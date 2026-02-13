@@ -3,7 +3,7 @@ import itertools
 import operator
 import typing
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch._inductor.runtime.runtime_utils
@@ -921,16 +921,19 @@ def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
 
 
 @functools.cache
-def _pad_mm_init() -> None:
+def _pad_mm_init(input_device: Optional[torch.device] = None) -> None:
     from .joint_graph import patterns
 
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
-    elif torch.xpu.is_available():
-        device = "xpu"
+    if input_device:
+        device = str(input_device)
     else:
-        device = "cpu"
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        elif torch.xpu.is_available():
+            device = "xpu"
+        else:
+            device = "cpu"
 
     # sizes/values dont actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
@@ -984,6 +987,7 @@ def _pad_mm_init() -> None:
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,
+            skip_duplicates=True,
         )
 
         gen_register_replacement(
@@ -997,4 +1001,5 @@ def _pad_mm_init() -> None:
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,
+            skip_duplicates=True,
         )

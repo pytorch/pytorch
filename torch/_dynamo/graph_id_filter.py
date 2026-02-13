@@ -5,10 +5,12 @@ from __future__ import annotations
 import functools
 import logging
 import re
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._guards import CompileId
 
 
@@ -18,34 +20,6 @@ log = logging.getLogger(__name__)
 _INDUCTOR_MODES = frozenset(
     {"default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"}
 )
-
-
-def lookup_backend_with_mode(backend_str: str) -> Any:
-    """
-    Look up a backend, supporting 'backend:mode' format for inductor.
-    """
-    import torch
-
-    from .backends.registry import lookup_backend
-    from .eval_frame import cached_backends
-
-    backend: Any = None
-    if ":" in backend_str:
-        parts = backend_str.split(":", 1)
-        backend_name, mode = parts[0], parts[1]
-
-        if backend_name == "inductor" and mode in _INDUCTOR_MODES:
-            backend = torch._TorchCompileInductorWrapper(
-                mode=mode, options=None, dynamic=None
-            )
-
-    if backend is None:
-        backend = lookup_backend(backend_str)
-
-    # Register the backend so its reset() is called during torch._dynamo.reset()
-    assert backend is not None, "Invalid override backend: " + backend_str
-    cached_backends.setdefault(id(backend), backend)
-    return backend
 
 
 class GraphIdFilter:
@@ -116,7 +90,98 @@ class GraphIdFilter:
         return f"GraphIdFilter({', '.join(parts) if parts else 'empty'})"
 
 
-class GraphBackendRouter:
+T = TypeVar("T")
+
+
+class _GraphRouterBase(Generic[T]):
+    """
+    Base class for routing graphs to different values based on their IDs.
+
+    The router parses a configuration string with rules in the format:
+        "filter1:value1;filter2:value2;..."
+
+    Rules are evaluated in order, and the first matching rule wins.
+    """
+
+    def __init__(self, config_str: str, rule_type: str) -> None:
+        self._rules: list[tuple[GraphIdFilter, T]] = []
+        self._values: list[Optional[T]] = []
+        self._overflow_value: Optional[T] = None
+        self._rule_type = rule_type
+        self._parse(config_str)
+        self._precompute()
+
+    def _parse_value_str(self, value_str: str) -> Optional[T]:
+        """Parse a value string into the appropriate type. Returns None to skip."""
+        raise NotImplementedError
+
+    def _parse(self, config_str: str) -> None:
+        if not config_str or not config_str.strip():
+            return
+
+        rule_strs = config_str.split(";")
+        for rule_str in rule_strs:
+            rule_str = rule_str.strip()
+            if not rule_str:
+                continue
+
+            colon_idx = rule_str.find(":")
+            if colon_idx == -1:
+                log.warning(
+                    "Invalid %s override rule (missing ':'): %s",
+                    self._rule_type,
+                    rule_str,
+                )
+                continue
+
+            filter_str = rule_str[:colon_idx].strip()
+            value_str = rule_str[colon_idx + 1 :].strip()
+
+            if not filter_str or not value_str:
+                log.warning("Invalid %s override rule: %s", self._rule_type, rule_str)
+                continue
+
+            value = self._parse_value_str(value_str)
+            if value is not None:
+                self._rules.append((GraphIdFilter(filter_str), value))
+
+    def _precompute(self) -> None:
+        if not self._rules:
+            return
+
+        # Find max ID from explicit IDs and comparison thresholds
+        max_id = 0
+        for f, _ in self._rules:
+            if f._explicit_ids:
+                max_id = max(max_id, *f._explicit_ids)
+            for _, val in f._conditions:
+                max_id = max(max_id, val)
+
+        # Pre-compute values for IDs 0 to max_id
+        for i in range(max_id + 1):
+            self._values.append(self._match_rules(i))
+
+        # For IDs > max_id, the result is constant (only unbounded conditions apply)
+        self._overflow_value = self._match_rules(max_id + 1)
+
+    def _match_rules(self, graph_id: int) -> Optional[T]:
+        for f, value in self._rules:
+            if graph_id in f:
+                return value
+        return None
+
+    def get_value_for_graph(self, graph_id: int) -> Optional[T]:
+        """Get the value for a given graph ID. Returns None if no rule matches."""
+        if graph_id < len(self._values):
+            return self._values[graph_id]
+        return self._overflow_value
+
+    def is_empty(self) -> bool:
+        """Check if no rules are configured."""
+        return len(self._rules) == 0
+
+
+class GraphBackendRouter(_GraphRouterBase[Any]):
     """
     Routes graphs to different backends based on their IDs.
 
@@ -140,73 +205,32 @@ class GraphBackendRouter:
     """
 
     def __init__(self, config_str: str) -> None:
-        self._rules: list[tuple[GraphIdFilter, str]] = []
-        self._backends: list[Optional[str]] = []
-        self._overflow_backend: Optional[str] = None
-        self._parse(config_str)
-        self._precompute()
+        super().__init__(config_str, "backend")
 
-    def _parse(self, config_str: str) -> None:
-        if not config_str or not config_str.strip():
-            return
+    def _parse_value_str(self, value_str: str) -> Optional[Any]:
+        """Look up a backend, supporting 'backend:mode' format for inductor."""
+        import torch
 
-        rule_strs = config_str.split(";")
-        for rule_str in rule_strs:
-            rule_str = rule_str.strip()
-            if not rule_str:
-                continue
+        from .backends.registry import lookup_backend
+        from .eval_frame import cached_backends
 
-            colon_idx = rule_str.find(":")
-            if colon_idx == -1:
-                log.warning("Invalid backend override rule (missing ':'): %s", rule_str)
-                continue
+        backend: Any = None
+        if ":" in value_str:
+            parts = value_str.split(":", 1)
+            backend_name, mode = parts[0], parts[1]
 
-            filter_str = rule_str[:colon_idx].strip()
-            backend = rule_str[colon_idx + 1 :].strip()
+            if backend_name == "inductor" and mode in _INDUCTOR_MODES:
+                backend = torch._TorchCompileInductorWrapper(
+                    mode=mode, options=None, dynamic=None
+                )
 
-            if not filter_str or not backend:
-                log.warning("Invalid backend override rule: %s", rule_str)
-                continue
+        if backend is None:
+            backend = lookup_backend(value_str)
 
-            self._rules.append((GraphIdFilter(filter_str), backend))
-
-    def _precompute(self) -> None:
-        if not self._rules:
-            return
-
-        # Find max ID from explicit IDs and comparison thresholds
-        max_id = 0
-        for f, _ in self._rules:
-            if f._explicit_ids:
-                max_id = max(max_id, *f._explicit_ids)
-            for _, val in f._conditions:
-                max_id = max(max_id, val)
-
-        # Pre-compute backends for IDs 0 to max_id
-        for i in range(max_id + 1):
-            self._backends.append(self._match_rules(i))
-
-        # For IDs > max_id, the result is constant (only unbounded conditions apply)
-        self._overflow_backend = self._match_rules(max_id + 1)
-
-    def _match_rules(self, graph_id: int) -> Optional[str]:
-        for f, backend in self._rules:
-            if graph_id in f:
-                return backend
-        return None
-
-    def get_backend_for_graph(self, graph_id: int) -> Optional[str]:
-        """
-        Get the backend override for a given graph ID.
-        Returns None if no override matches.
-        """
-        if graph_id < len(self._backends):
-            return self._backends[graph_id]
-        return self._overflow_backend
-
-    def is_empty(self) -> bool:
-        """Check if no rules are configured."""
-        return len(self._rules) == 0
+        # Register the backend so its reset() is called during torch._dynamo.reset()
+        assert backend is not None, "Invalid override backend: " + value_str
+        cached_backends.setdefault(id(backend), backend)
+        return backend
 
     def __repr__(self) -> str:
         if not self._rules:
@@ -214,12 +238,96 @@ class GraphBackendRouter:
         return f"GraphBackendRouter({self._rules})"
 
 
+class GraphConfigRouter(_GraphRouterBase[dict[str, Any]]):
+    """
+    Routes graphs to different inductor configs based on their IDs.
+
+    The router parses a configuration string with rules in the format:
+        "filter1:config1;filter2:config2;..."
+
+    Rules are evaluated in order, and the first matching rule wins.
+    Config format is "key=value" or "key1=value1,key2=value2" for multiple settings.
+
+    Examples:
+        "0-5:triton.cudagraph_skip_dynamic_graphs=False"
+        ">10:triton.cudagraphs=False,triton.cudagraph_trees=False"
+    """
+
+    def __init__(self, config_str: str) -> None:
+        super().__init__(config_str, "config")
+
+    @staticmethod
+    def _parse_scalar_value(value_str: str) -> Any:
+        """Parse a string value into the appropriate Python type."""
+        value_str = value_str.strip()
+        if value_str.lower() == "true":
+            return True
+        if value_str.lower() == "false":
+            return False
+        if value_str.lower() == "none":
+            return None
+        try:
+            if "." in value_str:
+                return float(value_str)
+            return int(value_str)
+        except ValueError:
+            return value_str
+
+    def _parse_value_str(self, value_str: str) -> Optional[dict[str, Any]]:
+        """Parse a config string like 'key1=val1,key2=val2' into a dict."""
+        result: dict[str, Any] = {}
+        for item in value_str.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if "=" not in item:
+                log.warning("Invalid config item (missing '='): %s", item)
+                continue
+            key, value = item.split("=", 1)
+            result[key.strip()] = self._parse_scalar_value(value)
+        return result if result else None
+
+    def __repr__(self) -> str:
+        if not self._rules:
+            return "GraphConfigRouter(empty)"
+        return f"GraphConfigRouter({self._rules})"
+
+
+def _get_override_for_compile_id(
+    compile_id: Optional[CompileId],
+    config_str: str,
+    create_router: Callable[[str], _GraphRouterBase[T]],
+    log_msg: str,
+) -> Optional[T]:
+    """
+    Get the override value for a given CompileId.
+
+    Returns the value from the router, or None if no override applies.
+    """
+    if compile_id is None or not config_str:
+        return None
+
+    graph_id = compile_id.frame_id
+    if graph_id is None:
+        return None
+
+    router = create_router(config_str)
+    value = router.get_value_for_graph(graph_id)
+    if value is not None:
+        log.info(log_msg, compile_id, graph_id, value)
+    return value
+
+
 @functools.lru_cache
-def _create_router(config_str: str) -> GraphBackendRouter:
-    """
-    Create and cache GraphBackendRouter instances based on config string.
-    """
+def _create_backend_router(config_str: str) -> GraphBackendRouter:
+    """Create and cache GraphBackendRouter instances based on config string."""
     return GraphBackendRouter(config_str)
+
+
+@functools.lru_cache
+def _create_config_router(config_str: str) -> GraphConfigRouter:
+    """Create and cache GraphConfigRouter instances based on config string."""
+    return GraphConfigRouter(config_str)
 
 
 def get_backend_override_for_compile_id(
@@ -231,22 +339,30 @@ def get_backend_override_for_compile_id(
 
     Returns the backend function to use, or None if no override applies.
     """
-    if compile_id is None or not config_str:
-        return None
+    return _get_override_for_compile_id(
+        compile_id,
+        config_str,
+        _create_backend_router,
+        "Graph %s (frame_id=%d) overridden to use backend: %s",
+    )
 
-    graph_id = compile_id.frame_id
-    if graph_id is None:
-        return None
 
-    router = _create_router(config_str)
-    backend_str = router.get_backend_for_graph(graph_id)
-    if backend_str:
-        # ok to use log.info because this is a debug-only feature
-        log.info(
-            "Graph %s (frame_id=%d) overridden to use backend: %s",
-            compile_id,
-            graph_id,
-            backend_str,
-        )
-        return lookup_backend_with_mode(backend_str)
-    return None
+def get_inductor_config_override_for_compile_id(
+    compile_id: Optional[CompileId],
+    config_str: str,
+) -> Optional[dict[str, Any]]:
+    """
+    Get the inductor config override for a given CompileId.
+
+    Returns a dict of config patches to apply, or None if no override applies.
+    """
+    return _get_override_for_compile_id(
+        compile_id,
+        config_str,
+        _create_config_router,  # type: ignore[arg-type]
+        "Graph %s (frame_id=%d) overridden with inductor config: %s",
+    )
+
+
+# Keep old name for backwards compatibility
+_create_router = _create_backend_router
