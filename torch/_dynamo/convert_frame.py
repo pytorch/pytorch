@@ -103,6 +103,7 @@ from .eval_frame import (
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    innermost_backend,
     innermost_fn,
     skip_code,
     TorchPatcher,
@@ -1997,11 +1998,7 @@ def _compile(
             if should_clear is None:
                 # Default: clear for registered backends, don't clear for custom
                 # Unwrap the compiler_fn to get the actual backend function
-                should_clear = _is_registered_backend(
-                    innermost_fn(
-                        compiler_fn, unaltered_fn_attr="_torchdynamo_orig_backend"
-                    )
-                )
+                should_clear = _is_registered_backend(innermost_backend(compiler_fn))
             if should_clear:
                 if tracer_output and tracer_output.output_graph:
                     tc = tracer_output.output_graph.tracing_context
