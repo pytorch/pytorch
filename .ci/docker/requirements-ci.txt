@@ -341,18 +341,18 @@ sympy==1.13.3
 #test that import:
 
 onnx==1.20.0
-#Description: Required by onnx tests, and mypy and test_public_bindings.py when checking torch.onnx._internal
+#Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
 
-onnxscript==0.6.0
-#Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
+onnxscript==0.6.2
+#Description: Required by the torch.onnx exporter
 #Pinned versions:
 #test that import:
 
-onnx-ir==0.1.15
+onnx-ir==0.1.16
 #Description: In-memory IR for ONNX, dependency of onnxscript. Pinned to avoid breaking changes in newer versions.
-#Pinned versions: 0.1.12
+#Pinned versions:
 #test that import:
 
 parameterized==0.8.1
