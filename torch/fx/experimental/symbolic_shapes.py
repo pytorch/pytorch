@@ -3860,9 +3860,10 @@ class ShapeEnv:
         self.unique_ids: set[int] = set()
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
-        # when hint is overridden in mark_dynamic, the value stored in
-        # self.backed_var_to_val is the overridden hint.
-        # only used for backed dynamic shapes symbols.
+        # When hint is overridden in mark_dynamic, the value stored here
+        # is the overridden hint (this is the source of truth for backed
+        # hints). The override is also recorded in var_to_hint_override
+        # so it can be included in the FxGraphCache key.
         self.backed_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
         # Only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error in draft export.
@@ -3878,6 +3879,11 @@ class ShapeEnv:
         # A set of unbacked symbols that are inputs (i.e: not data dependent).
         self.unbacked_inputs: OrderedSet[sympy.Symbol] = OrderedSet()
         self.var_to_stack: dict[sympy.Symbol, CapturedTraceback] = {}
+        # User-provided hint overrides from mark_dynamic/mark_unbacked.
+        # Even though we never read hints for backed variables from this
+        # dict (backed hints are read from backed_var_to_val), we still
+        # want them to always be stored here, since this dict is used as
+        # part of the FxGraphCache key.
         self.var_to_hint_override: dict[sympy.Symbol, int] = {}
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
@@ -6536,6 +6542,53 @@ class ShapeEnv:
 
         return tuple(equiv.items())
 
+    def _is_nonneg_term(self, term: sympy.Expr) -> bool:
+        """Check if a single term is non-negative (symbol with non-neg range or non-neg constant)."""
+        if term.is_Symbol:
+            vr = self.var_to_range.get(term)
+            return vr is not None and vr.lower >= 0
+        if term.is_number:
+            return term >= 0
+        return False
+
+    def _is_nonneg_sum(self, expr: sympy.Expr) -> bool:
+        """
+        Check if expr is a sum of non-negative terms (Add of symbols with non-neg range
+        and non-negative constants). Returns True only for simple Add expressions.
+        """
+        if not isinstance(expr, sympy.Add):
+            return self._is_nonneg_term(expr)
+
+        # Check each arg in the Add
+        for arg in expr.args:
+            if not self._is_nonneg_term(arg):
+                return False
+
+        return True
+
+    def _maybe_fast_eval_comparison(self, expr: sympy.Basic) -> Optional[sympy.Basic]:
+        """
+        Fast path for trivial comparisons: sum of non-negative terms >= 0.
+        Returns sympy.true if pattern matches, None otherwise.
+        """
+        if len(expr.args) != 2:
+            return None
+
+        lhs, rhs = expr.args
+
+        # Handle: sum >= 0 (Ge) or 0 <= sum (Le)
+        if isinstance(expr, sympy.Ge) and rhs == 0:
+            sum_expr = lhs
+        elif isinstance(expr, sympy.Le) and lhs == 0:
+            sum_expr = rhs
+        else:
+            return None
+
+        if self._is_nonneg_sum(sum_expr):
+            return sympy.true
+
+        return None
+
     @_lru_cache
     def _maybe_evaluate_static(
         self,
@@ -7137,14 +7190,17 @@ class ShapeEnv:
             has_only_ephemeral_sources = x in self.var_to_sources and all(
                 s.is_ephemeral() for s in self.var_to_sources[x]
             )
-            # NB: size_hint is int, not sympy.Expr, do not use int_oo here
-            hint_size = self.size_hint(x, allow_none=True)
-            if hint_size is None:
+
+            hint = self.backed_var_to_val.get(x)
+            if hint is None or isinstance(hint, SingletonInt):
+                # NB: size_hint is int, not sympy.Expr, do not use int_oo here.
+                # SingletonInt is used to represent jagged/nested tensor dimensions
+                # (e.g. the irregular ragged dimension). It cannot be converted to
+                # int, so we treat it the same as an unknown size. This matches the
+                # behavior of size_hint(), which returns None for SingletonInt.
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
-                if not isinstance(hint_size, sympy.Expr):
-                    raise AssertionError(f"Expected sympy.Expr, got {type(hint_size)}")
-                size = int(hint_size)
+                size = int(hint)
             else:
                 size = sys.maxsize
             name = x.name
@@ -7727,6 +7783,12 @@ class ShapeEnv:
 
             expr = orig_expr
 
+            # Try to quickly evaluate trivially true/false comparisons
+            # using var_to_range, before calling expensive _maybe_evaluate_static.
+            fast_result = self._maybe_fast_eval_comparison(expr)
+            if fast_result is not None:
+                return fast_result
+
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
             )
@@ -7899,6 +7961,29 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
+    def _should_skip_static_eval(self, expr: SympyBoolean) -> bool:
+        """Check if we should skip _maybe_evaluate_static for the given expression.
+
+        Skips static evaluation for single unbacked symbol >= 0 (or 0 <= symbol)
+        when the symbol has unknown range [-int_oo, int_oo].
+        This pattern is common during tracing and doesn't benefit from static evaluation
+        since the symbol has no constraints.
+        Note that the first time this is called value range will be updated and next time
+        it's called (if any) we would call _maybe_evaluate_static and it would return True.
+        """
+        unbacked_sym = None
+        if isinstance(expr, sympy.GreaterThan) and expr.rhs == 0:
+            unbacked_sym = expr.lhs
+        elif isinstance(expr, sympy.LessThan) and expr.lhs == 0:
+            unbacked_sym = expr.rhs
+        if isinstance(unbacked_sym, sympy.Symbol) and symbol_is_type(
+            unbacked_sym, SymT.UNBACKED_INT
+        ):
+            vr = self.var_to_range[unbacked_sym]
+            if vr.lower == -int_oo and vr.upper == int_oo:
+                return True
+        return False
+
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def guard_or_defer_runtime_assert(
@@ -7917,19 +8002,27 @@ class ShapeEnv:
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately
+        # Try to quickly evaluate trivially true/false comparisons
+        # using var_to_range, before calling expensive _maybe_evaluate_static.
+        fast_result = self._maybe_fast_eval_comparison(expr)
+        if fast_result is not None:
+            return bool(fast_result)
 
-        static_expr = self._maybe_evaluate_static(expr)
-        if static_expr is not None:
-            self.log.debug(
-                "runtime_assert %s == %s [statically known]", orig_expr, static_expr
-            )
-            # TODO: assert bool(static_expr)
-            return bool(static_expr)
+        if self._should_skip_static_eval(expr):
+            new_expr = expr
+        else:
+            static_expr = self._maybe_evaluate_static(expr)
+            if static_expr is not None:
+                self.log.debug(
+                    "runtime_assert %s == %s [statically known]", orig_expr, static_expr
+                )
+                # TODO: assert bool(static_expr)
+                return bool(static_expr)
 
-        # Attempt to eliminate the unbacked SymInt
-        new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-        if new_expr is None:
-            raise AssertionError("new_expr must not be None")
+            # Attempt to eliminate the unbacked SymInt
+            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+            if new_expr is None:
+                raise AssertionError("new_expr must not be None")
         if (
             not self.prefer_deferred_runtime_asserts_over_guards
             and new_expr.free_symbols <= self.backed_var_to_val.keys()
