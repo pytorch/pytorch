@@ -97,11 +97,11 @@ class TestDecompSharding(TestCase):
             def op2_decomp(x, y):
                 return torch.mm(x, y)
 
-            @torch.library.impl(my_lib, "op1", "Meta")
+            @torch.library.register_fake("sharding_decomps::op1")
             def op1_meta(x, y):
                 return torch.mm(torch.empty_like(x), torch.empty_like(y))
 
-            @torch.library.impl(my_lib, "op2", "Meta")
+            @torch.library.register_fake("sharding_decomps::op2")
             def op2_meta(x, y):
                 return torch.mm(torch.empty_like(x), torch.empty_like(y))
 

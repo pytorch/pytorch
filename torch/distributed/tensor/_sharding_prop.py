@@ -579,6 +579,9 @@ class ShardingPropagator:
             # try operator decomposition path
             from torch.distributed.tensor._decompositions import DecompShardingStrategy
 
+            # If the op has a CIA decomposition, we prioritize it over the decomposition flow,
+            # allowing decomposed ops to individually enter DTensor dispatch.
+            # TODO(pianpwk): maybe switch this back; the decomp flow could incur fewer comms.
             op_strategy = None
             has_cia = torch._C._dispatch_has_kernel_for_dispatch_key(
                 op_schema.op.name(),
