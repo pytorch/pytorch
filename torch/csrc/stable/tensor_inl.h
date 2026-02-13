@@ -7,12 +7,14 @@
 
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor_struct.h>
+#include <torch/headeronly/core/Layout.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
+using torch::headeronly::Layout;
 using torch::headeronly::ScalarType;
 
 inline ScalarType Tensor::scalar_type() const {
@@ -31,6 +33,12 @@ inline Device Tensor::device() const {
   DeviceType extension_device_type = torch::stable::detail::to<DeviceType>(
       torch::stable::detail::from(device_type));
   return Device(extension_device_type, static_cast<DeviceIndex>(device_index));
+}
+
+inline Layout Tensor::layout() const {
+  int32_t layout;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_layout(ath_.get(), &layout));
+  return torch::stable::detail::to<Layout>(torch::stable::detail::from(layout));
 }
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
