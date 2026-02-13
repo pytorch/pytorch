@@ -231,13 +231,12 @@ class ConstDictVariable(VariableTracker):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
     def debug_repr(self) -> str:
-        return (
-            "{"
-            + ", ".join(
-                f"{k.vt.debug_repr()}: {v.debug_repr()}" for k, v in self.items.items()
-            )
-            + "}"
-        )
+        items: list[str] = []
+        for k, v in self.items.items():
+            key_str = repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+            val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+            items.append(f"{key_str}: {val_str}")
+        return "{" + ", ".join(items) + "}"
 
     def as_python_constant(self) -> dict[Any, Any]:
         return {
@@ -1132,7 +1131,12 @@ class SetVariable(ConstDictVariable):
         if not self.items:
             return "set()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
+            items: list[str] = []
+            for v in self.items:
+                vt = v.vt if isinstance(v, ConstDictVariable._HashableTracker) else v
+                val_str = repr(vt.value) if hasattr(vt, "value") else vt.debug_repr()
+                items.append(val_str)
+            return "{" + ",".join(items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1484,9 +1488,13 @@ class OrderedSetVariable(SetVariable):
         if not self.items:
             return "OrderedSet([])"
         else:
-            return (
-                "OrderedSet([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
-            )
+            items: list[str] = []
+            for k, v in self.items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                items.append(key_str)
+            return "OrderedSet([" + ",".join(items) + "])"
 
     def as_python_constant(self) -> OrderedSet[Any]:
         return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
@@ -1512,7 +1520,13 @@ class FrozensetVariable(SetVariable):
         if not self.items:
             return "frozenset()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
+            items: list[str] = []
+            for k in self.items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                items.append(key_str)
+            return "{" + ",".join(items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1592,9 +1606,13 @@ class DictKeySetVariable(SetVariable):
         if not self.items:
             return "dict_keys([])"
         else:
-            return (
-                "dict_keys([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
-            )
+            items: list[str] = []
+            for k in self.items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                items.append(key_str)
+            return "dict_keys([" + ",".join(items) + "])"
 
     def install_dict_keys_match_guard(self) -> None:
         # Already EQUALS_MATCH guarded
@@ -1712,11 +1730,13 @@ class DictKeysVariable(DictViewVariable):
         if not self.view_items:
             return "dict_keys([])"
         else:
-            return (
-                "dict_keys(["
-                + ",".join(f"{k.vt.debug_repr()}" for k in self.view_items)
-                + "])"
-            )
+            items: list[str] = []
+            for k in self.view_items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                items.append(key_str)
+            return "dict_keys([" + ",".join(items) + "])"
 
     def call_method(
         self,
@@ -1765,11 +1785,11 @@ class DictValuesVariable(DictViewVariable):
         if not self.view_items:
             return "dict_values([])"
         else:
-            return (
-                "dict_values(["
-                + ",".join(f"{v.debug_repr()}" for v in self.view_items)
-                + "])"
-            )
+            items: list[str] = []
+            for v in self.view_items:
+                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+                items.append(val_str)
+            return "dict_values([" + ",".join(items) + "])"
 
 
 class DictItemsVariable(DictViewVariable):
@@ -1787,14 +1807,14 @@ class DictItemsVariable(DictViewVariable):
         if not self.view_items:
             return "dict_items([])"
         else:
-            return (
-                "dict_items(["
-                + ",".join(
-                    f"({k.vt.debug_repr()}, {v.debug_repr()})"
-                    for k, v in self.view_items
+            items: list[str] = []
+            for k, v in self.view_items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
                 )
-                + "])"
-            )
+                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+                items.append(f"({key_str}, {val_str})")
+            return "dict_items([" + ",".join(items) + "])"
 
     def call_method(
         self,
