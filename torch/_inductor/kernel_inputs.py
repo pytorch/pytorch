@@ -122,7 +122,10 @@ class KernelInputs(ABC):
             A tuple of shape tuples with integer hints for each input node
         """
         return tuple(
-            V.graph.sizevars.optimization_hints(node.get_size())
+            V.graph.sizevars.size_hints(
+                node.get_size(),
+                fallback=torch._inductor.config.unbacked_symint_fallback,
+            )
             for node in self._input_nodes
         )
 
@@ -143,7 +146,10 @@ class KernelInputs(ABC):
             A tuple of stride tuples with integer hints for each input node
         """
         return tuple(
-            V.graph.sizevars.optimization_hints(node.get_stride())
+            V.graph.sizevars.size_hints(
+                node.get_stride(),
+                fallback=torch._inductor.config.unbacked_symint_fallback,
+            )
             for node in self._input_nodes
         )
 
