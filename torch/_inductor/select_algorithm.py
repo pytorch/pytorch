@@ -50,6 +50,7 @@ from .autotune_process import (
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
     TritonGPUBenchmarkRequest,
+    use_pipelined_autotuning,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
@@ -2895,7 +2896,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
-            if config.pipeline_max_autotune_gemm:
+            if use_pipelined_autotuning():
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
                 )
@@ -3149,7 +3150,7 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
-        if log.isEnabledFor(logging.DEBUG) and not config.pipeline_max_autotune_gemm:
+        if log.isEnabledFor(logging.DEBUG) and not use_pipelined_autotuning():
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
 
@@ -3174,7 +3175,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         precompile_start_ts = time.time()
 
-        if not config.pipeline_max_autotune_gemm:
+        if not use_pipelined_autotuning():
             with dynamo_timed(
                 f"{name}_template_precompiling",
                 log_pt2_compile_event=True,
@@ -3219,7 +3220,7 @@ class AlgorithmSelectorCache(PersistentCache):
             prescreening_elapse = time.time() - prescreening_start_ts
             log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
-        if config.pipeline_max_autotune_gemm:
+        if use_pipelined_autotuning():
             AsyncAutotuner.start(choices, inputs_key)
             return
 
@@ -3437,7 +3438,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     elapsed_seconds,
                 )
 
-        if config.pipeline_max_autotune_gemm:
+        if use_pipelined_autotuning():
             executor = PrecompileThreadPool.get_instance()
         else:
             executor = ThreadPoolExecutor(max_workers=num_workers)
@@ -3540,7 +3541,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if exceptions:
                 _log_autotune_exceptions(exceptions)
 
-            if not config.pipeline_max_autotune_gemm:
+            if not use_pipelined_autotuning():
                 # pyrefly: ignore [missing-attribute]
                 executor.shutdown(wait=True)
 
@@ -4450,7 +4451,7 @@ def autotune_select_algorithm(*args, **kwargs):
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
-            or torch._inductor.config.pipeline_max_autotune_gemm
+            or use_pipelined_autotuning()
         )
 
     if "precompilation_timeout_seconds" not in kwargs:
