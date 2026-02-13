@@ -1764,6 +1764,47 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     loss.backward(retain_graph=True)
 
+    def test_force_matmul(self):
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+            dim = 128
+            x = torch.randn(8, dim)
+            A = torch.randn(dim, dim)
+
+            # [Shard(0), Replicate()] -> matmul has a valid strategy [S(0), R] -> S(0)
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Replicate()])
+            with ExplicitRedistributionContext(mode="force"):
+                with CommDebugMode() as comm_mode:
+                    torch.matmul(dx, dA)
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            # [Shard(1), Shard(1)] -> no valid matmul strategy, should raise
+            dx_s1 = distribute_tensor(x, device_mesh, [Shard(1)])
+            dA_s1 = distribute_tensor(A, device_mesh, [Shard(1)])
+            with ExplicitRedistributionContext(mode="force"):
+                with self.assertRaisesRegex(RuntimeError, "force mode"):
+                    torch.matmul(dx_s1, dA_s1)
+
+            # warn mode: same inputs trigger a warning, which means "force" mode
+            # do impact the sharding propagation decision
+            with ExplicitRedistributionContext(mode="warn"):
+                with self.assertLogs(
+                    torch.distributed.tensor._utils.logger, level="WARN"
+                ) as captured:
+                    torch.matmul(dx_s1, dA_s1)
+                    self.assertRegex(
+                        captured.output[0],
+                        r"WARNING:.*Implicit redistribution occurred",
+                    )
+
+            # default behavior: same inputs without force triggers
+            # redistribution, which means "force" mode do impact the sharding
+            # propagation decision
+            with CommDebugMode() as comm_mode:
+                torch.matmul(dx_s1, dA_s1)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
 
 class TestIsTensorShardable(LocalTensorTestBase):
     @property

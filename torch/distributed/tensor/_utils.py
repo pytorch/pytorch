@@ -47,17 +47,25 @@ class ExplicitRedistributionContext:
     communication.
 
     mode (str) Determines what happens when ExplicitRedistributionContext triggers:
-    "raise": raises an exception, "warn" issues a warning
+    "raise": raises an exception, "warn" issues a warning, "force": selects only strategies
+    whose input placements exactly match the current inputs (no redistribution), raising if
+    no such strategy exists.  Also raises on any implicit redistribution that slips through.
     """
 
     _local = threading.local()
 
     def __init__(self, enable: bool = True, strict: bool = False, mode="raise"):
         self._enable = enable
-        self._strict = strict
-        if mode not in ("raise", "warn"):
+        if mode not in ("raise", "warn", "force"):
             raise RuntimeError(f"Invalid mode {mode}")
-        self._raise_on_redistribution = mode == "raise"
+        if mode == "force" and strict:
+            logger.warning(
+                "strict is redundant with mode='force'; "
+                "force mode already prevents all redistribution"
+            )
+        self._strict = strict
+        self._mode = mode
+        self._raise_on_redistribution = mode in ("raise", "force")
 
     @classmethod
     def observe_redistribution(
@@ -78,6 +86,11 @@ class ExplicitRedistributionContext:
                     raise RuntimeError(redistribution_msg)
                 else:
                     logger.warning(redistribution_msg)
+
+    @classmethod
+    def is_force_mode(cls) -> bool:
+        instance = getattr(cls._local, "_active", None)
+        return instance is not None and instance._enable and instance._mode == "force"
 
     def __enter__(self):
         self._prev = getattr(ExplicitRedistributionContext._local, "_active", None)
