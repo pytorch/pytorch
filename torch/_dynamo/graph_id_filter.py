@@ -82,6 +82,7 @@ class GraphIdFilter:
         return False
 
     def __repr__(self) -> str:
+        # pyrefly: ignore [implicit-any]
         parts = []
         if self._explicit_ids:
             parts.append(f"ids={sorted(self._explicit_ids)}")

@@ -283,6 +283,7 @@ class FlightRecorderHandler(DebugHandler):
             details[f"rank{rank}.json"] = dump
 
         version = next(iter(details.values()))["version"]
+        # pyrefly: ignore [bad-argument-type]
         return build_db(details, args, version)
 
     def _render_tables(

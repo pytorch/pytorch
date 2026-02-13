@@ -50,6 +50,7 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetClassVariable,
     OrderedSetVariable,
     SetVariable,
 )
@@ -73,6 +74,7 @@ from .functions import (
     SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
+    TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
