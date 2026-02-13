@@ -584,12 +584,41 @@ class TestNNInitDeviceType(TestCase):
             f"{dtype}: failed KS test against truncated normal",
         )
 
-    # Test that trunc_normal_ behaves well for narrow interval compared to std.
+    # Reduced-precision KS test uses fixed wide params to avoid random
+    # intervals too narrow for the type's representable value count.
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     @parametrize_test(
         "dtype",
-        [torch.float32, torch.float64],
+        [torch.float16, torch.bfloat16],
+    )
+    def test_trunc_normal_low_precision(self, device, dtype):
+        n = 10000
+        mean, std, a, b = 0.0, 1.0, -2.0, 2.0
+        t = torch.empty(n, dtype=dtype, device=device)
+        init.trunc_normal_(t, mean=mean, std=std, a=a, b=b)
+
+        self.assertTrue(
+            t.min().item() >= a,
+            f"{dtype}: values below lower bound a={a}",
+        )
+        self.assertTrue(
+            t.max().item() <= b,
+            f"{dtype}: values above upper bound b={b}",
+        )
+        self.assertTrue(
+            self._is_trunc_normal(t.float().cpu(), mean, std, a, b),
+            f"{dtype}: failed KS test against truncated normal",
+        )
+
+    # Test that trunc_normal_ behaves well for narrow interval compared to std.
+    # bf16 excluded: only 65 representable values in [2, 3] makes the
+    # distribution visibly stepped, legitimately failing the KS test.
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
+    @parametrize_test(
+        "dtype",
+        [torch.float32, torch.float64, torch.float16],
     )
     def test_trunc_normal_narrow_interval(self, device, dtype):
         n = 10000
