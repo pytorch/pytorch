@@ -16,11 +16,10 @@ import logging
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, TYPE_CHECKING, Union
 
-import onnxscript
-from onnxscript import evaluator, ir
-from onnxscript.ir import convenience as ir_convenience
+from onnxscript import evaluator
 
 import torch
+from torch.onnx._internal._lazy_import import onnx_ir as ir, onnxscript
 from torch.onnx._internal.exporter import _errors, _schemas, _tensors
 
 
@@ -41,7 +40,7 @@ AllowedArgType = Union[
 
 # Logic for adapting inputs from general Python or PyTorch inputs to ONNX ir.Value
 def _construct_named_inputs_and_attrs(
-    signature: _schemas.OpSignature,
+    signature: ir.schemas.OpSignature,
     args: Sequence[AllowedArgType],
     kwargs: Mapping[str, AllowedArgType],
 ) -> tuple[dict[str, AllowedArgType], dict[str, ValidAttributeType]]:
@@ -71,7 +70,7 @@ def _construct_named_inputs_and_attrs(
     named_attrs: dict[str, Any] = {}
     reversed_args_stack = list(reversed(args))
     for param in signature.params:
-        if isinstance(param, _schemas.Parameter):
+        if isinstance(param, ir.schemas.Parameter):
             # Handle inputs
             if reversed_args_stack:
                 # First exhaust the positional arguments
@@ -98,7 +97,7 @@ def _construct_named_inputs_and_attrs(
         else:
             # Handle attributes
             attribute: ValidAttributeType | ir.Attr
-            if not isinstance(param, _schemas.AttributeParameter):
+            if not isinstance(param, ir.schemas.AttributeParameter):
                 raise AssertionError(f"Expected AttributeParameter, got {type(param)}")
             if reversed_args_stack:
                 # First exhaust the positional arguments
@@ -140,8 +139,8 @@ def _construct_named_inputs_and_attrs(
 
 
 def _resolve_parameter_dtypes(
-    signature: _schemas.OpSignature, named_inputs: Mapping[str, AllowedArgType]
-) -> Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol]:
+    signature: ir.schemas.OpSignature, named_inputs: Mapping[str, AllowedArgType]
+) -> Mapping[ir.schemas.TypeConstraintParam, ir.TypeProtocol]:
     """Determine which parameter takes which type.
 
     Handle non-tensor input corner cases and type promotion.
@@ -165,7 +164,7 @@ def _resolve_parameter_dtypes(
     type_binding = {}
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        if not isinstance(param, _schemas.Parameter):
+        if not isinstance(param, ir.schemas.Parameter):
             raise AssertionError(f"Expected Parameter, got {type(param)}")
         if isinstance(arg, (int, float, bool, str, Sequence, torch.Tensor)):
             # Skip the Python constants because we do not know what dtype they should take yet
@@ -183,9 +182,9 @@ def _resolve_parameter_dtypes(
 
 
 def _determine_input_dtype(
-    param: _schemas.Parameter,
+    param: ir.schemas.Parameter,
     arg: AllowedArgType,
-    type_binding: Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol],
+    type_binding: Mapping[ir.schemas.TypeConstraintParam, ir.TypeProtocol],
 ) -> ir.DataType:
     """Determine the dtype of the input that is a mix of Python constants and ir.Value."""
     if param.type_constraint in type_binding:
@@ -288,9 +287,9 @@ def _get_or_create_constant(
 
 
 def _process_python_constants(
-    signature: _schemas.OpSignature,
+    signature: ir.schemas.OpSignature,
     named_inputs: dict[str, AllowedArgType],
-    type_binding: Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol],
+    type_binding: Mapping[ir.schemas.TypeConstraintParam, ir.TypeProtocol],
     constant_farm: dict[
         tuple[
             bool | int | float | str | tuple[int, ...] | tuple[float, ...],
@@ -324,7 +323,7 @@ def _process_python_constants(
     #       - Otherwise, set named_inputs[param.name] = Constant(value)
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        if not isinstance(param, _schemas.Parameter):
+        if not isinstance(param, ir.schemas.Parameter):
             raise AssertionError(f"Expected Parameter, got {type(param)}")
 
         if isinstance(arg, ir.Value):
@@ -369,9 +368,9 @@ def _reshape_to_1d_tensor(opset: onnxscript.values.Opset, arg: ir.Value) -> ir.V
 
 
 def _process_python_sequences(
-    signature: _schemas.OpSignature,
+    signature: ir.schemas.OpSignature,
     named_inputs: dict[str, AllowedArgType],
-    type_binding: Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol],
+    type_binding: Mapping[ir.schemas.TypeConstraintParam, ir.TypeProtocol],
     constant_farm: dict[
         tuple[
             bool
@@ -396,7 +395,7 @@ def _process_python_sequences(
     """
     for name, arg in named_inputs.items():
         param = signature.params_map[name]
-        if not isinstance(param, _schemas.Parameter):
+        if not isinstance(param, ir.schemas.Parameter):
             raise AssertionError(f"Expected Parameter, got {type(param)}")
 
         if not isinstance(arg, (tuple, list)):
@@ -470,7 +469,7 @@ def _process_python_sequences(
 
 
 def _determine_output_number(
-    signature: _schemas.OpSignature, named_attrs: Mapping[str, ValidAttributeType]
+    signature: ir.schemas.OpSignature, named_attrs: Mapping[str, ValidAttributeType]
 ) -> int:
     """Determine the number of outputs for the node with heuristics."""
     if signature.domain == "":
@@ -490,7 +489,7 @@ def _determine_output_number(
 
 
 def _construct_node(
-    signature: _schemas.OpSignature,
+    signature: ir.schemas.OpSignature,
     named_inputs: Mapping[str, ir.Value | None],
     named_attrs: Mapping[str, ValidAttributeType],
     opset: onnxscript.values.Opset,
@@ -527,7 +526,7 @@ def _construct_node(
     # Construct and filter out None attributes
     attributes = [
         attr
-        for attr in ir_convenience.convert_attributes(named_attrs)
+        for attr in ir.convenience.convert_attributes(named_attrs)
         if attr.value is not None
     ]
     outputs = [_tensors.SymbolicTensor(opset) for _ in range(num_outputs)]
@@ -537,7 +536,7 @@ def _construct_node(
         inputs=inputs,
         attributes=attributes,
         outputs=outputs,
-        version=signature.opset_version,
+        version=signature.since_version,
     )
 
 
@@ -556,7 +555,7 @@ class OpRecorder(evaluator.Evaluator):
 
     def _call_op(
         self,
-        op_signature: _schemas.OpSignature,
+        op_signature: ir.schemas.OpSignature,
         named_inputs: dict[str, AllowedArgType],
         named_attrs: dict[str, ValidAttributeType],
         num_outputs: int,
@@ -612,7 +611,7 @@ class OpRecorder(evaluator.Evaluator):
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor]:
         try:
-            op_signature = _schemas.OpSignature.from_opschema(schema)
+            op_signature = ir.schemas.OpSignature.from_op_schema(schema)
             named_inputs, named_attrs = _construct_named_inputs_and_attrs(
                 op_signature, args, kwargs
             )
@@ -661,11 +660,11 @@ class OpRecorder(evaluator.Evaluator):
             if hasattr(function, "_pt_onnx_signature"):
                 op_signature = function._pt_onnx_signature  # type: ignore[attr-defined]
             else:
-                op_signature = _schemas.OpSignature.from_function(
+                op_signature = _schemas.op_signature_from_function(
                     function,
                     function.function_ir.domain,
                     function.name,
-                    opset_version=function.opset.version,
+                    since_version=function.opset.version,
                 )
                 function._pt_onnx_signature = op_signature  # type: ignore[attr-defined]
 
