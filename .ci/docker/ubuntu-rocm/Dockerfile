@@ -65,6 +65,8 @@ RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${R
 RUN rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
+ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
 
 # ROCm environment variables are set in /etc/rocm_env.sh by install_rocm.sh
 # and sourced via /etc/bash.bashrc for interactive shells.
