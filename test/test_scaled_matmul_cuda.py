@@ -75,7 +75,9 @@ f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
-cutedsl_skip_msg = "CuTeDSL runtime requires nvidia-cutlass-dsl and cuda-python"
+cutedsl_skip_msg = (
+    "CuTeDSL runtime requires nvidia-cutlass-dsl, apache-tvm-ffi, and cuda-bindings"
+)
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -87,7 +89,7 @@ def _device_supports_scaled_mm_fp8(device):
 
 
 def _has_cutedsl_runtime() -> bool:
-    deps = ("cutlass", "cuda.bindings.driver")
+    deps = ("cutlass", "tvm_ffi", "cuda.bindings.driver")
     for mod in deps:
         try:
             importlib.import_module(mod)

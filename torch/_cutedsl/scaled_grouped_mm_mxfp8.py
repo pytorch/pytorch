@@ -15,12 +15,14 @@ from torch.nn.functional import ScalingType, SwizzleType
 class _KernelConfig(NamedTuple):
     mma_tile_mn: tuple[int, int]
     cluster_shape_mn: tuple[int, int]
+    transpose_ab: bool
 
 
 @functools.cache
 def _cutedsl_unavailable_reason() -> Optional[str]:
     deps = [
         ("nvidia-cutlass-dsl", "cutlass"),
+        ("apache-tvm-ffi", "tvm_ffi"),
         ("cuda-bindings", "cuda.bindings.driver"),
     ]
     for package_name, module_name in deps:
@@ -40,19 +42,371 @@ def assert_cutedsl_runtime_available() -> None:
         return
     raise RuntimeError(
         "scaled_grouped_mm CuTeDSL path requires optional Python packages "
-        "`nvidia-cutlass-dsl` and `cuda-bindings` (from NVIDIA cuda-python); "
+        "`nvidia-cutlass-dsl`, `apache-tvm-ffi`, and `cuda-bindings` "
+        "(from NVIDIA cuda-python); "
         f"{reason}"
     )
 
 
 def _select_kernel_config(M: int, N: int, K: int) -> _KernelConfig:
-    # This came from MSLK heuristics, but it collapses to two configs
-    # for our non-transpose path (transpose specialization did not
-    # show benefit).
-    config_medium = _KernelConfig((128, 128), (2, 1))
-    config_large = _KernelConfig((256, 256), (2, 1))
-    del N, K  # Kept in signature for eventual future use.
-    return config_medium if M <= 128 else config_large
+    # Port of MSLK get_kernel_via_heuristics() for MX8 grouped GEMM.
+    # MSLK has a 256x64 variant; CuTeDSL kernel supports N in {128,
+    # 256}, so we map that choice to a 128x128 transpose
+    # configuration.
+    cfg_256_64_ba = _KernelConfig((128, 128), (2, 1), True)
+    cfg_256_128_ba = _KernelConfig((256, 128), (2, 1), True)
+    cfg_256_256_ab = _KernelConfig((256, 256), (2, 1), False)
+    cfg_256_256_ba = _KernelConfig((256, 256), (2, 1), True)
+
+    M = int(M)
+    N = int(N)
+    K = int(K)
+
+    # CuTeDSL-tuned overrides for large per-group workloads where the
+    # MSLK heuristic tends to over-select transpose_ab=True.
+    if M >= 2048 and N >= 6144 and K >= 2048:
+        return cfg_256_256_ab
+    if N == 5120 and K == 8192 and M <= 4096:
+        return cfg_256_256_ab
+
+    if M <= 64:
+        return cfg_256_64_ba
+    elif M <= 128:
+        if N <= 1024:
+            if K <= 5120:
+                return cfg_256_64_ba
+            else:
+                return cfg_256_128_ba
+        else:
+            return cfg_256_128_ba
+    elif M <= 1024:
+        if N <= 1024:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 5120:
+                return cfg_256_256_ba
+            elif K <= 6144:
+                return cfg_256_256_ab
+            elif K <= 7168:
+                return cfg_256_256_ba
+            elif K <= 8192:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 2048:
+            if K <= 1024:
+                return cfg_256_256_ba
+            elif K <= 2048:
+                return cfg_256_256_ab
+            elif K <= 7168:
+                return cfg_256_256_ba
+            elif K <= 8192:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 4096:
+            if K <= 5120:
+                return cfg_256_256_ba
+            elif K <= 6144:
+                return cfg_256_256_ab
+            elif K <= 8192:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 5120:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 5120:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 6144:
+            if K <= 1024:
+                return cfg_256_256_ba
+            elif K <= 2048:
+                return cfg_256_256_ab
+            elif K <= 6144:
+                return cfg_256_256_ba
+            elif K <= 8192:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 7168:
+            if K <= 5120:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 8192:
+            if K <= 4096:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        else:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 2048:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+    elif M <= 2048:
+        if N <= 1024:
+            if K <= 1024:
+                return cfg_256_256_ba
+            elif K <= 2048:
+                return cfg_256_256_ab
+            elif K <= 7168:
+                return cfg_256_256_ba
+            elif K <= 8192:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 2048:
+            return cfg_256_256_ba
+        elif N <= 4096:
+            if K <= 1024:
+                return cfg_256_256_ba
+            elif K <= 2048:
+                return cfg_256_256_ab
+            elif K <= 4096:
+                return cfg_256_256_ba
+            elif K <= 7168:
+                return cfg_256_256_ab
+            elif K <= 8192:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 6144:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 6144:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 7168:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 5120:
+                return cfg_256_256_ba
+            elif K <= 8192:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ab
+        elif N <= 8192:
+            if K <= 4096:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        else:
+            if K <= 2048:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+    elif M <= 4096:
+        if N <= 1024:
+            if K <= 1024:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 2048:
+            if K <= 2048:
+                return cfg_256_256_ab
+            elif K <= 5120:
+                return cfg_256_256_ba
+            elif K <= 6144:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 4096:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 8192:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 5120:
+            if K <= 8192:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 6144:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 4096:
+                return cfg_256_256_ba
+            elif K <= 5120:
+                return cfg_256_256_ab
+            elif K <= 7168:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 7168:
+            if K <= 2048:
+                return cfg_256_256_ba
+            elif K <= 4096:
+                return cfg_256_256_ab
+            elif K <= 5120:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 8192:
+            if K <= 1024:
+                return cfg_256_256_ba
+            elif K <= 2048:
+                return cfg_256_256_ab
+            elif K <= 4096:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        else:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 2048:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+    elif M <= 5120:
+        if N <= 1024:
+            if K <= 1024:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 2048:
+            return cfg_256_256_ba
+        elif N <= 4096:
+            if K <= 1024:
+                return cfg_256_256_ba
+            elif K <= 2048:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 5120:
+            if K <= 1024:
+                return cfg_256_256_ba
+            elif K <= 2048:
+                return cfg_256_256_ab
+            elif K <= 6144:
+                return cfg_256_256_ba
+            elif K <= 7168:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 6144:
+            if K <= 1024:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 7168:
+            if K <= 5120:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 8192:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 5120:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        else:
+            if K <= 2048:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+    elif M <= 6144:
+        if N <= 1024:
+            return cfg_256_256_ba
+        elif N <= 2048:
+            if K <= 1024:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 4096:
+            return cfg_256_256_ba
+        elif N <= 5120:
+            if K <= 7168:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 6144:
+            return cfg_256_256_ba
+        elif N <= 7168:
+            if K <= 4096:
+                return cfg_256_256_ba
+            elif K <= 5120:
+                return cfg_256_256_ab
+            elif K <= 6144:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 8192:
+            if K <= 5120:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        else:
+            if K <= 1024:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+    elif M <= 7168:
+        if N <= 2048:
+            if K <= 1024:
+                return cfg_256_256_ba
+            elif K <= 2048:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 4096:
+            if K <= 1024:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 6144:
+            return cfg_256_256_ba
+        elif N <= 7168:
+            if K <= 8192:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        elif N <= 8192:
+            if K <= 2048:
+                return cfg_256_256_ba
+            elif K <= 5120:
+                return cfg_256_256_ab
+            elif K <= 7168:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+        else:
+            if K <= 1024:
+                return cfg_256_256_ab
+            elif K <= 2048:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+    elif M <= 8192:
+        if N <= 1024:
+            return cfg_256_256_ba
+        elif N <= 2048:
+            if K <= 1024:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        elif N <= 8192:
+            return cfg_256_256_ba
+        else:
+            if K <= 2048:
+                return cfg_256_256_ba
+            else:
+                return cfg_256_256_ab
+    else:
+        if N <= 1024:
+            if K <= 1024:
+                return cfg_256_256_ab
+            else:
+                return cfg_256_256_ba
+        else:
+            return cfg_256_256_ba
 
 
 def _round_up(a: int, b: int) -> int:
@@ -68,69 +422,13 @@ def _allocate_output(mat_a: Tensor, mat_b: Tensor, out_dtype: torch.dtype) -> Te
     )
 
 
-def _check_valid_strides_and_return_transposed(mat: Tensor) -> bool:
-    strides = mat.stride()
-    sizes = mat.size()
-    end_dim = mat.dim() - 1
-    alignment = 16 // mat.element_size()
-    if mat.device.type != "cpu" and mat.data_ptr() % 16 != 0:
-        raise ValueError("expected data_ptr to be aligned to 16 bytes")
-    if strides[end_dim - 1] == 1 and strides[end_dim] >= max(1, sizes[end_dim - 1]):
-        if strides[end_dim] % alignment != 0:
-            raise ValueError("strides should be multiple of 16 bytes")
-        return True
-    if strides[end_dim] == 1 and strides[end_dim - 1] >= max(1, sizes[end_dim]):
-        if strides[end_dim - 1] % alignment != 0:
-            raise ValueError("strides should be multiple of 16 bytes")
-        return False
-    raise ValueError(
-        f"Invalid strides/sizes, got {mat.stride()} for strides and {mat.size()} for sizes"
-    )
-
-
-def _check_scales_blocked(mat: Tensor, scale: Tensor, arg_idx: int) -> None:
-    blocksize = 32
-    if mat.dim() == 2:
-        if scale.dim() != mat.dim():
-            raise ValueError(
-                f"for block-scaled, scale must have same number of dimensions as "
-                f"parent tensor, but got mat.dim() = {mat.dim()} and scale.dim() = "
-                f"{scale.dim()} for arg {arg_idx}"
-            )
-        scale_dim_to_check = 0
-        mat_dim_to_check = 0 if arg_idx == 0 else 1
-        if scale.size(scale_dim_to_check) < mat.size(mat_dim_to_check):
-            raise ValueError(
-                f"for block-scaled, arg {arg_idx} tensor shape ({mat.size(0)}, {mat.size(1)}) "
-                f"must have scale.shape[{scale_dim_to_check}] >= {mat.size(mat_dim_to_check)} "
-                f"but got scale.shape=({scale.size(0)}, {scale.size(1)})"
-            )
-    else:
-        G = mat.size(0)
-        K = mat.size(1)
-        N = mat.size(2)
-        blocked_scale_k = _round_up(K // blocksize, 4)
-        blocked_scale_n = _round_up(N, 128)
-        if scale.dim() != mat.dim() - 1:
-            raise ValueError(
-                "for block-scaled 2d-3d grouped GEMM, the 3d tensor must have "
-                "a 2d scale of shape (G, blocked_scale_K * blocked_scale_N), "
-                f"but scale is {scale.dim()}D for arg {arg_idx}"
-            )
-        if scale.size(0) != G or scale.size(1) != blocked_scale_k * blocked_scale_n:
-            raise ValueError(
-                f"for block-scaled grouped GEMM, the tensor shape ({G}, {K}, {N}) must have "
-                f"scale shape ({G}, {blocked_scale_k}, {blocked_scale_n}) for arg {arg_idx}, "
-                f"got: {scale.size(0)}, {scale.size(1)}"
-            )
-
-
 @functools.cache
 def _compile_scaled_grouped_mm_mxfp8(
     sm_count: int,
     max_active_clusters: int,
     mma_tile_mn: tuple[int, int],
     cluster_shape_mn: tuple[int, int],
+    transpose_ab: bool,
 ):
     import cutlass
     import cutlass.cute as cute
@@ -141,11 +439,11 @@ def _compile_scaled_grouped_mm_mxfp8(
     )
 
     m = cute.sym_int()
-    n = cute.sym_int()
-    k = cute.sym_int()
-    a_stride_m = cute.sym_int()
-    b_stride_n = cute.sym_int()
-    c_stride_m = cute.sym_int()
+    n = cute.sym_int(divisibility=16)
+    k = cute.sym_int(divisibility=32)
+    a_stride_m = cute.sym_int(divisibility=16)
+    b_stride_n = cute.sym_int(divisibility=16)
+    c_stride_0 = cute.sym_int(divisibility=8)
     sf_a_m = cute.sym_int()
     sf_a_k = cute.sym_int()
     sf_b_n = cute.sym_int()
@@ -165,11 +463,19 @@ def _compile_scaled_grouped_mm_mxfp8(
         (n, k, 1),
         stride=(b_stride_n, 1, 0),
     )
-    fake_c = make_fake_tensor(
-        cutlass.BFloat16,
-        (m, n, 1),
-        stride=(c_stride_m, 1, 0),
-    )
+    if transpose_ab:
+        # In transpose mode, C is passed as (N, M, 1) with transpose strides.
+        fake_c = make_fake_tensor(
+            cutlass.BFloat16,
+            (n, m, 1),
+            stride=(1, c_stride_0, 0),
+        )
+    else:
+        fake_c = make_fake_tensor(
+            cutlass.BFloat16,
+            (m, n, 1),
+            stride=(c_stride_0, 1, 0),
+        )
     fake_scale_a = make_fake_tensor(
         cutlass.Float8E8M0FNU,
         (sf_a_m, sf_a_k, 1),
@@ -207,6 +513,7 @@ def _compile_scaled_grouped_mm_mxfp8(
         sf_vec_size=32,
         mma_tiler_mn=mma_tile_mn,
         cluster_shape_mn=cluster_shape_mn,
+        transpose_ab=transpose_ab,
     )
 
     compiled = _compile_with_safe_names(
@@ -227,7 +534,7 @@ def _compile_scaled_grouped_mm_mxfp8(
             tensormap_cute_tensor=fake_tensormap,
             max_active_clusters=max_active_clusters,
             stream=fake_stream,
-            options="--enable-assertions",
+            options="--enable-assertions --enable-tvm-ffi",
         )
     )
     return compiled, grouped_gemm.cluster_tile_shape_mnk
@@ -322,27 +629,48 @@ def scaled_grouped_mm_mxfp8(
     if mat_a.size(-1) % 32 != 0:
         raise ValueError("K dimension must be divisible by 32 for MXFP8 block scaling")
 
+    # tvm-ffi validates shape/dtype/layout constraints at runtime.
+    if offs is None:
+        raise ValueError("offs must be provided for scaled grouped MM")
+    if len(scale_a) != 1 or len(scale_b) != 1:
+        raise ValueError("scale_a and scale_b must contain a single tensor")
+
     assert_cutedsl_runtime_available()
 
     if mat_a.device.type != "cuda":
-        raise ValueError("scaled grouped MM is only supported on CUDA")
+        raise ValueError("scaled grouped MM mxfp8 is only supported on CUDA")
+    if mat_a.device != mat_b.device:
+        raise ValueError("mat_a and mat_b must be on the same device")
+    if scale_a[0].device != mat_a.device or scale_b[0].device != mat_a.device:
+        raise ValueError("scale_a and scale_b must be on the same device as mat_a")
+    if offs.device != mat_a.device:
+        raise ValueError("offs must be on the same device as mat_a")
 
     if bias is not None:
         raise ValueError("bias is not supported for scaled grouped MM")
-    if offs is None:
-        raise ValueError("offs must be provided for scaled grouped MM")
-    if mat_a.dim() != 2 or mat_b.dim() != 3:
-        raise ValueError("expected mat_a to be 2D and mat_b to be 3D")
-    if mat_a.dtype != torch.float8_e4m3fn or mat_b.dtype != torch.float8_e4m3fn:
-        raise ValueError("expected mat_a and mat_b to be float8_e4m3fn")
-    if mat_a.device != mat_b.device:
-        raise ValueError("expected mat_a and mat_b to be on the same device")
-    if _check_valid_strides_and_return_transposed(mat_a):
+
+    if mat_a.data_ptr() % 16 != 0:
+        raise ValueError("expected data_ptr to be aligned to 16 bytes")
+    if mat_a.stride(0) == 1 and mat_a.stride(1) >= max(1, mat_a.size(0)):
         raise ValueError("expected mat_a to be transposed")
-    if not _check_valid_strides_and_return_transposed(mat_b):
+    if not (mat_a.stride(1) == 1 and mat_a.stride(0) >= max(1, mat_a.size(1))):
+        raise ValueError(
+            f"Invalid strides/sizes, got {mat_a.stride()} for strides and "
+            f"{mat_a.size()} for sizes"
+        )
+
+    if mat_b.data_ptr() % 16 != 0:
+        raise ValueError("expected data_ptr to be aligned to 16 bytes")
+    if mat_b.stride(1) == 1 and mat_b.stride(2) >= max(1, mat_b.size(1)):
+        pass
+    elif mat_b.stride(2) == 1 and mat_b.stride(1) >= max(1, mat_b.size(2)):
         raise ValueError("expected mat_b to be transposed")
-    if output_dtype is not None and output_dtype != torch.bfloat16:
-        raise ValueError("only bfloat16 output is supported for scaled grouped MM")
+    else:
+        raise ValueError(
+            f"Invalid strides/sizes, got {mat_b.stride()} for strides and "
+            f"{mat_b.size()} for sizes"
+        )
+
     if use_fast_accum:
         raise ValueError("use_fast_accum is not supported for scaled grouped MM")
     if contraction_dim and tuple(contraction_dim) != (-1, -2):
@@ -353,21 +681,6 @@ def scaled_grouped_mm_mxfp8(
     else:
         if mat_a.size(-1) != mat_b.size(-2):
             raise ValueError("contraction dimension of mat_a and mat_b must match")
-    if len(scale_a) != 1 or len(scale_b) != 1:
-        raise ValueError("scale_a and scale_b must contain a single tensor")
-    if (
-        scale_a[0].dtype != torch.float8_e8m0fnu
-        or scale_b[0].dtype != torch.float8_e8m0fnu
-    ):
-        raise ValueError("scale_a and scale_b must be float8_e8m0fnu")
-    if scale_a[0].device != mat_a.device or scale_b[0].device != mat_a.device:
-        raise ValueError("scale_a and scale_b must be on the same device as mat_a")
-    if offs.dtype != torch.int32:
-        raise ValueError("offs must be int32")
-    if offs.dim() != 1:
-        raise ValueError("offs must be 1D")
-    if offs.numel() != mat_b.size(0):
-        raise ValueError("offs size must match mat_b batch dimension")
     if len(scale_recipe_a) != 1 or len(scale_recipe_b) != 1:
         raise ValueError("scale_recipe_a and scale_recipe_b must be singleton lists")
     if scale_recipe_a[0] != ScalingType.BlockWise1x32:
@@ -381,9 +694,6 @@ def scaled_grouped_mm_mxfp8(
     if swizzle_b[0] != SwizzleType.SWIZZLE_32_4_4:
         raise ValueError("swizzle_b must be SWIZZLE_32_4_4 for MXFP8")
 
-    _check_scales_blocked(mat_a, scale_a[0], 0)
-    _check_scales_blocked(mat_b, scale_b[0], 1)
-
     out_dtype = output_dtype or torch.bfloat16
     out = _allocate_output(mat_a, mat_b, out_dtype)
     ngroups = int(offs.numel())
@@ -391,7 +701,8 @@ def scaled_grouped_mm_mxfp8(
         return out
     device = mat_a.device
 
-    max_threads = torch.cuda.get_device_properties(device).max_threads_per_block
+    props = torch.cuda.get_device_properties(device)
+    max_threads = int(getattr(props, "max_threads_per_block", 1024))
     threads_per_block = min(ngroups, max_threads)
     num_blocks = (ngroups + threads_per_block - 1) // threads_per_block
 
@@ -410,6 +721,7 @@ def scaled_grouped_mm_mxfp8(
             max_active_clusters,
             config.mma_tile_mn,
             config.cluster_shape_mn,
+            config.transpose_ab,
         )
     )
 
@@ -445,11 +757,15 @@ def scaled_grouped_mm_mxfp8(
         int(scale_a[0].data_ptr()),
         int(scale_b[0].data_ptr()),
         offs,
+        int(mat_a.element_size()),
+        int(scale_a[0].element_size()),
+        int(out.element_size()),
         tuple(map(int, mat_a.stride())),
         tuple(map(int, mat_b.stride())),
         tuple(map(int, out.stride())),
         tuple(map(int, scale_a[0].stride())),
         tuple(map(int, scale_b[0].stride())),
+        int(config.transpose_ab),
         cluster_tile_m,
         cluster_tile_n,
         problem_sizes,
@@ -472,30 +788,12 @@ def scaled_grouped_mm_mxfp8(
         strides = t.stride()
         return t.as_strided((*sizes, 1), (*strides, 0))
 
-    def _pick_leading_dim(t: Tensor, preferred: int) -> int:
-        ones = [i for i, s in enumerate(t.stride()) if s == 1]
-        if preferred in ones:
-            return preferred
-        if len(ones) == 1:
-            return ones[0]
-        if ones:
-            return ones[0]
-        return 0
-
-    def _as_cute_tensor(t: Tensor, preferred: int):
-        from cutlass.cute.runtime import from_dlpack as _from_dlpack
-
-        leading_dim = _pick_leading_dim(t, preferred)
-        return _from_dlpack(t, assumed_align=16).mark_layout_dynamic(
-            leading_dim=leading_dim
-        )
-
     scaled_grouped_mm_mxfp8_compiled(
-        _as_cute_tensor(_with_l_dim(mat_a), 1),
-        _as_cute_tensor(_with_l_dim(mat_b[0].transpose(0, 1)), 1),
-        _as_cute_tensor(_with_l_dim(out), 1),
-        _as_cute_tensor(_with_l_dim(scale_a[0]), 1),
-        _as_cute_tensor(_with_l_dim(scale_b[0]), 1),
+        _with_l_dim(mat_a),
+        _with_l_dim(mat_b[0].transpose(0, 1)),
+        _with_l_dim(out.transpose(0, 1) if config.transpose_ab else out),
+        _with_l_dim(scale_a[0]),
+        _with_l_dim(scale_b[0]),
         ngroups,
         problem_sizes,
         strides_abc,

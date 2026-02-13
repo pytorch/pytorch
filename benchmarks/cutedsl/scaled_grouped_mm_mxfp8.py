@@ -150,6 +150,7 @@ def _bench_backend_subprocess(
     use_cuda_graphs: bool,
     mma_tile_mn: tuple[int, int] | None,
     cluster_shape_mn: tuple[int, int] | None,
+    transpose_ab: bool | None,
 ) -> float:
     cmd = [
         sys.executable,
@@ -179,6 +180,8 @@ def _bench_backend_subprocess(
         cmd.extend(
             ["--cluster-shape-mn", f"{cluster_shape_mn[0]},{cluster_shape_mn[1]}"]
         )
+    if transpose_ab is not None:
+        cmd.extend(["--transpose-ab", "on" if transpose_ab else "off"])
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise RuntimeError(
@@ -324,6 +327,7 @@ def benchmark_scaled_grouped_mm(
     do_correctness=True,
     mma_tile_mn: tuple[int, int] | None = None,
     cluster_shape_mn: tuple[int, int] | None = None,
+    transpose_ab: bool | None = None,
 ):
     if dtype is None:
         dtype = torch.bfloat16
@@ -373,7 +377,7 @@ def benchmark_scaled_grouped_mm(
     def _make_cute_call(
         fn: Callable[[], torch.Tensor],
     ) -> Callable[[], torch.Tensor]:
-        if mma_tile_mn is None and cluster_shape_mn is None:
+        if mma_tile_mn is None and cluster_shape_mn is None and transpose_ab is None:
             return fn
 
         sgmm_mod = importlib.import_module("torch._cutedsl.scaled_grouped_mm_mxfp8")
@@ -390,6 +394,7 @@ def benchmark_scaled_grouped_mm(
                         if cluster_shape_mn is not None
                         else base.cluster_shape_mn
                     ),
+                    transpose_ab if transpose_ab is not None else base.transpose_ab,
                 )
 
             sgmm_mod._select_kernel_config = _select_override
@@ -461,6 +466,7 @@ def benchmark_scaled_grouped_mm(
                 use_cuda_graphs=use_cuda_graphs,
                 mma_tile_mn=mma_tile_mn,
                 cluster_shape_mn=cluster_shape_mn,
+                transpose_ab=transpose_ab,
             )
             us_cute = _bench_backend_subprocess(
                 g=g,
@@ -476,6 +482,7 @@ def benchmark_scaled_grouped_mm(
                 use_cuda_graphs=use_cuda_graphs,
                 mma_tile_mn=mma_tile_mn,
                 cluster_shape_mn=cluster_shape_mn,
+                transpose_ab=transpose_ab,
             )
         else:
             bench_fn_cpp = (
@@ -599,6 +606,12 @@ if __name__ == "__main__":
         help="Override CuTeDSL cluster shape as M,N (e.g. 2,1).",
     )
     parser.add_argument(
+        "--transpose-ab",
+        choices=["on", "off"],
+        default=None,
+        help="Override CuTeDSL transpose_ab tuning knob.",
+    )
+    parser.add_argument(
         "--grouping",
         choices=["balanced", "random"],
         default="balanced",
@@ -667,4 +680,5 @@ if __name__ == "__main__":
         do_correctness=not args.no_correctness,
         mma_tile_mn=args.mma_tile_mn,
         cluster_shape_mn=args.cluster_shape_mn,
+        transpose_ab=(None if args.transpose_ab is None else args.transpose_ab == "on"),
     )
