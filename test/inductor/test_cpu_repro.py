@@ -5163,8 +5163,8 @@ class CPUReproTests(TestCase):
                 .view(-1, window_size * window_size)
             )
             attn_mask = masked_window.unsqueeze(1) - masked_window.unsqueeze(2)
-            res = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(
-                attn_mask == 0, float(0.0)
+            res = attn_mask.masked_fill(attn_mask != 0, -100.0).masked_fill(
+                attn_mask == 0, 0.0
             )
             return res
 
