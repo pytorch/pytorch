@@ -1,9 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import io
 import logging
+import os
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 import torch
 import torch._logging.structured
@@ -21,6 +23,9 @@ if torch.distributed.is_available():
 if has_triton():
     import triton
     import triton.language as tl
+
+    GLOBAL_SCALE = 2
+    GLOBAL_SCALE_CONSTEXPR: tl.constexpr = tl.constexpr(GLOBAL_SCALE)
 
     def init_to_zero(name):
         return lambda nargs: nargs[name].zero_()
@@ -86,6 +91,30 @@ if has_triton():
         output = x + y
         tl.atomic_add(output_ptr + offsets, output, mask=mask)
 
+    autotuned_subtract = triton.autotune(
+        configs=[
+            triton.Config({"BLOCK_SIZE": 1024}, num_warps=4, num_stages=2),
+        ],
+        key=["n_elements"],
+    )(subtract_kernel_inner)
+
+    @triton.jit
+    def ref_global(x_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        output = x * GLOBAL_SCALE
+        tl.store(output_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def nested_ref_global_constexpr(
+        x_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        tl.static_print(f"SCALE={GLOBAL_SCALE_CONSTEXPR}")
+        ref_global(x_ptr, output_ptr, n_elements, BLOCK_SIZE)
+
 
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
@@ -123,6 +152,7 @@ class ToyModel(torch.nn.Module):
         return x
 
 
+@mock.patch.dict(os.environ, {"TRITON_ALLOW_NON_CONSTEXPR_GLOBALS": "1"})
 class FxGraphRunnableTest(TestCase):
     def setUp(self):
         super().setUp()
@@ -222,6 +252,61 @@ class FxGraphRunnableTest(TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
 
         torch.compile(subtract_nested)(x, y)
+        self._exec_and_verify_payload()
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_gpu
+    def test_nested_and_autotuned_same_kernel(self):
+        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output1 = torch.empty_like(x)
+            output2 = torch.empty_like(x)
+            n_elements = x.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            autotuned_subtract[grid](x, y, output2, n_elements)
+            subtract_kernel_inner[(n_elements,)](
+                x, y, output1, n_elements, BLOCK_SIZE=1024
+            )
+            return output1 + output2
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
+
+        torch.compile(f)(x, y)
+        self._exec_and_verify_payload()
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_gpu
+    def test_multi_kernel_nesting_and_global_constexpr(self):
+        def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            n_elements = x.numel()
+
+            output1 = torch.empty_like(x)
+            ref_global[(n_elements,)](x, output1, n_elements, BLOCK_SIZE=1024)
+
+            output2 = torch.empty_like(x)
+            nested_ref_global_constexpr[(n_elements,)](
+                x, output2, n_elements, BLOCK_SIZE=1024
+            )
+
+            output3 = torch.empty_like(x)
+            nested_kernel_with_inner_call[(n_elements,)](
+                x, y, output3, n_elements, BLOCK_SIZE=1024
+            )
+
+            output4 = torch.empty_like(x)
+            subtract_kernel_inner[(n_elements,)](
+                x, y, output4, n_elements, BLOCK_SIZE=1024
+            )
+
+            return output1 + output2 + output3 + output4
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16) * 0.5
+
+        torch.compile(f)(x, y)
         self._exec_and_verify_payload()
 
     def test_two_inputs_matmul(self):
