@@ -61,6 +61,9 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
+    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
@@ -193,21 +196,18 @@ class DeviceConfig:
     dtypes_fast: list[torch.dtype]
 
 
-TEST_ON_CUDA = (
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0)
-)
-TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
-
 device_configs = {}
+# Tests are skipped when no device is supported, so CPU as default is safe
 test_device = ("cpu",)
 if HAS_GPU:
     if TEST_ON_CUDA:
-        test_device = (
-            "cuda",
-            "cpu",
-        )
+        if TEST_ON_CPU:
+            test_device = (
+                "cuda",
+                "cpu",
+            )
+        else:
+            test_device = ("cuda",)
     elif TEST_ON_XPU:
         torch._C._set_onednn_allow_tf32(True)
         test_device = ("xpu",)
@@ -1314,9 +1314,6 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
-    @skipCPUIf(
-        not torch.cpu._is_avx2_supported(), "CPU flex attention requires AVX2 support"
-    )
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
