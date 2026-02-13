@@ -3327,16 +3327,6 @@
       ]
     }
   ],
-  "GB6604": [
-    {
-      "Gb_type": "Missing CALL_INTRINSIC_2 handler",
-      "Context": "CALL_INTRINSIC_2 operand: {inst.argval}",
-      "Explanation": "No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0276": [
     {
       "Gb_type": "Failed to make weakref to User Object",
@@ -3897,6 +3887,20 @@
       "Explanation": "Expected init leaves.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB1297": [
+    {
+      "Gb_type": "Reconstruction failure (self-referential)",
+      "Context": "str(self)",
+      "Explanation": "Dynamo tried to reconstruct sourceless variable {self}, but it is self-referential. Dynamo must manually implement reconstruction rules for self-referentiable sourceless variables.",
+      "Hints": [
+        "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable ",
+        "that Dynamo cannot reconstruct, then remove it from the return statement.",
+        "Remove the self-reference in the variable. A self-referring list, for example, is `l = []; l.append(l)`.",
+        "Report an issue to PyTorch if you need self-referential reconstrtuction support.",
+        "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
       ]
     }
   ],

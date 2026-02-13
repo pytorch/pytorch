@@ -1405,6 +1405,7 @@ def compute_unbacked_bindings(
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
     )
+
     pending -= ignorable
     if not peek and pending:
         extra = (
@@ -3860,9 +3861,10 @@ class ShapeEnv:
         self.unique_ids: set[int] = set()
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
-        # when hint is overridden in mark_dynamic, the value stored in
-        # self.backed_var_to_val is the overridden hint.
-        # only used for backed dynamic shapes symbols.
+        # When hint is overridden in mark_dynamic, the value stored here
+        # is the overridden hint (this is the source of truth for backed
+        # hints). The override is also recorded in var_to_hint_override
+        # so it can be included in the FxGraphCache key.
         self.backed_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
         # Only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error in draft export.
@@ -3878,6 +3880,11 @@ class ShapeEnv:
         # A set of unbacked symbols that are inputs (i.e: not data dependent).
         self.unbacked_inputs: OrderedSet[sympy.Symbol] = OrderedSet()
         self.var_to_stack: dict[sympy.Symbol, CapturedTraceback] = {}
+        # User-provided hint overrides from mark_dynamic/mark_unbacked.
+        # Even though we never read hints for backed variables from this
+        # dict (backed hints are read from backed_var_to_val), we still
+        # want them to always be stored here, since this dict is used as
+        # part of the FxGraphCache key.
         self.var_to_hint_override: dict[sympy.Symbol, int] = {}
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
