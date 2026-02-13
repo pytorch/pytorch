@@ -71,8 +71,8 @@ def remove_no_ops(
     zeros: OrderedSet[torch.fx.Node],
     ones: OrderedSet[torch.fx.Node],
 ):
+    """Remove identity arithmetic operations: (+ 0, - 0, * 1, / 1)."""
     with torch.utils._python_dispatch._disable_current_modes():
-        "Removes no-ops: (+ 0, - 0, * 1, / 1)"
         graph = gm.graph
 
         def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):

@@ -8740,7 +8740,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # Should compile successfully with fullgraph=True
         self.assertEqual(cnt.frame_count, 1)
 
-
     def test_data_attr_mutation_with_noop_add(self):
         # Regression test: remove_no_ops incorrectly eliminated add(x, 0) -> x
         # when x was subsequently mutated by set_, causing the return value to
