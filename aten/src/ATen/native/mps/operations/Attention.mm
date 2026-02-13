@@ -265,8 +265,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
 
   auto out = at::empty({batchSize, num_heads, seq_len_q, headSize}, q_.options());
   auto intermediate = at::empty({batchSize, num_heads, seq_len_q, blocks, headSize}, q_.options());
-  auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options());
-  auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options());
+  auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
+  auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
 
   auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
   bool has_mask = mask_.has_value();
