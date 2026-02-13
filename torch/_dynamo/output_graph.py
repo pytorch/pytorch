@@ -106,7 +106,10 @@ from .exc import (
 )
 from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
-from .graph_id_filter import get_backend_override_for_compile_id
+from .graph_id_filter import (
+    get_backend_override_for_compile_id,
+    get_inductor_config_override_for_compile_id,
+)
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
@@ -191,6 +194,24 @@ RootGuardManager = guards.RootGuardManager
 # as static in case user overrides fn ptr
 og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
+
+
+def _wrap_with_inductor_config(
+    compiler_fn: Any, config_patches: dict[str, Any]
+) -> Callable[..., Any]:
+    """
+    Wrap a compiler function to apply inductor config patches during compilation.
+    """
+    from torch._inductor import config as inductor_config
+
+    def wrapped(gm: Any, example_inputs: Any) -> Any:
+        with inductor_config.patch(config_patches):
+            return compiler_fn(gm, example_inputs)
+
+    # Preserve function metadata for logging
+    wrapped.__name__ = getattr(compiler_fn, "__name__", "<wrapped>")
+    wrapped.__wrapped__ = compiler_fn  # type: ignore[attr-defined]
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -342,6 +363,7 @@ class BytecodeTracingTimings:
     get_fake_value_ns: int = 0
     create_proxy_ns: int = 0
     wrap_to_fake_tensor_and_record_ns: int = 0
+    variable_builder_call_ns: int = 0
 
     def report_and_reset(self) -> None:
         """Flush accumulated timings to the bytecode_tracing chromium event
@@ -2615,6 +2637,15 @@ class OutputGraph(OutputGraphCommon):
             )
             or self.compiler_fn
         )
+
+        # Check for per-graph inductor config override (for debugging/bisecting)
+        inductor_config_override = get_inductor_config_override_for_compile_id(
+            self.dynamo_compile_id, config.debug_inductor_config_override
+        )
+        if inductor_config_override:
+            compiler_fn = _wrap_with_inductor_config(
+                compiler_fn, inductor_config_override
+            )
 
         name = (
             compiler_fn.__name__

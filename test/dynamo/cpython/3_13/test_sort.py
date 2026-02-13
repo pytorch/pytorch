@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, slowTest
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
 
@@ -183,7 +183,6 @@ class TestBase(__TestCase):
             x = [e for e, i in augmented] # a stable sort of s
             check("stability", x, s)
 
-    @slowTest
     def test_small_stability(self):
         from itertools import product
         from operator import itemgetter

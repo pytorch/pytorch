@@ -2337,6 +2337,34 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         disabled_bound = torch._dynamo.disable(bound_method)
         self.assertIs(innermost_fn(disabled_bound), bound_method)
 
+    def test_disable_functools_wraps(self):
+        # Test that functools.wraps copying _torchdynamo_orig_callable doesn't
+        # cause innermost_fn to bypass the outer wrapper. This tests the fix
+        # using _torchdynamo_wrapper_id to verify the attribute was set by our
+        # decorator, not copied by functools.wraps.
+        from torch._dynamo.eval_frame import innermost_fn
+
+        @torch._dynamo.disable
+        def inner_fn(x):
+            return x + 1
+
+        # Outer wrapper uses functools.wraps which copies _torchdynamo_orig_callable
+        @functools.wraps(inner_fn)
+        def outer_wrapper(x):
+            return inner_fn(x) * 2
+
+        # innermost_fn should NOT follow the copied _torchdynamo_orig_callable
+        # because _torchdynamo_wrapper_id won't match
+        self.assertIs(innermost_fn(outer_wrapper), outer_wrapper)
+
+        # Applying disable to outer_wrapper should wrap outer_wrapper, not inner_fn
+        disabled_outer = torch._dynamo.disable(outer_wrapper)
+
+        x = torch.tensor([1.0, 2.0, 3.0])
+        expected = outer_wrapper(x)  # (x+1)*2 = [4, 6, 8]
+        actual = disabled_outer(x)
+        self.assertEqual(expected, actual)
+
     def test_dynamo_disable_annotations(self):
         class SimpleModel(torch.nn.Module):
             def __init__(self) -> None:
