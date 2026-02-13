@@ -1376,6 +1376,7 @@ class SizeVariable(TupleVariable):
         from .tensor import SymNodeVariable
 
         const_result = 1
+        # pyrefly: ignore [implicit-any]
         sym_sizes = []
 
         for v in self.items:
@@ -1472,6 +1473,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def __init__(
         self,
         items: list[VariableTracker],
+        # pyrefly: ignore [implicit-any]
         tuple_cls: type[tuple],
         dynamic_attributes: Optional[dict[str, VariableTracker]] = None,
         tuple_vt: Optional[TupleVariable] = None,
@@ -1838,6 +1840,7 @@ class ListIteratorVariable(IteratorVariable):
         if not self.is_exhausted:
             remaining_items = self.items[self.index :]
         else:
+            # pyrefly: ignore [implicit-any]
             remaining_items = []
         codegen.foreach(remaining_items)
         codegen.extend_output(
