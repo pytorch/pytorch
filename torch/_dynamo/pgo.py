@@ -236,6 +236,7 @@ class FrameStateSizeEntry:
     stride: Union[
         AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
+    excluded_sizes: Optional[tuple[Optional[int], ...]] = None
 
     def render(self) -> str:
         # Special cases
@@ -361,6 +362,19 @@ class FrameStateSizeEntry:
         return tuple(cls._merge_atom(x, y) for x, y in zip(xs, ys))
 
     def __ior__(self, other: Self) -> Self:
+        if isinstance(self.size, tuple) and isinstance(other.size, tuple):
+            if len(self.size) == len(other.size):
+                excluded = list(self.excluded_sizes or (None,) * len(self.size))
+                for i in range(len(self.size)):
+                    si = self.size[i]
+                    if (
+                        type(si) is int
+                        and type(other.size[i]) is int
+                        and si != other.size[i]
+                        and excluded[i] is None
+                    ):
+                        excluded[i] = si
+                self.excluded_sizes = tuple(excluded)
         self.scalar = self._merge_atom(self.scalar, other.scalar)
         self.size = self._merge_atom_tup(self.size, other.size)
         self.stride = self._merge_atom_tup(self.stride, other.stride)

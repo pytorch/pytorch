@@ -3052,6 +3052,23 @@ class GuardBuilder(GuardBuilderBase):
                     dispatch_keys,
                 )
 
+                excluded_sizes = metadata.get("excluded_sizes")
+                if excluded_sizes and any(v is not None for v in excluded_sizes):
+                    dims_and_values = [
+                        (i, v) for i, v in enumerate(excluded_sizes) if v is not None
+                    ]
+
+                    def check_exclusion(x, dvs=dims_and_values):
+                        return not all(x.size(d) == v for d, v in dvs)
+
+                    guard_manager.add_lambda_guard(
+                        check_exclusion,
+                        get_verbose_code_parts(
+                            f"excluded_sizes({excluded_sizes})", guard
+                        ),
+                        guard.user_stack,
+                    )
+
                 # We consider TENSOR_MATCH guard to be important enough to be
                 # included in diff guard manager by default.
                 if not isinstance(value, torch.nn.Parameter):
