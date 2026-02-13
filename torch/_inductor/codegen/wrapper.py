@@ -520,6 +520,28 @@ class ExitSubgraphLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class EnterNoopLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_indent()
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_enter_noop
+
+
+@dataclasses.dataclass
+class ExitNoopLine(WrapperLine):
+    wrapper: PythonWrapperCodegen
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        return converter._generate_exit_noop
+
+
+@dataclasses.dataclass
 class EnterDeviceContextManagerLine(WrapperLine):
     device_idx: int
     last_seen_device_guard_index: Optional[int]
@@ -3724,7 +3746,6 @@ class PythonWrapperCodegen(CodeGen):
 
         predicate = conditional.predicate.codegen_reference()
         if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-            # move the Tensor predicate to host
             predicate = f"{predicate}.item()"
 
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
@@ -3740,15 +3761,33 @@ class PythonWrapperCodegen(CodeGen):
 
         self.writeline(ExitSubgraphLine(self))
         self.writeline("else:")
-        self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
-        if V.graph.aot_mode:
-            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
-            self.codegen_subgraph_by_inlining(
-                conditional.false_subgraph, outer_inputs, outer_outputs
-            )
+
+        if conditional.false_subgraph is not None:
+            self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
+            if V.graph.aot_mode:
+                outer_outputs = [
+                    f"{name}[{i}]" for i in range(len(conditional.outputs))
+                ]
+                self.codegen_subgraph_by_inlining(
+                    conditional.false_subgraph, outer_inputs, outer_outputs
+                )
+            else:
+                self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
+            self.writeline(ExitSubgraphLine(self))
         else:
-            self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
-        self.writeline(ExitSubgraphLine(self))
+            self.writeline(EnterNoopLine(self))
+            for i, output in enumerate(conditional.outputs):
+                layout = output.get_layout()
+                size = self.codegen_shape_tuple(layout.size)
+                stride = self.codegen_shape_tuple(layout.stride)
+                device = layout.device
+                dtype = layout.dtype
+                self.writeline(
+                    f"{name}[{i}] = torch.empty_strided("
+                    f"{size}, {stride}, "
+                    f"dtype={dtype}, device='{device}')"
+                )
+            self.writeline(ExitNoopLine(self))
 
     def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""

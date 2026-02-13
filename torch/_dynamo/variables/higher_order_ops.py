@@ -2224,6 +2224,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Specialize into one of the branches since pred is constant
         pred, true_fn, false_fn, operands = args
+        false_fn_is_none = (
+            isinstance(false_fn, ConstantVariable)
+            and false_fn.as_python_constant() is None
+        )
         if type(args[0]) is ConstantVariable:
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
@@ -2233,6 +2237,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if pred.as_python_constant():
                 return true_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
             else:
+                if false_fn_is_none:
+                    unimplemented(
+                        gb_type="torch.cond: constant pred with None false_fn",
+                        context="pred is False and false_fn is None",
+                        explanation="Cannot specialize on the false branch when false_fn is None.",
+                        hints=[
+                            *graph_break_hints.USER_ERROR,
+                        ],
+                    )
                 return false_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
 
         # predicate
@@ -2278,7 +2291,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # branches
         _check_supported_callable_arg(tx, true_fn, "true_fn")
-        _check_supported_callable_arg(tx, false_fn, "false_fn")
+        if not false_fn_is_none:
+            _check_supported_callable_arg(tx, false_fn, "false_fn")
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,
@@ -2350,63 +2364,80 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         (true_r, true_spec, true_graph, true_lifted_freevars) = speculate_branch(True)
         true_nn_modules = dict(tx.output.nn_modules)
 
-        (
-            false_r,
-            false_spec,
-            false_graph,
-            false_lifted_freevars,
-        ) = speculate_branch(False)
-        false_nn_modules = dict(tx.output.nn_modules)
-
-        same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
-            true_spec.treespec, false_spec.treespec
-        ).as_python_constant()
-        # 3.14: NotImplemented cannot be converted to bool
-        if same_spec is not NotImplemented and not same_spec:
-            unimplemented(
-                gb_type="torch.cond: differing branch outputs",
-                context=f"true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
-                explanation="Expected branches to return the same pytree structure.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
+        if false_fn_is_none:
+            true_name = tx.output.install_subgraph(
+                "cond_true",
+                torch.fx.GraphModule(true_nn_modules, true_graph),
             )
 
-        (
-            true_graph,
-            false_graph,
-            true_shared,
-            _false_shared,
-            unique_true,
-            unique_false,
-        ) = _merge_graph_inputs(
-            true_graph,
-            true_lifted_freevars,
-            "true_branch",
-            false_graph,
-            false_lifted_freevars,
-            "false_branch",
-        )
+            true_node = make_attr(tx, true_name)
+            false_node = None
 
-        true_name = tx.output.install_subgraph(
-            "cond_true",
-            torch.fx.GraphModule(true_nn_modules, true_graph),
-        )
-        false_name = tx.output.install_subgraph(
-            "cond_false",
-            torch.fx.GraphModule(false_nn_modules, false_graph),
-        )
+            all_freevars = list(true_lifted_freevars.keys())
 
-        true_node = make_attr(tx, true_name)
-        false_node = make_attr(tx, false_name)
+            p_args = (
+                pred.as_proxy(),
+                true_node,
+                false_node,
+                tuple(all_freevars),
+            )
+        else:
+            (
+                false_r,
+                false_spec,
+                false_graph,
+                false_lifted_freevars,
+            ) = speculate_branch(False)
+            false_nn_modules = dict(tx.output.nn_modules)
 
-        p_args = (
-            pred.as_proxy(),
-            true_node,
-            false_node,
-            # We pick true_shared but it shouldn't matter
-            tuple(true_shared + unique_true + unique_false),
-        )
+            same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+                true_spec.treespec, false_spec.treespec
+            ).as_python_constant()
+            # 3.14: NotImplemented cannot be converted to bool
+            if same_spec is not NotImplemented and not same_spec:
+                unimplemented(
+                    gb_type="torch.cond: differing branch outputs",
+                    context=f"true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
+                    explanation="Expected branches to return the same pytree structure.",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+
+            (
+                true_graph,
+                false_graph,
+                true_shared,
+                _false_shared,
+                unique_true,
+                unique_false,
+            ) = _merge_graph_inputs(
+                true_graph,
+                true_lifted_freevars,
+                "true_branch",
+                false_graph,
+                false_lifted_freevars,
+                "false_branch",
+            )
+
+            true_name = tx.output.install_subgraph(
+                "cond_true",
+                torch.fx.GraphModule(true_nn_modules, true_graph),
+            )
+            false_name = tx.output.install_subgraph(
+                "cond_false",
+                torch.fx.GraphModule(false_nn_modules, false_graph),
+            )
+
+            true_node = make_attr(tx, true_name)
+            false_node = make_attr(tx, false_name)
+
+            p_args = (
+                pred.as_proxy(),
+                true_node,
+                false_node,
+                tuple(true_shared + unique_true + unique_false),
+            )
 
         return _call_function_and_unflatten_output(
             tx,

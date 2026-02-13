@@ -1283,6 +1283,16 @@
       ]
     }
   ],
+  "GB1528": [
+    {
+      "Gb_type": "torch.cond: constant pred with None false_fn",
+      "Context": "pred is False and false_fn is None",
+      "Explanation": "Cannot specialize on the false branch when false_fn is None.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0111": [
     {
       "Gb_type": "TypeError from user code",
