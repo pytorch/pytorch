@@ -32,7 +32,7 @@ from torch.distributed.tensor._ops.strategy_validation import (
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
 from torch.testing._internal.common_methods_invocations import SampleInput
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_SLOW, TestCase
 
 
 class TestPlacementUtilities(TestCase):
@@ -417,7 +417,6 @@ class TestValidateCombination(TestCase):
         # - P(sum) + P(sum) -> P(sum) works for add (sums distribute)
         # - R * P(sum) -> P(sum) works for mul (multiplication distributes into sum)
         # - P(sum) / R -> P(sum) works for div
-        # - P(max) + P(max) -> P(max) works for max (max is idempotent)
         # But NOT:
         # - R + P(sum) -> P(sum) for add (R gets added on each rank, then summed)
         VALID_RULES = {
@@ -425,33 +424,46 @@ class TestValidateCombination(TestCase):
                 # Same-dim sharding (chunks match)
                 "S(0),S(0)->S(0)",
                 "S(1),S(1)->S(1)",
-                # Partial sum + Partial sum -> Partial sum
+                # Partial sum/avg + Partial sum/avg -> same (linearity of addition)
                 # (a0+a1) + (b0+b1) = (a0+b0) + (a1+b1) where ai/bi are per-rank
                 "P(sum),P(sum)->P(sum)",
+                "P(avg),P(avg)->P(avg)",
+                # Partial sum/avg with Replicate: avg normalizes the extra
+                # copies, so P(avg)+R works even though P(sum)+R does not
+                "P(avg),R->P(avg)",
+                "R,P(avg)->P(avg)",
                 # Partial max/min with Replicate: adding a constant preserves
                 # the reduce structure (NOT Pmax+Pmax, offsets accumulate)
                 "P(max),R->P(max)",
-                "R,P(max)->P(max)",
                 "P(min),R->P(min)",
+                # NOTE: these two rules are NOT valid in general for torch.add since it accepts alpha=a, which if negative
+                # flips the the partial output from max to min or vice versa.
+                # However, this test is simpler than the end to end validator and ignores alpha, and the rules have to
+                # be listed as valid since without alpha they DO produce correct results and the test asserts any rule
+                # NOT listed here produces incorrect results.
+                "R,P(max)->P(max)",
                 "R,P(min)->P(min)",
             ],
             torch.mul: [
                 # Same-dim sharding
                 "S(0),S(0)->S(0)",
                 "S(1),S(1)->S(1)",
-                # Partial sum * Replicate -> Partial sum (multiplicative linearity)
+                # Partial sum/avg * Replicate -> same (multiplicative linearity)
                 # r * (p0+p1) = r*p0 + r*p1 where pi are per-rank
                 "P(sum),R->P(sum)",
                 "R,P(sum)->P(sum)",
+                "P(avg),R->P(avg)",
+                "R,P(avg)->P(avg)",
                 # No P(min)/P(max) rules: negative multiplier flips ordering
             ],
             torch.div: [
                 # Same-dim sharding
                 "S(0),S(0)->S(0)",
                 "S(1),S(1)->S(1)",
-                # Partial sum / Replicate -> Partial sum
-                # (p0+p1) / r = p0/r + p1/r
+                # Partial sum/avg / Replicate -> same (division by constant is linear)
                 "P(sum),R->P(sum)",
+                "P(avg),R->P(avg)",
+                # No R/P(avg) rule: 1/x is not linear
                 # No P(min)/P(max) rules: negative divisor flips ordering
             ],
             torch.maximum: [
@@ -467,6 +479,7 @@ class TestValidateCombination(TestCase):
                 "R,P(max)->P(max)",
                 "P(min),R->P(min)",
                 "R,P(min)->P(min)",
+                # No P(avg) rules: max is not linear
             ],
         }
 
@@ -477,8 +490,11 @@ class TestValidateCombination(TestCase):
             Shard(1),
             Partial("sum"),
             Partial("max"),
-            Partial("min"),
         ]
+        if TEST_WITH_SLOW:
+            # This makes the test go from 4 sec to 12 sec, and I don't think it really adds much useful coverage, but
+            # why not have it run in CI.
+            ALL_PLACEMENTS += [Partial("avg"), Partial("min")]
 
         # Test each operator
         for op, valid_rule_strs in VALID_RULES.items():
@@ -726,43 +742,6 @@ class TestPartialCombinationValidity(TestCase):
         super().tearDown()
         if dist.is_initialized():
             dist.destroy_process_group()
-
-    def test_mixed_partial_types_invalid(self):
-        """
-        Verify that mixing different partial types is detected as invalid.
-
-        P(sum) + P(max) -> anything should always be invalid because
-        the reduction semantics are incompatible.
-        """
-        a = torch.randn(8, 4)
-        b = torch.randn(8, 4)
-        sample = SampleInput(a, args=(b,))
-        tensors = extract_tensors_from_sample(sample)
-        ground_truth = a + b
-
-        # Try all output placements - none should be valid
-        for out_reduce_op in ["sum", "max", "min", "avg"]:
-            combo = PlacementCombination(
-                input_placements=(Partial("sum"), Partial("max")),
-                output_placement=Partial(out_reduce_op),
-            )
-
-            with LocalTensorMode(frozenset(range(self.world_size))):
-                mesh = init_device_mesh("cpu", (self.world_size,))
-                is_valid, msg = validate_combination(
-                    torch.add,
-                    sample,
-                    tensors,
-                    combo,
-                    ground_truth,
-                    self.world_size,
-                    mesh,
-                )
-
-            self.assertFalse(
-                is_valid,
-                f"add Psum,Pmax->P({out_reduce_op}) should be invalid",
-            )
 
     def test_abs_psum_psum_is_invalid(self):
         """
