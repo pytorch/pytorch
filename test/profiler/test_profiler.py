@@ -2697,6 +2697,191 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 y = torch.randn(10, 10)
                 z = torch.mm(x, y)
 
+    def _text_trace_skeleton(self, text, ops_only=False):
+        """Extract indent+type+name skeleton from text trace, for assertExpectedInline.
+
+        If ops_only=True, filters to aten::/user/bwd events only (skips kern
+        and CUDA runtime noise), for GPU-stable assertions.
+        """
+        result = []
+        for line in text.split("\n"):
+            if not line or line.startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip())
+            cols = line.lstrip().split("\t")
+            typ = cols[4]
+            name = cols[5]
+            if ops_only and typ == "kern":
+                continue
+            if ops_only and not (
+                name.startswith("aten::") or typ in ("user", "bwd")
+            ):
+                continue
+            result.append(" " * indent + typ + " " + name)
+        return "\n".join(result)
+
+    def test_export_text_trace(self):
+        with profile(
+            activities=[ProfilerActivity.CPU], record_shapes=True
+        ) as prof:
+            with record_function("outer"):
+                x = torch.randn(16, 16)
+                with record_function("inner"):
+                    y = torch.matmul(x, x)
+
+        # Structure matches expected hierarchy
+        self.assertExpectedInline(
+            self._text_trace_skeleton(prof.export_text_trace(threshold=5)),
+            """\
+user outer
+  op aten::randn
+    op aten::empty
+    op aten::normal_
+  user inner
+    op aten::matmul
+      op aten::mm
+        op aten::resolve_conj""",
+        )
+
+        # threshold filters events
+        full = prof.export_text_trace()
+        filtered = prof.export_text_trace(threshold=1000)
+        self.assertGreater(full.count("\n"), filtered.count("\n"))
+
+        # shapes appear in output
+        self.assertIn("[16, 16]", prof.export_text_trace(shapes=True))
+
+        # memory flag adds columns (8 vs 6)
+        text_mem = prof.export_text_trace(memory=True)
+        data_lines = [
+            l
+            for l in text_mem.split("\n")
+            if l and not l.startswith("#") and not l.startswith("###")
+        ]
+        self.assertEqual(data_lines[0].lstrip().count("\t"), 7)  # 8 cols = 7 tabs
+
+        # no_header strips all comment lines
+        text_no_hdr = prof.export_text_trace(no_header=True)
+        self.assertNotIn("###", text_no_hdr)
+        self.assertFalse(
+            any(l.startswith("# ") for l in text_no_hdr.split("\n") if l)
+        )
+
+        # file write round-trips
+        with tempfile.NamedTemporaryFile(mode="r", suffix=".txt", delete=False) as f:
+            path = f.name
+        try:
+            returned = prof.export_text_trace(path)
+            with open(path) as f:
+                self.assertEqual(returned, f.read())
+        finally:
+            os.remove(path)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_export_text_trace_cuda(self):
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            x = torch.randn(64, 64, device="cuda")
+            y = torch.randn(64, 64, device="cuda")
+            z = torch.matmul(x, y)
+            torch.cuda.synchronize()
+
+        text = prof.export_text_trace(threshold=5)
+
+        # Op skeleton is stable across GPU architectures
+        self.assertExpectedInline(
+            self._text_trace_skeleton(text, ops_only=True),
+            """\
+op aten::randn
+  op aten::empty
+  op aten::normal_
+op aten::randn
+  op aten::empty
+  op aten::normal_
+op aten::matmul
+  op aten::mm""",
+        )
+
+        # GPU kernels present with device annotation
+        kern_lines = [l for l in text.split("\n") if "\tkern\t" in l]
+        self.assertGreater(len(kern_lines), 0)
+        self.assertTrue(any("[device" in l for l in kern_lines))
+
+        # Multi-thread: profile_all_threads produces multiple sections
+        barrier = threading.Barrier(2)
+
+        def worker():
+            barrier.wait()
+            torch.matmul(
+                torch.randn(32, 32, device="cuda"),
+                torch.randn(32, 32, device="cuda"),
+            )
+            torch.cuda.synchronize()
+
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+            experimental_config=_ExperimentalConfig(profile_all_threads=True),
+        ) as prof:
+            t = threading.Thread(target=worker)
+            t.start()
+            barrier.wait()
+            torch.matmul(
+                torch.randn(32, 32, device="cuda"),
+                torch.randn(32, 32, device="cuda"),
+            )
+            torch.cuda.synchronize()
+            t.join()
+
+        thread_headers = [
+            l
+            for l in prof.export_text_trace().split("\n")
+            if l.startswith("### thread")
+        ]
+        self.assertGreaterEqual(len(thread_headers), 2)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
+    def test_export_text_trace_multigpu(self):
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            for gpu_id in [0, 1]:
+                x = torch.randn(32, 32, device=f"cuda:{gpu_id}")
+                y = torch.randn(32, 32, device=f"cuda:{gpu_id}")
+                z = torch.matmul(x, y)
+                torch.cuda.synchronize(gpu_id)
+
+        text = prof.export_text_trace(threshold=5)
+
+        # Two identical op blocks, one per GPU
+        self.assertExpectedInline(
+            self._text_trace_skeleton(text, ops_only=True),
+            """\
+op aten::randn
+  op aten::empty
+  op aten::normal_
+op aten::randn
+  op aten::empty
+  op aten::normal_
+op aten::matmul
+  op aten::mm
+op aten::randn
+  op aten::empty
+  op aten::normal_
+op aten::randn
+  op aten::empty
+  op aten::normal_
+op aten::matmul
+  op aten::mm""",
+        )
+
+        # Both devices appear in kernel annotations
+        kern_lines = [l for l in text.split("\n") if "\tkern\t" in l]
+        self.assertTrue(any("[device 0]" in l for l in kern_lines))
+        self.assertTrue(any("[device 1]" in l for l in kern_lines))
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:

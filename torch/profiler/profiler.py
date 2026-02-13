@@ -311,6 +311,17 @@ class _KinetoProfile:
             raise AssertionError("Profiler must be initialized before exporting stacks")
         return self.profiler.export_stacks(path, metric)
 
+    def export_text_trace(self, path=None, **kwargs) -> str:
+        """Export a minimal hierarchical text trace for diffing or LLM analysis.
+
+        See EventList.export_text_trace for full argument documentation.
+        """
+        if self.profiler is None:
+            raise AssertionError(
+                "Profiler must be initialized before exporting text trace"
+            )
+        return self.profiler.function_events.export_text_trace(path, **kwargs)
+
     def toggle_collection_dynamic(
         self, enable: bool, activities: Iterable[ProfilerActivity]
     ) -> None:
