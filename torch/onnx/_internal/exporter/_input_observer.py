@@ -1017,7 +1017,11 @@ class InputObserver:
                 self.info._captured_inputs,
                 self.info.signature_names,
             )
-        return self.info.infer_arguments(flat=flat, as_args_kwargs=as_args_kwargs)
+        return self.info.infer_arguments(
+            index_or_candidate,
+            flat=flat,
+            as_args_kwargs=as_args_kwargs,
+        )
 
     def check_discrepancies(
         self,
