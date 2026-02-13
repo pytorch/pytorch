@@ -2069,7 +2069,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         tma_opts = {
             "A_ROW_MAJOR": not mat1.layout.is_transposed(),
             "B_ROW_MAJOR": not mat2.layout.is_transposed(),
-            "NUM_SMS": get_num_sms(),
+            "NUM_SMS": get_num_sms(mat1.layout.device.type),
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             "tma_store": config.triton.enable_template_tma_store,
@@ -2115,9 +2115,11 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 and not constraints_violated
             )
             flatten = template_kwargs.get("FLATTEN", True) and not constraints_violated
+
+            (mat1,) = kernel_inputs.mat1mat2()
             yield {
                 **template_kwargs,
-                "NUM_SMS": get_num_sms(),
+                "NUM_SMS": get_num_sms(mat1.layout.device.type),
                 "WARP_SPECIALIZE": ws,
                 "FLATTEN": flatten,
             }
@@ -2339,7 +2341,8 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
         ):
             # Add TMA-specific options for device TMA scaled MM
             template_kwargs["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
-            template_kwargs["NUM_SMS"] = get_num_sms()
+            mat1, _ = kernel_inputs.mat1mat2()
+            template_kwargs["NUM_SMS"] = get_num_sms(mat1.layout.device.type)
             template_kwargs["TMA_EXPERIMENTAL_API"] = not has_triton_stable_tma_api()
 
             yield template_kwargs
