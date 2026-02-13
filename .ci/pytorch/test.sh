@@ -1940,18 +1940,11 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
-  # Use a pin-specific cache directory so different TIMM versions don't
-  # share or corrupt each other's cached models.
-  if [[ -n "${HF_HOME:-}" ]]; then
+  if [[ "${TRANSFORMERS_OFFLINE:-1}" == "0" ]]; then
     TIMM_PIN="$(< .ci/docker/ci_commit_pins/timm.txt)"
     export HF_HOME="${HF_HOME}/timm_${TIMM_PIN}"
-    mkdir -p "${HF_HOME}"
-    if [[ ! -f "${HF_HOME}/.timm_cache_complete" ]]; then
-      export TRANSFORMERS_OFFLINE=0
-      export HF_DATASETS_OFFLINE=0
-      python benchmarks/dynamo/timm_models.py --download-only \
-        && touch "${HF_HOME}/.timm_cache_complete"
-    fi
+    python benchmarks/dynamo/timm_models.py --download-only \
+      && touch "${HF_HOME}/.timm_cache_complete"
   fi
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
