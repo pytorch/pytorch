@@ -2764,7 +2764,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         from decimal import Decimal
 
         x = -127.0
-        x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
+        x_ten = torch.tensor([x], dtype=torch.float32, device=device_type)
 
         def fn(x):
             return 2.0**x
