@@ -16,6 +16,7 @@ from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
+from .._utils_internal import justknobs_check
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import (
@@ -33,6 +34,8 @@ from .external_utils import (
 )
 from .utils import _get_error_on_graph_break, _set_error_on_graph_break, is_function
 
+
+justknobs_check._dynamo_marked_constant = True  # type: ignore[attr-defined]
 
 if TYPE_CHECKING:
     from types import FunctionType
@@ -96,6 +99,9 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_wrapper_id = id(  # type: ignore[attr-defined]
+                nonrecursive_disable_wrapper
+            )
             nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
             # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
@@ -197,6 +203,7 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
+# pyrefly: ignore [implicit-any]
 def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> None:
     mutually_exclusive = {
         "leaf_function": trace_rules.is_leaf_function,
@@ -876,6 +883,9 @@ def mark_unbacked(
         index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single integer or a list/tuple of integers.
         hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
             This is only used by the inductor backend for size hint queries, such as during autotuning.
+            NOTE: changing hint_override values will cause FxGraphCache misses, since hint overrides
+            affect inductor codegen decisions and are included in the cache key via
+            ShapeEnv.var_to_hint_override.
         strict (bool, default=False): If True, an error will be raised if the unbacked dimension is specialized.
             By default (strict=False), specialization is allowed and will proceed without error.
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
@@ -904,12 +914,14 @@ def mark_unbacked(
             return
 
         if not hasattr(t, "_specialized_on"):
+            # pyrefly: ignore [implicit-any]
             t._specialize_on = {}
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
 
         if not hasattr(t, "_dynamo_hint_overrides"):
+            # pyrefly: ignore [implicit-any]
             t._dynamo_hint_overrides = {}
 
         if hint_override:
@@ -917,6 +929,7 @@ def mark_unbacked(
 
         if shape_id is not None:
             if not hasattr(t, "_dynamo_shape_ids"):
+                # pyrefly: ignore [implicit-any]
                 t._dynamo_shape_ids = {}
             t._dynamo_shape_ids[index] = shape_id
 
@@ -967,7 +980,9 @@ def mark_dynamic(
     before torch.compile.
 
     5) If hint_override is passed, the hint_override for the specified dimension will replace the provided value
-    from the first example input as the official size hint.
+    from the first example input as the official size hint. Note: changing hint_override values will cause
+    FxGraphCache misses, since hint overrides affect inductor codegen decisions (autotuning, reduction
+    strategy, etc.) and are included in the cache key via ShapeEnv.var_to_hint_override.
 
     6) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
     multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
@@ -998,9 +1013,11 @@ def mark_dynamic(
 
             t._dynamo_dynamic_range = set()
 
+            # pyrefly: ignore [implicit-any]
             t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
+            # pyrefly: ignore [implicit-any]
             t._specialize_on = {}
 
         if hint_override:
@@ -1138,6 +1155,15 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
 # we still need to be really careful about version matches.
 def _allow_in_graph_einops() -> None:
     import einops
+
+    if einops.__version__ >= "0.8.2":
+        if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+            # trigger backend registration up front to avoid a later guard failure
+            # that would otherwise cause a recompilation
+            einops.rearrange(torch.randn(1), "i -> i")
+
+        # einops 0.8.2+ don't need explicit allow_in_graph calls
+        return
 
     try:
         # requires einops > 0.6.1, torch >= 2.0

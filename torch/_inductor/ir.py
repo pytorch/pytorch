@@ -118,13 +118,13 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
 
 else:
-    CUDATemplate: TypeAlias = object
+    CUTLASSTemplate: TypeAlias = object
 
 
 try:
@@ -1917,7 +1917,7 @@ class Reduction(Loops):
         ) -> OpsValue:
             return intermediate_loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges))
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(original_ranges))
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
@@ -3180,6 +3180,11 @@ class GenericView(BaseView):
 
 @ir_dataclass
 class View(GenericView):
+    """
+    This class handles tensor reshaping by computing appropriate index transformations
+    to map the new shape back to the original storage layout.
+    """
+
     @staticmethod
     def handle_negative_index(idx: Expr, size: Expr) -> Expr:
         idx = sympy.expand(idx)
@@ -3190,6 +3195,7 @@ class View(GenericView):
         return idx
 
     @classmethod
+    @override
     def create(cls, x: IRNode, new_size: Sequence[Expr]) -> IRNode:  # type: ignore[override]
         assert isinstance(new_size, Sequence), type(new_size)
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
@@ -3198,12 +3204,45 @@ class View(GenericView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
-        unbacked_symbols_in_sizes = False
-        if (
+        unbacked_symbols_in_sizes = (
             len(free_unbacked_symbols(old_size)) > 0
             or len(free_unbacked_symbols(new_size)) > 0
-        ):
-            unbacked_symbols_in_sizes = True
+        )
+        is_contiguous = is_contiguous_storage_and_layout(x)
+
+        def create_reinterpret_view(
+            inp: IRNode, new_size: Sequence[Expr], new_stride: Sequence[Expr]
+        ) -> ReinterpretView:
+            storage, old_layout = as_storage_and_layout(inp, want_contiguous=True)
+            new_layout = FixedLayout(
+                old_layout.device,
+                old_layout.dtype,
+                new_size,
+                new_stride,
+                old_layout.offset,
+                old_layout.is_pinned,
+            )
+            return ReinterpretView(data=storage, layout=new_layout)
+
+        def handle_unbacked_or_dynamic_reshape(
+            x: IRNode,
+        ) -> IRNode:
+            """
+            Handle the case where view is not possible with current strides.
+            For unbacked symbols, make contiguous; otherwise use dynamic_reshape_indexer.
+            """
+            nonlocal old_size, new_size, unbacked_symbols_in_sizes
+            if unbacked_symbols_in_sizes:
+                # For unbacked symbols, we must require contiguous
+                # dynamic_reshape_indexer cannot handle unbacked SymInts
+                # https://github.com/pytorch/pytorch/issues/145561
+                x = ExternKernel.require_contiguous(x)
+                return create_reinterpret_view(
+                    x, new_size, FlexibleLayout.contiguous_strides(new_size)
+                )
+            # For backed symbols, fall back to dynamic_reshape_indexer
+            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
+            return cls(data=x, size=list(new_size), reindex=reindex)
 
         if 0 in new_size:
 
@@ -3211,29 +3250,58 @@ class View(GenericView):
                 return tuple([0] * len(old_size))
 
             return cls(data=x, size=list(new_size), reindex=fake_reindex)
-        # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
-            if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
-                # realize x; otherwise, the dynamic_reshape_indexer below will fail
-                # due to the size_hint's inability to process unbacked SymInts
-                # TODO: unbacked should not diverge from backed in determining striding
-                # Need to require contiguous here instead of realize, see:
-                # https://github.com/pytorch/pytorch/issues/145561
-                x = ExternKernel.require_contiguous(x)
 
-            storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
+        # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
+        elif is_contiguous:
+            # Input is contiguous, output can use contiguous strides
+            return create_reinterpret_view(
+                x, new_size, FlexibleLayout.contiguous_strides(new_size)
+            )
+
+        # Input is non-contiguous. Check if we can get storage/layout.
+        if not is_storage_and_layout(x):
+            # Can't get storage/layout (e.g., for Pointwise nodes)
+            return handle_unbacked_or_dynamic_reshape(x)
+
+        # Try to compute valid output strides.
+        storage, old_layout = as_storage_and_layout(x, freeze=False)
+
+        old_stride = old_layout.stride
+
+        # Convert sympy exprs to SymInt for _compute_stride, then convert back
+        old_size_symint = V.graph.sizevars.to_symints_or_ints(old_size)
+        old_stride_symint = V.graph.sizevars.to_symints_or_ints(old_stride)
+        new_size_symint = V.graph.sizevars.to_symints_or_ints(new_size)
+
+        from torch._subclasses.fake_impls import _compute_stride
+
+        # Use size_oblivious=True for unbacked symbols to avoid DDE errors
+        new_stride_symint = _compute_stride(
+            old_size_symint,
+            old_stride_symint,
+            new_size_symint,
+            size_oblivious=unbacked_symbols_in_sizes,
+        )
+
+        if new_stride_symint is not None:
+            # Convert SymInt back to sympy expressions
+            new_stride = [
+                s.node.expr if hasattr(s, "node") else sympy.Integer(s)
+                for s in new_stride_symint
+            ]
+            # View is possible with computed strides
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
                 new_size,
-                FlexibleLayout.contiguous_strides(new_size),
+                new_stride,
                 old_layout.offset,
                 old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
-        reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-        return cls(data=x, size=list(new_size), reindex=reindex)
+        # View not possible with current strides
+        return handle_unbacked_or_dynamic_reshape(x)
 
     @staticmethod
     def resolve_negative_size(
@@ -3711,7 +3779,9 @@ class Layout(OutputSpec):
         self._offset = offset
         self.is_pinned = is_pinned
         # is_pinned implies cpu
-        assert (not self.is_pinned) or (self.device.type == "cpu")
+        assert (not self.is_pinned) or (self.device.type == "cpu"), (
+            "Only CPU tensors can be pinned"
+        )
 
     @property
     def size(self) -> Sequence[Expr]:
@@ -3777,7 +3847,11 @@ class Layout(OutputSpec):
         if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            strides, make_channels_last_strides_for(shape), shape
+            # pyrefly: ignore [bad-specialization]
+            strides,
+            # pyrefly: ignore [bad-specialization]
+            make_channels_last_strides_for(shape),
+            shape,
         ):
             if size != 1 and left != right:
                 return False
@@ -5196,7 +5270,7 @@ class ChoiceCaller:
     During autotuning, self.benchmark() is first called to get benchmark result,
     and if this choice is selected, self.output_node() is called to get the output_node.
 
-    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    Children classes: TritonTemplateCaller, CUTLASSTemplateCaller.
     """
 
     def __init__(
@@ -5360,14 +5434,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = self._make_kernel_renders[None]
 
 
-class CUDATemplateBuffer(TemplateBuffer):
+class CUTLASSTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
         layout: Layout,
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T],
         workspace_size: int,
-        template: CUDATemplate,
+        template: CUTLASSTemplate,
         supports_epilogue_fusion: bool,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
@@ -5390,7 +5464,7 @@ class CppTemplateBuffer(TemplateBuffer):
         layout: Layout,
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T],
-        template: CUDATemplate,
+        template: CUTLASSTemplate,
         choice: Any,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
@@ -5690,9 +5764,12 @@ class ConcatKernel(NopKernel):
         assert isinstance(fx_node_args, list), type(fx_node_args)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
+            # pyrefly: ignore [missing-attribute]
             "val" in arg.meta
             and (
+                # pyrefly: ignore [missing-attribute]
                 arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                # pyrefly: ignore [missing-attribute]
                 or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
             )
             for arg in fx_node_args
@@ -6447,7 +6524,11 @@ class ExternKernel(InputsKernel):
         cls, x: IRNode, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> IRNode:
         return cls.require_strides(
-            x, exact_strides=exact_strides, allow_padding=allow_padding
+            x,
+            exact_strides=[
+                s.node.expr if isinstance(s, torch.SymInt) else s for s in exact_strides
+            ],
+            allow_padding=allow_padding,
         )
 
     @classmethod
@@ -7105,6 +7186,7 @@ class UserDefinedTritonKernel(ExternKernel):
         (
             new_name,
             triton_meta,
+            inductor_meta,
             extra_launch_args,
         ) = wrapper.define_user_defined_triton_kernel(
             kernel,
@@ -7171,6 +7253,7 @@ class UserDefinedTritonKernel(ExternKernel):
             raw_args=raw_args_filtered,
             raw_keys=raw_keys_filtered,
             triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
             triton=True,
             device=self.get_device(),
             original_fxnode_name=self.fx_node.name,
@@ -7856,9 +7939,21 @@ class FallbackKernel(ExternKernelAlloc):
             self.mutation_names.append(tensor_args[0].get_name())
             return
 
-        if schema.is_mutable and not can_auto_functionalize(kernel):
+        def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
+            return torch._C._dispatch_has_kernel_for_dispatch_key(
+                op.name(), torch._C.DispatchKey.Functionalize
+            ) or (
+                hasattr(op, "py_kernels")
+                and torch._C.DispatchKey.Functionalize in op.py_kernels
+            )
+
+        if (
+            schema.is_mutable
+            and not can_auto_functionalize(self.op_overload)
+            and not has_functionalize_impl(self.op_overload)
+        ):
             raise NotImplementedError(
-                f"NYI: Can't generate FallbackKernel for {kernel}"
+                f"NYI: Can't generate FallbackKernel for {self.op_overload}"
             )
 
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
@@ -8108,7 +8203,7 @@ class FallbackKernel(ExternKernelAlloc):
             return_type = returns[0].real_type
             output_arguments = [handle_single_output(return_type, outputs)]
         else:
-            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
+            # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tensor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(
@@ -8950,15 +9045,13 @@ class Conditional(ExternKernel):
                 if isinstance(output, ShapeAsConstantBuffer):
                     ret.append(output)
                 else:
-                    fake_strides = [
-                        s.node.expr if isinstance(s, torch.SymInt) else s
-                        for s in fake.stride()
-                    ]
                     ret.append(
+                        # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
-                            TensorBox(output), fake_strides, allow_padding=False
+                            TensorBox(output), fake.stride(), allow_padding=False
                         )
                     )
+            # pyrefly: ignore [bad-return]
             return ret
 
         for subgraph in (true_fn, false_fn):
@@ -9610,7 +9703,8 @@ class _CollectiveKernel(FallbackKernel):
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
         assert not unbacked_bindings, f"{kernel}, {unbacked_bindings}"
         for tensor_arg in tensor_args:
-            tensor_arg.realize()
+            if not isinstance(tensor_arg, TorchBindObject):
+                tensor_arg.realize()
 
         if isinstance(example_output, list):
             device = cls.find_device(tensor_args, example_output)
