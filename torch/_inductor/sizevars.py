@@ -570,6 +570,8 @@ class SizeVarAllocator:
 
         expr = self.remove_precomputed_replacements(expr)
         expr = sympy_subs(expr, self.backed_var_to_val)
+        expr = expr.expand(identity=True)
+
         free_symbols = expr.free_symbols
         if not free_symbols:
             try:
@@ -718,6 +720,7 @@ class SizeVarAllocator:
 
         # replace unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.var_to_hint_override)
+
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
