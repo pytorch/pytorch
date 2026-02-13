@@ -669,8 +669,10 @@ class SizeVarAllocator:
             - fallback for NaN
             - None if no special handling needed
         """
-        if isinstance(expr, (int, sympy.Integer, float, sympy.Float, sympy.Rational)):
+        try:
             return int(expr)
+        except (TypeError, ValueError):
+            pass
 
         if isinstance(expr, Expr):
             if expr.has(sympy.I):
@@ -716,8 +718,6 @@ class SizeVarAllocator:
 
         # replace unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.var_to_hint_override)
-        expr = sympy.expand(expr)
-
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
