@@ -457,19 +457,17 @@ class _CudagraphAnnotation:
     bwd: bool
 
 
-class _cudagraph_annotation:
-    """Control cudagraph behavior for compiled functions.
+class _disable_cudagraphs:
+    """Decorator to disable cudagraph recording for compiled graphs.
 
-    When applied as a decorator, marks a function so that any compiled graph
-    containing inlined calls to this function will have cudagraphs disabled.
-    This is per-graph: other graph segments (e.g. after a graph break) are
-    unaffected unless they also inline an annotated function.
-
-    Currently only ``mode="disable"`` is supported.
+    When a compiled function inlines a call to a decorated function, the
+    containing graph segment will skip cudagraph recording.  This is
+    per-graph: other graph segments (e.g. after a graph break) are
+    unaffected unless they also inline a decorated function.
 
     Example::
 
-        @torch._inductor._cudagraph_annotation("disable")
+        @torch._inductor._disable_cudagraphs()
         def my_fn(x):
             return x + 1
 
@@ -480,15 +478,8 @@ class _cudagraph_annotation:
             return y * 2        # this graph segment uses cudagraphs
     """
 
-    def __init__(
-        self, mode: str = "disable", *, fwd: bool = True, bwd: bool = True
-    ) -> None:
-        if mode not in ("disable",):
-            raise ValueError(
-                f"Invalid cudagraph annotation mode: {mode}. "
-                "Only 'disable' is supported."
-            )
-        self._annotation = _CudagraphAnnotation(mode=mode, fwd=fwd, bwd=bwd)
+    def __init__(self, *, fwd: bool = True, bwd: bool = True) -> None:
+        self._annotation = _CudagraphAnnotation(mode="disable", fwd=fwd, bwd=bwd)
 
     def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
         fn._cudagraph_annotation = self._annotation  # type: ignore[attr-defined]
