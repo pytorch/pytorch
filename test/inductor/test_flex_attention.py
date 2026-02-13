@@ -1458,9 +1458,8 @@ class TestFlexAttention(InductorTestCase):
         """Recompiling create_block_mask with a much smaller Q_LEN must not OOB.
 
         When Q_LEN shrinks enough that (Q_LEN+15)//16 == 1 for all guarded
-        values, the persistent reduction R0_BLOCK (minimum 2) exceeds the
-        actual numel. The codegen must emit a proper r0_mask instead of an
-        all-True constant mask.
+        values, _get_persistent_RBLOCK must return R0_BLOCK=1 (not 2) so
+        the constant all-True mask does not read out of bounds.
         """
         compiled_create_block_mask = torch.compile(create_block_mask)
 
