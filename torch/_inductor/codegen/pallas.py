@@ -1518,6 +1518,81 @@ class PallasKernel(SIMDKernel):
 
         return index_str, needs_flatten
 
+    def _try_multidim_slice(
+        self,
+        name: str,
+        index: sympy.Expr,
+        index_str: str,
+        needs_flatten: bool,
+    ) -> tuple[str, bool]:
+        """
+        Try to emit multi-dim slice notation instead of flatten + gather.
+
+        For a buffer with shape (d0, ..., dk) and index `stride * var + offset`,
+        emit `buf[:, ..., :, offset::stride]` when stride divides dk.
+        """
+        if not needs_flatten:
+            return index_str, needs_flatten
+
+        buf_obj = V.graph.get_buffer(name)
+        if buf_obj is None:
+            return index_str, needs_flatten
+
+        buf_size = buf_obj.get_size()
+        ndim = len(buf_size)
+        if ndim < 2:
+            return index_str, needs_flatten
+
+        # Need a single iteration variable with an affine index
+        used_vars = self._get_used_iter_vars(index)
+        if len(used_vars) != 1:
+            return index_str, needs_flatten
+
+        var = next(iter(used_vars))
+        var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(index, var)
+        stride = self._safe_int(
+            BlockPatternMatcher.match_affine_block_expr(var_expr, var)
+        )
+        if stride is None or stride <= 1:
+            return index_str, needs_flatten
+
+        offset = V.graph.sizevars.simplify(index - var_expr)
+        try:
+            offset_val = int(offset)
+        except (TypeError, ValueError):
+            return index_str, needs_flatten
+
+        if offset_val < 0 or offset_val >= stride:
+            return index_str, needs_flatten
+
+        last_dim = self._safe_int(buf_size[-1])
+        if last_dim is None or last_dim % stride != 0:
+            return index_str, needs_flatten
+
+        # Verify the iteration variable covers all buffer elements at the
+        # given stride: var_length * stride == buf_numel. This ensures
+        # the flattened stride-access 0, stride, 2*stride, ... maps exactly
+        # to buf[:, ..., :, offset::stride].
+        entry = self.range_tree_nodes.get(var)
+        if entry is None:
+            return index_str, needs_flatten
+        var_length = self._safe_int(entry.length)
+        buf_numel = 1
+        for s in buf_size:
+            d = self._safe_int(s)
+            if d is None:
+                return index_str, needs_flatten
+            buf_numel *= d
+        if var_length is None or var_length * stride != buf_numel:
+            return index_str, needs_flatten
+
+        prefix = ":, " * (ndim - 1)
+        if offset_val == 0:
+            slice_str = f"{prefix}::{stride}"
+        else:
+            slice_str = f"{prefix}{offset_val}::{stride}"
+        return slice_str, False
+
     def _build_load_expr(
         self,
         buf: str,
@@ -1972,6 +2047,11 @@ class PallasKernel(SIMDKernel):
 
         # Adjust index for buffer shape (scalar, multi-dim, etc.)
         index_str, needs_flatten = self._adjust_index_for_buffer_shape(
+            name, index, index_str, needs_flatten
+        )
+
+        # Try to emit multi-dim slice instead of flatten + gather
+        index_str, needs_flatten = self._try_multidim_slice(
             name, index, index_str, needs_flatten
         )
 
@@ -2578,8 +2658,10 @@ class PallasKernel(SIMDKernel):
         non_alias_out_set = OrderedSet(
             [name for name, flag in aliasable_flags.items() if not flag]
         )
-        # On CPU (interpret=True), we need to copy back even aliased outputs
-        # because pallas_call returns a new array (doesn't mutate in-place)
+        # On CPU (interpret=True) and TPU, pallas_call returns new arrays so
+        # we must copy back every output.  On CUDA, aliased outputs are
+        # mutated in-place by the donated-buffer mechanism so only
+        # non-aliased outputs need an explicit copy.
         if interpret_is_cpu or is_tpu:
             copy_output_indices = list(range(len(output_params)))
         else:
@@ -3124,8 +3206,18 @@ from torch._inductor.runtime.runtime_utils import (
             if ctx.alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
                 for alias_name in ctx.alias_params:
+                    # On CPU/TPU, alias outputs may be non-contiguous (e.g.
+                    # torch.cat slices) and JAX's from_dlpack rejects
+                    # non-trivially strided tensors.  Making them contiguous
+                    # is safe because CPU/TPU already copies all results back
+                    # via copy_output_indices.  On CUDA, the donated-buffer
+                    # mechanism requires the original buffer for in-place
+                    # mutation, so we cannot make a contiguous copy.
                     self._emit_torch_to_jax(
-                        code, alias_name, ctx.is_tpu, contiguous=False
+                        code,
+                        alias_name,
+                        ctx.is_tpu,
+                        contiguous=ctx.interpret_is_cpu,
                     )
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in ctx.pointer_tail:
