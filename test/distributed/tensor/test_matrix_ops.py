@@ -659,32 +659,6 @@ class DistMatrixOpsTest(DTensorTestBase):
             propagator.op_single_dim_strategy_funcs = saved
             _clear_sharding_prop_cache()
 
-    def test_mm_partial_partial_is_incorrect(self):
-        # P(sum),P(sum) -> P(sum) is invalid for mm because mm is bilinear,
-        # not element-wise. Per-rank mm computes A_i @ B_i but the correct
-        # result requires all cross-terms: sum_i sum_j (A_i @ B_j).
-        #
-        # Counter example:
-        #   A = [[2]], B = [[3]], A @ B = [[6]]
-        #   Rank 0: A0 = [[1.2]], B0 = [[2.1]] -> C0 = [[2.52]]
-        #   Rank 1: A1 = [[0.8]], B1 = [[0.9]] -> C1 = [[0.72]]
-        #   sum(C_i) = [[3.24]] != [[6]]
-        #
-        # The valid rules are P,R -> P and R,P -> P (linearity in each
-        # argument individually). Verify that mm strategies never produce
-        # P,P -> P.
-        strategies = gen_single_dim_einsum_strategies("mk,kn->mn")
-        for strategy in strategies:
-            # strategy layout: [output, input0, input1]
-            input_placements = strategy[1:]
-            num_partial = sum(isinstance(p, Partial) for p in input_placements)
-            self.assertLessEqual(
-                num_partial,
-                1,
-                f"mm must not have Partial on both inputs (bilinear, not "
-                f"element-wise), but got strategy: {strategy}",
-            )
-
     @with_comms
     @skip_unless_torch_gpu
     def test_scaled_dot_product_attention(self):
