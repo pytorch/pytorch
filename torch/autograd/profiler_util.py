@@ -464,6 +464,125 @@ class EventList(list):
         total_stat.key = "Total"
         return total_stat
 
+    def export_text_trace(
+        self,
+        path: Optional[str] = None,
+        threshold: float = 0,
+        stacks: bool = False,
+        shapes: bool = False,
+        memory: bool = False,
+        no_header: bool = False,
+    ) -> str:
+        """Export a minimal, hierarchical text trace of profiling events.
+
+        One line per event, indentation encodes parent-child nesting.
+        Fields are tab-separated. Designed for diffing two traces or
+        feeding to an LLM for analysis.
+
+        Args:
+            path: File path to write to. If None, only returns the string.
+            threshold: Omit events with duration < threshold microseconds.
+            stacks: Append semicolon-joined stack frames after the name.
+            shapes: Append input shapes after the name.
+            memory: Add cpu_mem(B) and dev_mem(B) columns.
+            no_header: Omit thread headers and column header comments.
+
+        Returns:
+            The text trace as a string.
+        """
+        if not self._tree_built:
+            self._build_tree()
+
+        # Group root events (no cpu_parent) by thread id
+        roots_by_thread: dict[int, list[FunctionEvent]] = defaultdict(list)
+        for evt in self:
+            if evt.cpu_parent is None and evt.device_type == DeviceType.CPU:
+                roots_by_thread[evt.thread].append(evt)
+
+        # Sort threads: lowest start time first (main thread likely first)
+        thread_order = sorted(
+            roots_by_thread.keys(),
+            key=lambda tid: min(
+                e.time_range.start for e in roots_by_thread[tid]
+            ),
+        )
+
+        # Determine event type from scope / annotation
+        def _event_type(evt: FunctionEvent) -> str:
+            if evt.scope == 1:  # BACKWARD_FUNCTION
+                return "bwd"
+            if evt.is_user_annotation:
+                return "user"
+            return "op"
+
+        lines: list[str] = []
+
+        def _emit_event(evt: FunctionEvent, depth: int) -> None:
+            dur = evt.time_range.elapsed_us()
+            if dur < threshold:
+                return
+            indent = "  " * depth
+            cols = [
+                f"{evt.time_range.start:.1f}",
+                f"{dur:.1f}",
+                f"{evt.self_cpu_time_total:.1f}",
+                f"{evt.device_time_total:.1f}",
+            ]
+            if memory:
+                cols.append(str(evt.cpu_memory_usage))
+                cols.append(str(evt.device_memory_usage))
+            cols.append(_event_type(evt))
+            name = evt.name
+            if shapes and evt.input_shapes:
+                name += f"  {evt.input_shapes}"
+            if stacks and evt.stack:
+                name += "\t" + ";".join(evt.stack)
+            cols.append(name)
+            lines.append(indent + "\t".join(cols))
+
+            # Emit GPU kernels as children
+            for kernel in evt.kernels:
+                kern_indent = "  " * (depth + 1)
+                kern_cols = [
+                    "-",  # no start time available from Kernel namedtuple
+                    f"{kernel.duration:.1f}",
+                    "0.0",
+                    f"{kernel.duration:.1f}",
+                ]
+                if memory:
+                    kern_cols.append("0")
+                    kern_cols.append("0")
+                kern_cols.append("kern")
+                kern_name = f"{kernel.name} [device {kernel.device}]"
+                kern_cols.append(kern_name)
+                lines.append(kern_indent + "\t".join(kern_cols))
+
+            # Recurse into CPU children (sorted by start time)
+            for child in sorted(
+                evt.cpu_children, key=lambda e: e.time_range.start
+            ):
+                _emit_event(child, depth + 1)
+
+        for tid in thread_order:
+            roots = sorted(roots_by_thread[tid], key=lambda e: e.time_range.start)
+            if not no_header:
+                # Label the first thread as "main"
+                label = "main" if tid == thread_order[0] else str(tid)
+                lines.append(f"### thread {tid} ({label})")
+                mem_hdr = "\tcpu_mem(B)\tdev_mem(B)" if memory else ""
+                lines.append(
+                    f"# ts(us)\tdur(us)\tself_cpu(us)\tdev(us){mem_hdr}\ttype\tname"
+                )
+            for evt in roots:
+                _emit_event(evt, 0)
+            lines.append("")  # blank line between threads
+
+        result = "\n".join(lines)
+        if path is not None:
+            with open(path, "w") as f:
+                f.write(result)
+        return result
+
 
 def _format_time(time_us):
     """Define how to format time in FunctionEvent."""
