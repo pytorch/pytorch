@@ -283,7 +283,7 @@ def _adapt_user_input_gen_fns(
         """Create internal input generator that converts IR buffer to user's fake tensor."""
 
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-            fake_tensor = ir_node_to_tensor(ir_buffer, guard_shape=False)
+            fake_tensor = ir_node_to_tensor(ir_buffer, replace_symbols_with_hints=True)
             assert fake_tensor is not None, "ir_node_to_tensor returned None"
             return user_function(fake_tensor)
 
