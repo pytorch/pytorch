@@ -23,7 +23,7 @@ from typing import Literal, TypeAlias, Union
 
 import torch
 import torch._ops
-from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
+from torch.onnx._internal._lazy_import import onnx_ir as ir, onnxscript, onnxscript_apis
 from torch.onnx._internal.exporter import _constants, _schemas
 from torch.onnx._internal.exporter._torchlib import _torchlib_registry
 
@@ -51,7 +51,7 @@ class OnnxDecompMeta:
 
     onnx_function: Callable
     fx_target: TorchOp
-    signature: _schemas.OpSignature | None
+    signature: ir.schemas.OpSignature | None
     is_custom: bool = False
     is_complex: bool = False
     opset_introduced: int = 18
@@ -62,17 +62,17 @@ class OnnxDecompMeta:
         if self.signature is None and not self.skip_signature_inference:
             try:
                 if isinstance(self.onnx_function, onnxscript.OnnxFunction):
-                    signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                    signature = _schemas.op_signature_from_function(
                         self.onnx_function,
                         # pyrefly: ignore [missing-attribute]
                         self.onnx_function.function_ir.domain,
                         # pyrefly: ignore [missing-attribute]
                         self.onnx_function.name,
                         # pyrefly: ignore [missing-attribute]
-                        opset_version=self.onnx_function.opset.version,
+                        since_version=self.onnx_function.opset.version,
                     )
                 else:
-                    signature = _schemas.OpSignature.from_function(
+                    signature = _schemas.op_signature_from_function(
                         self.onnx_function, "__traced", self.onnx_function.__name__
                     )
             except Exception as e:
