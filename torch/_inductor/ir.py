@@ -343,29 +343,22 @@ def get_stride_order(
 
 
 @overload
-def ir_node_to_tensor(x: None, replace_symbols_with_hints: bool = False) -> None: ...
+def ir_node_to_tensor(x: None, guard_shape: bool = True) -> None: ...
 
 
 @overload
-def ir_node_to_tensor(
-    x: IRNode, replace_symbols_with_hints: bool = False
-) -> torch.Tensor: ...
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
 
 
 def ir_node_to_tensor(
-    x: Optional[IRNode], replace_symbols_with_hints: bool = False
+    x: Optional[IRNode], guard_shape: bool = True
 ) -> Optional[torch.Tensor]:
-    # When replace_symbols_with_hints=False (default), sizes/strides remain as
-    # symbolic expressions, so downstream operations on the resulting tensor (e.g.,
-    # shape comparisons inside a kernel's meta function) may install guards. When
-    # True, symbolic expressions are replaced with concrete integer hints via
-    # size_hint, preventing any downstream guards.
     if x is None:
         return None
 
     shape_fn: Callable[[Union[int, Expr]], Union[int, Expr]]
-    if replace_symbols_with_hints:
-        shape_fn = V.graph.sizevars.optimization_hint
+    if not guard_shape:
+        shape_fn = V.graph.sizevars.size_hint
     else:
         shape_fn = identity
     size = [shape_fn(s) for s in x.get_size()]
@@ -467,8 +460,11 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
-        if not V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2)):
+        if not V.graph.sizevars.statically_known_equals(
+            s1, s2
+        ) and V.graph.sizevars.symbolic_hint(s1) != V.graph.sizevars.symbolic_hint(s2):
             return False
+
     return True
 
 
@@ -1302,13 +1298,8 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        # TODO Laith support unbacked!
-        reduction_numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            reduction_numel
-        )
-        numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            sympy_product(ranges)
-        )
+        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
+        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
@@ -1361,10 +1352,8 @@ class Reduction(Loops):
                         new_reduction_ranges,
                     ) = extract_input_node_reduction_ranges(input_node)
                 if new_ranges is not None and new_reduction_ranges is not None:
-                    extracted_numel_hint = (
-                        V.graph.sizevars.replace_backed_symbols_with_hints(
-                            sympy_product(new_ranges + new_reduction_ranges)
-                        )
+                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
+                        sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         log.debug(
@@ -6202,7 +6191,7 @@ class ExternKernel(InputsKernel):
                     torch.cuda.default_generators[device_index].clone_state()
                 )
             else:
-                example_args.append(ir_node_to_tensor(x))
+                example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)

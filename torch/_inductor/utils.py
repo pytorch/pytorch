@@ -1871,12 +1871,8 @@ def can_use_tma(
             sizes_i = V.graph.sizevars.guard_int_seq(sizes)
             strides_i = V.graph.sizevars.guard_int_seq(strides)
         else:
-            sizes_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(s) for s in sizes
-            ]
-            strides_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
-            ]
+            sizes_i = [V.graph.sizevars.symbolic_hint(s) for s in sizes]
+            strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
 
         # Every logical size ≥ 2
         if any(not V.graph.sizevars.statically_known_geq(s, 2) for s in sizes_i):
@@ -1919,16 +1915,14 @@ def can_use_tma(
     ) -> bool:
         # Make sure the last dimension is contiguous
         last_stride = strides[-1]
-        last_stride_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            last_stride
-        )
+        last_stride_hint = V.graph.sizevars.symbolic_hint(last_stride)
         if not V.graph.sizevars.statically_known_equals(last_stride_hint, 1):
             return False
 
         # Triton's type of index is uint32, so all dimensions must fit in uint32
         MAX_UINT32 = 2**32 - 1
         for size in sizes:
-            size_hint = V.graph.sizevars.replace_backed_symbols_with_hints(size)
+            size_hint = V.graph.sizevars.symbolic_hint(size)
             if V.graph.sizevars.statically_known_gt(size_hint, MAX_UINT32):
                 return False
 
@@ -4242,7 +4236,7 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
         )
 
     flat_args = [
-        torch._inductor.ir.ir_node_to_tensor(a, replace_symbols_with_hints=True)
+        torch._inductor.ir.ir_node_to_tensor(a, guard_shape=False)
         if _is_tensor_ir(a)
         else a
         for a in flat_args
