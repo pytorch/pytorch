@@ -623,10 +623,9 @@ class InputObserverInfo:
         if index_or_candidate is None:
             for cand in self.inputs:
                 args, kwargs = cand.args, cand.kwargs
-                if (
-                    len(args) == len(self._best_candidate.args or ())
-                    and len(kwargs) == len(self._best_candidate.kwargs or {})
-                ):
+                if len(args) == len(self._best_candidate.args or ()) and len(
+                    kwargs
+                ) == len(self._best_candidate.kwargs or {}):
                     candidate = cand
                     break
         elif isinstance(index_or_candidate, int):
@@ -695,7 +694,7 @@ class InputObserverInfo:
                 aligned_flat_list[index] = torch.empty(
                     tuple(new_shape), dtype=tensor.dtype, device=tensor.device
                 )
-        if flat:            
+        if flat:
             return aligned_flat_list
         args, kwargs = torch.utils._pytree.tree_unflatten(
             aligned_flat_list,
