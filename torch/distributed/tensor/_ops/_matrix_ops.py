@@ -411,6 +411,14 @@ def gen_single_dim_einsum_strategies(
             linearity_placement_list.append(Partial())
         strategies_over_one_mesh_dim.append(_maybe_add_bias(linearity_placement_list))
 
+    # Per-input linearity: einsum is linear in each input individually.
+    # For each input, keep it Partial while replicating others → output Partial.
+    for i in range(len(input_dims)):
+        placement_list = [Partial()]
+        for j in range(len(input_dims)):
+            placement_list.append(Partial() if j == i else Replicate())
+        strategies_over_one_mesh_dim.append(_maybe_add_bias(placement_list))
+
     return strategies_over_one_mesh_dim
 
 
