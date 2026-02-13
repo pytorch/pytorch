@@ -48,6 +48,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
+# Sentinel value to indicate "don't compute hint" vs actual None
+# When passed as hint to SymNode, it means we already know hint is unavailable
+# and should not waste time calling compute_hint()
+_NO_HINT: object = object()
+# Type alias for hint values (including the sentinel)
+HintType = bool | float | int | None
+
 
 __all__ = ["SymNode", "method_to_operator", "magic_methods", "DynamicInt"]
 
@@ -140,7 +147,10 @@ class SymNode:
                 hint = self.pytype(hint) if not isinstance(hint, SymTypes) else hint
             return hint
 
-        if hint is not None:
+        if hint is _NO_HINT:
+            # Caller explicitly indicates hint is unavailable, don't compute
+            hint = None
+        elif hint is not None:
             if not (type(hint) is pytype or type(hint) is _to_symtype(pytype)):
                 raise AssertionError(
                     "Cannot create SymNode of type "
@@ -905,7 +915,11 @@ def _optimized_add(
     def make_optimized(ordered_args):
         if ordered_args is None:
             raise AssertionError("ordered_args is None")
-        result = sympy.Add(*ordered_args, evaluate=False)
+        # Use _from_args directly to bypass _exec_constructor_postprocessors
+        # which iterates over all args. This is safe because args are only
+        # symbols or constants, which don't register postprocessors.
+        # Pass is_commutative=True to avoid fuzzy_and check over all args.
+        result = sympy.Add._from_args(ordered_args, is_commutative=True)
         return (True, result)
 
     from torch.utils._sympy.functions import _is_symbols_binary_summation
@@ -1379,7 +1393,7 @@ def _make_node_magic(method, func):
 
         op = method_to_operator(method)
 
-        out_hint = None
+        out_hint: object = _NO_HINT
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
 
@@ -1441,10 +1455,11 @@ def _make_node_magic(method, func):
 
         if (
             pytype is not None
+            and out_hint is not _NO_HINT
             and out_hint is not None
             and not isinstance(out_hint, SymTypes)
         ):
-            out_hint = pytype(out_hint)
+            out_hint = pytype(out_hint)  # type: ignore[arg-type]
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
@@ -1483,7 +1498,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s)", method, expr)
             raise
         sym_node_log.debug("%s %s -> %s", func, expr, out)
-        out_hint = None
+        out_hint: object = _NO_HINT
         if self.hint is not None:
             out_hint = op(self.hint)
         pytype: type
@@ -1497,7 +1512,7 @@ def _make_node_magic(method, func):
             pytype = self.pytype
 
         fx_node, _ = self.shape_env._create_fx_call_function(op, (self.fx_node,))
-        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)  # type: ignore[arg-type]
 
     if method in unary_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
