@@ -31,6 +31,21 @@ class DTensorInitOpsTest(DTensorTestBase):
         # NOTE: random init tests are moved to test_random_ops.py
         self._run_init_op(torch.nn.init.constant_, 2.4)
 
+    @with_comms
+    def test_eye_init(self):
+        # Test nn.init.eye_() with DTensor (issue #173357)
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Replicate()]
+        input_size = (8, 8)
+
+        input_tensor = torch.randn(*input_size, device=self.device_type)
+        dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
+
+        torch.nn.init.eye_(dtensor)
+
+        expected = torch.eye(*input_size, device=self.device_type)
+        self.assertEqual(expected, dtensor.to_local())
+
 
 class DTensorConstructorTest(DTensorTestBase):
     @property
