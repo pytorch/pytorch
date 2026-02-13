@@ -2978,7 +2978,8 @@ class TestSDPACudaOnly(NNTestCase):
         dropout_p = 0.00000000001
         out1 = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=dropout_p)
         out2 = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.)
-        self.assertEqual(out1, out2)
+        with self.assertRaisesRegex(AssertionError, "AssertionError not raised"):
+            self.assertNotEqual(out1, out2)
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
