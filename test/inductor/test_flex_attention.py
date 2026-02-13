@@ -1454,6 +1454,61 @@ class TestFlexAttention(InductorTestCase):
             create_block_mask_from_seqlens(seqlen, seqlen)
 
     @supported_platform
+    @skip_on_cpu
+    def test_create_block_mask_recompile_persistent_reduction_oob(self, device):
+        """Recompiling create_block_mask with a much smaller Q_LEN must not OOB.
+
+        When Q_LEN shrinks enough that (Q_LEN+15)//16 == 1 for all guarded
+        values, the persistent reduction R0_BLOCK (minimum 2) exceeds the
+        actual numel. The codegen must emit a proper r0_mask instead of an
+        all-True constant mask.
+        """
+        compiled_create_block_mask = torch.compile(create_block_mask)
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        KV_LEN = 2048
+
+        compiled_create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=7896,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+
+        compiled_bm = compiled_create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=2,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+        eager_bm = create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=2,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+
+        torch.testing.assert_close(
+            compiled_bm.full_q_num_blocks,
+            eager_bm.full_q_num_blocks,
+        )
+        torch.testing.assert_close(
+            compiled_bm.q_num_blocks,
+            eager_bm.q_num_blocks,
+        )
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
