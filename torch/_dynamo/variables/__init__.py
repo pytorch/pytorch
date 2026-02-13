@@ -50,6 +50,7 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetClassVariable,
     OrderedSetVariable,
     SetVariable,
 )
