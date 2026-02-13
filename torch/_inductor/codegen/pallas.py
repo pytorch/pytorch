@@ -2628,9 +2628,7 @@ class PallasKernel(SIMDKernel):
 
         kernel_name = name or "<KERNEL_NAME>"
         is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
-        interpret_is_cpu = (
-            V.graph.get_current_device_or_throw().type == "cpu"
-        )
+        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         interpret_literal = "True" if interpret_is_cpu else "False"
 
         aliasable_flags: dict[str, bool] = {}
@@ -3203,9 +3201,7 @@ from torch._inductor.runtime.runtime_utils import (
             code.writeline("jax.clear_caches()")
 
             # Build JAX placeholders for all inputs
-            code.writeline(
-                "# Build JAX placeholders for export tracing"
-            )
+            code.writeline("# Build JAX placeholders for export tracing")
             all_jax_input_names = []
             for alias_name in ctx.alias_params:
                 code.writeline(
@@ -3221,9 +3217,11 @@ from torch._inductor.runtime.runtime_utils import (
                 all_jax_input_names.append(f"{ptr}_placeholder")
 
             # Prepare output metadata
-            code.writeline("out_shapes = ("
+            code.writeline(
+                "out_shapes = ("
                 + ", ".join([f"tuple({name}.shape)" for name in ctx.output_params])
-                + ",)")
+                + ",)"
+            )
             dtype_exprs: list[str] = []
             for name in ctx.output_params:
                 buf_name = ctx.output_buffer_lookup.get(name)
@@ -3260,14 +3258,8 @@ from torch._inductor.runtime.runtime_utils import (
                 )
 
             # Build input tensor list (all non-size-var inputs)
-            input_tensor_names = []
-            for alias_name in ctx.alias_params:
-                input_tensor_names.append(alias_name)
-            for ptr in ctx.pointer_tail:
-                input_tensor_names.append(ptr)
-            code.writeline(
-                f"input_tensors = [{', '.join(input_tensor_names)}]"
-            )
+            input_tensor_names = list(ctx.alias_params) + list(ctx.pointer_tail)
+            code.writeline(f"input_tensors = [{', '.join(input_tensor_names)}]")
 
             # Build output shapes list
             code.writeline("output_shape_tensors = [")
@@ -3379,9 +3371,7 @@ from torch._inductor.runtime.runtime_utils import (
         code: IndentedBuffer, var_name: str, is_tpu: bool, *, contiguous: bool
     ) -> None:
         suffix = ".detach().contiguous()" if contiguous else ".detach()"
-        code.writeline(
-            f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})"
-        )
+        code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})")
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
