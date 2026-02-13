@@ -1626,12 +1626,14 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
                     )
                     continue
                 # barrier to ensure thread reading the same value
+                original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
                 original_compile_threads = torch._inductor.config.compile_threads
                 torch.distributed.barrier()
 
                 if mode == FullyShardMode.EAGER:
                     fully_shard_patch = original_fully_shard
                 elif mode == FullyShardMode.COMPILED_COMPUTE:
+                    torch._dynamo.config.skip_fsdp_hooks = True
                     torch._inductor.config.compile_threads = 1
                     fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
                 else:
@@ -1646,6 +1648,7 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
                 # other threads use patched func before this thread restores
                 torch.distributed.barrier()
                 func.__globals__[original_fully_shard.__name__] = original_fully_shard
+                torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
                 torch._inductor.config.compile_threads = original_compile_threads
 
         return wrapper
