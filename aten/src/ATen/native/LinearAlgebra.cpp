@@ -3769,5 +3769,89 @@ Tensor _int_mm_cpu(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cpu(self, mat2, result);
 }
 
+Tensor& _int_mm_acc_f32_out_cpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    Tensor& result) {
+
+#ifndef STRIP_ERROR_MESSAGES
+  static constexpr std::string_view func_name = "_int_mm_acc_f32_out_cpu";
+#endif
+  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
+  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
+  TORCH_CHECK(self.dtype() == at::kChar, func_name, ": Expected self dtype to be of type int8 but got ", self.dtype());
+  TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
+  TORCH_CHECK(result.dtype() == kFloat, func_name, ": result must be float32");
+
+  // ---- Layout checks ----
+  TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
+  TORCH_CHECK(result.size(1) == mat2.size(1), func_name, ": Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
+  TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
+  TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
+
+  if (result.numel() == 0 || self.size(1) == 0) {
+    return result.zero_();
+  }
+
+  bool dispatched = false;
+  #if defined(__aarch64__)
+    if (at::globalContext().userEnabledMkldnn()) {
+      try {
+        // int8 × int8 → float
+        mkldnn_matmul_i8i8f32(self, mat2, result);
+        dispatched = true;
+      } catch (const std::exception& e) {
+        TORCH_WARN(func_name, ": mkldnn path failed, falling back. Reason: ", e.what());
+      }
+    }
+  #endif  // __aarch64__
+
+  // ---- Naive fallback (portable) ----
+  if (!dispatched) {
+    std::cout << "Falling back to naive int8 x int8 -> float mm" << std::endl;
+    auto a = reinterpret_cast<const int8_t*>(self.data_ptr());
+    auto b = reinterpret_cast<const int8_t*>(mat2.data_ptr());
+    auto c = reinterpret_cast<float*>(result.data_ptr());
+
+    const int64_t m = result.size(0);
+    const int64_t n = result.size(1);
+    const int64_t k = self.size(1);
+
+    const int64_t lda_0 = self.strides()[0];
+    const int64_t lda_1 = self.strides()[1];
+
+    const int64_t ldb_0 = mat2.strides()[0];
+    const int64_t ldb_1 = mat2.strides()[1];
+
+    const int64_t ldc_0 = result.strides()[0];
+    const int64_t ldc_1 = result.strides()[1];
+
+    at::parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
+      for (const auto idx : c10::irange(start, end)) {
+        const int64_t row = idx / n;
+        const int64_t col = idx % n;
+
+        float acc = 0.0f;
+
+        for (const auto kk : c10::irange(k)) {
+          acc += static_cast<float>(a[row * lda_0 + kk * lda_1]) *
+                static_cast<float>(b[kk * ldb_0 + col * ldb_1]);
+        }
+
+        c[row * ldc_0 + col * ldc_1] = acc;
+      }
+    });
+  }
+  return result;
+}
+
+Tensor _int_mm_acc_f32_cpu(
+    const Tensor& self,
+    const Tensor& mat2) {
+  auto result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(kFloat));
+  return _int_mm_acc_f32_out_cpu(self, mat2, result);
+}
+
 } // namespace native
 } // namespace at

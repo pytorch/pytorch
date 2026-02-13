@@ -15789,3 +15789,11 @@
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
+
+- func: _int_mm_acc_f32(Tensor self, Tensor mat2) -> Tensor
+  dispatch:
+    CPU: _int_mm_acc_f32_cpu
+
+- func: _int_mm_acc_f32.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _int_mm_acc_f32_out_cpu
