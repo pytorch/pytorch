@@ -1054,10 +1054,9 @@ class TestCompareOperatorEndToEnd(TestCase):
         if dist.is_initialized():
             dist.destroy_process_group()
 
-    def test_compare_operator_add_no_incorrect(self):
-        """compare_operator on add should find valid rules with no incorrect ones."""
+    def _with_even_sizes(self, fn):
+        """Run fn with opinfo sizes overridden to be evenly divisible by world_size."""
         import torch.testing._internal.common_methods_invocations as common_ops
-        from torch.distributed.tensor._ops.strategy_validation import compare_operator
         from torch.testing._internal.opinfo import core as opinfo_core
 
         orig_sizes = (opinfo_core.L, opinfo_core.M, opinfo_core.S, opinfo_core.XS)
@@ -1065,17 +1064,8 @@ class TestCompareOperatorEndToEnd(TestCase):
         opinfo_core.M = common_ops.M = 12
         opinfo_core.S = common_ops.S = 4
         opinfo_core.XS = common_ops.XS = 2
-
         try:
-            stats = compare_operator(
-                "add",
-                device="cpu",
-                dtype=torch.float32,
-                world_size=self.world_size,
-                incorrect_only=True,
-            )
-            self.assertGreater(stats.true_positives, 0)
-            self.assertEqual(len(stats.false_positives), 0)
+            return fn()
         finally:
             (
                 opinfo_core.L,
@@ -1089,6 +1079,44 @@ class TestCompareOperatorEndToEnd(TestCase):
                 common_ops.S,
                 common_ops.XS,
             ) = orig_sizes
+
+    def test_compare_operator_add_no_incorrect(self):
+        """compare_operator on add should find valid rules with no incorrect ones."""
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+
+        def run():
+            stats = compare_operator(
+                "add",
+                device="cpu",
+                dtype=torch.float32,
+                world_size=self.world_size,
+                incorrect_only=True,
+            )
+            self.assertGreater(stats.true_positives, 0)
+            self.assertEqual(len(stats.false_positives), 0)
+
+        self._with_even_sizes(run)
+
+    def test_compare_operator_split_multi_output(self):
+        """compare_operator should handle multi-output ops like split."""
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+
+        def run():
+            stats = compare_operator(
+                "split",
+                device="cpu",
+                dtype=torch.float32,
+                world_size=self.world_size,
+                incorrect_only=True,
+            )
+            self.assertGreater(
+                stats.total_samples,
+                0,
+                f"split should have runnable samples, got skip_reasons={stats.skip_reasons}",
+            )
+            self.assertEqual(len(stats.false_positives), 0)
+
+        self._with_even_sizes(run)
 
 
 class TestOpInfoLookup(TestCase):
