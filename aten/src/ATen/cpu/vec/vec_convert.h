@@ -32,7 +32,8 @@ template <
     int dst_n,
     typename src_t,
     int src_n,
-    typename Enabled = void>
+    typename =
+        std::enable_if_t<is_integer_v<dst_t> && is_floating_point_v<src_t>>>
 struct VecRoundConvert {
   static inline VectorizedN<dst_t, dst_n> apply(
       const VectorizedN<src_t, src_n>& src) {

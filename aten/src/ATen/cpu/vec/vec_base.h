@@ -105,6 +105,12 @@ template <typename T>
 constexpr bool is_floating_point_v = is_floating_point<T>::value;
 
 template <typename T>
+struct is_integer : std::integral_constant<bool, std::is_integral_v<T>> {};
+
+template <typename T>
+constexpr bool is_integer_v = is_integer<T>::value;
+
+template <typename T>
 struct is_reduced_floating_point
     : std::integral_constant<
           bool,
