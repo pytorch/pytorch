@@ -99,6 +99,9 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_wrapper_id = id(  # type: ignore[attr-defined]
+                nonrecursive_disable_wrapper
+            )
             nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
             # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
