@@ -318,6 +318,38 @@ def _create_partial_input(
 
     Uses asymmetric splits to avoid coincidental matches when combining
     different Partial types.
+
+    For each placement combination, it creates local tensors that would
+    reduce to the original (e.g., for P(sum), splits values across ranks so
+    they sum back), runs the op on those local tensors, wraps the output as
+    a DTensor, redistributes to Replicate, and compares against ground
+    truth.
+
+    The main challenge is avoiding false positives where a rule appears
+    valid on a specific input but is actually incorrect. Several techniques
+    are used:
+
+    Asymmetric splits for P(sum)/P(avg): instead of splitting evenly
+    (tensor/2 per rank), uses a 60/40 ratio (varied by tensor index) so
+    that ops which are not truly linear don't accidentally produce
+    matching outputs.
+
+    Sign-varying offsets for P(sum)/P(avg): adds an offset that
+    alternates sign across elements, so local tensors have mixed positive
+    and negative values. Without this, proportional splits preserve the
+    sign pattern of the original tensor, causing non-linear ops like abs
+    to falsely validate P(sum)->P(sum).
+
+    Distinct magnitudes for P(min) vs P(max): P(min) offsets non-holding
+    ranks by +0.7 while P(max) offsets by -1.3. Using different
+    magnitudes prevents accidental cancellation when min and max
+    placements appear in the same combination.
+
+    Alternating rank ownership for P(min)/P(max): a mask alternating by
+    element (shifted by tensor index) controls which rank holds the true
+    value vs the offset value. This prevents the degenerate case where
+    one rank always holds all true values.
+
     """
     reduce_op = placement.reduce_op
     local_tensors: dict[int, torch.Tensor] = {}
@@ -325,9 +357,7 @@ def _create_partial_input(
     if reduce_op in ("sum", "avg"):
         base_ratio = 0.6 + 0.1 * (tensor_idx % 3)
 
-        # Add a sign-varying offset so local values have mixed signs.
-        # Pure proportional splits (tensor * ratio) preserve sign patterns,
-        # causing non-linear ops like abs to falsely validate P(sum)->P(sum).
+        # See docstring above: "Sign-varying offsets"
         flat = tensor.flatten()
         offset_mag = flat.abs() + 1.0
         signs = torch.ones_like(flat)
@@ -346,11 +376,7 @@ def _create_partial_input(
                 ) * scale - offset / (world_size - 1)
 
     elif reduce_op == "min":
-        # For P(min): on each element, one rank holds the true value (offset=0)
-        # and the other holds value+0.7. min() selects the unmodified value.
-        # The mask alternates which rank holds the true value (shifted by tensor_idx).
-        # 0.7 is arbitrary; any positive value works. Using a different magnitude
-        # than max's 1.3 prevents accidental cancellation when min/max are combined.
+        # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
         mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
@@ -365,9 +391,7 @@ def _create_partial_input(
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
     elif reduce_op == "max":
-        # For P(max): on each element, one rank holds the true value (offset=0)
-        # and the other holds value-1.3. max() selects the unmodified value.
-        # 1.3 is arbitrary; any positive magnitude works.
+        # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
         mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
