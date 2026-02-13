@@ -369,6 +369,7 @@ class BytecodeTracingTimings:
         """Flush accumulated timings to the bytecode_tracing chromium event
         and to compilation_time_metrics, then reset all counters."""
         chromium_log = get_chromium_event_logger()
+        # pyrefly: ignore [implicit-any]
         event_data = {}
         for f in dataclasses.fields(self):
             ns_val = getattr(self, f.name)
@@ -1445,6 +1446,7 @@ class OutputGraph(OutputGraphCommon):
                 needs_alias[stolen_name] = []
             needs_alias[stolen_name].append(x)
 
+        # pyrefly: ignore [implicit-any]
         visited = {}
         overridden_sources: dict[Source, Source] = {}
         for arg in self.graphargs:
@@ -1805,11 +1807,13 @@ class OutputGraph(OutputGraphCommon):
             for val, count in pass1.uses.items():
                 # If it's already a local source, no need to cache it
                 if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
+                    # pyrefly: ignore [unsupported-operation]
                     tempvars[val] = None
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
                 graph_output_var,
+                # pyrefly: ignore [bad-argument-type]
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
@@ -2020,6 +2024,7 @@ class OutputGraph(OutputGraphCommon):
                             var.value, _ExportModuleSpecTrackerDict
                         ):
                             for k, v in var.items.items():
+                                # pyrefly: ignore [implicit-any]
                                 specs = {}
                                 # pyrefly: ignore[missing-attribute]
                                 for k_spec, val in v.items.items():

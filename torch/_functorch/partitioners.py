@@ -1760,6 +1760,7 @@ def functionalize_rng_ops(
                 functional_fw_node = fw_graph.create_node(
                     "call_function",
                     run_and_save_rng,
+                    # pyrefly: ignore [bad-argument-type]
                     args=(
                         fw_node.target,
                         *fw_node.args,
@@ -1800,6 +1801,7 @@ def functionalize_rng_ops(
                 rng_output = bw_graph.create_node(
                     "call_function",
                     run_with_rng_state,
+                    # pyrefly: ignore [bad-argument-type]
                     args=(
                         bw_rng_state_node,
                         bw_node.target,

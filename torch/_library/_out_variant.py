@@ -83,6 +83,7 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     for overload_name in torch_packet.overloads():
         candidate = getattr(torch_packet, overload_name)
 
+        # pyrefly: ignore [missing-attribute]
         if torch.Tag.out_variant not in candidate.tags:
             continue
 
@@ -146,6 +147,7 @@ def _get_out_variants_info(functional_op) -> str:
     overloads_info: list[str] = []
     for overload_name in torch_packet.overloads():
         candidate = getattr(torch_packet, overload_name)
+        # pyrefly: ignore [missing-attribute]
         if torch.Tag.out_variant in candidate.tags:
             overloads_info.append(f"  - {overload_name}: {candidate._schema}")
 

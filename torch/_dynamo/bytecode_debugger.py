@@ -96,10 +96,6 @@ class DebuggerState:
         default_factory=dict
     )  # User-defined variables from debugger
     last_command: str = "s"  # Last command for repeat on empty input
-    step_count: int = 0  # Remaining steps for "s [n]" command (0 = prompt each time)
-    list_index: int | None = (
-        None  # Current position for 'l' command (None = use current)
-    )
 
 
 class _DebugContext:
@@ -293,7 +289,7 @@ class _DebugContext:
     def _print_help(self) -> None:
         """Print help message."""
         print("\nCommands:")
-        print("  s [n]       - Step n instructions (default 1)")
+        print("  s, step     - Execute one instruction")
         print(
             "  c, cont     - Continue until breakpoint, exception, or next Dynamo code"
         )
@@ -302,8 +298,7 @@ class _DebugContext:
         )
         print("                Use with 'c' to find segfaults - last printed = culprit")
         print("  p <expr>    - Print expression")
-        print("  l [first[, last]]  - List instructions (like pdb)")
-        print("  l .         - List around current instruction")
+        print("  l, list     - Show context around current instruction")
         print("  ll          - Disassemble all bytecode")
         print("  stack       - Print value stack")
         print("  locals      - Print local variables")
@@ -361,18 +356,6 @@ class _DebugContext:
 
             if action in ("s", "step", "n", "next"):
                 state.step_mode = True
-                # Parse optional count argument (e.g., "s 3" to step 3 times)
-                if arg:
-                    try:
-                        count = int(arg)
-                        state.step_count = (
-                            count - 1
-                        )  # -1 because we're about to execute one
-                    except ValueError:
-                        print(f"Invalid count: {arg}")
-                        continue
-                else:
-                    state.step_count = 0
                 return
 
             elif action in ("c", "cont", "continue"):
@@ -385,65 +368,7 @@ class _DebugContext:
                 print(f"Verbose mode {status}.")
 
             elif action in ("l", "list"):
-                # Like pdb:
-                # - 'l' continues from last position (or centers on current if first time)
-                # - 'l .' centers on current instruction
-                # - 'l N' lists 11 instructions starting at N
-                # - 'l first, last' lists range (if last < first, last is a count)
-                num_lines = 11  # pdb default
-                start: int | None = None
-                end: int | None = None
-
-                if arg == ".":
-                    # Reset to current instruction
-                    state.list_index = None
-                elif arg:
-                    # Check for range syntax: "first, last" or "first,last"
-                    if "," in arg:
-                        parts = arg.split(",", 1)
-                        try:
-                            first = int(parts[0].strip())
-                            second = int(parts[1].strip())
-                            if second < first:
-                                # second is a count
-                                start = first
-                                end = first + second
-                            else:
-                                start = first
-                                end = second + 1  # inclusive
-                        except ValueError:
-                            print(f"Invalid range: {arg}")
-                            continue
-                    else:
-                        # Single number: start at that instruction
-                        try:
-                            start = int(arg)
-                            end = start + num_lines
-                        except ValueError:
-                            print(f"Invalid argument: {arg}")
-                            continue
-
-                if start is None:
-                    if state.list_index is None:
-                        # Center on current instruction
-                        current_idx = state.offset_to_index.get(state.current_offset, 0)
-                        start = max(0, current_idx - num_lines // 2)
-                    else:
-                        start = state.list_index
-                    end = start + num_lines
-
-                assert end is not None
-                end = min(len(state.instructions), end)
-                if start >= len(state.instructions):
-                    print("(End of bytecode)")
-                else:
-                    print(self._format_header(state))
-                    for i in range(start, end):
-                        inst = state.instructions[i]
-                        if inst.offset is not None:
-                            print(self._format_instruction(state, inst.offset))
-                    print()
-                    state.list_index = end
+                self._print_context(state)
 
             elif action == "ll":
                 self._disassemble(state)
@@ -590,7 +515,6 @@ class _DebugContext:
                     pass
 
         state.current_offset = offset
-        state.list_index = None  # Reset list position when stepping
         state.current_frame = (
             frame if frame is not None else self._find_frame_for_code(code)
         )
@@ -620,17 +544,6 @@ class _DebugContext:
         # Check if current instruction has a breakpoint (by index)
         current_index = state.offset_to_index.get(offset, -1)
         hit_breakpoint = current_index in state.breakpoints
-
-        # Check if we should stop
-        # If step_count > 0, we're in the middle of "N s" and should continue
-        if state.step_count > 0:
-            state.step_count -= 1
-            # But still stop for breakpoints
-            if hit_breakpoint or hit_breakpoint_marker:
-                state.step_count = 0  # Cancel remaining steps
-            else:
-                return  # Continue without prompting
-
         should_stop = state.step_mode or hit_breakpoint or hit_breakpoint_marker
         if should_stop:
             if hit_breakpoint:

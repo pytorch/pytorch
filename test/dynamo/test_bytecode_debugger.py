@@ -246,55 +246,25 @@ Stack (TOS at end):
         InteractiveDebugSession(fn, (input_tensor,), test_logic)
 
     def test_list_command(self):
-        """Test that the list command behaves like pdb."""
+        """Test that the list command shows context around current instruction."""
 
         @torch.compile(backend="eager")
         def fn(x):
-            y = x + 1
-            z = y * 2
-            w = z - 1
-            return w + x
+            return x + 1
 
         def test_logic(sess, initial):
-            # First list shows around current instruction
-            list_output1 = yield "l"
-            self.assertIn(">>>", list_output1)  # Current instruction marker
-            self.assertIn("# [offset]", list_output1)  # Header
+            # Step a few times to move past the beginning
+            for _ in range(5):
+                yield "s"
 
-            # Second list continues (may or may not have >>> depending on position)
-            list_output2 = yield "l"
-            # Should show different instructions (or end of bytecode message)
-            if "(End of bytecode)" not in list_output2:
-                self.assertIn("# [offset]", list_output2)
+            # Now list to see context around current instruction
+            list_output = yield "l"
 
-            # 'l .' resets to current instruction
-            list_dot_output = yield "l ."
-            self.assertIn(">>>", list_dot_output)  # Current instruction marker again
-
-            # 'l N' lists 11 instructions starting at N
-            list_from_0 = yield "l 0"
-            # Should show instruction 0
-            self.assertRegex(list_from_0, r"\s+0\s+\[")
-
-            # 'l first, last' lists range (inclusive)
-            list_range = yield "l 0, 2"
-            # Should show exactly 3 instructions (0, 1, 2)
-            instruction_lines = [
-                line
-                for line in list_range.split("\n")
-                if re.match(r"\s*>>?>?\s*\*?\s*\d+\s+\[", line)
-            ]
-            self.assertEqual(len(instruction_lines), 3)
-
-            # 'l first, count' when count < first, count is number of lines
-            list_count = yield "l 5, 2"
-            # Should show 2 instructions starting at 5
-            instruction_lines = [
-                line
-                for line in list_count.split("\n")
-                if re.match(r"\s*>>?>?\s*\*?\s*\d+\s+\[", line)
-            ]
-            self.assertEqual(len(instruction_lines), 2)
+            self.assertIn(">>>", list_output)  # Current instruction marker
+            self.assertIn("# [offset]", list_output)  # Header
+            self.assertRegex(
+                list_output, r"\d+\s*\[\s*\d+\]:\s*\w+"
+            )  # Instruction format
 
         InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
 
@@ -806,42 +776,6 @@ Stack (TOS at end):
             # Empty input should repeat 'v' (toggle verbose off)
             output = yield ""
             self.assertIn("Verbose mode disabled", output)
-
-            # Continue to end
-            yield "c"
-
-        InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
-
-    def test_step_with_count_argument(self):
-        """Test that step command accepts count argument"""
-
-        @torch.compile(backend="eager")
-        def fn(x):
-            return x + 1
-
-        def test_logic(sess, initial):
-            # Get starting instruction number
-            match = re.search(r"Instruction (\d+)", initial)
-            self.assertIsNotNone(match)
-            start_inst = int(match.group(1))
-
-            # Step 3 times with "s 3"
-            output = yield "s 3"
-            match = re.search(r"Instruction (\d+)", output)
-            self.assertIsNotNone(match)
-            end_inst = int(match.group(1))
-
-            # Should have advanced by 3 instructions
-            self.assertEqual(end_inst, start_inst + 3)
-
-            # Also test with "step 2"
-            output = yield "step 2"
-            match = re.search(r"Instruction (\d+)", output)
-            self.assertIsNotNone(match)
-            new_inst = int(match.group(1))
-
-            # Should have advanced by 2 more
-            self.assertEqual(new_inst, end_inst + 2)
 
             # Continue to end
             yield "c"
