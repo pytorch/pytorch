@@ -156,6 +156,29 @@ ALIGNMENT = 16
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
 
+# PyTorch dtypes with valid CUtensorMapDataType mappings.
+# Ref: triton/backends/nvidia/include/cuda.h (CUtensorMapDataType enum)
+#      triton/_internal_testing.py (tma_dtypes test list)
+_TMA_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [
+        torch.uint8,
+        torch.int8,
+        torch.uint16,
+        torch.int16,
+        torch.uint32,
+        torch.int32,
+        torch.int64,
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+    ]
+)
+
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
 
@@ -1304,6 +1327,27 @@ def clear_caches() -> None:
 
 
 @contextlib.contextmanager
+def _set_env(key: str, value: str) -> Iterator[None]:
+    """Thread-safe env var set/restore using atomic C-level lookups.
+
+    We avoid mock.patch.dict(os.environ, ...) because it internally calls
+    os.environ.copy(), which iterates all env var keys then fetches values in
+    separate steps. That approach is not atomic and can race with background threads
+    (e.g. Triton async compilation) modifying the environment, causing KeyError,
+    so we use os.environ.get() for individual keys which is an atomic C-level lookup.
+    """
+    old = os.environ.get(key)
+    try:
+        os.environ[key] = value
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old
+
+
+@contextlib.contextmanager
 def fresh_cache(
     cache_entries: Optional[dict[str, Any]] = None,
     dir: Optional[str] = None,
@@ -1321,14 +1365,12 @@ def fresh_cache(
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
-        with mock.patch.dict(
-            os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
-        ):
+        with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
             triton_cache_dir = normalize_path_separator(
                 os.path.join(inductor_cache_dir, "triton")
             )
-            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
+            with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
                     assert len(cache_entries) == 0, "expected empty cache_entries dict"
@@ -1801,18 +1843,18 @@ def can_use_tma(
     *matrices: IRNode, output_layout: Optional[Layout] = None, add_guards: bool = False
 ) -> bool:
     """
-    Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
+    Return True iff *all* supplied tensors satisfy the CUDA TMA constraints
     that Triton relies on today.
     * https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TENSOR__MEMORY.html
 
     A tensor is accepted when:
-      * 2 ≤ rank ≤ 5
-      * dtype ∈ {FP16, BF16, FP8-E4M3FN}
-      * Every logical size ≥ 2
+      * 1 ≤ rank ≤ 5 (cuTensorMapEncodeTiled)
+      * dtype in _TMA_SUPPORTED_DTYPES (CUtensorMapDataType enum)
       * Base pointer 16-byte aligned
+      * Exactly one contiguous ("inner") dim with stride 1
       * All "outer" dims have 16-byte aligned strides
-      * The “inner” dim has stride 1 (contiguous)
-      * For FP8 tensors, inner dim ≥ 32
+      * Inner dim size × itemsize is a multiple of 16
+      * For 1-byte dtypes (e.g. FP8), inner dim ≥ 32
     """
     from torch.utils._triton import has_triton_tma_device
 
@@ -1832,7 +1874,7 @@ def can_use_tma(
         if not _aligned(layout.offset):
             return False
 
-        return _is_tma_compatible(sizes, strides, dtype, allow_float32=True)
+        return _is_tma_compatible(sizes, strides, dtype)
 
     def _is_tma_compatible_matrix(m: IRNode) -> bool:
         sizes = m.get_size()
@@ -1846,25 +1888,20 @@ def can_use_tma(
         if (m_device := m.get_device()) is not None and m_device.type == "xpu":
             return _is_tma_compatible_xpu(sizes, strides, dtype)
 
-        return _is_tma_compatible(sizes, strides, dtype, allow_float32=False)
+        return _is_tma_compatible(sizes, strides, dtype)
 
     def _is_tma_compatible(
         sizes: Sequence[sympy.Expr],
         strides: Sequence[_IntLike],
         dtype: torch.dtype,
-        allow_float32: bool,
     ) -> bool:
         rank = len(sizes)
         itemsize = dtype.itemsize
 
-        # 2 ≤ rank ≤ 5
-        if rank < 2 or rank > 5:
+        if rank < 1 or rank > 5:
             return False
 
-        # dtype ∈ {FP16, BF16, FP8-E4M3FN}
-        if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn) and (
-            not allow_float32 or dtype != torch.float32
-        ):
+        if dtype not in _TMA_SUPPORTED_DTYPES:
             return False
 
         if add_guards:
@@ -1874,11 +1911,7 @@ def can_use_tma(
             sizes_i = [V.graph.sizevars.symbolic_hint(s) for s in sizes]
             strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
 
-        # Every logical size ≥ 2
-        if any(not V.graph.sizevars.statically_known_geq(s, 2) for s in sizes_i):
-            return False
-
-        # Find the single contiguous (“inner”) dim
+        # Find the single contiguous ("inner") dim
         inner = [
             i
             for i, st in enumerate(strides_i)
@@ -1895,15 +1928,13 @@ def can_use_tma(
             if not _aligned(st * itemsize):
                 return False
 
-        # Inner dim byte width must still be a multiple of 16 B
+        # Inner dim byte width must be a multiple of 16 B
         inner_dim = sizes_i[inner_idx]
         if not _aligned(inner_dim * itemsize):
             return False
 
-        # FP8 special case: inner ≥ 32
-        if dtype == torch.float8_e4m3fn and not V.graph.sizevars.statically_known_geq(
-            inner_dim, 32
-        ):
+        # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
+        if itemsize == 1 and not V.graph.sizevars.statically_known_geq(inner_dim, 32):
             return False
 
         return True
