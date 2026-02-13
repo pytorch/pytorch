@@ -32,4 +32,4 @@ current_norm_impl.__module__ = __name__
 restore_norm_impl.__module__ = __name__
 
 # Import built-in implementations to trigger self-registration
-from . import _cutedsl_layernorm, _cutedsl_rmsnorm  # noqa: F401
+from . import _cutedsl_norms  # noqa: F401
