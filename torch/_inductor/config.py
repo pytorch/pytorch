@@ -893,6 +893,8 @@ combo_kernel_max_num_args = 250
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, only pointwise kernels are eligible for combo kernel fusion.
+combo_kernels_pointwise_only = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1059,6 +1061,9 @@ class aten_distributed_optimizations:
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
+
+    # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
+    prioritize_bucketing_during_scheduling: bool = True
 
 
 def parallel_compile_enabled_internally() -> bool:

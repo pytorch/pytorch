@@ -960,6 +960,10 @@ class LocalTensor(torch.Tensor):
             requires_grad=requires_grad,
             _extra_dispatch_keys=extra_dispatch_keys,
         )
+        # The wrapper has no real storage (data_ptr()=0). Prevent callers
+        # (e.g. Triton kernels) from silently reading the null pointer —
+        # turn it into a clear RuntimeError instead of a CUDA IMA.
+        torch._C._set_throw_on_mutable_data_ptr(r)
 
         local_tensors = {
             r: v if not isinstance(v, AsyncCollectiveTensor) else v.wait()
