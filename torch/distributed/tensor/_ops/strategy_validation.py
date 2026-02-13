@@ -460,22 +460,22 @@ def validate_combination(
                 local_tensor = _create_partial_input(
                     tensor, placement, world_size, tensor_idx
                 )
-                local_tensors.append(local_tensor)
             elif isinstance(placement, Replicate):
                 _tmp = {r: tensor.clone() for r in range(world_size)}
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
-                local_tensors.append(LocalTensor(_tmp))
+                local_tensor = LocalTensor(_tmp)
             elif isinstance(placement, Shard):
                 # Create sharded LocalTensor directly to work in LocalTensorMode
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
                 _tmp = {r: chunks[r].clone().contiguous() for r in range(world_size)}
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
-                local_tensors.append(LocalTensor(_tmp))
+                local_tensor = LocalTensor(_tmp)
             else:
                 # Fallback for other placement types
                 dt = distribute_tensor(tensor.clone(), mesh, (placement,))
-                local_tensors.append(dt.to_local())
+                local_tensor = dt.to_local()
+            local_tensors.append(local_tensor)
 
         local_idx = 0
 
@@ -707,9 +707,9 @@ def query_single_dim_strategy(
     try:
         result = strategy_func(op_overload, args_meta, kwargs or {})
 
-        expanded_result = []
+        expanded_result: list[list[Placement]] = []
         for combo in result:
-            expanded_combo = []
+            expanded_combo: list[Placement] = []
             for p in combo:
                 if isinstance(p, _ShardingPlaceholder):
                     expanded_combo.append(Shard(p.dim))
@@ -1332,15 +1332,20 @@ def compare_operator(
                     combinations_to_test = []
                     for combo_key in dtensor_rules:
                         input_plc_strs, output_plc_str = combo_key
-                        input_plcs = tuple(parse_placement(s) for s in input_plc_strs)
+                        input_plcs_list: list[Placement] = []
+                        all_valid = True
+                        for s in input_plc_strs:
+                            p = parse_placement(s)
+                            if p is None:
+                                all_valid = False
+                                break
+                            input_plcs_list.append(p)
                         output_plc = parse_placement(output_plc_str)
-                        if (
-                            not any(p is None for p in input_plcs)
-                            and output_plc is not None
-                        ):
-                            combinations_to_test.append(
-                                (input_plcs, output_plc, combo_key)
-                            )
+                        if not all_valid or output_plc is None:
+                            continue
+                        combinations_to_test.append(
+                            (tuple(input_plcs_list), output_plc, combo_key)
+                        )
                 else:
                     combinations_to_test = []
                     for input_placements in itertools.product(*input_placement_options):
