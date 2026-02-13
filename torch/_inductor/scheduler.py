@@ -2485,6 +2485,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
+
+        # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
+        if config.combo_kernels_pointwise_only:
+            reduction_nodes = [x for x in filtered_nodes if x.is_reduction()]
+            if reduction_nodes:
+                log.debug(
+                    "ComboKernels: %d reduction nodes are filtered (pointwise_only mode)",
+                    len(reduction_nodes),
+                )
+            filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
+
         return filtered_nodes
 
     @staticmethod
@@ -3560,6 +3571,10 @@ class Scheduler:
         for node in self.nodes:
             node.prune_weak_deps()
 
+    def mode_requires_synchronization(self, mode: Optional[str]) -> bool:
+        """Check if store mode requires cross-thread synchronization."""
+        return mode is not None  # Currently all non-None modes need sync
+
     def topological_sort_schedule(
         self, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
@@ -3890,6 +3905,22 @@ class Scheduler:
             for n in node_list
         )
 
+    def compile_kernel(
+        self, nodes: Sequence[BaseSchedulerNode], hint_override: Optional[int] = None
+    ) -> tuple[Optional[LambdaFuture], ModuleType]:
+        src_code = self.generate_kernel_code_from_nodes(
+            nodes, benchmark_kernel=True, hint_override=hint_override
+        )
+        mod = PyCodeCache.load(src_code)
+        async_compile = torch._inductor.async_compile.AsyncCompile()
+        if not async_compile.use_process_pool():
+            fut = None
+        else:
+            fut = async_compile.triton(kernel_name="triton_", source_code=src_code)
+            assert isinstance(fut, LambdaFuture)
+
+        return (fut, mod)
+
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> FusionResult:
@@ -3956,23 +3987,6 @@ class Scheduler:
                         red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
                     )
 
-        async_compile = torch._inductor.async_compile.AsyncCompile()
-
-        def compile_kernel(
-            nodes: Sequence[BaseSchedulerNode], hint_override: Optional[int] = None
-        ) -> tuple[Optional[LambdaFuture], ModuleType]:
-            src_code = self.generate_kernel_code_from_nodes(
-                nodes, benchmark_kernel=True, hint_override=hint_override
-            )
-            mod = PyCodeCache.load(src_code)
-            if not async_compile.use_process_pool():
-                fut = None
-            else:
-                fut = async_compile.triton(kernel_name="triton_", source_code=src_code)
-                assert isinstance(fut, LambdaFuture)
-
-            return (fut, mod)
-
         if is_multi_template and any(
             n.get_template_node() is not None for n in (node1, node2)
         ):
@@ -3999,7 +4013,7 @@ class Scheduler:
                         future_choices.append(
                             (
                                 choice,
-                                *compile_kernel(
+                                *self.compile_kernel(
                                     node_list_fused, hint_override=choice.hint_override
                                 ),
                             )
@@ -4098,7 +4112,9 @@ class Scheduler:
                     break
 
                 with multi_node.swap_as_triton_caller(choice):
-                    future_choices.append((choice, *compile_kernel(node_list_fused)))
+                    future_choices.append(
+                        (choice, *self.compile_kernel(node_list_fused))
+                    )
 
             if len(future_choices) == 0:
                 return FusionResult.fuse(False)
@@ -4197,9 +4213,9 @@ class Scheduler:
 
         else:
             # Start parallel compilation for all three kernels
-            future_and_mod_l1 = compile_kernel(node_list_1)
-            future_and_mod_l2 = compile_kernel(node_list_2)
-            future_and_mod_l1_fused = compile_kernel(node_list_fused)
+            future_and_mod_l1 = self.compile_kernel(node_list_1)
+            future_and_mod_l2 = self.compile_kernel(node_list_2)
+            future_and_mod_l1_fused = self.compile_kernel(node_list_fused)
 
             def benchmark_when_ready() -> bool:
                 from torch._inductor.runtime.triton_heuristics import (
@@ -5634,6 +5650,11 @@ class Scheduler:
                 # nodes.
                 read = read.normalize()
                 write = write.normalize()
+            # Operations like index_add_, scatter_add_, etc. require global
+            # synchronization - all threads must complete writes before any reads.
+            # These cannot be safely fused into the same kernel. Atomic modes and TMA stores require synchronization barriers
+            if self.mode_requires_synchronization(write.mode):
+                return False
 
             return (
                 read.index == write.index
@@ -6089,7 +6110,7 @@ class Scheduler:
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
-        candidate_symbols.union(
+        candidate_symbols.update(
             *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
