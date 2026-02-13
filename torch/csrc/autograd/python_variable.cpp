@@ -876,6 +876,11 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_op_dispatcher"))
 
 DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_explicit_redistribution_context,
+    py::module::import("torch.distributed.tensor._utils")
+        .attr("ExplicitRedistributionContext"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
     get_dtensor_dispatch,
     py::module::import("torch.distributed.tensor")
         .attr("DTensor")
@@ -1103,15 +1108,19 @@ class NativeOpSchema {
       const c10::OperatorHandle& op,
       c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key,
       std::size_t comparison_key_hash,
-      std::size_t args_schema_len)
+      std::size_t args_schema_len,
+      bool force_mode = false)
       : op_(op),
         hash_(hash_combine(
             hash_combine(
-                std::hash<c10::OperatorHandle>()(op),
-                comparison_key_hash),
-            args_schema_len)),
+                hash_combine(
+                    std::hash<c10::OperatorHandle>()(op),
+                    comparison_key_hash),
+                args_schema_len),
+            std::hash<bool>()(force_mode))),
         args_schema_len_(args_schema_len),
-        comparison_key_(std::move(comparison_key)) {}
+        comparison_key_(std::move(comparison_key)),
+        force_mode_(force_mode) {}
 
   bool operator==(const NativeOpSchema& rhs) const {
     // If two NativeOpSchema are being compared, they are probably
@@ -1119,6 +1128,7 @@ class NativeOpSchema {
     // lookup and we know the hashes are already equal. Therefore, we
     // don't bother checking hash_ first.
     return op_ == rhs.op_ && args_schema_len_ == rhs.args_schema_len_ &&
+        force_mode_ == rhs.force_mode_ &&
         comparison_key_ == rhs.comparison_key_;
   }
 
@@ -1178,6 +1188,7 @@ class NativeOpSchema {
   // There is no particular justification for the choice of 8
   // here. Feel free to change it.
   c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key_;
+  bool force_mode_;
 };
 
 namespace std {
@@ -1880,15 +1891,17 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
       }
     }
     comparison_key = PyTuple_Pack(
-        3,
+        4,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
         args_to_hash_tup.ptr(),
-        kwargs_to_hash.ptr());
+        kwargs_to_hash.ptr(),
+        get_explicit_redistribution_context().attr("is_force_mode")().ptr());
   } else {
     comparison_key = PyTuple_Pack(
-        2,
+        3,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
-        args_to_hash_tup.release().ptr());
+        args_to_hash_tup.release().ptr(),
+        get_explicit_redistribution_context().attr("is_force_mode")().ptr());
   }
   if (!comparison_key) {
     return false;
@@ -2460,12 +2473,17 @@ create_native_op_schema(
       "found no DeviceMesh from dtensor args for ",
       op.operator_name());
 
+  const bool force_mode = get_explicit_redistribution_context()
+                              .attr("is_force_mode")()
+                              .cast<bool>();
+
   return std::make_pair(
       NativeOpSchema(
           op,
           std::move(comparison_key),
           comparison_key_hash,
-          args_kwargs.num_positional_args()),
+          args_kwargs.num_positional_args(),
+          force_mode),
       std::move(compute_mesh));
 }
 
