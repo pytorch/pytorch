@@ -742,14 +742,14 @@ class SizeVarAllocator:
         original = expr
 
         # remove precomputed_replacements
-        expr = self.remove_precomputed_replacements(result)
+        expr = self.remove_precomputed_replacements(expr)
 
         # replace all backed symbols with their backed hints,
         # unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
-
-        result = self._maybe_realize_expr(sympy.expand(expr), fallback)
+        expr = sympy.expand(expr)
+        result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
 
