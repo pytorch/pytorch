@@ -509,28 +509,13 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        try:
-            lv = self.guarding_hint_or_throw(left)
-            rv = self.guarding_hint_or_throw(right)
-        except TypeError:  # unbacked symints
-            if left == right or self.statically_known_leq(left, right):
-                return left
-            if self.statically_known_leq(right, left):
-                return right
-            gcd = sympy.gcd(left, right)
-            if left == gcd:  # handle `min(10*u0, u0)` etc
-                return left
-            if right == gcd:
-                return right
-            raise TypeError(
-                f"evaluate_min({left}, {right}) with unbacked symints"
-            ) from None
-        if lv <= rv:
-            self.check_leq(left, right)
+        if self.guard_or_false(sympy.Le(left, right)):
             return left
-        else:
-            self.check_leq(right, left)
+        if self.guard_or_false(sympy.Le(right, left)):
             return right
+        raise TypeError(
+            f"evaluate_min({left}, {right}) with unbacked symints"
+        ) from None
 
     def evaluate_max(self, left: Expr, right: Expr) -> Expr:
         """return the larger of left and right, and guard on that choice"""
@@ -1139,6 +1124,8 @@ class SizeVarAllocator:
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
 
+    # Return stride optimizaitons hints,
+    # only used for optimizations.
     def stride_hints(
         self,
         index: Expr,
