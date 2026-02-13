@@ -4816,6 +4816,7 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._stack = contextlib.ExitStack()
+        torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = True
 
     def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
         FileCheck().check(get_func_call()).check_count(

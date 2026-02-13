@@ -7206,6 +7206,9 @@ class UserDefinedTritonKernel(ExternKernel):
         We do this by pruning the `out` tensor allocation and directly writing the relu-output.
         """
 
+        if not config.epilogue_fusion_user_defined_triton_kernel:
+            return False
+
         if not self.arg_accesses.can_fuse_epilogue:
             return False
 
