@@ -2209,7 +2209,7 @@ class WelfordReduction(MultiOutputReduction):
         # TODO: Unrolled reduction
         # if (
         #     isinstance(reduction_numel, Integer)
-        #     and V.graph.sizevars.size_hint(reduction_numel)
+        #     and int(reduction_numel)
         #     < config.unroll_reductions_threshold
         #     and sympy_product(ranges) != 1
         # ):
@@ -2352,7 +2352,9 @@ class WelfordReduction(MultiOutputReduction):
         ) -> OpsValue:
             return loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        # numel_hint is only used to choose between ReductionHint.OUTER vs
+        # OUTER_TINY, which is a performance heuristic, not a correctness decision.
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(ranges))
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
@@ -3355,7 +3357,7 @@ class View(GenericView):
         """
         Perform a reshape entirely by modifying indexing math
         """
-        size_hint = V.graph.sizevars.size_hint
+        guard_or_false = V.graph.sizevars.guard_or_false
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -3385,22 +3387,21 @@ class View(GenericView):
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
-            elif size_hint(size_new) == size_hint(size_old):
+            elif guard_or_false(sympy.Eq(size_new, size_old)):
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
-            elif size_hint(size_new) < size_hint(size_old):
-                while size_hint(size_new) < size_hint(size_old):
+            elif guard_or_false(sympy.Lt(size_new, size_old)):
+                while guard_or_false(sympy.Lt(size_new, size_old)):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
                 V.graph.sizevars.check_equals(size_new, size_old)
-            elif size_hint(size_new) > size_hint(size_old):
+            elif guard_or_false(sympy.Gt(size_new, size_old)):
                 divisor = sympy.S.One
                 modulus = size_old
                 view_expr.append(ModularIndexing(var, divisor, modulus))
                 divisor = divisor * modulus
-                while size_hint(size_new) > size_hint(size_old):
+                while guard_or_false(sympy.Gt(size_new, size_old)):
                     modulus = stack_old.pop()
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
@@ -6775,7 +6776,9 @@ class ExternKernel(InputsKernel):
         sizevars = V.graph.sizevars
         sizes = self.get_size()
         strides = self.get_stride()
-        strides = [sizevars.size_hint(x) for x in strides]
+        # Stride hints are only used as sort keys to determine dimension
+        # ordering for canonicalization, not for correctness.
+        strides = [sizevars.optimization_hint(x) for x in strides]
         # TODO: I can't tell if the symbols here are temporary
         index_vars = [sympy_index_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
