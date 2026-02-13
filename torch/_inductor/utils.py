@@ -1714,8 +1714,8 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
 
 
 @functools.lru_cache
-def get_max_num_sms() -> int:
-    if torch.xpu.is_available():
+def get_max_num_sms(device_type: str) -> int:
+    if device_type == "xpu":
         return torch.xpu.get_device_properties().gpu_subslice_count
     return torch.cuda.get_device_properties("cuda").multi_processor_count
 
@@ -1730,13 +1730,13 @@ def using_b200() -> bool:
     return device_properties.major == 10
 
 
-def get_num_sms() -> int:
+def get_num_sms(device_type: str) -> int:
     """Handle experimental carveout if set otherwise return hardware SM count"""
     # TODO we need to properly guard on this global
-    if torch.xpu.is_available():
-        return get_max_num_sms()
+    if device_type == "xpu":
+        return get_max_num_sms(device_type)
     carveout = torch._C._get_sm_carveout_experimental()
-    return get_max_num_sms() - (carveout if carveout is not None else 0)
+    return get_max_num_sms(device_type) - (carveout if carveout is not None else 0)
 
 
 def get_tma_workspace_arg(
@@ -1748,7 +1748,7 @@ def get_tma_workspace_arg(
     from .codegen.common import WorkspaceArg, WorkspaceZeroMode
 
     if num_programs is None:
-        num_programs = get_num_sms()
+        num_programs = get_num_sms(device.type)
     zero_mode = WorkspaceZeroMode.from_bool(False)
     size = num_programs * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
     return WorkspaceArg(
