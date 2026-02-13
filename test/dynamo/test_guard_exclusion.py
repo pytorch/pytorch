@@ -1,7 +1,7 @@
 import torch
 import torch._dynamo
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class GraphTracker:
@@ -30,6 +30,7 @@ class GraphTracker:
         self.call_log.clear()
 
 
+@skipIfTorchDynamo("uses custom backend incompatible with PYTORCH_TEST_WITH_DYNAMO")
 class TestGuardExclusion(TestCase):
     def setUp(self):
         super().setUp()

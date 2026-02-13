@@ -3054,20 +3054,33 @@ class GuardBuilder(GuardBuilderBase):
 
                 excluded_sizes = metadata.get("excluded_sizes")
                 if excluded_sizes and any(v is not None for v in excluded_sizes):
+                    # Only exclude on dimensions that are dynamic in this
+                    # graph (size[i] is None). Static dimensions are already
+                    # handled by the tensor match guard.
                     dims_and_values = [
-                        (i, v) for i, v in enumerate(excluded_sizes) if v is not None
+                        (i, v)
+                        for i, v in enumerate(excluded_sizes)
+                        if v is not None and i < len(size) and size[i] is None
                     ]
 
-                    def check_exclusion(x, dvs=dims_and_values):
-                        return not all(x.size(d) == v for d, v in dvs)
+                    # Only add the exclusion if the current input doesn't
+                    # match all excluded dims. If it does, this graph was
+                    # compiled to handle that input and the exclusion would
+                    # reject the compilation's own input.
+                    if dims_and_values and not all(
+                        value.size(d) == v for d, v in dims_and_values
+                    ):
 
-                    guard_manager.add_lambda_guard(
-                        check_exclusion,
-                        get_verbose_code_parts(
-                            f"excluded_sizes({excluded_sizes})", guard
-                        ),
-                        guard.user_stack,
-                    )
+                        def check_exclusion(x, dvs=dims_and_values):
+                            return not all(x.size(d) == v for d, v in dvs)
+
+                        guard_manager.add_lambda_guard(
+                            check_exclusion,
+                            get_verbose_code_parts(
+                                f"excluded_sizes({excluded_sizes})", guard
+                            ),
+                            guard.user_stack,
+                        )
 
                 # We consider TENSOR_MATCH guard to be important enough to be
                 # included in diff guard manager by default.
