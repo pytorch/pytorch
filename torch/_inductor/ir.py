@@ -56,6 +56,7 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
+    GuardOnDataDependentSymNode,
     IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
@@ -3235,15 +3236,13 @@ class View(GenericView):
             symbols (guard_or_false can't resolve comparisons), fall back
             to making the tensor contiguous.
             """
-            nonlocal old_size, new_size, unbacked_symbols_in_sizes
+            nonlocal old_size, new_size
             try:
                 reindex = cls.dynamic_reshape_indexer(old_size, new_size)
                 return cls(data=x, size=list(new_size), reindex=reindex)
-            except (AssertionError, IndexError):
-                if not unbacked_symbols_in_sizes:
-                    raise
+            except GuardOnDataDependentSymNode:
                 # dynamic_reshape_indexer cannot handle unbacked SymInts
-                # fallback to unbacked semantics.
+                # because guard_or_false can't resolve size comparisons.
                 # https://github.com/pytorch/pytorch/issues/145561
                 x = ExternKernel.require_contiguous(x)
                 return create_reinterpret_view(
@@ -3403,6 +3402,11 @@ class View(GenericView):
                     size_old = size_old * modulus
                 V.graph.sizevars.check_equals(size_new, size_old)
             else:
+                # With backed symbols, one of Eq/Lt/Gt must be true,
+                # so reaching here is a bug. With unbacked symbols,
+                # guard_or_false can't resolve any comparison.
+                if free_unbacked_symbols(size_old) or free_unbacked_symbols(size_new):
+                    raise GuardOnDataDependentSymNode(sympy.Eq(size_new, size_old))
                 raise AssertionError
 
         while stack_old:
