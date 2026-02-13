@@ -1719,17 +1719,9 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.fmod({a}, {b})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def pow(a, b):
-        # Handle low precision inputs
-        a_str = f"{a}.to(tl.float32)" if (isinstance(a, CSEVariable) and a.dtype in (torch.float16, torch.bfloat16) and not config.triton.codegen_upcast_to_fp32) else str(a)
-        b_str = f"{b}.to(tl.float32)" if (isinstance(b, CSEVariable) and b.dtype in (torch.float16, torch.bfloat16) and not config.triton.codegen_upcast_to_fp32) else str(b)
-        result = f"libdevice.pow({a_str}, {b_str})"
-        # Downcast if needed
-        if isinstance(a, CSEVariable) and a.dtype in (torch.float16, torch.bfloat16) and not config.triton.codegen_upcast_to_fp32:
-            out_dtype = get_dtype_handler().pow(a, b)
-            if out_dtype in (torch.float16, torch.bfloat16):
-                result = f"{result}.to({triton_type(out_dtype)})"
-        return result
+        return f"libdevice.pow({a}, {b})"
 
     @staticmethod
     @maybe_upcast_float32()
