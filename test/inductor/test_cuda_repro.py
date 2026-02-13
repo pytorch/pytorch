@@ -193,6 +193,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
         self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
 
+    @skipIfXpu(msg="RuntimeError, torch-xpu-ops: 2891")
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
 

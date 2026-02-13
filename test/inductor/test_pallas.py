@@ -1108,7 +1108,6 @@ class PallasTestsMixin:
         expected = fn(x, weight, bias)
         self.assertEqual(result, expected)
 
-    @skip_if_cpu
     @skip_if_cuda
     @skip_if_tpu
     def test_rope(self):
@@ -1131,6 +1130,50 @@ class PallasTestsMixin:
         sin = torch.randn(32, 32, device=self.DEVICE)
         result = compiled(x, cos, sin)
         expected = fn(x, cos, sin)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_rope_interleaved(self):
+        """Test Rotary Position Embedding with interleaved halves.
+
+        Uses even/odd stride-2 slicing instead of contiguous halves, then
+        reassembles via stack + reshape. Exercises strided input access.
+        """
+
+        def fn(x, cos, sin):
+            x1 = x[..., 0::2]
+            x2 = x[..., 1::2]
+            o1 = x1 * cos - x2 * sin
+            o2 = x2 * cos + x1 * sin
+            return torch.stack([o1, o2], dim=-1).reshape_as(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        cos = torch.randn(32, 32, device=self.DEVICE)
+        sin = torch.randn(32, 32, device=self.DEVICE)
+        result = compiled(x, cos, sin)
+        expected = fn(x, cos, sin)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_chained_stride_slice(self):
+        """Test that chained stride slices compose into a single strided access.
+
+        x[:, 1::2][:, 2::3][:, 3::4] should compose to x[:, 23::24].
+        """
+
+        def fn(x):
+            return x[:, 1::2][:, 2::3][:, 3::4] + 1
+
+        compiled = self._compile(fn)
+
+        # last dim = 480 which is divisible by 24
+        x = torch.randn(4, 480, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
         self.assertEqual(result, expected)
 
     @skip_if_tpu
