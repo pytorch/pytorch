@@ -673,6 +673,7 @@ class SizeVarAllocator:
         expr = self.simplify(expr)
         expr = self.remove_precomputed_replacements(expr)
         expr = sympy_subs(expr, self.backed_var_to_val)
+        expr = expr.expand(identity=True)
 
         if has_free_unbacked_symbols(expr):
             raise GuardOnDataDependentSymNode(expr)
@@ -750,6 +751,7 @@ class SizeVarAllocator:
         # unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
+        expr = expr.expand(identity=True)
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
