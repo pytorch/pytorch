@@ -38,9 +38,10 @@ def _construct_strides(
 ) -> Sequence[int]:
     """From a list of sizes and a fill order, construct the strides of the permuted tensor."""
     # Initialize strides
-    assert len(sizes) == len(fill_order), (
-        "Length of sizes must match the length of the fill order"
-    )
+    if len(sizes) != len(fill_order):
+        raise AssertionError(
+            f"Length of sizes must match the length of the fill order, got {len(sizes)} vs {len(fill_order)}"
+        )
     strides = [0] * len(sizes)
 
     # Start with stride 1 for the innermost dimension
@@ -70,7 +71,10 @@ def _permute_strides(out: torch.Tensor, query_strides: tuple[int, ...]) -> torch
     from torch._inductor.ir import get_fill_order
 
     fill_order = get_fill_order(query_strides)
-    assert out.storage_offset() == 0, "Only support storage_offset == 0"
+    if out.storage_offset() != 0:
+        raise AssertionError(
+            f"Only support storage_offset == 0, got {out.storage_offset()}"
+        )
     out_strides = _construct_strides(out.shape, fill_order)
 
     # Attention kernels require stride[-1]=1 for efficient memory access.
@@ -132,8 +136,8 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         value: torch.Tensor,
         out: torch.Tensor,
         logsumexp: torch.Tensor,
-        grad_out: torch.Tensor,
-        grad_logsumexp: torch.Tensor,
+        grad_out: torch.Tensor | None,
+        grad_logsumexp: torch.Tensor | None,
         fw_graph: Union[Callable, GraphModule],
         joint_graph: GraphModule,
         block_mask: tuple,
@@ -442,7 +446,10 @@ def trace_flex_attention(
         mask_graph = reenter_make_fx(mask_mod)(
             *mask_example_vals, *mask_mod_other_buffers
         )
-    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+    if not isinstance(proxy_mode.tracer, torch.fx.Tracer):
+        raise AssertionError(
+            f"expected proxy_mode.tracer to be torch.fx.Tracer, got {type(proxy_mode.tracer)}"
+        )
     block_mask = block_mask[:-1] + (mask_graph,)
     qualname = proxy_mode.tracer.get_fresh_qualname("sdpa_score")
     proxy_mode.tracer.root.register_module(qualname, score_graph)
@@ -486,7 +493,8 @@ def flex_attention_proxy_torch_dispatch_mode(
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    assert mode is not None, "Mode should always be enabled for python fallback key"
+    if mode is None:
+        raise AssertionError("Mode should always be enabled for python fallback key")
     return trace_flex_attention(
         mode,
         query,
@@ -530,12 +538,30 @@ def flex_attention_functionalize(
     mask_mod_other_buffers_unwrapped = ctx.unwrap_tensors(mask_mod_other_buffers)
 
     # Appease the mypy overlords
-    assert isinstance(query_unwrapped, torch.Tensor)
-    assert isinstance(key_unwrapped, torch.Tensor)
-    assert isinstance(value_unwrapped, torch.Tensor)
-    assert isinstance(block_mask_unwrapped, tuple)
-    assert isinstance(score_mod_other_buffers_unwrapped, tuple)
-    assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
+    if not isinstance(query_unwrapped, torch.Tensor):
+        raise AssertionError(
+            f"expected query_unwrapped to be torch.Tensor, got {type(query_unwrapped)}"
+        )
+    if not isinstance(key_unwrapped, torch.Tensor):
+        raise AssertionError(
+            f"expected key_unwrapped to be torch.Tensor, got {type(key_unwrapped)}"
+        )
+    if not isinstance(value_unwrapped, torch.Tensor):
+        raise AssertionError(
+            f"expected value_unwrapped to be torch.Tensor, got {type(value_unwrapped)}"
+        )
+    if not isinstance(block_mask_unwrapped, tuple):
+        raise AssertionError(
+            f"expected block_mask_unwrapped to be tuple, got {type(block_mask_unwrapped)}"
+        )
+    if not isinstance(score_mod_other_buffers_unwrapped, tuple):
+        raise AssertionError(
+            f"expected score_mod_other_buffers_unwrapped to be tuple, got {type(score_mod_other_buffers_unwrapped)}"
+        )
+    if not isinstance(mask_mod_other_buffers_unwrapped, tuple):
+        raise AssertionError(
+            f"expected mask_mod_other_buffers_unwrapped to be tuple, got {type(mask_mod_other_buffers_unwrapped)}"
+        )
 
     example_vals = (
         [query_unwrapped.new_zeros(())]
@@ -668,10 +694,14 @@ def create_fw_bw_graph(
                 unwrapped_score_mod_indexes = pytree.tree_map(_from_fun, index_values)
                 unwrapped_other_buffers = pytree.tree_map(_from_fun, other_buffers)
 
-            assert all(
+            if not all(
                 isinstance(t, (FakeTensor, int, torch.SymInt))
                 for t in unwrapped_score_mod_indexes + unwrapped_other_buffers
-            )
+            ):
+                raise AssertionError(
+                    f"all unwrapped values must be FakeTensor, int, or SymInt, got "
+                    f"{[type(t) for t in unwrapped_score_mod_indexes + unwrapped_other_buffers]}"
+                )
 
             example_flat_out = pytree.tree_map(
                 _from_fun,
@@ -730,14 +760,16 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         mask_mod_other_buffers: tuple[Any, ...],
         *score_mod_other_buffers: tuple[Any, ...],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        ctx.set_materialize_grads(False)
         any_buffer_requires_grad = any(
             buffer.requires_grad
             for buffer in mask_mod_other_buffers
             if isinstance(buffer, torch.Tensor)
         )
-        assert not any_buffer_requires_grad, (
-            "Captured buffers from mask mod that require grad are not supported."
-        )
+        if any_buffer_requires_grad:
+            raise AssertionError(
+                "Captured buffers from mask mod that require grad are not supported."
+            )
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
@@ -918,8 +950,8 @@ def sdpa_dense_backward(
     value: torch.Tensor,
     out: torch.Tensor,
     logsumexp: torch.Tensor,
-    grad_out: torch.Tensor,
-    grad_logsumexp: torch.Tensor,
+    grad_out: torch.Tensor | None,
+    grad_logsumexp: torch.Tensor | None,
     fw_graph: Callable,  # GraphModule type hint?
     joint_graph: Callable,
     block_mask: tuple,
@@ -976,6 +1008,11 @@ def sdpa_dense_backward(
     G = query.size(1) // key.size(1)
     key = torch.repeat_interleave(key, G, dim=1)
     value = torch.repeat_interleave(value, G, dim=1)
+
+    if grad_out is None:
+        grad_out = torch.zeros_like(out)
+    if grad_logsumexp is None:
+        grad_logsumexp = torch.zeros_like(logsumexp)
 
     # We're undoing the log -> log2 change of base in the forwards
     logsumexp = logsumexp * math.log(2)
@@ -1066,9 +1103,10 @@ def sdpa_dense_backward(
     actual_grad_value.copy_(grad_value)
 
     if Bq != Bkv:
-        assert Bq > 1 and Bkv == 1, (
-            f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
-        )
+        if not (Bq > 1 and Bkv == 1):
+            raise AssertionError(
+                f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
+            )
 
         actual_grad_key = torch.sum(actual_grad_key, 0, keepdim=True)
         actual_grad_value = torch.sum(actual_grad_value, 0, keepdim=True)
@@ -1145,7 +1183,10 @@ def trace_flex_attention_backward(
         mask_graph = _maybe_reenter_make_fx(mask_graph)(
             *mask_example_vals, *mask_mod_other_buffers
         )
-    assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+    if not isinstance(proxy_mode.tracer, torch.fx.Tracer):
+        raise AssertionError(
+            f"expected proxy_mode.tracer to be torch.fx.Tracer, got {type(proxy_mode.tracer)}"
+        )
     block_mask = block_mask[:-1] + (mask_graph,)
 
     qualname = proxy_mode.tracer.get_fresh_qualname("fw_graph")
@@ -1208,7 +1249,8 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
-    assert mode is not None, "Mode should always be enabled for python fallback key"
+    if mode is None:
+        raise AssertionError("Mode should always be enabled for python fallback key")
     with torch.fx.experimental.proxy_tensor.set_original_aten_op(
         flex_attention_backward
     ):
@@ -1270,16 +1312,50 @@ def flex_attention_backward_functionalize(
     mask_mod_other_buffers_unwrapped = ctx.unwrap_tensors(mask_mod_other_buffers)
 
     # Appease the mypy overlords
-    assert isinstance(query_unwrapped, torch.Tensor)
-    assert isinstance(key_unwrapped, torch.Tensor)
-    assert isinstance(value_unwrapped, torch.Tensor)
-    assert isinstance(out_unwrapped, torch.Tensor)
-    assert isinstance(logsumexp_unwrapped, torch.Tensor)
-    assert isinstance(grad_out_unwrapped, torch.Tensor)
-    assert isinstance(grad_logsumexp_unwrapped, torch.Tensor)
-    assert isinstance(block_mask_unwrapped, tuple)
-    assert isinstance(score_mod_other_buffers_unwrapped, tuple)
-    assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
+    if not isinstance(query_unwrapped, torch.Tensor):
+        raise AssertionError(
+            f"expected query_unwrapped to be torch.Tensor, got {type(query_unwrapped)}"
+        )
+    if not isinstance(key_unwrapped, torch.Tensor):
+        raise AssertionError(
+            f"expected key_unwrapped to be torch.Tensor, got {type(key_unwrapped)}"
+        )
+    if not isinstance(value_unwrapped, torch.Tensor):
+        raise AssertionError(
+            f"expected value_unwrapped to be torch.Tensor, got {type(value_unwrapped)}"
+        )
+    if not isinstance(out_unwrapped, torch.Tensor):
+        raise AssertionError(
+            f"expected out_unwrapped to be torch.Tensor, got {type(out_unwrapped)}"
+        )
+    if not isinstance(logsumexp_unwrapped, torch.Tensor):
+        raise AssertionError(
+            f"expected logsumexp_unwrapped to be torch.Tensor, got {type(logsumexp_unwrapped)}"
+        )
+    if grad_out_unwrapped is not None and not isinstance(
+        grad_out_unwrapped, torch.Tensor
+    ):
+        raise AssertionError(
+            f"expected grad_out_unwrapped to be torch.Tensor or None, got {type(grad_out_unwrapped)}"
+        )
+    if grad_logsumexp_unwrapped is not None and not isinstance(
+        grad_logsumexp_unwrapped, torch.Tensor
+    ):
+        raise AssertionError(
+            f"expected grad_logsumexp_unwrapped to be torch.Tensor or None, got {type(grad_logsumexp_unwrapped)}"
+        )
+    if not isinstance(block_mask_unwrapped, tuple):
+        raise AssertionError(
+            f"expected block_mask_unwrapped to be tuple, got {type(block_mask_unwrapped)}"
+        )
+    if not isinstance(score_mod_other_buffers_unwrapped, tuple):
+        raise AssertionError(
+            f"expected score_mod_other_buffers_unwrapped to be tuple, got {type(score_mod_other_buffers_unwrapped)}"
+        )
+    if not isinstance(mask_mod_other_buffers_unwrapped, tuple):
+        raise AssertionError(
+            f"expected mask_mod_other_buffers_unwrapped to be tuple, got {type(mask_mod_other_buffers_unwrapped)}"
+        )
 
     with ctx.redispatch_to_next():
         # pyrefly: ignore [bad-argument-type]
