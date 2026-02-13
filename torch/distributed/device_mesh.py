@@ -6,7 +6,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -637,21 +637,19 @@ else:
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
-        def _hash_key(self) -> tuple[Any, ...]:
-            """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
-            return (
-                self._flatten_rank_map,
-                self._layout,
-                self._device_type,
-                self._mesh_dim_names,
-                self._thread_id,
-            )
-
         def __hash__(self):
             # lazily compute hash
             self._hash = getattr(self, "_hash", None)
             if not self._hash:
-                self._hash = hash(self._hash_key())
+                self._hash = hash(
+                    (
+                        self._flatten_rank_map,
+                        self._layout,
+                        self._device_type,
+                        self._mesh_dim_names,
+                        self._thread_id,
+                    )
+                )
             return self._hash
 
         def __eq__(self, other: object) -> bool:
@@ -666,17 +664,6 @@ else:
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
             )
-
-        def _stable_hash(self) -> str:
-            """
-            Return a stable hash for AOT autograd caching.
-            [See note: Tensor subclass stable hashing for AOT autograd cache]
-            """
-            import hashlib
-
-            return hashlib.blake2b(
-                repr(self._hash_key()).encode(), digest_size=16
-            ).hexdigest()
 
         def __getitem__(self, mesh_dim_names: str | tuple[str, ...]) -> "DeviceMesh":
             """
