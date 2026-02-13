@@ -580,6 +580,32 @@ class TestNNInitDeviceType(TestCase):
             f"{dtype}: failed KS test against truncated normal",
         )
 
+    # Test that trunc_normal_ behaves well for narrow interval compared to std.
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
+    @parametrize_test(
+        "dtype",
+        [torch.float32, torch.float64],
+    )
+    def test_trunc_normal_narrow_interval(self, device, dtype):
+        n = 10000
+        mean, std, a, b = 0.0, 1.0, 2.0, 3.0
+        t = torch.empty(n, dtype=dtype, device=device)
+        init.trunc_normal_(t, mean=mean, std=std, a=a, b=b)
+
+        self.assertTrue(
+            t.min().item() >= a,
+            f"{dtype}: values below lower bound a={a}",
+        )
+        self.assertTrue(
+            t.max().item() <= b,
+            f"{dtype}: values above upper bound b={b}",
+        )
+        self.assertTrue(
+            self._is_trunc_normal(t.float().cpu(), mean, std, a, b),
+            f"{dtype}: failed KS test against truncated normal",
+        )
+
     # Sanity check for trunc normal to ensure that we sample a decent
     # subset of the value space.
     @parametrize_test(
@@ -621,7 +647,7 @@ class TestNNInitDeviceType(TestCase):
             f"{dtype}: trunc_normal_ produced nan values",
         )
 
-    # Sanity check that we don't round to the boundary by mistake
+    # Sanity check that we don't round to the boundary by mistake.
     @parametrize_test(
         "dtype",
         [torch.float32, torch.float64, torch.float16, torch.bfloat16],
