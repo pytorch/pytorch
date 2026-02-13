@@ -534,7 +534,10 @@ class InputObserverInfo:
                     **dict(zip(pos_names, flat_dynamic_shapes[:n_args])),
                     var_pos: tuple(flat_dynamic_shapes[n_args:i_kwargs]),
                     **dict(
-                        zip(list(self._best_candidate.kwargs), flat_dynamic_shapes[i_kwargs:])
+                        zip(
+                            list(self._best_candidate.kwargs),
+                            flat_dynamic_shapes[i_kwargs:],
+                        )
                     ),
                     **dict.fromkeys(self._best_candidate.cst_kwargs, None),
                 }
@@ -778,6 +781,48 @@ class InputObserver:
     >>>     dynamic_shapes.input_observer.infer_dynamic_shapes(),
     >>> )
 
+    The last example consider a LLM taking images and text as inputs.
+    The first call to the forward method which we try to export has `pixel_values`
+    but no `past_key_values`. The next calls do not have `pixel_values` but
+    `past_key_values`. The observer understand `pixel_values` and `past_key_values`
+    are needed but they may not be both specified at the same time.
+    Since `pixel_values` only appears in the first call, the observer cannot
+    tell how to infer an empty tensor for this argument. That's what the argument
+    `missing` is for.
+    
+    >>> from transformers import pipeline
+    >>>
+    >>> model_id = "tiny-random/gemma-3"
+    >>> pipe = pipeline(
+    >>>     "image-text-to-text",
+    >>>     model=model_id,
+    >>>     device="cpu",
+    >>>     trust_remote_code=True,
+    >>>     max_new_tokens=3,
+    >>>     dtype=torch.float16,
+    >>> )
+    >>> messages = [
+    >>>     {
+    >>>         "role": "system",
+    >>>         "content": [{"type": "text", "text": "You are a helpful assistant."}],
+    >>>     },
+    >>>     {
+    >>>         "role": "user",
+    >>>         "content": [
+    >>>             {
+    >>>                 "type": "image",
+    >>>                 "url": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/p-blog/candy.JPG",
+    >>>             },
+    >>>             {"type": "text", "text": "What animal is on the candy?"},
+    >>>         ],
+    >>>     },
+    >>> ]    
+    >>> observer = InputObserver(
+    >>>     missing=dict(pixel_values=torch.empty((0, 3, 896, 896), dtype=torch.float16))
+    >>> )
+    >>> with observer(pipe.model):
+    >>>     pipe(text=messages, max_new_tokens=4)
+    
     .. versionadded:: 2.11.0
     """
 
