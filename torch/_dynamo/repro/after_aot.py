@@ -641,6 +641,7 @@ if "__compile_source__" in globals():
     model_str += NNModuleToString.convert(gm)
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
+    # pyrefly: ignore [implicit-any]
     used_syms = {}
 
     # Extract from graph placeholders and their corresponding arguments

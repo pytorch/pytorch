@@ -90,12 +90,14 @@ from .dicts import (
     DictViewVariable,
     FrozensetVariable,
     is_hashable,
+    OrderedSetClassVariable,
     SetVariable,
 )
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    RangeVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -1652,6 +1654,18 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, variables.UserDefinedClassVariable):
             if type(arg.value).__repr__ is type.__repr__:
                 return variables.ConstantVariable.create(repr(arg.value))
+        if isinstance(
+            arg,
+            (
+                RangeVariable,
+                ConstDictVariable,
+                DefaultDictVariable,
+                OrderedSetClassVariable,
+                DictViewVariable,
+            ),
+        ):
+            return variables.ConstantVariable.create(arg.debug_repr())
+        return None
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker

@@ -630,6 +630,7 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
             if isinstance(val, (bool, int, float)):
                 normalized_expected.append(val)
             else:
+                # pyrefly: ignore [bad-argument-type]
                 normalized_expected.append(str(val))
 
         matching_entries = []
@@ -2086,6 +2087,7 @@ class GraphModuleSerializer(metaclass=Final):
         for user in node.users:
             if user.target is not operator.getitem:
                 raise AssertionError(f"User node {user} of {node} is incorrect")
+            # pyrefly: ignore [unsupported-operation]
             idx_to_name[user.args[1]] = user.name
 
         for idx, _ in enumerate(meta_val):
@@ -2093,11 +2095,13 @@ class GraphModuleSerializer(metaclass=Final):
             # However, we need a name for them so that the number of outputs will
             # correctly match the schema. Just assign a dummy name.
             if idx not in idx_to_name:
+                # pyrefly: ignore [unsupported-operation]
                 idx_to_name[idx] = f"{node.name}_unused_{idx}"
 
         arg_list = []
         for i, element_meta_val in enumerate(meta_val):
             arg_list.append(
+                # pyrefly: ignore [bad-index]
                 self.serialize_tensor_output(idx_to_name[i], element_meta_val)
             )
 
