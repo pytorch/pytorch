@@ -2815,7 +2815,7 @@ def pointwise(
     Construct @triton.heuristics() based on size_hints.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
-    device_type = triton_meta.device.type
+    device_type = triton_meta["device"].type
 
     configs = _handle_combo_kernel_per_subkernel_blocks(
         size_hints,
@@ -2912,7 +2912,7 @@ def pointwise(
             or (
                 torch.version.hip is None
                 and tile_hint == TileHint.SQUARE
-                and torch.version.xpu is None
+                and device_type != "xpu"
             )
         ) and not (
             inductor_meta.get("max_autotune")

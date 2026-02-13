@@ -389,7 +389,7 @@ def _tuned_grouped_mm_common(
             "A_IS_K_MAJOR": a_is_k_major,
             "B_IS_K_MAJOR": b_is_k_major,
             "USE_FAST_ACCUM": use_fast_accum,
-            "NUM_SMS": get_num_sms(),
+            "NUM_SMS": get_num_sms(mat_a.get_device().type),
             "USE_TMA_LOAD": use_tma_load,
             "USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR": triton_has_experimental_make_tensor_descriptor,
         }
