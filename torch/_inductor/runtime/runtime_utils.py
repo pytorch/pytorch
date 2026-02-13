@@ -460,6 +460,7 @@ def pallas_make_block_spec(
     axis_to_grid: dict[int, int],
     n_grid: int,
     swap_last_two: bool = False,
+    is_output: bool = False,
 ) -> Any:
     """Build a ``pl.BlockSpec`` for *buf_shape* given tiling of *ref_shape*.
 
@@ -473,6 +474,9 @@ def pallas_make_block_spec(
 
     When *swap_last_two* is True, the last two buffer dims are swapped
     relative to the reference: ref axis -2 maps to buf axis -1 and vice versa.
+
+    When *is_output* is True and *buf_nd < ref_nd*, left-alignment is used
+    as a fallback (for reduction outputs whose trailing dims were reduced).
     """
     from jax.experimental import (  # pyrefly: ignore [import-error, missing-import]
         pallas as pl,
@@ -525,12 +529,23 @@ def pallas_make_block_spec(
                 tiled_pairs.append((buf_ax, grid_dim))
 
     else:
-        # Standard right-alignment
+        # Standard right-alignment, with left-alignment fallback for
+        # reduction outputs (e.g. sum(dim=-1) on (10,10) → (10,)).
         for ref_ax, grid_dim in axis_to_grid.items():
             buf_ax = ref_ax - (ref_nd - buf_nd)
             if 0 <= buf_ax < buf_nd and buf_shape[buf_ax] == ref_shape[ref_ax]:
                 bs[buf_ax] = tile_shape[ref_ax]
                 tiled_pairs.append((buf_ax, grid_dim))
+            elif (
+                is_output
+                and buf_nd < ref_nd
+                and 0 <= ref_ax < buf_nd
+                and buf_shape[ref_ax] == ref_shape[ref_ax]
+            ):
+                # Left-aligned match for output: buf dim i matches ref dim i
+                # (reduction output whose trailing dims were reduced away)
+                bs[ref_ax] = tile_shape[ref_ax]
+                tiled_pairs.append((ref_ax, grid_dim))
 
     return pl.BlockSpec(
         tuple(bs),

@@ -2616,6 +2616,15 @@ class PallasKernel(SIMDKernel):
         if self.outputs_need_read:
             return False
 
+        # If iteration variables appear in the compute body (not just in
+        # load/store index resolution that collapses to [...]), tiling is
+        # unsafe because the arange-based vars have full-tensor shapes.
+        if self.used_iter_vars:
+            compute_text = "\n".join(str(line) for line in self.compute._lines)
+            for var_sym in self.used_iter_vars:
+                if str(var_sym) in compute_text:
+                    return False
+
         # Determine the reference output shape (highest-ndim output).
         out_bufs = list(self.args.output_buffers.keys())
 
@@ -2649,8 +2658,13 @@ class PallasKernel(SIMDKernel):
 
         # Count trailing reduction dimensions in the output shape that must
         # not be tiled (the kernel body needs the full reduction range).
-        self.tile_skip_last_n = sum(
-            1 for tree in self.range_trees if tree.is_reduction
+        # Only count when the kernel actually performs reduction (numel > 1).
+        reduction_numel = self._compute_reduction_numel()
+        has_reduction = reduction_numel is not None and reduction_numel > 1
+        self.tile_skip_last_n = (
+            sum(1 for tree in self.range_trees if tree.is_reduction)
+            if has_reduction
+            else 0
         )
 
         ref_shape: list[int] = []
@@ -2688,18 +2702,26 @@ class PallasKernel(SIMDKernel):
                 # Allow transposed last-2 dims.
                 mismatch = False
                 for i in range(ref_nd):
-                    if int_size[i] == ref_shape[i] or int_size[i] == 1 or ref_shape[i] == 1:
+                    if (
+                        int_size[i] == ref_shape[i]
+                        or int_size[i] == 1
+                        or ref_shape[i] == 1
+                    ):
                         continue
                     mismatch = True
                     break
 
-                if mismatch and ref_nd >= 2:
-                    # Check if last-2 dims are swapped (transpose pattern)
+                if mismatch and ref_nd >= 2 and self.tile_has_transpose:
+                    # Check if last-2 dims are swapped (transpose pattern).
+                    # Only allow when the kernel actually transposes
+                    # (has_transposed_load or column-major output).
                     if (
                         int_size[-2] == ref_shape[-1]
                         and int_size[-1] == ref_shape[-2]
                         and all(
-                            int_size[i] == ref_shape[i] or int_size[i] == 1 or ref_shape[i] == 1
+                            int_size[i] == ref_shape[i]
+                            or int_size[i] == 1
+                            or ref_shape[i] == 1
                             for i in range(ref_nd - 2)
                         )
                     ):
@@ -2711,7 +2733,10 @@ class PallasKernel(SIMDKernel):
                     return False
 
                 # At least one buffer with a tileable dim
-                if any(int_size[i] == ref_shape[i] and ref_shape[i] > 1 for i in range(ref_nd)):
+                if any(
+                    int_size[i] == ref_shape[i] and ref_shape[i] > 1
+                    for i in range(ref_nd)
+                ):
                     has_tileable = True
 
             elif buf_nd > ref_nd:
@@ -2740,7 +2765,29 @@ class PallasKernel(SIMDKernel):
                     if a != b and a != 1 and b != 1:
                         return False
 
-        return has_tileable
+        if not has_tileable:
+            return False
+
+        # On CPU (interpret mode) each tile iteration has significant
+        # Python/JAX overhead, so cap the grid size to avoid regressions
+        # on large tensors.  On TPU the grid executes natively.
+        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        if not is_tpu:
+            from ..runtime.runtime_utils import pallas_compute_tiling
+
+            _, grid, _ = pallas_compute_tiling(
+                tuple(ref_shape),
+                transpose=self.tile_has_transpose,
+                skip_last_n=self.tile_skip_last_n,
+            )
+            _MAX_GRID_PRODUCT = 64
+            grid_product = 1
+            for g in grid:
+                grid_product *= g
+            if grid_product > _MAX_GRID_PRODUCT:
+                return False
+
+        return True
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
         """
@@ -3352,7 +3399,9 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline("_ref = out_shapes[0]")
 
         code.writeline("out_specs_pallas = tuple(")
-        code.writeline("    pallas_make_block_spec(s, _ref, _tile, _ax2g, _ng)")
+        code.writeline(
+            "    pallas_make_block_spec(s, _ref, _tile, _ax2g, _ng, is_output=True)"
+        )
         code.writeline("    for s in out_shapes")
         code.writeline(")")
 
