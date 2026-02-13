@@ -609,7 +609,7 @@ class InputObserverInfo:
         flat: bool = False,
         as_args_kwargs: bool = False,
     ) -> (
-        list[torch.Tensor]
+        list[torch.Tensor | None]
         | tuple[torch.Tensor, ...]
         | dict[str, torch.Tensor]
         | tuple[list[torch.Tensor] | tuple[torch.Tensor, ...], dict[str, torch.Tensor]]
@@ -618,13 +618,14 @@ class InputObserverInfo:
         # This is already checked by _build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
         self.align_inputs_none_values()
-        torch._check(self._best_candidate is not None, lambda: "No input was captured.")
+        assert self._best_candidate is not None  # noqa: S101
         candidate = None
         if index_or_candidate is None:
             for cand in self.inputs:
                 args, kwargs = cand.args, cand.kwargs
-                if len(args) == len(self._best_candidate.args) and len(kwargs) == len(
-                    self._best_candidate.kwargs
+                if (
+                    len(args) == len(self._best_candidate.args or ())
+                    and len(kwargs) == len(self._best_candidate.kwargs or {})
                 ):
                     candidate = cand
                     break
@@ -640,7 +641,7 @@ class InputObserverInfo:
         else:
             candidate = index_or_candidate
 
-        torch._check(candidate is not None, "No input was captured.")
+        assert candidate is not None  # noqa: S101
         if candidate.aligned_flat_list is None:
             raise RuntimeError(
                 f"Candidate {candidate} has no aligned flat list of tensors, "
@@ -694,7 +695,7 @@ class InputObserverInfo:
                 aligned_flat_list[index] = torch.empty(
                     tuple(new_shape), dtype=tensor.dtype, device=tensor.device
                 )
-        if flat:
+        if flat:            
             return aligned_flat_list
         args, kwargs = torch.utils._pytree.tree_unflatten(
             aligned_flat_list,
@@ -789,7 +790,7 @@ class InputObserver:
     Since `pixel_values` only appears in the first call, the observer cannot
     tell how to infer an empty tensor for this argument. That's what the argument
     `missing` is for.
-    
+
     >>> from transformers import pipeline
     >>>
     >>> model_id = "tiny-random/gemma-3"
@@ -816,13 +817,13 @@ class InputObserver:
     >>>             {"type": "text", "text": "What animal is on the candy?"},
     >>>         ],
     >>>     },
-    >>> ]    
+    >>> ]
     >>> observer = InputObserver(
     >>>     missing=dict(pixel_values=torch.empty((0, 3, 896, 896), dtype=torch.float16))
     >>> )
     >>> with observer(pipe.model):
     >>>     pipe(text=messages, max_new_tokens=4)
-    
+
     .. versionadded:: 2.11.0
     """
 
@@ -956,7 +957,7 @@ class InputObserver:
         flat: bool = False,
         as_args_kwargs: bool = False,
     ) -> (
-        list[torch.Tensor]
+        list[torch.Tensor | None]
         | tuple[torch.Tensor, ...]
         | dict[str, torch.Tensor]
         | tuple[list[torch.Tensor] | tuple[torch.Tensor, ...], dict[str, torch.Tensor]]
