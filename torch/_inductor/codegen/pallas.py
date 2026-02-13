@@ -2785,12 +2785,16 @@ class PallasKernel(SIMDKernel):
                 )
             code.writeline("out_shapes_pallas = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
-            code.writeline("    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)")
+            code.writeline(
+                "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
+            )
             code.writeline(")")
             code.writeline("indexer = lambda n: lambda i: [i] * n")
             code.writeline("out_specs_pallas = tuple(")
             code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
-            code.writeline("    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)")
+            code.writeline(
+                "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
+            )
             code.writeline(")")
             code.writeline("in_specs_pallas = tuple(")
             code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
@@ -3206,8 +3210,7 @@ from torch._inductor.runtime.runtime_utils import (
         # Reshape results back to original shapes (restores 0-d from promoted (1,))
         code.writeline("if isinstance(_result, tuple):")
         code.writeline(
-            "    _result = tuple("
-            "r.reshape(s) for r, s in zip(_result, out_shapes))"
+            "    _result = tuple(r.reshape(s) for r, s in zip(_result, out_shapes))"
         )
         code.writeline("else:")
         code.writeline("    _result = _result.reshape(out_shapes[0])")
