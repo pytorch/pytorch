@@ -144,7 +144,7 @@ jobs:
         timeout-minutes: 120
 
   upload-wheel:
-      name: "Upload FA3 ${{ matrix.cuda_short }} windows_amd64"
+      name: "Upload FA3 ${{ matrix.build_cuda_short }} windows_amd64"
       needs: build-wheel
       runs-on: ubuntu-latest
       if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -152,7 +152,8 @@ jobs:
         fail-fast: false
         matrix:
           include:
-            - cuda_short: "128"
+            - build_cuda_short: "128"
+              upload_subfolders: "cu128 cu129"
       permissions:
         id-token: write
         contents: read
@@ -171,16 +172,17 @@ jobs:
         - name: Download Build Artifacts
           uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
           with:
-            name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}-windows_amd64
+            name: flash-attn-3-wheel-cu${{ matrix.build_cuda_short }}-windows_amd64
             path: ${{ runner.temp }}/artifacts
 
         - name: Upload binaries to test index
           env:
             PACKAGE_TYPE: wheel
             UPLOAD_CHANNEL: test
-            UPLOAD_SUBFOLDER: cu${{ matrix.cuda_short }}
             PKG_DIR: ${{ runner.temp }}/artifacts
             DRY_RUN: disabled
           run: |
             set -ex
-            bash .circleci/scripts/binary_upload.sh
+            for subfolder in ${{ matrix.upload_subfolders }}; do
+              UPLOAD_SUBFOLDER="${subfolder}" bash .circleci/scripts/binary_upload.sh
+            done
