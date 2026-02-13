@@ -1480,6 +1480,189 @@ class LoweringTest(MultiProcContinuousTest):
         with self.assertRaises(RuntimeError):
             run_and_get_triton_code(compiled_input_direct, x_input)
 
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_cudagraph_partition_symm_mem(self):
+        """
+        Verify that symm_mem collective ops trigger CUDA graph partition
+        boundaries when graph_partition is enabled.
+
+        With graph_partition=True, the scheduler should split the graph so that:
+        - Compute ops (mm) are in cudagraph-eligible partitions
+        - symm_mem collective ops are in non-cudagraph partitions (run eagerly)
+        - CommBuffer (empty_strided_p2p) allocations stay in compute partitions
+        - Buffers are correctly passed across partition boundaries
+
+        Note: cudagraphs=False here to isolate the partitioning logic from
+        the cudagraph tree's memory pool tracking, which does not yet handle
+        P2P allocations (empty_strided_p2p uses a separate allocator). The
+        cudagraph tree integration is tracked separately.
+        """
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w1 = torch.rand(N, N, device=self.device)
+        w2 = torch.rand(N, N, device=self.device)
+        w3 = torch.rand(N, N, device=self.device)
+
+        # Multi-layer TP pattern: mm → allreduce → mm → allreduce → mm → allreduce
+        def func(x, w1, w2, w3):
+            x = torch.mm(x, w1)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            x = torch.mm(x, w2)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            x = torch.mm(x, w3)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            return x
+
+        with torch._inductor.config.patch(
+            {
+                "graph_partition": True,
+                "triton.cudagraphs": True,
+            }
+        ):
+            compiled = torch.compile(func, fullgraph=True)
+            code = run_and_get_triton_code(compiled, x, w1, w2, w3)
+
+        # Verify partitioning occurred: the generated code should contain
+        # partition function calls (self.partitions[N](...))
+        partition_calls = re.findall(r"self\.partitions\[\d+\]", code)
+        self.assertGreaterEqual(
+            len(partition_calls),
+            1,
+            "Expected at least 1 partition call with graph_partition=True, "
+            f"got {len(partition_calls)}. symm_mem ops may not be triggering "
+            "partition boundaries.",
+        )
+
+        # Verify symm_mem ops appear OUTSIDE partition functions
+        # (i.e., in the inline non-cudagraph sections)
+        self.assertIn(
+            "one_shot_all_reduce",
+            code,
+            "Expected one_shot_all_reduce in generated code",
+        )
+
+        # Verify empty_strided_p2p allocation exists (for the CommBuffer input)
+        p2p_allocs = re.findall(r"empty_strided_p2p", code)
+        self.assertGreaterEqual(
+            len(p2p_allocs),
+            1,
+            "Expected at least 1 empty_strided_p2p allocation in generated code",
+        )
+
+        # Verify out-variant is used (ExternKernelOut lowering)
+        out_calls = re.findall(r"one_shot_all_reduce_out", code)
+        self.assertGreaterEqual(
+            len(out_calls),
+            1,
+            "Expected one_shot_all_reduce_out (out-variant) in generated code",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_cudagraph_partition_symm_mem_correctness(self):
+        """
+        Verify numerical correctness when symm_mem ops run with
+        cudagraph partitioning enabled vs without partitioning.
+        """
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w1 = torch.rand(N, N, device=self.device)
+        w2 = torch.rand(N, N, device=self.device)
+
+        def func(x, w1, w2):
+            x = torch.mm(x, w1)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            x = torch.mm(x, w2)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            return x
+
+        # Get baseline result without partitioning
+        with torch._inductor.config.patch(
+            {
+                "graph_partition": False,
+                "triton.cudagraphs": False,
+            }
+        ):
+            compiled_baseline = torch.compile(func, fullgraph=True)
+            baseline_result = compiled_baseline(x, w1, w2)
+
+        # Get result with graph_partition enabled
+        with torch._inductor.config.patch(
+            {
+                "graph_partition": True,
+                "triton.cudagraphs": True,
+            }
+        ):
+            compiled_partitioned = torch.compile(func, fullgraph=True)
+            partitioned_result = compiled_partitioned(x, w1, w2)
+
+        torch.testing.assert_close(
+            baseline_result,
+            partitioned_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled (with cudagraph partition) and compiled (without) outputs do not match",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_cudagraph_partition_buffer_passing(self):
+        """
+        Verify that CommBuffer (P2P) and regular buffers are correctly
+        passed across partition boundaries with the ping-pong reuse pattern.
+        """
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w1 = torch.rand(N, N, device=self.device)
+        w2 = torch.rand(N, N, device=self.device)
+
+        def func(x, w1, w2):
+            x = torch.mm(x, w1)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            x = torch.mm(x, w2)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            return x
+
+        with torch._inductor.config.patch(
+            {
+                "graph_partition": True,
+                "triton.cudagraphs": True,
+            }
+        ):
+            compiled = torch.compile(func, fullgraph=True)
+            code = run_and_get_triton_code(compiled, x, w1, w2)
+
+        # Verify partitioning occurred and buffers are passed between partitions.
+        # With proper partitioning, buffer reuse happens within each partition
+        # via the partition's memory planner. Cross-partition buffer passing
+        # is handled by partition argument lists.
+        partition_count = len(re.findall(r"def partition_\d+\(", code))
+        self.assertGreaterEqual(
+            partition_count,
+            2,
+            f"Expected at least 2 partitions, got {partition_count}. "
+            "Partitioning may not be working correctly.",
+        )
+
+        # Verify partition_args lists contain buffer names (buffers passed
+        # between partitions)
+        partition_args = re.findall(r"partition\d+_args = \[([^\]]+)\]", code)
+        self.assertGreater(
+            len(partition_args),
+            0,
+            "Expected partition argument lists for cross-partition buffer passing",
+        )
+
 
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda

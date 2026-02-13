@@ -227,6 +227,12 @@ class GraphPartitionSignature:
     # name of constants read/written by the graph partition
     constant_names: list[str]
 
+    # Buffers whose allocation is hoisted into this partition from a later
+    # non-cudagraph partition.  The subgraph codegen emits the allocation
+    # (e.g. empty_strided_cuda) and returns these buffers so that the
+    # later partition can use them without a per-iteration allocation.
+    hoisted_alloc_buffers: tuple["Buffer", ...] = ()
+
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
     def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:
@@ -4551,6 +4557,11 @@ class Buffer(IRNode, CodegenSymbol):
         return loader
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
+            # This buffer is never allocated — it writes directly into its
+            # mutation target.  Any reference to it should resolve to the
+            # target buffer's name.
+            return self.layout.get_buffer().codegen_reference(writer)
         return self.get_name()
 
     def decide_layout(self) -> None:

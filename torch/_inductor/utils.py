@@ -1202,6 +1202,32 @@ FORBIDDEN_CUDAGRAPH_OPS = frozenset(
         # with CUDA graphs, but the operator is also pointless with
         # constant arguments, so might as well ban
         "aten._assert_scalar",
+        # Symmetric memory (symm_mem) collective ops synchronize across
+        # ranks and cannot be captured in a CUDA graph. They must run
+        # eagerly in non-cudagraph partitions while their input/output
+        # buffer allocations (empty_strided_p2p, empty_strided_cuda) can
+        # be captured in adjacent cudagraph partitions.
+        "symm_mem.one_shot_all_reduce.default",
+        "symm_mem.one_shot_all_reduce_out.default",
+        "symm_mem.one_shot_all_reduce_copy.default",
+        "symm_mem.one_shot_all_reduce_copy_out.default",
+        "symm_mem.two_shot_all_reduce_.default",
+        "symm_mem.two_shot_all_reduce_out.default",
+        "symm_mem.multimem_all_reduce_.default",
+        "symm_mem.multimem_one_shot_all_reduce.default",
+        "symm_mem.multimem_one_shot_all_reduce_out.default",
+        "symm_mem.multimem_one_shot_reduce_out.default",
+        "symm_mem.multimem_all_gather_out.default",
+        "symm_mem.reduce_scatter_out.default",
+        "symm_mem.all_to_all_vdev.default",
+        "symm_mem.all_to_all_vdev_2d.default",
+        "symm_mem.all_to_all_vdev_2d_offset.default",
+        "symm_mem.tile_reduce.default",
+        "symm_mem.multi_root_tile_reduce.default",
+        "symm_mem.fused_all_gather_matmul.default",
+        "symm_mem.fused_all_gather_scaled_matmul.default",
+        "symm_mem.fused_matmul_reduce_scatter.default",
+        "symm_mem.fused_scaled_matmul_reduce_scatter.default",
     ]
 )
 
@@ -3870,6 +3896,28 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     fx_node = getattr(node, "fx_node", None)
     if fx_node is not None and is_cudagraph_unsafe_fx_node(fx_node):
         return True
+
+    # ExternKernelOut nodes created by lowering (e.g., symm_mem out-variant
+    # lowering in comm_lowering.py) may not have an fx_node. Fall back to
+    # checking op_overload against FORBIDDEN_CUDAGRAPH_OPS directly.
+    if fx_node is None:
+        op_overload = getattr(node, "op_overload", None)
+        if op_overload is not None:
+            op_str = str(op_overload)
+            if op_str in FORBIDDEN_CUDAGRAPH_OPS:
+                log.debug(
+                    "is_cudagraph_unsafe_op: matched op_overload=%s (no fx_node)",
+                    op_str,
+                )
+                return True
+        # Also check python_kernel_name for ops without op_overload
+        pk_name = getattr(node, "python_kernel_name", None)
+        if pk_name is not None and pk_name in FORBIDDEN_CUDAGRAPH_OPS:
+            log.debug(
+                "is_cudagraph_unsafe_op: matched python_kernel_name=%s (no fx_node)",
+                pk_name,
+            )
+            return True
 
     return False
 
