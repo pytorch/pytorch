@@ -402,8 +402,10 @@ struct LpNormDimFunctor {
   using out_opmath_t = typename at::opmath_type<out_t>;
 
   __device__ __forceinline__ out_opmath_t warp_reduce(out_opmath_t val) {
-    constexpr unsigned int FULL_WARP_MASK = 0xffffffff; // use all 32 bits
     constexpr int HALF_WARP_SIZE = 16;
+
+#if !defined(USE_ROCM)
+    constexpr unsigned int FULL_WARP_MASK = 0xffffffff; // use all 32 bits
     for (int offset = HALF_WARP_SIZE; offset > 0; offset /= 2) {
       if constexpr (norm_type == NormType::LInf) {
         val = max_propagate_nan(
@@ -412,6 +414,17 @@ struct LpNormDimFunctor {
         val += __shfl_down_sync(FULL_WARP_MASK, val, offset);
       }
     }
+#else
+    // unsigned int FULL_WARP_MASK = 0xffffffff does not work on ROCM
+    constexpr int WARP_SIZE = 32;
+    for (int offset = HALF_WARP_SIZE; offset > 0; offset /= 2) {
+      if constexpr (norm_type == NormType::LInf) {
+        val = max_propagate_nan(val, __shfl_down(val, offset, WARP_SIZE));
+      } else {
+        val += __shfl_down(val, offset, WARP_SIZE);
+      }
+    }
+#endif
     return val;
   }
 

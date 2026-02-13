@@ -296,6 +296,8 @@ aten::_foreach_neg.out
 aten::_foreach_neg_
 aten::_foreach_norm.Scalar
 aten::_foreach_norm.Scalar_out
+aten::_foreach_norm.dim
+aten::_foreach_norm.dim_out
 aten::_foreach_pow.List
 aten::_foreach_pow.List_out
 aten::_foreach_pow.Scalar
