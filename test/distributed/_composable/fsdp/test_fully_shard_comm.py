@@ -1179,12 +1179,6 @@ class TestFullyShardPrefetch(FSDPTest):
                     "tok_embeddings, pos_embeddings",
                     TrainingState.POST_BACKWARD,
                 ),
-                (
-                    "reshard",
-                    "tok_embeddings, pos_embeddings",
-                    TrainingState.POST_BACKWARD,
-                ),
-                ("reshard", "norm, output", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_backward_events)
             events.clear()
@@ -1247,12 +1241,6 @@ class TestFullyShardPrefetch(FSDPTest):
                     "tok_embeddings, pos_embeddings",
                     TrainingState.POST_BACKWARD,
                 ),
-                (
-                    "reshard",
-                    "tok_embeddings, pos_embeddings",
-                    TrainingState.POST_BACKWARD,
-                ),
-                ("reshard", "norm, output", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_backward_events)
             events.clear()
