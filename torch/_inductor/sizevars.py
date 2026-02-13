@@ -716,9 +716,9 @@ class SizeVarAllocator:
 
         # replace unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.var_to_hint_override)
+        expr = sympy.expand(expr)
 
-        result = self._maybe_realize_expr(sympy.expand(expr), fallback)
-
+        result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
 
