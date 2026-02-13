@@ -197,6 +197,33 @@ class TestDecompSharding(TestCase):
 
 class TestDecompShardingWithComms(DTensorTestBase):
     @with_comms
+    def test_decomp_schema_caches_static_args(self):
+        """
+        Test that decomposition ops use the correct cache key with static args.
+        unsafe_chunk decomposes through split, and two unsafe_chunk calls with different dims
+        could cache hit without correct dim/start/end handling.
+
+        This checks the first call allows Shard(2) through, while the 2nd call forces Replicate.
+        """
+        device_mesh = self.build_device_mesh()
+        t = torch.randn(8, 8, 8, requires_grad=False, device=self.device_type)
+        dt = distribute_tensor(t, device_mesh, [Shard(2)])
+
+        # chunk on non-sharding dim propagates through
+        result_dim1 = torch.unsafe_chunk(dt, 2, dim=1)
+        expected_dim1 = torch.unsafe_chunk(t, 2, dim=1)
+        for r, e in zip(result_dim1, expected_dim1):
+            self.assertEqual(r.placements, (Shard(2),))
+            self.assertEqual(r.full_tensor(), e)
+
+        # chunk on sharding dim forces replicate
+        result_dim2 = torch.unsafe_chunk(dt, 2, dim=2)
+        expected_dim2 = torch.unsafe_chunk(t, 2, dim=2)
+        for r, e in zip(result_dim2, expected_dim2):
+            self.assertEqual(r.placements, (Replicate(),))
+            self.assertEqual(r.full_tensor(), e)
+
+    @with_comms
     def test_decomp_schema_for_cache_aminmax(self):
         """Test that aminmax with different dim kwargs doesn't hit stale cache."""
         device_mesh = self.build_device_mesh()
