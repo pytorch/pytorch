@@ -1805,6 +1805,53 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 torch.matmul(dx_s1, dA_s1)
             self.assertEqual(comm_mode.get_total_counts(), 1)
 
+    def test_force_mode_cache(self):
+        from torch.distributed.tensor.debug import (
+            _clear_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
+        )
+
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+            dim = 128
+            x = torch.randn(8, dim)
+            A = torch.randn(dim, dim)
+
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Replicate()])
+
+            _clear_sharding_prop_cache()
+
+            # First call without force mode: cache miss
+            torch.matmul(dx, dA)
+            hits0, misses0 = _get_fast_path_sharding_prop_cache_stats()
+            self.assertEqual(misses0, 1)
+
+            # Same call without force mode: cache hit
+            torch.matmul(dx, dA)
+            hits1, misses1 = _get_fast_path_sharding_prop_cache_stats()
+            self.assertEqual(hits1, hits0 + 1)
+            self.assertEqual(misses1, misses0)
+
+            # Same op+placements but in force mode: cache miss (different key)
+            with ExplicitRedistributionContext(mode="force"):
+                torch.matmul(dx, dA)
+            hits2, misses2 = _get_fast_path_sharding_prop_cache_stats()
+            self.assertEqual(misses2, misses1 + 1)
+
+            # Same op+placements in force mode again: cache hit
+            with ExplicitRedistributionContext(mode="force"):
+                torch.matmul(dx, dA)
+            hits3, misses3 = _get_fast_path_sharding_prop_cache_stats()
+            self.assertEqual(hits3, hits2 + 1)
+            self.assertEqual(misses3, misses2)
+
+            # Back to non-force mode: cache hit (was cached earlier)
+            torch.matmul(dx, dA)
+            hits4, misses4 = _get_fast_path_sharding_prop_cache_stats()
+            self.assertEqual(hits4, hits3 + 1)
+            self.assertEqual(misses4, misses3)
+
 
 class TestIsTensorShardable(LocalTensorTestBase):
     @property

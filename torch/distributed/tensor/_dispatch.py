@@ -222,11 +222,7 @@ class OpDispatcher:
         try:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
-            if (
-                try_cache
-                and not _are_we_tracing()
-                and not ExplicitRedistributionContext.is_force_mode()
-            ):
+            if try_cache and not _are_we_tracing():
                 result = self.sharding_propagator.propagate_op_sharding(op_info.schema)
             else:
                 result = self.sharding_propagator.propagate_op_sharding_non_cached(
