@@ -728,6 +728,10 @@ class SizeVarAllocator:
 
         expr = self.replace_backed_symbols_with_hints(expr)
 
+        result = self._maybe_realize_expr(expr, fallback)
+        if result is not None:
+            return result
+
         # replace unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.var_to_hint_override)
 
