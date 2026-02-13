@@ -876,6 +876,10 @@ class PallasKernel(SIMDKernel):
         self.has_transposed_load = False
         # Track which iteration variables are actually used in the kernel
         self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
+        # Track if any load/store uses flatten-based indexing (buf[...].flatten()[idx])
+        self.has_flatten_indexing = False
+        # Track input buffers that are accessed with transposed last-2 dims
+        self.transposed_input_buffers: OrderedSet[str] = OrderedSet()
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -1604,6 +1608,7 @@ class PallasKernel(SIMDKernel):
         Build the load expression based on indexing mode.
         """
         if needs_flatten:
+            self.has_flatten_indexing = True
             # Flatten then index for non-contiguous access (gather operation)
             has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
             idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
@@ -1910,6 +1915,7 @@ class PallasKernel(SIMDKernel):
             return self._build_full_array_store_expr(out, value, needs_transpose)
 
         if needs_flatten:
+            self.has_flatten_indexing = True
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
             return [
@@ -2593,35 +2599,60 @@ class PallasKernel(SIMDKernel):
     def _can_tile_cpu_tpu(self) -> bool:
         """Check if this kernel can use tiling on CPU/TPU.
 
-        Tiling is safe when the kernel body only uses full-array access ([...])
-        and doesn't depend on iteration variable positions.  That means:
-        - No iteration variables are referenced in the kernel body
-        - No reductions (the kernel must see the full reduction dimension)
-        - No scatter outputs (indirect indexing complicates tile boundaries)
-        - Not running on GPU (GPU has its own TMA / padding path)
-        - All buffers have consistent dim-0 sizes (no mixed-dim mismatches)
+        Tiling is compatible with reductions, transpositions, and multi-range-tree
+        kernels as long as no flatten-based indexing is used (buf[...].flatten()[idx]).
+        Flatten indexing requires global flat indices which don't decompose into
+        per-tile local indices.
+
+        Reject:
+        - GPU (has its own TMA / padding path)
+        - Flatten-based indexing
+        - Scatter outputs (indirect indexing complicates tile boundaries)
         """
         if self.is_gpu:
             return False
-        if self.used_iter_vars:
-            return False
-        reduction_numel = self._compute_reduction_numel()
-        if reduction_numel is not None and reduction_numel > 1:
+        if self.has_flatten_indexing:
             return False
         if self.outputs_need_read:
             return False
-        if self.has_transposed_load:
-            return False
-
-        # Check for column-major (transposed) outputs which need jnp.transpose
-        # in the store -- incompatible with tiling.
-        if self._has_column_major_output():
-            return False
 
         # Determine the reference output shape (highest-ndim output).
-        # We tile along dim 0 of this shape; every other buffer must either
-        # share that dim 0 or be broadcast-compatible with the tiled ref.
         out_bufs = list(self.args.output_buffers.keys())
+
+        # Only check the current kernel's actual output buffers for transpose,
+        # not _has_column_major_output() which scans all graph buffers and can
+        # be triggered by unrelated intermediates (e.g., (N,1) reductions with
+        # degenerate column-major strides).
+        has_col_major_out = False
+        for buf_name in out_bufs:
+            info = self._get_buffer_info(buf_name)
+            if info is None:
+                continue
+            _, buf_size, _, actual_strides, _ = info
+            if len(actual_strides) >= 2 and len(buf_size) >= 2:
+                s0 = actual_strides[0]
+                s1 = actual_strides[1]
+                d0 = self._safe_int(buf_size[0])
+                d1 = self._safe_int(buf_size[1])
+                if (
+                    s0 is not None
+                    and s1 is not None
+                    and s0 < s1
+                    and d0 is not None
+                    and d1 is not None
+                    and d0 > 1
+                    and d1 > 1
+                ):
+                    has_col_major_out = True
+                    break
+        self.tile_has_transpose = self.has_transposed_load or has_col_major_out
+
+        # Count trailing reduction dimensions in the output shape that must
+        # not be tiled (the kernel body needs the full reduction range).
+        self.tile_skip_last_n = sum(
+            1 for tree in self.range_trees if tree.is_reduction
+        )
+
         ref_shape: list[int] = []
         for buf_name in out_bufs:
             info = self._get_buffer_info(buf_name)
@@ -2634,19 +2665,10 @@ class PallasKernel(SIMDKernel):
             if len(int_size) > len(ref_shape):
                 ref_shape = int_size  # type: ignore[assignment]
 
-        if not ref_shape or ref_shape[0] is None:
+        if not ref_shape:
             return False
-        tile_dim = ref_shape[0]
-        if tile_dim <= 0:
-            return False
+        ref_nd = len(ref_shape)
 
-        # Check every buffer for compatibility with the tiled output ref.
-        # Tiled ref shape: (TILE_SIZE, ref_shape[1], ref_shape[2], ...)
-        # A buffer is ok if:
-        #   - 0-dim (scalar)
-        #   - same ndim with matching dim 0 (will be tiled)
-        #   - lower ndim whose shape is broadcast-compatible with the tiled ref
-        tiled_trailing = ref_shape[1:]  # dims after dim 0
         all_bufs = list(self.args.input_buffers) + out_bufs
         has_tileable = False
         for buf_name in all_bufs:
@@ -2655,27 +2677,66 @@ class PallasKernel(SIMDKernel):
                 return False
             _, buf_size, _, _, _ = info
             if len(buf_size) == 0:
-                continue  # scalar, always fine
+                continue  # scalar
             int_size = [self._safe_int(s) for s in buf_size]
             if any(s is None for s in int_size):
                 return False
+            buf_nd = len(int_size)
 
-            if len(int_size) == len(ref_shape):
-                # Same ndim: dim 0 must match or be 1.
-                d0 = int_size[0]
-                if d0 == tile_dim:
-                    has_tileable = True
-                elif d0 != 1:
+            if buf_nd == ref_nd:
+                # Same ndim: check dimensions match or are broadcast (1).
+                # Allow transposed last-2 dims.
+                mismatch = False
+                for i in range(ref_nd):
+                    if int_size[i] == ref_shape[i] or int_size[i] == 1 or ref_shape[i] == 1:
+                        continue
+                    mismatch = True
+                    break
+
+                if mismatch and ref_nd >= 2:
+                    # Check if last-2 dims are swapped (transpose pattern)
+                    if (
+                        int_size[-2] == ref_shape[-1]
+                        and int_size[-1] == ref_shape[-2]
+                        and all(
+                            int_size[i] == ref_shape[i] or int_size[i] == 1 or ref_shape[i] == 1
+                            for i in range(ref_nd - 2)
+                        )
+                    ):
+                        if buf_name in self.args.input_buffers:
+                            self.transposed_input_buffers.add(buf_name)
+                    else:
+                        return False
+                elif mismatch:
                     return False
-            elif len(int_size) > len(ref_shape):
-                # Input has MORE dims than output — the kernel body will
-                # produce a higher-ndim result that can't fit the output ref.
-                return False
+
+                # At least one buffer with a tileable dim
+                if any(int_size[i] == ref_shape[i] and ref_shape[i] > 1 for i in range(ref_nd)):
+                    has_tileable = True
+
+            elif buf_nd > ref_nd:
+                # Reduction input with extra dims. Find an alignment offset k
+                # such that buf_shape[k+i] == ref_shape[i] for all i (skipping
+                # broadcast dims where ref_shape[i] == 1).
+                found = False
+                for k in range(buf_nd - ref_nd + 1):
+                    ok = True
+                    for i in range(ref_nd):
+                        if ref_shape[i] == 1:
+                            continue
+                        if int_size[k + i] != ref_shape[i]:
+                            ok = False
+                            break
+                    if ok:
+                        found = True
+                        break
+                if not found:
+                    return False
+                has_tileable = True
+
             else:
-                # Fewer dims: verify numpy-style broadcastability with the
-                # tiled ref's trailing dimensions.  Iterate from the
-                # rightmost dim of both shapes; each pair must be equal or 1.
-                for a, b in zip(reversed(int_size), reversed(tiled_trailing)):
+                # Fewer dims: verify numpy-style broadcastability
+                for a, b in zip(reversed(int_size), reversed(ref_shape)):
                     if a != b and a != 1 and b != 1:
                         return False
 
@@ -3281,9 +3342,12 @@ from torch._inductor.runtime.runtime_utils import (
         reference output shape per numpy broadcast rules.
         """
         code = ctx.code
-        input_list = ", ".join(ctx.kernel_input_params)
+        transpose_literal = "True" if self.tile_has_transpose else "False"
 
-        code.writeline("_tile, _grid, _ax2g = pallas_compute_tiling(out_shapes[0])")
+        skip_n = self.tile_skip_last_n
+        code.writeline(
+            f"_tile, _grid, _ax2g = pallas_compute_tiling(out_shapes[0], transpose={transpose_literal}, skip_last_n={skip_n})"
+        )
         code.writeline("_ng = len(_grid)")
         code.writeline("_ref = out_shapes[0]")
 
@@ -3291,11 +3355,36 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline("    pallas_make_block_spec(s, _ref, _tile, _ax2g, _ng)")
         code.writeline("    for s in out_shapes")
         code.writeline(")")
-        code.writeline("in_specs_pallas = tuple(")
-        code.writeline(
-            f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng) for i in [{input_list}]"
-        )
-        code.writeline(")")
+
+        # Build per-input swap_last_two flags for transposed buffers
+        swap_flags = []
+        for param in ctx.kernel_input_params:
+            # Map kernel param back to graph buffer name
+            buf_name = None
+            for graph_name, inner_name in self.args.input_buffers.items():
+                if inner_name == param:
+                    buf_name = graph_name
+                    break
+            is_swap = buf_name is not None and buf_name in self.transposed_input_buffers
+            swap_flags.append(is_swap)
+
+        if any(swap_flags):
+            swap_list = ", ".join(str(f) for f in swap_flags)
+            code.writeline(f"_swap_flags = [{swap_list}]")
+            input_list = ", ".join(ctx.kernel_input_params)
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline(
+                f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng, swap_last_two=s)"
+                f" for i, s in zip([{input_list}], _swap_flags)"
+            )
+            code.writeline(")")
+        else:
+            input_list = ", ".join(ctx.kernel_input_params)
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline(
+                f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng) for i in [{input_list}]"
+            )
+            code.writeline(")")
 
     def _codegen_jit_wrapper_cpu_tpu(
         self,
