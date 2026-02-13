@@ -85,27 +85,6 @@ from .cpp_utils import (
 
 _IS_WINDOWS = sys.platform == "win32"
 
-# Fallback hints for GEMM template loop variables. These sympy index symbols
-# are created by CppTemplateKernel.slice_nd → parse_expr_with_index_symbols
-# and are internal to C++ GEMM codegen (not tracked by ShapeEnv).
-_GEMM_TEMPLATE_FALLBACK_HINTS = {
-    sympy_index_symbol(name): 8192
-    for name in [
-        "m_start",
-        "m_end",
-        "n_start",
-        "n_end",
-        "k_start",
-        "k_end",
-        "m_size",
-        "n_size",
-        "m_offset",
-        "m_start_unsliced",
-        "m_end_unsliced",
-        "m_size_unsliced",
-    ]
-}
-
 
 @functools.cache
 def get_export_declaration():
@@ -2401,13 +2380,6 @@ class CppKernel(Kernel):
     def size_hint(self):
         assert self.call_ranges is not None
         expr = sympy_product(self.call_ranges)
-        # call_ranges may contain GEMM template loop variables (e.g. m_start,
-        # m_end, n_start, n_end) created by CppTemplateKernel.slice_nd via
-        # parse_expr_with_index_symbols. These are codegen-internal symbols,
-        # not tensor shape symbols, so ShapeEnv is unaware of them (no entry
-        # in backed_var_to_val or var_to_range). Substitute them with a
-        # fallback before calling optimization_hint.
-        expr = sympy_subs(expr, _GEMM_TEMPLATE_FALLBACK_HINTS)
         return V.graph.sizevars.optimization_hint(expr)
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):

@@ -206,7 +206,7 @@ def compute_size_for_scheduler_buffer(
             return size_alloc
         else:
             buf_size = V.graph.sizevars.optimization_hint(
-                sched_buf.node.get_numel()
+                sched_buf.node.get_numel(), fallback=0
             ) * get_dtype_size(sched_buf.node.get_dtype())
             sched_buf_to_size[sched_buf.get_name()] = (
                 0 if user_of_MultiOutputLayout else buf_size,

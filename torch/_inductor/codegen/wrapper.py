@@ -728,7 +728,7 @@ class EfficientPeakEstimate:
 
     def _get_size(self, node: BufferLike) -> int:
         return V.graph.sizevars.optimization_hint(
-            V.graph.get_allocation_storage_size(node)
+            V.graph.get_allocation_storage_size(node), fallback=0
         ) * get_dtype_size(node.get_dtype())
 
     def peak_between(self, line_a: FreeIfNotReusedLine, line_b: AllocateLine):
