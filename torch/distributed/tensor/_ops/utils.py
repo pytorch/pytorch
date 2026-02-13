@@ -523,9 +523,11 @@ def expand_to_full_mesh_op_strategy(
             else:
                 raise RuntimeError("output spec is None")
 
-        # check all inputs are shardable
+        # check all inputs are shardable (skip check if input already has
+        # the proposed placement, since data is already distributed that way)
         if not all(
-            is_tensor_shardable(
+            inp.strategies[0].output_spec.placements == s.placements
+            or is_tensor_shardable(
                 inp.shape, s, allow_unbacked_sharding=allow_unbacked_sharding
             )
             for inp, s in zip(input_args_strategy, input_specs)
