@@ -9,7 +9,11 @@ from operator import mul
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
+    parametrize as parametrize_test,
     run_tests,
     skipIfNoLapack,
     skipIfTorchDynamo,
@@ -131,20 +135,6 @@ class TestNNInit(TestCase):
 
             if not self._is_normal(input_tensor, mean, std):
                 raise AssertionError("Expected normal distribution")
-
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
-    def test_trunc_normal(self):
-        for dims in [1, 2, 4]:
-            input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
-            mean = self._random_float(-3, 3)
-            std = self._random_float(0.01, 1)
-            a = self._random_float(mean - 2 * std, mean)
-            b = self._random_float(mean, mean + 2 * std)
-            init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
-
-            if not self._is_trunc_normal(input_tensor, mean, std, a, b):
-                raise AssertionError("Expected truncated normal distribution")
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
@@ -550,6 +540,111 @@ class TestNNInit(TestCase):
             msg="methods not suffixed with underscore should be deprecated",
         ):
             fn()
+
+
+class TestNNInitDeviceType(TestCase):
+    def _is_trunc_normal(self, tensor, mean, std, a, b):
+        z_samples = (tensor.view(-1) - mean) / std
+        z_samples = z_samples.tolist()
+        a0 = (a - mean) / std
+        b0 = (b - mean) / std
+        p_value = stats.kstest(z_samples, "truncnorm", args=(a0, b0))[1]
+        return p_value > 0.0001
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
+    @parametrize_test("dims", [1, 2, 4])
+    @parametrize_test(
+        "dtype",
+        [torch.float32, torch.float64, torch.float16, torch.bfloat16],
+    )
+    def test_trunc_normal_all_dtypes(self, device, dims, dtype):
+        size = [random.randint(30, 50) for _ in range(dims)]
+        input_tensor = torch.zeros(size, dtype=dtype, device=device)
+        mean = random.uniform(-3, 3)
+        std = random.uniform(0.01, 1)
+        a = random.uniform(mean - 2 * std, mean)
+        b = random.uniform(mean, mean + 2 * std)
+        init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
+
+        self.assertTrue(
+            input_tensor.min().item() >= a,
+            f"{dtype}: values below lower bound a={a}",
+        )
+        self.assertTrue(
+            input_tensor.max().item() <= b,
+            f"{dtype}: values above upper bound b={b}",
+        )
+        self.assertTrue(
+            self._is_trunc_normal(input_tensor.float().cpu(), mean, std, a, b),
+            f"{dtype}: failed KS test against truncated normal",
+        )
+
+    # Sanity check for trunc normal to ensure that we sample a decent
+    # subset of the value space.
+    @parametrize_test(
+        "dtype,min_unique",
+        [
+            (torch.float32, 5000),
+            (torch.float64, 5000),
+            (torch.float16, 3000),
+            (torch.bfloat16, 1000),
+        ],
+    )
+    def test_trunc_normal_unique_values(self, device, dtype, min_unique):
+        n = 10000
+        t = torch.empty(n, dtype=dtype, device=device)
+        init.trunc_normal_(t, mean=0.0, std=1.0, a=-2.0, b=2.0)
+
+        self.assertTrue(
+            t.min().item() >= -2.0,
+            f"{dtype}: values below lower bound",
+        )
+        self.assertTrue(
+            t.max().item() <= 2.0,
+            f"{dtype}: values above upper bound",
+        )
+
+        unique = t.unique().numel()
+        self.assertGreater(
+            unique,
+            min_unique,
+            f"{dtype}: only {unique} unique values, expected > {min_unique}",
+        )
+
+        self.assertFalse(
+            t.isinf().any().item(),
+            f"{dtype}: trunc_normal_ produced inf values",
+        )
+        self.assertFalse(
+            t.isnan().any().item(),
+            f"{dtype}: trunc_normal_ produced nan values",
+        )
+
+    # Sanity check that we don't round to the boundary by mistake
+    @parametrize_test(
+        "dtype",
+        [torch.float32, torch.float64, torch.float16, torch.bfloat16],
+    )
+    def test_trunc_normal_no_boundary_values_small_std(self, device, dtype):
+        t = torch.empty(10000, dtype=dtype, device=device)
+        init.trunc_normal_(t, mean=0.0, std=0.1, a=-2.0, b=2.0)
+
+        at_lower = (t == -2.0).sum().item()
+        at_upper = (t == 2.0).sum().item()
+        self.assertEqual(
+            at_lower,
+            0,
+            f"{dtype}: {at_lower} values clamped to lower bound a=-2.0",
+        )
+        self.assertEqual(
+            at_upper,
+            0,
+            f"{dtype}: {at_upper} values clamped to upper bound b=2.0",
+        )
+
+
+instantiate_device_type_tests(TestNNInitDeviceType, globals())
 
 
 if __name__ == "__main__":
