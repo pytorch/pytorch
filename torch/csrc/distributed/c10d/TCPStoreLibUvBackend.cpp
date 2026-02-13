@@ -685,6 +685,11 @@ class LibUVStoreDaemon : public BackgroundThread {
   int64_t queueLen(const std::string& queueName);
   std::vector<std::string> listKeys();
 
+  bool barrier(
+      const std::string& key,
+      int64_t worldSize,
+      const c10::intrusive_ptr<UvHandle>& client);
+
   void registerClient(const c10::intrusive_ptr<UvHandle>& client);
   void unregisterClient(const c10::intrusive_ptr<UvHandle>& client);
   void clearClientWaitState(const c10::intrusive_ptr<UvHandle>& client);
@@ -825,6 +830,10 @@ class UvClient : public UvTcpSocket {
             break;
           case QueryType::LIST_KEYS:
             if (!parse_list_keys_command())
+              return;
+            break;
+          case QueryType::BARRIER:
+            if (!parse_barrier_command())
               return;
             break;
           default:
@@ -1179,6 +1188,30 @@ class UvClient : public UvTcpSocket {
       sw.write_string(key);
     }
     sw.send();
+    return true;
+  }
+
+  bool parse_barrier_command() {
+    std::string key;
+    if (!stream.read_key(key))
+      return false;
+
+    int64_t worldSize = 0;
+    if (!stream.read_value(worldSize))
+      return false;
+
+    C10D_TRACE(
+        "barrier key:{} worldSize:{} address:{}",
+        key,
+        worldSize,
+        this->address());
+
+    if (store->barrier(key, worldSize, iptr())) {
+      StreamWriter sw(iptr());
+      sw.write1(static_cast<uint8_t>(WaitResponseType::STOP_WAITING));
+      sw.send();
+    }
+
     return true;
   }
 
@@ -1568,6 +1601,33 @@ std::vector<std::string> LibUVStoreDaemon::listKeys() {
     keys.push_back(kv.first);
   }
   return keys;
+}
+
+bool LibUVStoreDaemon::barrier(
+    const std::string& key,
+    int64_t worldSize,
+    const c10::intrusive_ptr<UvHandle>& client) {
+  // Atomically increment the barrier counter
+  auto it = tcpStore_.find(key);
+  int64_t count = 1;
+  if (it != tcpStore_.end()) {
+    auto buf = reinterpret_cast<const char*>(it->second.data());
+    auto len = it->second.size();
+    count = std::stoll(std::string(buf, len)) + 1;
+  }
+  auto countStr = std::to_string(count);
+  tcpStore_[key] = std::vector<uint8_t>(countStr.begin(), countStr.end());
+
+  if (count >= worldSize) {
+    // Wake up all previously waiting clients
+    wakeupWaitingClients(key);
+    return true; // Caller should send STOP_WAITING to this client
+  } else {
+    // Register this client to wait for remaining workers
+    waitingSockets_[key].push_back(client);
+    keysAwaited_[client] = 1;
+    return false;
+  }
 }
 
 #endif

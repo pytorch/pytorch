@@ -261,6 +261,13 @@ class StoreTestBase:
         self.assertIn("foo", keys)
         self.assertIn("baz", keys)
 
+    def _test_barrier(self, store):
+        # Barrier with world_size=1 should return immediately
+        store.barrier("test_barrier_key", 1)
+
+    def test_barrier(self):
+        self._test_barrier(self._create_store())
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -641,6 +648,42 @@ class TCPStoreTest(TestCase, StoreTestBase):
         del os.environ[MASTER_PORT]
 
         self.assertEqual(second_server.port, store.port)
+
+    def test_barrier(self):
+        store = self._create_store()
+        # Single worker barrier should return immediately
+        store.barrier("test_barrier_key", 1)
+
+    def test_barrier_with_timeout(self):
+        store = self._create_store()
+        store.barrier("test_barrier_timeout_key", 1, timedelta(seconds=10))
+
+    def test_barrier_timeout_expires(self):
+        store = self._create_store()
+        with self.assertRaisesRegex(DistStoreError, "barrier timeout"):
+            store.barrier("test_barrier_fail", 2, timedelta(seconds=0.1))
+
+    def test_barrier_multi_worker(self):
+        server_store = self._create_store()
+        world_size = 4
+
+        def worker(rank):
+            if rank == 0:
+                worker_store = server_store
+            else:
+                worker_store = dist.TCPStore(
+                    host_name=server_store.host,
+                    port=server_store.port,
+                    is_master=False,
+                    wait_for_workers=False,
+                    use_libuv=self._use_libuv,
+                )
+            worker_store.barrier("multi_barrier", world_size, timedelta(seconds=10))
+
+        with ThreadPoolExecutor(max_workers=world_size) as pool:
+            futures = [pool.submit(worker, i) for i in range(world_size)]
+            for f in futures:
+                f.result()
 
 
 class LibUvTCPStoreTest(TCPStoreTest):

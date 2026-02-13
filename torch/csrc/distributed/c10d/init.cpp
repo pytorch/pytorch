@@ -1676,7 +1676,41 @@ Returns a list of all keys in the store.
           .def(
               "has_extended_api",
               &::c10d::Store::hasExtendedApi,
-              R"(Returns true if the store supports extended operations.)");
+              R"(Returns true if the store supports extended operations.)")
+          .def(
+              "barrier",
+              [](::c10d::Store& store,
+                 const std::string& key,
+                 int64_t world_size,
+                 const std::optional<std::chrono::milliseconds>& timeout) {
+                if (timeout.has_value()) {
+                  store.barrier(key, world_size, *timeout);
+                } else {
+                  store.barrier(key, world_size);
+                }
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              py::arg("key"),
+              py::arg("world_size"),
+              py::arg("timeout") = py::none(),
+              R"(
+Barrier operation that blocks until ``world_size`` workers have called it
+with the same ``key``. If ``timeout`` is not specified, the store's default
+timeout is used.
+
+Arguments:
+    key (str): The unique key for this barrier instance.
+    world_size (int): The number of workers that must call barrier before it unblocks.
+    timeout (timedelta, optional): Time to wait before throwing an exception. Defaults to store timeout.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> # This will return immediately since world_size=1
+    >>> store.barrier("my_barrier", 1)
+    >>> store.barrier("my_barrier2", 1, timedelta(seconds=10))
+)");
 
   intrusive_ptr_class_<::c10d::FileStore>(
       module,
