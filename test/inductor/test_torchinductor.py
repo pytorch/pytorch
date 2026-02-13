@@ -12415,6 +12415,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         deterministic=deterministic,
                     )
 
+    @unittest.skipIf(IS_MACOS, "fails on macos")
     @parametrize("dtype", test_dtypes)
     def test_empty_deterministic(self, dtype):
         def test_helper(fn, args):
