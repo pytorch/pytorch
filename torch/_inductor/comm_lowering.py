@@ -405,8 +405,7 @@ def register_comm_lowerings():
     @register_comm_lowering(c10d.isend)  # type: ignore[misc]
     def _isend(inp, dst, tag, group_name):
         inp = ir.ExternKernel.require_contiguous(inp)
-        # isend is read-only — don't mark the buffer as mutated.
-        # This avoids false dependencies that prevent comm/compute overlap.
+        # don't mark buffer as mutated
         kernel = c10d.isend.default
         with V.graph.fake_mode:
             (
@@ -440,11 +439,7 @@ def register_comm_lowerings():
     @register_comm_lowering(c10d.batch_p2p_ops)  # type: ignore[misc]
     def _batch_p2p_ops(op_list, peer_list, tag_list, tensors, group_name):
         tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
-        # batch_p2p_ops has non-tensor args before tensor args in its schema:
-        #   (str[] op_list, int[] peer_list, int[] tag_list,
-        #    Tensor[] tensors, str group_name)
-        # create_inplace assumes inputs (tensors) come first, so we inline
-        # the logic with args in schema order.
+        # batch_p2p_ops has non-tensor args before tensor args in its schema
         kernel = c10d.batch_p2p_ops.default
         with V.graph.fake_mode:
             (
@@ -454,12 +449,15 @@ def register_comm_lowerings():
                 unflatten_args,
                 unbacked_bindings,
             ) = ir._CollectiveKernel.process_kernel(
-                kernel, op_list, peer_list, tag_list, tensors, group_name,
+                kernel,
+                op_list,
+                peer_list,
+                tag_list,
+                tensors,
+                group_name,
             )
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
-        # Only mark irecv buffers as mutated. isend buffers are read-only —
-        # marking them as mutated creates false dependencies that prevent
-        # comm/compute overlap.
+        # Only mark irecv buffers as mutated; let's avoid false dependencies
         for op, tensor_arg in zip(op_list, tensor_args):
             tensor_arg.realize()
             if op == "irecv":
@@ -480,7 +478,6 @@ def register_comm_lowerings():
                 )
                 packed.alias_names.append(t.get_name())
         return tensors
- 
 
 
 def register_symm_mem_lowerings():
