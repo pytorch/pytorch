@@ -1447,7 +1447,9 @@ except RuntimeError as e:
     # - Passes on RHEL 9.6 (segfault triggers correctly)
     # - Fails on Ubuntu (process may not terminate as expected)
     # Skipping on Linux due to kernel/distribution-dependent segfault behavior.
-    @unittest.skipIf(IS_LINUX, "Segfault behavior is inconsistent across Linux distributions")
+    @unittest.skipIf(
+        IS_LINUX, "Segfault behavior is inconsistent across Linux distributions"
+    )
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
