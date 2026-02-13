@@ -8740,6 +8740,42 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # Should compile successfully with fullgraph=True
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_property_from_base_class(self):
+        class Base:
+            @property
+            def scale(self):
+                return self._scale
+
+            @property
+            def offset(self):
+                return self._offset
+
+        class Middle(Base):
+            pass
+
+        class A(Middle):
+            def __init__(self, x):
+                self._scale = x
+                self._offset = x + 1
+
+        class B(Middle):
+            def __init__(self, x):
+                self._scale = x * 2
+                self._offset = x * 3
+
+        def fn(x, a, b):
+            return x * a.scale + x * b.scale + a.offset + b.offset
+
+        a = A(2.0)
+        b = B(3.0)
+        x = torch.randn(4)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        result = opt_fn(x, a, b)
+        self.assertEqual(result, fn(x, a, b))
+        self.assertEqual(cnt.frame_count, 1)
+
 
 instantiate_parametrized_tests(ReproTests)
 
