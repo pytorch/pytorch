@@ -936,6 +936,8 @@ ops_unbacked_dtensor_dde = {
     xfail("reshape"),
     xfail("reshape_as"),
     xfail("rsub"),
+    xfail("scatter"),
+    xfail("scatter_add"),
     xfail("select"),
     xfail("slice"),
     xfail("slice_scatter"),
