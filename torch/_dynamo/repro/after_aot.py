@@ -20,6 +20,7 @@ the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import functools
 import io
@@ -39,8 +40,11 @@ import sympy
 
 
 try:
+    import triton.language as tl
     from triton.runtime.autotuner import Autotuner, Heuristics
     from triton.runtime.jit import JITFunction
+
+    TritonConstexpr = tl.constexpr
 except ImportError:
 
     class Autotuner:  # type: ignore[no-redef]
@@ -50,6 +54,9 @@ except ImportError:
         pass
 
     class Heuristics:  # type: ignore[no-redef]
+        pass
+
+    class TritonConstexpr:  # type: ignore[no-redef]
         pass
 
 
@@ -103,6 +110,126 @@ log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
+
+
+def _extract_distributed_info(
+    gm: torch.fx.GraphModule,
+) -> dict[str, dict[str, int]]:
+    """
+    Extract process group information from distributed ops in the graph.
+
+    Returns a dict mapping group names to dicts with 'size' and 'rank' keys.
+    Example: {'tp': {'size': 4, 'rank': 0}, 'dp': {'size': 2, 'rank': 0}}
+    """
+    from torch.fx.operator_schemas import normalize_function
+
+    group_info: dict[str, dict[str, int]] = {}
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+        if not isinstance(node.target, OpOverload):
+            continue
+        if node.target.namespace not in {"_c10d_functional", "c10d_functional"}:
+            continue
+
+        opt_args_kwargs = normalize_function(
+            node.target,
+            args=node.args,
+            kwargs=node.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is None:
+            continue
+        _, kwargs = opt_args_kwargs
+
+        group_name = kwargs.get("group_name")
+        if group_name is None:
+            continue
+
+        if group_name in group_info:
+            continue
+
+        from torch.distributed.distributed_c10d import (
+            _get_group_size_by_name,
+            _resolve_process_group,
+        )
+
+        group_size = _get_group_size_by_name(group_name)
+        pg = _resolve_process_group(group_name)
+        rank = pg.rank()
+        group_info[group_name] = {"size": group_size, "rank": rank}
+
+    return group_info
+
+
+def setup_fake_process_groups(
+    group_info: dict[str, dict[str, int]],
+) -> None:
+    """
+    Set up fake process groups for repro execution.
+
+    Args:
+        group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
+    """
+    import torch.distributed as dist
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    if not group_info:
+        return
+
+    world_size = max(info["size"] for info in group_info.values())
+
+    global_rank = 0
+    for info in group_info.values():
+        if info["size"] == world_size:
+            global_rank = info["rank"]
+            break
+
+    store = FakeStore()
+    dist.init_process_group(
+        backend="fake",
+        rank=global_rank,
+        world_size=world_size,
+        store=store,
+    )
+
+    default_pg = dist.distributed_c10d._get_default_group()
+    torch._C._distributed_c10d._unregister_all_process_groups()
+
+    for group_name, info in group_info.items():
+        group_size = info["size"]
+        if group_size == world_size:
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, default_pg)
+        else:
+            ranks = list(range(group_size))
+            new_pg = dist.new_group(ranks)
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, new_pg)
+
+
+def generate_standalone_repro(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    *,
+    save_path: Optional[str] = None,
+) -> str:
+    """
+    Generate a self-contained repro script from an FX graph.
+    """
+    buf = io.StringIO()
+    save_graph_repro(buf, gm, args, "inductor", save_dir=None)
+    repro = buf.getvalue()
+
+    if save_path is not None:
+        with open(save_path, "w") as f:
+            f.write(repro)
+        log.info("Saved standalone repro to %s", save_path)
+
+    return repro
+
+
 use_buck = is_fbcode()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -303,6 +430,44 @@ python_binary(
         return ""
 
 
+def generate_custom_triton_kernel(kernel: Any) -> str:
+    res = ""
+    if isinstance(kernel, Autotuner):
+        # pyrefly: ignore [missing-attribute]
+        if isinstance(kernel.fn, Heuristics):
+            res += "ERROR: Repro will not work as intended, "
+            res += "triton.runtime.autotuner.Heuristics is not currently supported\n"
+            return res
+
+        config_strs = []
+        # pyrefly: ignore [missing-attribute]
+        for kernel_config in kernel.configs:
+            # pyrefly: ignore [bad-argument-type]
+            config_strs.append(f"""triton.Config(
+                    {str(kernel_config.kwargs)},
+                    num_warps={kernel_config.num_warps},
+                    num_stages={kernel_config.num_stages},
+                )""")
+
+        config_str = ",".join(config_strs)
+        res += textwrap.dedent(f"""
+        @triton.autotune(
+            configs=[
+                {config_str}
+            ],
+            key=[]
+        )
+        """).strip()
+
+    # pyrefly: ignore [missing-attribute]
+    src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+    res += "\n@triton.jit\n"
+    res += src_code
+    res += "\n"
+
+    return res
+
+
 def generate_compiler_repro_string(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
@@ -380,52 +545,90 @@ if "__compile_source__" in globals():
     kernel_side_table_prefix = (
         "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
     )
-    # Track which grid entry corresponds to the best config
-    for id in kernel_side_table.id_to_kernel:
-        kernel = kernel_side_table.get_kernel(id)
+
+    def get_fn_name(kernel: Any) -> str:
+        fn_name = (
+            # pyrefly: ignore [missing-attribute]
+            kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
+        )
+        return fn_name.split(".")[-1]
+
+    def write_kernel_dependencies(
+        kernel: Any,
+        written_constexpr_vars: set[str],
+        written_nested_kernels: set[str],
+    ) -> str:
+        """Write out global tl.constexpr vars and nested kernel dependencies."""
+        result = ""
+        jit_fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        if not getattr(jit_fn, "fn", None) or not getattr(jit_fn, "src", None):
+            return result
+
+        fn_globals = getattr(jit_fn.fn, "__globals__", {})
+        src = jit_fn.src  # pyrefly: ignore [missing-attribute]
+        full_src = src if src.strip().startswith("def ") else "def " + src
+
+        referenced_names: set[str] = set()
+        called_names: set[str] = set()
+        for node in ast.walk(ast.parse(full_src)):
+            if isinstance(node, ast.Name):
+                referenced_names.add(node.id)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                called_names.add(node.func.id)
+
+        # Write out global tl.constexpr variables
+        for name in referenced_names:
+            if name in written_constexpr_vars:
+                continue
+            val = fn_globals.get(name)
+
+            if isinstance(val, TritonConstexpr) and getattr(val, "value", None):
+                result += f"{name} = tl.constexpr({val.value})\n"
+            elif isinstance(val, (int, float, str, bool)):
+                result += f"{name} = {val!r}\n"
+            else:
+                continue
+            written_constexpr_vars.add(name)
+
+        # Write out nested kernel dependencies
+        for name in called_names:
+            val = fn_globals.get(name)
+            if not isinstance(val, JITFunction) or val is jit_fn:
+                continue
+            nested_fn_name = get_fn_name(val)
+            if nested_fn_name in written_nested_kernels:
+                continue
+            # Mark as written before recursing to prevent cycles
+            written_nested_kernels.add(nested_fn_name)
+            result += write_kernel_dependencies(
+                val, written_constexpr_vars, written_nested_kernels
+            )
+            result += generate_custom_triton_kernel(val)
+
+        return result
+
+    written_nested_kernels: set[str] = set()
+    written_constexpr_vars: set[str] = set()
+
+    model_str += f"{kernel_side_table_prefix}.reset_table()\n"
+
+    for idx in kernel_side_table.id_to_kernel:
+        kernel = kernel_side_table.get_kernel(idx)
 
         try:
-            if isinstance(kernel, Autotuner):
-                # pyrefly: ignore [missing-attribute]
-                if isinstance(kernel.fn, Heuristics):
-                    model_str += "ERROR: Repro will not work as intended, "
-                    model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
-                    break
-
-                config_strs = []
-                # pyrefly: ignore [missing-attribute]
-                for kernel_config in kernel.configs:
-                    # pyrefly: ignore [bad-argument-type]
-                    config_strs.append(f"""triton.Config(
-                            {str(kernel_config.kwargs)},
-                            num_warps={kernel_config.num_warps},
-                            num_stages={kernel_config.num_stages},
-                        )""")
-
-                config_str = ",".join(config_strs)
-                model_str += textwrap.dedent(f"""
-                @triton.autotune(
-                    configs=[
-                        {config_str}
-                    ],
-                    key=[]
-                )
-                """).strip()
-
-            model_str += "\n@triton.jit\n"
-            # pyrefly: ignore [missing-attribute]
-            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
-            fn_name = (
-                # pyrefly: ignore [missing-attribute]
-                kernel._fn_name
-                if isinstance(kernel, JITFunction)
-                else kernel.fn._fn_name
+            model_str += write_kernel_dependencies(
+                kernel, written_constexpr_vars, written_nested_kernels
             )
-            fn_name = fn_name.split(".")[-1]
+            fn_name = get_fn_name(kernel)
 
-            model_str += src_code
-            model_str += "\n"
-            model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
+            unique_name = f"{fn_name}_{idx}"
+
+            kernel_code = generate_custom_triton_kernel(kernel)
+            kernel_code = kernel_code.replace(
+                f"def {fn_name}(", f"def {unique_name}(", 1
+            )
+            model_str += kernel_code
+            model_str += f"{kernel_side_table_prefix}.add_kernel({unique_name})\n"
         except AttributeError as e:
             model_str += "ERROR: Repro will not work as intended, "
             model_str += f"User defined triton kernel exception: {e}\n"
@@ -438,6 +641,7 @@ if "__compile_source__" in globals():
     model_str += NNModuleToString.convert(gm)
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
+    # pyrefly: ignore [implicit-any]
     used_syms = {}
 
     # Extract from graph placeholders and their corresponding arguments
@@ -539,13 +743,9 @@ def save_graph_repro(
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
 
-    # Check if the graph contains distributed operations
-    has_distributed_ops = any(
-        node.op == "call_function"
-        and isinstance(node.target, OpOverload)
-        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
-        for node in gm.graph.nodes
-    )
+    # Extract distributed info from the graph
+    distributed_info = _extract_distributed_info(gm)
+    has_distributed_ops = len(distributed_info) > 0
 
     fd.write(
         generate_compiler_repro_string(
@@ -571,15 +771,9 @@ def save_graph_repro(
     # Add distributed initialization before run_repro if needed
     if has_distributed_ops:
         fd.write(
-            "    # Initialize FakeProcessGroup for distributed operations\n"
-            "    store = FakeStore()\n"
-            "    dist.init_process_group(\n"
-            '        backend="fake",\n'
-            "        rank=0,\n"
-            "        world_size=2,\n"
-            "        store=store\n"
-            "    )\n"
+            "    from torch._dynamo.repro.after_aot import setup_fake_process_groups\n"
         )
+        fd.write(f"    setup_fake_process_groups({distributed_info!r})\n")
 
     fd.write(
         f"    with torch.no_grad():\n"

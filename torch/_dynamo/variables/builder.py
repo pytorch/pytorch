@@ -32,6 +32,7 @@ import operator
 import random
 import re
 import sys
+import time
 import types
 import weakref
 from collections.abc import Callable, MutableMapping
@@ -60,6 +61,7 @@ from torch._library.opaque_object import (
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
+    should_hoist,
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
@@ -131,6 +133,7 @@ from ..source import (
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
+    SkipGuardSource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
@@ -215,6 +218,7 @@ from .functions import (
     FunctoolsWrapsVariable,
     SysFunctionVariable,
     TritonKernelVariable,
+    TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
@@ -291,6 +295,7 @@ from .torch_function import (
 )
 from .user_defined import (
     FrozenDataClassVariable,
+    InspectVariable,
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
@@ -479,6 +484,15 @@ class VariableBuilder:
         self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value: object) -> VariableTracker:
+        _t0 = time.time_ns()
+        try:
+            return self._call_impl(value)
+        finally:
+            self.tx.output.bytecode_tracing_timings.variable_builder_call_ns += (
+                time.time_ns() - _t0
+            )
+
+    def _call_impl(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
@@ -498,7 +512,7 @@ class VariableBuilder:
                 side_effect_result.set_nn_module_stack_source(self.source)
             return side_effect_result
 
-        cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
+        cached_vt = self.tx.output.variable_tracker_cache.get(self.source)
         if cached_vt:
             # If allow_lazy_constant=False but the cached VT is a lazy variable,
             # we need to rebuild to get a non-lazy version. This happens when
@@ -532,7 +546,13 @@ class VariableBuilder:
         ):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
-        self.tx.output.variable_tracker_cache.add(value, self.source, vt)
+        # Skip caching for JVP_NESTING source because
+        # JvpIncrementNestingCtxManagerVariable hides global JVP mutation from
+        # Dynamo, resulting in stale value. We attempted a fix in
+        # https://github.com/pytorch/pytorch/pull/174329 but it exposed other
+        # issues.  This only affects cache hit rate, NOT correctness.
+        if "JVP_NESTING" not in self.source.name:
+            self.tx.output.variable_tracker_cache[self.source] = vt
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt: VariableTracker) -> bool:
@@ -590,8 +610,10 @@ class VariableBuilder:
         ]
 
         if trace_numpy and np:
+            # pyrefly: ignore [bad-argument-type]
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, tuple) else (ts,):
@@ -647,9 +669,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -686,6 +706,7 @@ class VariableBuilder:
             (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, (tuple, list)) else (ts,):
@@ -730,6 +751,9 @@ class VariableBuilder:
             def from_tensor() -> None:
                 pass
 
+        def set_allocator() -> None:
+            pass
+
         if has_triton_experimental_host_tma():
             from triton.tools.experimental_descriptor import (  # noqa: F811
                 create_1d_tma_descriptor,
@@ -737,6 +761,11 @@ class VariableBuilder:
             )
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
+        if has_triton():
+            import triton as triton_mod
+
+            if hasattr(triton_mod, "set_allocator"):
+                set_allocator = triton_mod.set_allocator  # noqa: F811
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -822,7 +851,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1346,6 +1375,8 @@ class VariableBuilder:
             return CreateTMADescriptorExperimentalVariable(rank=2)
         elif value is TensorDescriptor.from_tensor:
             return CreateTMADescriptorStableVariable()
+        elif value is set_allocator:
+            return TritonSetAllocatorSkipVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1594,7 +1625,7 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
-            if is_opaque_value_type(type(value)):
+            if is_opaque_value_type(type(value)) and not should_hoist(type(value)):
                 proxy = value
             else:
                 proxy = self.tx.output.root_tracer.create_graph_input(
@@ -1635,7 +1666,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -1802,7 +1833,14 @@ class VariableBuilder:
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        result = UserDefinedObjectVariable(value, source=self.source)
+        if InspectVariable.is_matching_object(value):
+            # Skip guards on inspect related variable trackers because they are
+            # not important for recompiles (something else will also change to
+            # cause recompiles) and can cause a large number of OBJECT_ALIASING
+            # guards.
+            result = InspectVariable(value, source=SkipGuardSource(self.source))
+        else:
+            result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
             # don't allow STORE_ATTR mutation with custom __setattr__
             return result
@@ -1811,15 +1849,6 @@ class VariableBuilder:
     def wrap_listlike(
         self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
     ) -> VariableTracker:
-        for item in value:
-            if item is value:
-                unimplemented(
-                    gb_type="list elements are pointing to the list itself",
-                    context="",
-                    explanation="Dynamo does not support lists whose items reference to itself",
-                    hints=["Avoid using self referential list"],
-                )
-
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -2962,6 +2991,7 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
             base_src = AttrSource(obj.source, "__dataclass_fields__")
             source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
+    # pyrefly: ignore [bad-argument-type]
     return TupleVariable(items)
 
 
@@ -3610,9 +3640,12 @@ def record_automatic_dynamic(
         candidates = {}
         for i_stride, neg_i in pending:
             i = -neg_i
+            # pyrefly: ignore [unsupported-operation]
             stride[i] = candidates.get(i_stride, i_stride)
+            # pyrefly: ignore [no-matching-overload]
             candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
+        # pyrefly: ignore [implicit-any]
         stride = []
 
     return process_automatic_dynamic(
@@ -3756,6 +3789,7 @@ def _automatic_dynamic(
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
     t_id = id(e)
+    # pyrefly: ignore [implicit-any]
     dim2constraint = {}
 
     def update_dim2constraint(
@@ -3825,7 +3859,9 @@ def _automatic_dynamic(
             # into the mutable state
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
+            # pyrefly: ignore [unsupported-operation]
             mark_size[i] = auto_dynamic
+            # pyrefly: ignore [bad-argument-type]
             frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
@@ -3930,6 +3966,7 @@ def _automatic_dynamic(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
+        # pyrefly: ignore [bad-argument-type]
         constraint_strides=constraint_strides,
         specialize_on=specialize_on,
         view_base_context=view_base_context,
@@ -3941,6 +3978,25 @@ def _automatic_dynamic(
 
 # See note [Tensor Fakification and Symbol Caching]
 def wrap_to_fake_tensor_and_record(
+    e: Any,
+    tx: "InstructionTranslatorBase",
+    *,
+    source: Source | None,
+    is_tensor: bool,
+    parent_context: Any | None = None,
+) -> Any:
+    _t0 = time.time_ns()
+    try:
+        return _wrap_to_fake_tensor_and_record_impl(
+            e, tx, source=source, is_tensor=is_tensor, parent_context=parent_context
+        )
+    finally:
+        tx.output.bytecode_tracing_timings.wrap_to_fake_tensor_and_record_ns += (
+            time.time_ns() - _t0
+        )
+
+
+def _wrap_to_fake_tensor_and_record_impl(
     e: Any,
     tx: "InstructionTranslatorBase",
     *,
@@ -4069,8 +4125,38 @@ class SourcelessBuilder:
     def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
+    @overload
     @staticmethod
-    def create(tx: "InstructionTranslator", value: Any) -> VariableTracker:
+    def create(
+        tx: "InstructionTranslatorBase",
+        value: type[set[Any]]
+        | type[dict[Any, Any]]
+        | type[tuple[Any, ...]]
+        | type[list[Any]],
+    ) -> BuiltinVariable: ...
+
+    @overload
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: list[Any]) -> ListVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: tuple[Any, ...]
+    ) -> TupleVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: bool | int | float | str
+    ) -> ConstantVariable: ...
+
+    @overload
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker: ...
+
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
         value_type = type(value)
         # type: ignore[attr-defined]
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
@@ -4129,6 +4215,7 @@ class SourcelessBuilder:
             assert getattr(value.__self__, value.__func__.__name__) == value
             cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
             try:
+                # pyrefly: ignore[bad-argument-type]
                 return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
             except NotImplementedError:
                 pass  # failthrough to unimplemented branch
