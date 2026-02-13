@@ -723,7 +723,7 @@ class HalideKernel(SIMDKernel):
         assert not (
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
-        size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)  # type: ignore[arg-type]
+        size_hint = functools.partial(V.graph.sizevars.optimization_hint, fallback=inf)  # type: ignore[arg-type]
         # pyrefly: ignore [bad-assignment]
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = OrderedSet[Any]()
@@ -996,7 +996,9 @@ class HalideKernel(SIMDKernel):
             dims.append(expr_to_dimension(expr, syms))
         for sym, expr in split_expr.items():
             dims.append(expr_to_dimension(expr, [sym]))
-        dims.sort(key=lambda d: V.graph.sizevars.size_hint(d.stride, fallback=inf))  # type: ignore[arg-type]
+        dims.sort(
+            key=lambda d: V.graph.sizevars.optimization_hint(d.stride, fallback=inf)
+        )  # type: ignore[arg-type]
 
         if not dims:  # scalar load/store
             if self.has_indirect_indexing:
