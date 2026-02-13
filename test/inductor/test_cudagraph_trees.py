@@ -3202,6 +3202,30 @@ if HAS_CUDA_AND_TRITON:
             # Both segments disabled, no cudagraphs
             self.assertIsNone(self.get_manager())
 
+        def test_cudagraph_annotation_deeply_nested(self):
+            """Annotation on an innermost function propagates through
+            nested inlining to disable cudagraphs for the whole graph."""
+
+            @torch._inductor._disable_cudagraphs()
+            def inner(x):
+                return x + 1
+
+            def middle(x):
+                return inner(x) * 2
+
+            def outer(x):
+                return middle(x).sin()
+
+            def model(x):
+                return outer(x)
+
+            inp = torch.randn(4, 4, device="cuda")
+            compiled = torch.compile(model, mode="reduce-overhead")
+            out = compiled(inp)
+
+            self.assertEqual(out, ((inp + 1) * 2).sin())
+            self.assertIsNone(self.get_manager())
+
         def test_cudagraph_annotation_inductor_default(self):
             """Annotation works with default inductor backend (cudagraphs
             enabled via setUp config, no mode='reduce-overhead')."""
