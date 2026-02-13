@@ -8,7 +8,6 @@ import itertools
 import logging
 import operator
 import sys
-import time
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, Union
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
     from .ir import IRNode, Operation
 
 from .memory import (
-    estimate_peak_memory,
     estimate_peak_memory_allocfree,
     FreeableInputBuffer,
     get_freeable_input_buf,
@@ -249,6 +247,7 @@ def _initialize_memory_tracking(snodes, graph_inputs, graph_outputs):
         )
     )
     _curr_memory = dict(zip(snodes, snodes_curr_memory))
+    # pyrefly: ignore [unsupported-operation]
     _curr_memory[None] = (0, 0)
 
     # Build candidate buffer map for optimization
@@ -1052,7 +1051,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                         )
                         exposed_delta = exposed_after - exposed_before
                         for gw_comm_time, gw_comp_time in group_waits.values():
+                            # pyrefly: ignore [no-matching-overload]
                             gw_exposed_before = max(0, gw_comm_time - gw_comp_time)
+                            # pyrefly: ignore [no-matching-overload]
                             gw_exposed_after = max(
                                 0, gw_comm_time - gw_comp_time + c_runtime
                             )
@@ -1978,6 +1979,7 @@ def _sink_waits_iterative_internal(
                         # pyrefly: ignore[no-matching-overload]
                         -max(0, info.comm_time - info.comp_time - c_runtime)
                         for gc_comm_time, gc_comp_time in group_colls.values():
+                            # pyrefly: ignore [no-matching-overload]
                             exposed_delta += max(0, gc_comm_time - gc_comp_time) - max(
                                 0, gc_comm_time - gc_comp_time + c_runtime
                             )
@@ -2218,8 +2220,6 @@ def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
     order = snodes
-    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
-    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
     # pyrefly: ignore [bad-assignment]
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
@@ -2227,32 +2227,7 @@ def reorder_compute_and_comm_for_overlap(
         assert callable(p), (
             f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
         )
-        peak_memory, _ = estimate_peak_memory(
-            snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
-        )
-        if torch.distributed.get_rank() == 0:
-            overlap_log.debug(
-                f"==== Visualize overlap before reordering pass {p}, {peak_memory=} ===="  # noqa: G004
-            )
-            try:
-                visualize_overlap(order)
-            except Exception as e:
-                overlap_log.debug("", exc_info=e)
-        t0 = time.time()
         order = p(order)  # type: ignore[operator]
-        t = time.time() - t0
-        if torch.distributed.get_rank() == 0:
-            overlap_log.debug(
-                f"==== Visualize overlap after reordering pass {p} (ran in {t} sec)===="  # noqa: G004
-            )
-            try:
-                visualize_overlap(order)
-            except Exception as e:
-                overlap_log.debug("", exc_info=e)
-        peak_memory, _ = estimate_peak_memory(
-            snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
-        )
-        overlap_log.debug("final %s", f"{peak_memory=}")
     # pyrefly: ignore [bad-return]
     return order
 

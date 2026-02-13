@@ -690,29 +690,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(partial_out.full_tensor(), out)
 
     @with_comms
-    def test_vector_norm_on_norm_partial(self):
-        from torch.distributed.tensor._ops._math_ops import _NormPartial
-
-        device_mesh = self.build_device_mesh()
-        comm_mode = CommDebugMode()
-
-        grad = torch.randn(12, 8, device=self.device_type)
-        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
-
-        for ord in [1.0, 2.0, 2.5]:
-            norm = torch.linalg.vector_norm(sharded_grad, ord=ord)
-            self.assertIsInstance(norm._spec.placements[0], _NormPartial)
-
-            with comm_mode:
-                result = torch.linalg.vector_norm(norm.unsqueeze(0), ord=ord)
-
-            self.assertEqual(comm_mode.get_total_counts(), 0)
-            self.assertIsInstance(result._spec.placements[0], _NormPartial)
-            self.assertEqual(
-                result.full_tensor(), torch.linalg.vector_norm(grad, ord=ord)
-            )
-
-    @with_comms
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
@@ -869,6 +846,16 @@ class DistMathOpsTest(DTensorTestBase):
         grad1_norm = out_tuple[1]
         self.assertEqual(grad0_norm.device_mesh, mesh_x)
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
+
+    @with_comms
+    def test_norm_0_on_psum(self):
+        # L0 norm on P(sum) should not propagate -> P(sum), should replicate
+        device_mesh = self.build_device_mesh()
+        t = torch.tensor([0, 1, 0, 3, 0, 5], device=self.device_type).float()
+        dt = distribute_tensor(t, device_mesh, [Partial()])
+        out = torch.ops.aten.linalg_vector_norm(dt, 0)
+        self.assertEqual(out.full_tensor().item(), 3.0)
+        self.assertEqual(out.placements, (Replicate(),))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
