@@ -89,6 +89,19 @@ class CustomGraphModulePass(ABC):
         """
 
 
+class CustomInferenceAwareGraphPass(CustomGraphPass):
+    """
+    Implement this interface for custom inference aware Graph passes.
+
+    """
+
+    @abstractmethod
+    def __call__(self, graph: torch.fx.graph.Graph, is_inference: bool) -> None:
+        """
+        Implementation of the custom pass.
+        """
+
+
 CustomGraphPassType: TypeAlias = Optional[
     Union[CustomGraphPass, Callable[[torch.fx.graph.Graph], None]]
 ]
