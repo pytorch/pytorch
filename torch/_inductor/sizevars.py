@@ -37,6 +37,25 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
+# Symbols created by CppTemplateKernel.slice_nd → parse_expr_with_index_symbols
+# and are internal to C++ GEMM codegen (not tracked by ShapeEnv).
+_GEMM_TEMPLATE_SYMBOL_NAMES = OrderedSet(
+    [
+        "m_start",
+        "m_end",
+        "n_start",
+        "n_end",
+        "k_start",
+        "k_end",
+        "m_size",
+        "n_size",
+        "m_offset",
+        "m_start_unsliced",
+        "m_end_unsliced",
+        "m_size_unsliced",
+    ]
+)
+
 
 def statically_known_true(
     shape_env: ShapeEnv,
@@ -738,6 +757,14 @@ class SizeVarAllocator:
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
+
+        # GEMM template loop variables (e.g. m_start, m_end) are codegen-
+        # internal symbols not tracked by ShapeEnv. If any remain after
+        # backed substitution, return the fallback directly.
+        if isinstance(expr, sympy.Expr) and any(
+            s.name in _GEMM_TEMPLATE_SYMBOL_NAMES for s in expr.free_symbols
+        ):
+            return fallback
 
         # Assign values to remaining unbacked symbols using a heuristic
         # tries to maximize consistency with shape environment.
