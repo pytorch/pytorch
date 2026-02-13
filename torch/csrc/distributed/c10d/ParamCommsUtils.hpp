@@ -24,7 +24,7 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       int globalRankStart,
       int globalRankStride,
       int worldSize,
-      bool isAsynchronizedOp);
+      bool isAsynchronizedOp = true);
 
   ~ParamCommsDebugInfo() override = default;
 
