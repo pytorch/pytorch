@@ -627,31 +627,13 @@ class OutputGraph(OutputGraphCommon):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # Check if the function being traced has a cudagraph_annotation
-        # First check CompileContext (persists across graph breaks within same compile)
-        compile_ctx = CompileContext.try_get()
-        if compile_ctx is not None and compile_ctx.cudagraph_annotation is not None:
-            self.cudagraph_annotation = compile_ctx.cudagraph_annotation
-        else:
-            # Look for the function in global_scope by name
-            self.cudagraph_annotation = None
-            fn_name = f_code.co_name
-            fn = global_scope.get(fn_name)
-
-            # If not found and this is a resume function, try extracting original name
-            # Resume functions have names like "torch_dynamo_resume_in_<orig_name>_at_<line>"
-            if fn is None and fn_name.startswith("torch_dynamo_resume_in_"):
-                import re
-                match = re.match(r"torch_dynamo_resume_in_(\w+)_at_\d+", fn_name)
-                if match:
-                    orig_name = match.group(1)
-                    fn = global_scope.get(orig_name)
-
-            if fn is not None and hasattr(fn, "_cudagraph_annotation"):
-                self.cudagraph_annotation = fn._cudagraph_annotation
-                # Store in CompileContext so it persists across graph breaks
-                if compile_ctx is not None:
-                    compile_ctx.cudagraph_annotation = self.cudagraph_annotation
+        # Cudagraph annotation: check if the top-level function has the attribute.
+        # For inlined functions, this is set during inlining in
+        # InliningInstructionTranslator.build_inline_tracer.
+        self.cudagraph_annotation = None
+        fn = global_scope.get(f_code.co_name)
+        if fn is not None and hasattr(fn, "_cudagraph_annotation"):
+            self.cudagraph_annotation = fn._cudagraph_annotation
 
         self.region_tracker = GraphRegionTracker()
 
@@ -692,6 +674,7 @@ class OutputGraph(OutputGraphCommon):
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.tracing_context.traced_code.append(f_code)
+        self.tracing_context.cudagraph_annotation = self.cudagraph_annotation
         self.traced_code = self.tracing_context.traced_code
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
@@ -2337,7 +2320,6 @@ class OutputGraph(OutputGraphCommon):
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
             gm.meta["backend_id"] = name
 
-            # Propagate cudagraph annotation to gm.meta
             if self.cudagraph_annotation is not None:
                 gm.meta["cudagraph_annotation"] = self.cudagraph_annotation
 

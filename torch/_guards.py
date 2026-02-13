@@ -857,8 +857,6 @@ class CompileContext:
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []
-        # Cudagraph annotation (set by @torch._inductor.cudagraph_annotation decorator)
-        self.cudagraph_annotation: Any = None
 
     @staticmethod
     def current_compile_id() -> CompileId | None:
@@ -947,6 +945,7 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
+        self.cudagraph_annotation: Any = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`

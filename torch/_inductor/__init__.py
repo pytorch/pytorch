@@ -448,56 +448,49 @@ def standalone_compile(
 
 
 import dataclasses
-import functools
-from typing import Callable, TypeVar
-
-
-_F = TypeVar("_F", bound=Callable[..., Any])
+from collections.abc import Callable
 
 
 @dataclasses.dataclass
 class CudagraphAnnotation:
-    """Stores cudagraph annotation settings for forward and backward graphs."""
-
-    mode: str  # "disable" or "enable" (for future use)
-    fwd: bool  # Apply to forward graph
-    bwd: bool  # Apply to backward graph
+    mode: str
+    fwd: bool
+    bwd: bool
 
 
-def cudagraph_annotation(
-    mode: str = "disable", *, fwd: bool = True, bwd: bool = True
-) -> Callable[[_F], _F]:
-    """
-    Decorator to control cudagraph behavior for compiled functions.
+class cudagraph_annotation:
+    """Control cudagraph behavior for compiled functions.
 
-    When applied to a function that is then compiled with ``torch.compile``,
-    this annotation controls whether the forward and/or backward graphs use cudagraphs.
+    When applied as a decorator, marks a function so that any compiled graph
+    containing inlined calls to this function will have cudagraphs disabled.
+    This is per-graph: other graph segments (e.g. after a graph break) are
+    unaffected unless they also inline an annotated function.
 
-    Args:
-        mode: The annotation mode. Currently only "disable" is supported, which
-            disables cudagraphs for the specified graphs.
-        fwd: If True, apply the annotation to the forward graph. Default: True.
-        bwd: If True, apply the annotation to the backward graph. Default: True.
+    Currently only ``mode="disable"`` is supported.
 
     Example::
 
-        @torch._inductor.cudagraph_annotation("disable", fwd=True, bwd=True)
+        @torch._inductor.cudagraph_annotation("disable")
         def my_fn(x):
             return x + 1
 
-        # Then compile the function
-        compiled_fn = torch.compile(my_fn, mode="reduce-overhead")
-        result = compiled_fn(x)  # Cudagraphs disabled for this function
-
-    Note:
-        The annotation is stored on the function and read during compilation.
-        It affects the compiled graph, not runtime behavior.
+        @torch.compile(mode="reduce-overhead")
+        def model(x):
+            y = my_fn(x)       # this graph segment skips cudagraphs
+            torch._dynamo.graph_break()
+            return y * 2        # this graph segment uses cudagraphs
     """
-    if mode not in ("disable",):
-        raise ValueError(f"Invalid cudagraph annotation mode: {mode}. Only 'disable' is supported.")
 
-    def decorator(fn: _F) -> _F:
-        fn._cudagraph_annotation = CudagraphAnnotation(mode=mode, fwd=fwd, bwd=bwd)  # type: ignore[attr-defined]
+    def __init__(
+        self, mode: str = "disable", *, fwd: bool = True, bwd: bool = True
+    ) -> None:
+        if mode not in ("disable",):
+            raise ValueError(
+                f"Invalid cudagraph annotation mode: {mode}. "
+                "Only 'disable' is supported."
+            )
+        self._annotation = CudagraphAnnotation(mode=mode, fwd=fwd, bwd=bwd)
+
+    def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
+        fn._cudagraph_annotation = self._annotation  # type: ignore[attr-defined]
         return fn
-
-    return decorator

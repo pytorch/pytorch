@@ -15,7 +15,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from contextlib import AbstractContextManager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
@@ -2248,8 +2248,7 @@ class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
     forward_device: BoxedDeviceIndex
-    # If True, disable cudagraphs for the backward graph (set by cudagraph_annotation)
-    disable_cudagraphs_for_bwd: BoxedBool
+    disable_cudagraphs_for_bwd: bool = False
 
 
 def create_compiler_config_extra(
@@ -2261,17 +2260,14 @@ def create_compiler_config_extra(
     # the final determination if cudagraphs actually can be used or not.
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
-    # Check for cudagraph_annotation in gm.meta
-    disable_cudagraphs_for_bwd = BoxedBool(False)
+    disable_cudagraphs_for_bwd = False
     if gm_meta is not None:
         annotation = gm_meta.get("cudagraph_annotation")
         if annotation is not None and annotation.mode == "disable":
             if annotation.fwd:
-                # Disable cudagraphs for forward graph
                 cudagraphs = BoxedBool(False)
             if annotation.bwd:
-                # Mark to disable cudagraphs for backward graph
-                disable_cudagraphs_for_bwd = BoxedBool(True)
+                disable_cudagraphs_for_bwd = True
 
     # TODO: The modern style is to use CompileId from TracingContext to
     # identify Inductor compilation.  However, this CompileId cannot
@@ -2433,7 +2429,7 @@ def compile_fx_backward(
 
         # Check if cudagraphs should be disabled for backward via annotation
         cudagraphs = compiler_config_extra.cudagraphs
-        if compiler_config_extra.disable_cudagraphs_for_bwd.value:
+        if compiler_config_extra.disable_cudagraphs_for_bwd:
             cudagraphs = BoxedBool(False)
 
         with (

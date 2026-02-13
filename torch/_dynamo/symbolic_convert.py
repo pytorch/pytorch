@@ -4955,6 +4955,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if not config.dont_skip_tracing and tracing_ctx:
                 tracing_ctx.previously_inlined_functions[code] = result
 
+        if isinstance(func, UserFunctionVariable):
+            annotation = inspect.getattr_static(
+                func.get_function(), "_cudagraph_annotation", None
+            )
+            if annotation is not None:
+                parent.output.cudagraph_annotation = annotation
+                parent.output.tracing_context.cudagraph_annotation = annotation
+
         sub_locals = None
         try:
             sub_locals = func.bind_args(parent, args, kwargs)
