@@ -44,12 +44,15 @@ class TestFullyShardCompileCompute(FSDPTest):
         torch._dynamo.reset()
         trace_rules_check_count = 0
         HOOKS_FILE_NAME = "torch/distributed/fsdp/_fully_shard/_fsdp_state.py"
+        HOOK_WRAPPER_NAME = "wrapper"
 
         def patched_trace_rules_check(*args, **kwargs):
             nonlocal trace_rules_check_count
             f_code = args[0]
-            if hasattr(f_code, "co_filename") and f_code.co_filename.endswith(
-                HOOKS_FILE_NAME
+            if (
+                hasattr(f_code, "co_filename")
+                and f_code.co_filename.endswith(HOOKS_FILE_NAME)
+                and f_code.co_name != HOOK_WRAPPER_NAME
             ):
                 trace_rules_check_count += 1
             return orig_trace_rules_check(*args, **kwargs)
