@@ -484,6 +484,15 @@ class VariableBuilder:
         self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value: object) -> VariableTracker:
+        _t0 = time.time_ns()
+        try:
+            return self._call_impl(value)
+        finally:
+            self.tx.output.bytecode_tracing_timings.variable_builder_call_ns += (
+                time.time_ns() - _t0
+            )
+
+    def _call_impl(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
@@ -601,8 +610,10 @@ class VariableBuilder:
         ]
 
         if trace_numpy and np:
+            # pyrefly: ignore [bad-argument-type]
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, tuple) else (ts,):
@@ -695,6 +706,7 @@ class VariableBuilder:
             (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, (tuple, list)) else (ts,):
@@ -1837,15 +1849,6 @@ class VariableBuilder:
     def wrap_listlike(
         self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
     ) -> VariableTracker:
-        for item in value:
-            if item is value:
-                unimplemented(
-                    gb_type="list elements are pointing to the list itself",
-                    context="",
-                    explanation="Dynamo does not support lists whose items reference to itself",
-                    hints=["Avoid using self referential list"],
-                )
-
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -2988,6 +2991,7 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
             base_src = AttrSource(obj.source, "__dataclass_fields__")
             source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
+    # pyrefly: ignore [bad-argument-type]
     return TupleVariable(items)
 
 
@@ -3636,9 +3640,12 @@ def record_automatic_dynamic(
         candidates = {}
         for i_stride, neg_i in pending:
             i = -neg_i
+            # pyrefly: ignore [unsupported-operation]
             stride[i] = candidates.get(i_stride, i_stride)
+            # pyrefly: ignore [no-matching-overload]
             candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
+        # pyrefly: ignore [implicit-any]
         stride = []
 
     return process_automatic_dynamic(
@@ -3782,6 +3789,7 @@ def _automatic_dynamic(
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
     t_id = id(e)
+    # pyrefly: ignore [implicit-any]
     dim2constraint = {}
 
     def update_dim2constraint(
@@ -3851,7 +3859,9 @@ def _automatic_dynamic(
             # into the mutable state
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
+            # pyrefly: ignore [unsupported-operation]
             mark_size[i] = auto_dynamic
+            # pyrefly: ignore [bad-argument-type]
             frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
@@ -3956,6 +3966,7 @@ def _automatic_dynamic(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
+        # pyrefly: ignore [bad-argument-type]
         constraint_strides=constraint_strides,
         specialize_on=specialize_on,
         view_base_context=view_base_context,
