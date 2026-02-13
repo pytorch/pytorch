@@ -253,6 +253,9 @@ def estimate_nccl_collective_runtime_impl(
     if nRanks <= 1:
         return 0
 
+    if coll == NCCL_COLL.UNSUPPORTED:
+        return 0
+
     # Assumes ring algorithm
     nccl_algo = NCCL_ALGO.RING
     nccl_proto = NCCL_PROTO.LL

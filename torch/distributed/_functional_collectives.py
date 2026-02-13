@@ -1712,7 +1712,7 @@ def all_gather_inplace(
 def isend_inplace(
     tensor: torch.Tensor,
     dst: int,
-    tag: int,
+    tag: int = 0,
     group: RANK_TYPES = "",
     group_dst: int = -1,
 ):
@@ -1728,15 +1728,16 @@ def isend_inplace(
         global_dst = dst
 
     group_name = _resolve_group_name(group)
-    return torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
-    # token = torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
-    # return _maybe_wrap_tensor(token)
+    tensor = torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+    if _are_we_tracing():
+        return tensor
+    return _maybe_wrap_tensor(tensor)
 
 
 def irecv_inplace(
     tensor: torch.Tensor,
     src: int,
-    tag: int,
+    tag: int = 0,
     group: RANK_TYPES = "",
     group_src: int = -1,
 ):
@@ -1751,9 +1752,8 @@ def irecv_inplace(
     else:
         global_src = src
     group_name = _resolve_group_name(group)
-    return torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
-    # token = torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
-    # return _maybe_wrap_tensor(token)
+    tensor = torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+    return _maybe_wrap_tensor(tensor)
 
 
 def batch_p2p_ops_inplace(
@@ -1767,14 +1767,15 @@ def batch_p2p_ops_inplace(
     if group_name is None or group_name == "":
         group_name = c10d._get_default_group()
     group_name = _resolve_group_name(group_name)
-    device = tensors[0].device
-    return torch.ops._c10d_functional.batch_p2p_ops(
+    tensors = torch.ops._c10d_functional.batch_p2p_ops(
         op_list, peer_list, tag_list, tensors, group_name
     )
-    # token = torch.ops._c10d_functional.batch_p2p_ops(
-    #     op_list, peer_list, tag_list, tensors, group_name
-    # )
-    # return _maybe_wrap_tensor(token)
+    if _are_we_tracing():
+        return [
+            _maybe_wrap_tensor(t) if op == "irecv" else t
+            for op, t in zip(op_list, tensors)
+        ]
+    return list(map(_maybe_wrap_tensor, tensors))
 
 
 from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
@@ -1805,15 +1806,3 @@ traceable_collective_remaps = {
     legacy_irecv: irecv_inplace,  # type: ignore[has-type]
     legacy_batch_p2p_ops: batch_p2p_ops_inplace,  # type: ignore[has-type]
 }
-
-# We register p2p funcols as side-effect-ful to not break dependencies in inductor.
-from torch._higher_order_ops.effects import (
-    _EffectType,
-    _register_effectful_op,
-)
-
-_register_effectful_op(torch.ops._c10d_functional.isend.default, _EffectType.ORDERED)
-_register_effectful_op(torch.ops._c10d_functional.irecv.default, _EffectType.ORDERED)
-_register_effectful_op(
-    torch.ops._c10d_functional.batch_p2p_ops.default, _EffectType.ORDERED
-)

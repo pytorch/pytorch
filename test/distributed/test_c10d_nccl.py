@@ -6364,6 +6364,61 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertLess(float(local_max.item()), 1e-5)
 
     @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
+    @parametrize("num_steps", [2, 4])
+    @parametrize("M", [256, 1024])
+    def test_compiled_ring_attention_pattern(self, num_steps, M):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        torch.cuda.set_device(self.rank)
+        device = self.local_device
+        N = M
+        world = dist.get_world_size()
+        rank = dist.get_rank()
+        nxt = (rank + 1) % world
+        prv = (rank - 1) % world
+
+        def ring_attention_kernel(q, k):
+            recv_buf = torch.empty_like(k)
+            acc = torch.zeros_like(q)
+            current_k = k
+
+            for step in range(num_steps):
+                work = dist.batch_isend_irecv(
+                    [
+                        dist.P2POp(dist.isend, current_k, nxt),
+                        dist.P2POp(dist.irecv, recv_buf, prv),
+                    ]
+                )
+                local_score = torch.mm(q, current_k.t())
+                local_out = torch.mm(local_score, current_k)
+                acc = acc + local_out * (1.0 / (step + 1))
+
+                for w in work:
+                    w.wait()
+
+                current_k = recv_buf * 0.5
+                recv_buf = torch.empty_like(k)
+
+            final_score = torch.mm(q, current_k.t())
+            final_out = torch.mm(final_score, current_k)
+            return acc + final_out
+
+        q = torch.randn(M, N, device=device)
+        k = torch.randn(M, N, device=device) * 0.1
+        q_e, k_e = q.clone(), k.clone()
+        out_e = ring_attention_kernel(q_e, k_e)
+
+        q_c, k_c = q.clone(), k.clone()
+        compiled_kernel = torch.compile(ring_attention_kernel)
+        out_c = compiled_kernel(q_c, k_c)
+
+        torch.cuda.synchronize(device=device)
+        self.assertEqual(out_e, out_c, atol=1e-3, rtol=1e-3)
+
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize(
         "op_sizes",

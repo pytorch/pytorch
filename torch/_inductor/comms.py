@@ -2252,7 +2252,7 @@ def reorder_compute_and_comm_for_overlap(
         peak_memory, _ = estimate_peak_memory(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
-        print(f"final {peak_memory=}")
+        overlap_log.debug("final %s", f"{peak_memory=}")
     # pyrefly: ignore [bad-return]
     return order
 
