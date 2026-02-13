@@ -12302,6 +12302,46 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "log_probs tensor must not be empty"):
             F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
 
+    @onlyCPU
+    def test_ctc_loss_out_of_range_targets(self, device):
+        # Target values must be in [0, num_labels). Out-of-bounds targets
+        # previously caused reads beyond the log_probs tensor, producing
+        # non-deterministic results depending on memory layout.
+        log_probs = torch.randn(50, 3, 15, device=device)
+        input_lengths = torch.tensor([50, 50, 50], device=device)
+
+        # 2D targets with values >= num_labels
+        targets_2d = torch.tensor(
+            [[1, 20, 3]] * 3, device=device, dtype=torch.long
+        )
+        target_lengths = torch.tensor([3, 3, 3], device=device)
+        with self.assertRaisesRegex(RuntimeError, "target values to be in range"):
+            F.ctc_loss(log_probs, targets_2d, input_lengths, target_lengths)
+
+        # 1D concatenated targets with values >= num_labels
+        targets_1d = torch.tensor(
+            [1, 20, 3, 1, 20, 3, 1, 20, 3], device=device, dtype=torch.long
+        )
+        with self.assertRaisesRegex(RuntimeError, "target values to be in range"):
+            F.ctc_loss(log_probs, targets_1d, input_lengths, target_lengths)
+
+        # Negative target values
+        targets_neg = torch.tensor(
+            [[1, -1, 3]] * 3, device=device, dtype=torch.long
+        )
+        with self.assertRaisesRegex(RuntimeError, "target values to be in range"):
+            F.ctc_loss(log_probs, targets_neg, input_lengths, target_lengths)
+
+        # Valid targets should succeed and produce deterministic results
+        targets_ok = torch.tensor(
+            [[1, 2, 3]] * 3, device=device, dtype=torch.long
+        )
+        res1 = F.ctc_loss(log_probs, targets_ok, input_lengths, target_lengths)
+        res2 = F.ctc_loss(
+            log_probs.clone(), targets_ok, input_lengths, target_lengths
+        )
+        self.assertEqual(res1, res2)
+
     @skipIfRocmArch(MI300_ARCH)
     @expectedFailureMPS  # RuntimeError: LSTM with projections is not currently supported with MPS.
     @dtypesIfCUDA(torch.half, torch.float, torch.double)

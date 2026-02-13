@@ -116,6 +116,22 @@ std::tuple<Tensor, Tensor, size_t, std::vector<int64_t>> ctc_loss_allocate_outpu
              " (while checking arguments for ", c, ")");
   }
 
+  // Validate that target values are in range [0, num_labels).
+  // Out-of-bounds targets cause reads beyond the log_probs tensor.
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
+  auto targets_data = targets.const_data_ptr<target_t>();
+  for (const auto b : c10::irange(batch_size)) {
+    for (int64_t t = 0; t < target_lengths[b]; ++t) {
+      int64_t target_val = static_cast<int64_t>(
+          targets_data[tg_batch_offsets[b] + tg_target_stride * t]);
+      TORCH_CHECK(
+          target_val >= 0 && target_val < num_labels,
+          "Expected all target values to be in range [0, ", num_labels,
+          "), but got target value ", target_val,
+          " (while checking arguments for ", c, ")");
+    }
+  }
+
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
