@@ -663,7 +663,9 @@ class SizeVarAllocator:
             optimization_hint: For cases where fallback/heuristic values are acceptable
                 for unbacked symbols.
         """
-        simplified = self.simplify(expr)
+        expr = self.simplify(expr)
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
 
         # apply replacements
         expr = self.remove_precomputed_replacements(expr)
@@ -671,9 +673,9 @@ class SizeVarAllocator:
         if has_free_unbacked_symbols(expr):
             raise GuardOnDataDependentSymNode(expr)
 
-        result = self._maybe_realize_expr(simplified, nan_fallback=None)
+        result = self._maybe_realize_expr(expr, nan_fallback=None)
 
-        assert result is not None, result
+        assert result is not None, expr
         return result
 
     def _maybe_realize_expr(
@@ -689,9 +691,6 @@ class SizeVarAllocator:
             - fallback for NaN
             - None if no special handling needed
         """
-        if isinstance(expr, sympy.Expr):
-            expr = expr.expand(identity=True)
-
         try:
             return int(expr)
         except (TypeError, ValueError):
@@ -740,6 +739,9 @@ class SizeVarAllocator:
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
+
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
 
         # remove precomputed_replacements
         expr = self.remove_precomputed_replacements(expr)
