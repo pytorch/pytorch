@@ -77,7 +77,6 @@ def _sycl_compiler_options() -> list[str]:
     options = [
         "-DCUTLASS_ENABLE_SYCL",
         "-DSYCL_INTEL_TARGET",
-        "-gline-tables-only",
         "-DCUTLASS_VERSIONS_GENERATED",
         "-O3",
         "-DNDEBUG",
