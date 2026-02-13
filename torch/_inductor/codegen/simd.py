@@ -796,6 +796,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size2 = remaining[current_group + 1]
                     size3 = FloorDiv(size, size1 * size2)
                     return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
                         make_combined(
                             [size2, size3],
                             [
@@ -833,6 +834,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
                         make_combined(
                             [size2],
                             [
@@ -844,6 +846,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 else:
                     if current_group < len(remaining):
                         return_getters.append(
+                            # pyrefly: ignore [bad-argument-type]
                             operator.itemgetter(add_range(current_group, size))
                         )
             return_getters_groups.append(return_getters)
@@ -851,6 +854,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
             f"failed to set ranges {remaining} {lengths}"
         )
+        # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
     @classmethod
@@ -2280,6 +2284,7 @@ class SIMDScheduling(BaseScheduling):
                         if size_hint is None
                         else self._make_shape_cache_key(template_node.node, size_hint)
                     )
+                    # pyrefly: ignore [unsupported-operation]
                     kernels[shape_cache_key] = kernel
 
             if only_gen_src_code:
@@ -2408,6 +2413,7 @@ class SIMDScheduling(BaseScheduling):
                     )
                     with V.set_kernel_handler(kernel):
                         src_code = kernel.codegen_kernel()
+                    # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
                 # Multi-node: create ComboKernel with combo subkernels
@@ -2431,7 +2437,9 @@ class SIMDScheduling(BaseScheduling):
                     )
 
                 src_code = kernel.codegen_kernel()
+                # pyrefly: ignore [bad-argument-type]
                 kernel_code_list.append((src_code, kernel, node_group))
+        # pyrefly: ignore [bad-return]
         return kernel_code_list
 
     def codegen_combo_kernel(self, combo_kernel_node):
