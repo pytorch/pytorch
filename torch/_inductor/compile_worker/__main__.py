@@ -16,7 +16,10 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocPickler,
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
-from torch._inductor.runtime.compile_tasks import _set_triton_ptxas_path
+from torch._inductor.runtime.compile_tasks import (
+    _set_triton_libdevice_path,
+    _set_triton_ptxas_path,
+)
 
 
 _T = TypeVar("_T")
@@ -25,6 +28,7 @@ _T = TypeVar("_T")
 log = logging.getLogger(__name__)
 
 _set_triton_ptxas_path()
+_set_triton_libdevice_path()
 
 try:
     import triton
