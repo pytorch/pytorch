@@ -5945,8 +5945,16 @@ def _in_projection(
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
-scaled_dot_product_attention = _add_docstr(
-    torch._C._nn.scaled_dot_product_attention,
+def scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Optional[Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale: Optional[float] = None,
+    enable_gqa: bool = False,
+) -> Tensor:
     r"""scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
         is_causal=False, scale=None, enable_gqa=False) -> Tensor:
 
@@ -6116,8 +6124,25 @@ scaled_dot_product_attention = _add_docstr(
         https://github.com/facebookresearch/xformers
     .. _Grouped-Query Attention:
         https://arxiv.org/pdf/2305.13245
-    """,
-)
+    """
+    # Handle zero-sized tensors to prevent segfault
+    if query.numel() == 0 or key.numel() == 0 or value.numel() == 0:
+        # Output shape: (N, ..., Hq, L, Ev)
+        # Take all dims from query except the last one, then append value's last dim
+        output_shape = list(query.shape[:-1]) + [value.shape[-1]]
+        
+        return torch.zeros(
+            output_shape,
+            dtype=query.dtype,
+            device=query.device,
+            requires_grad=query.requires_grad,
+        )
+    
+    # Call the underlying C++ implementation
+    return torch._C._nn.scaled_dot_product_attention(
+        query, key, value, attn_mask, dropout_p, is_causal, scale, enable_gqa
+    )
+
 
 
 def _mha_shape_check(
