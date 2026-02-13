@@ -4135,7 +4135,8 @@ print(ret)
 
         x = torch.tensor(
             [-5.0, -2.5, -0.5, -0.0, 0.0, 0.5, 2.5, 5.0],
-            device=device, dtype=torch.float64
+            device=device,
+            dtype=torch.float64,
         )
         y = special.bessel_y0(x)
 
