@@ -977,6 +977,67 @@ class MetaConverter(Generic[_TensorT]):
                 ):
                     return (t.size, t.stride, t.storage_offset)
                 else:
+                    from torch.fx.experimental.symbolic_shapes import (
+                        has_free_unbacked_symbols,
+                    )
+
+                    # Check if any sizes/strides have unbacked SymInts.
+                    # Unbacked SymInts (from data-dependent operations like
+                    # boolean indexing) have no hint, so they can't go through
+                    # the normal _maybe_specialize_sym_int_with_hint path.
+                    def _specialize_or_unbacked(
+                        val: int | torch.SymInt,
+                    ) -> int | torch.SymInt:
+                        if is_symbolic(val) and has_free_unbacked_symbols(val):
+                            new_sym = shape_env.create_unbacked_symint()
+                            # Propagate range constraints and size-like
+                            # from the original unbacked SymInt.
+                            old_expr = val.node.expr
+                            old_se = val.node.shape_env
+                            vr = old_se.var_to_range[old_expr]
+                            is_size_like = old_expr in old_se.size_like
+                            if is_size_like:
+                                shape_env._constrain_range_for_size(
+                                    new_sym.node.expr,
+                                    min=int(vr.lower),
+                                    max=int(vr.upper),
+                                )
+                            else:
+                                shape_env._constrain_range(
+                                    new_sym.node.expr,
+                                    min=int(vr.lower),
+                                    max=int(vr.upper),
+                                )
+                            return new_sym
+                        return shape_env._maybe_specialize_sym_int_with_hint(val)
+
+                    has_unbacked = (
+                        any(
+                            is_symbolic(sz) and has_free_unbacked_symbols(sz)
+                            for sz in t.size
+                        )
+                        or any(
+                            is_symbolic(sd) and has_free_unbacked_symbols(sd)
+                            for sd in t.stride
+                        )
+                        or (
+                            is_symbolic(t.storage_offset)
+                            and has_free_unbacked_symbols(t.storage_offset)
+                        )
+                    )
+
+                    if has_unbacked:
+                        # For tensors with unbacked dimensions, we can't go
+                        # through _create_symbolic_sizes_strides_storage_offset
+                        # because it requires concrete int hints. Instead,
+                        # create fresh unbacked SymInts in the target ShapeEnv.
+                        new_sizes = tuple(_specialize_or_unbacked(sz) for sz in t.size)
+                        new_strides = tuple(
+                            _specialize_or_unbacked(sd) for sd in t.stride
+                        )
+                        new_storage_offset = _specialize_or_unbacked(t.storage_offset)
+                        return (new_sizes, new_strides, new_storage_offset)
+
                     # TODO: deduplicate this
                     t_size = tuple(
                         shape_env._maybe_specialize_sym_int_with_hint(sz)
