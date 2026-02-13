@@ -45,7 +45,16 @@ import traceback
 import types
 import weakref
 from collections import deque
-from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import (
+    Any,
+    cast,
+    NoReturn,
+    Optional,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypeIs
 
 import torch
@@ -3607,17 +3616,27 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        self.push(
-            NestedUserFunctionVariable(
-                fn_name,
-                code,
-                self.f_globals,
-                defaults,
-                kwdefaults,
-                annotations,
-                closure,
-            )
+        fn = NestedUserFunctionVariable(
+            fn_name,
+            code,
+            self.f_globals,
+            defaults,
+            kwdefaults,
+            closure,
         )
+        if annotations:
+            assert isinstance(annotations, TupleVariable)
+            # Convert the attribute to a dictionary before assigning it
+            # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
+            items = annotations.items
+            ann = ConstDictVariable(
+                dict(zip(items[::2], items[1::2], strict=True)),
+                mutation_type=ValueMutationNew(),
+            )
+            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
+                "__annotations__", ann
+            )
+        self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -4235,11 +4254,38 @@ class InstructionTranslatorBase(
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
             self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
+        elif inst.argval == 7:
+            # INTRINSIC_TYPEVAR
+            v = self.pop().as_python_constant()
+            tv = variables.TypingVariable(TypeVar(v))
+            self.push(tv)
         else:
             unimplemented(
                 gb_type="Missing CALL_INTRINSIC_1 handler",
                 context=f"CALL_INTRINSIC_1 operand: {inst.argval}",
                 explanation=f"No handler implemented for CALL_INTRINSIC_1 {inst.argval} instruction.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    def CALL_INTRINSIC_2(self, inst: Instruction) -> None:
+        arg2 = self.pop()
+        arg1 = self.pop()
+        if inst.argval == 4:
+            # INTRINSIC_SET_FUNCTION_TYPE_PARAMS
+            # same as => arg1.__type_params__ = arg2
+            assert isinstance(arg1, BaseUserFunctionVariable)
+            arg1.call_method(
+                self,  # pyrefly: ignore[bad-argument-type]
+                "__setattr__",
+                [ConstantVariable.create("__type_params__"), arg2],
+                {},
+            )
+            self.push(arg1)
+        else:
+            unimplemented(
+                gb_type="Missing CALL_INTRINSIC_2 handler",
+                context=f"CALL_INTRINSIC_2 operand: {inst.argval}",
+                explanation=f"No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 
@@ -4282,11 +4328,26 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [ConstantVariable.create(1)], {})
-            fn.annotations = attr
+            fn.call_method(
+                self,  # pyrefly: ignore[bad-argument-type]
+                "__setattr__",
+                [ConstantVariable.create("__annotations__"), attr],
+                {},
+            )
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
-            fn.annotations = attr
+            assert isinstance(attr, TupleVariable)
+            # Convert the attribute to a dictionary before assigning it
+            # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
+            items = attr.items
+            ann = ConstDictVariable(
+                dict(zip(items[::2], items[1::2], strict=True)),
+                mutation_type=ValueMutationNew(),
+            )
+            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
+                "__annotations__", ann
+            )
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
