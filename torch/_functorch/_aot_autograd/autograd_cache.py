@@ -765,6 +765,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 "cudagraphs": cudagraphs,
                 "boxed_forward_device_index": boxed_forward_device_index,
             }
+
+            # if there was provided extra_cache_key_data in aot_config, append it to the
+            # _CompileFxKwargs, so it will be pickled when calculating cache key
+            if aot_config.extra_cache_key_data is not None:
+                fx_config["extra_cache_key_data"] = aot_config.extra_cache_key_data
+
             try:
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config

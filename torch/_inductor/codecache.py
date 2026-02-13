@@ -1611,6 +1611,12 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         """
         try:
             FxGraphCache._check_can_cache(gm)
+
+            # if there was provided extra_cache_key_data in gm.meta, append it to the
+            # _CompileFxKwargs, so it will be pickled when calculating cache key
+            if "extra_cache_key_data" in gm.meta:
+                fx_kwargs["extra_cache_key_data"] = gm.meta["extra_cache_key_data"]
+
             key, debug_lines = compiled_fx_graph_hash(
                 gm, example_inputs, fx_kwargs, inputs_to_check
             )

@@ -3,9 +3,12 @@ from __future__ import annotations
 import contextlib
 import itertools
 import time
+import logging
+from collections import OrderedDict
+from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Optional, Dict, List
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -29,6 +32,7 @@ from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils.hooks import RemovableHandle
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -468,6 +472,34 @@ AOT_COUNTER = itertools.count()
 
 
 aot_autograd_decompositions: dict[OpOverload, Callable[..., Any]] = {}
+
+_REGISTERED_EXTRA_CACHE_KEY_DATA: OrderedDict[int,
+Callable[[nn.Module, AOTConfig, List[Any], List[Any]], Dict[str, Any]]] = OrderedDict()
+
+def register_extra_cache_key_data(extra_cache_key_data_producer_fn: Callable[[nn.Module, AOTConfig, List[Any], List[Any]], Dict[str, Any]]) -> RemovableHandle:
+    """
+    Register a callback that emits a dict with extra values to include into
+    the compilation cache key.
+    It will influence both AotAutograd's and Inductor's cache key.
+
+    The callback is invoked during aot_autograd compilation and provides the caller broad
+    context via the following params:
+      - gm: GraphModule,
+      - aot_config: AOTConfig,
+      - real_inputs: List[Any],
+      - fake_inputs: List[Any].
+
+    It must return:
+      - dictionary with extra keys used for generating cache key. Returned dict must be
+      composed of deterministic, picklable primitives.
+    """
+    handle = RemovableHandle(_REGISTERED_EXTRA_CACHE_KEY_DATA)
+    _REGISTERED_EXTRA_CACHE_KEY_DATA[handle.id] = extra_cache_key_data_producer_fn
+    return handle
+
+
+def _get_registered_extra_cache_key_data():
+    return list(_REGISTERED_EXTRA_CACHE_KEY_DATA.values())
 
 
 def create_aot_state(
@@ -1055,6 +1087,25 @@ def prepare_aot_module_simplified(
         full_args, aot_config, fake_mode, shape_env, ignore_shape_env
     )
 
+    # if any extra cache key data producers are registered, append them to the aot_config
+    # to be eventually passed to _CompileFxKwargs for inclusion in cache key generation
+    for extra_cache_key_producer in _get_registered_extra_cache_key_data():
+        try:
+            extra_data_dict = extra_cache_key_producer(mod, aot_config, args, fake_flat_args)
+            if aot_config.extra_cache_key_data is None:
+                aot_config.extra_cache_key_data = OrderedDict()
+            logging.getLogger(__name__).debug("Updating extra_cache_key_data with the follwing keys: %s",
+                                              extra_data_dict.keys())
+            aot_config.extra_cache_key_data.update(extra_data_dict)
+
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to add extra cache key data.")
+
+    # include the extra data always in the same order, regardless of registration order
+    if aot_config.extra_cache_key_data is not None:
+        extra_data_sorted_by_keys = OrderedDict(sorted(aot_config.extra_cache_key_data.items()))
+        aot_config.extra_cache_key_data = extra_data_sorted_by_keys
+
     return (
         functional_call,
         params_buffers_flat,
@@ -1158,6 +1209,13 @@ def aot_module_simplified(
                 shape_env,
             )
             aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
+
+            # if any extra cache key data is included in aot_config, pass it to the meta
+            # of the graph module, so it will be accessible when preparing _CompileFxKwargs
+            # for key cache calculations
+            if aot_config.extra_cache_key_data is not None:
+                aot_graph_capture.graph_module.meta['extra_cache_key_data'] = aot_config.extra_cache_key_data
+
             compiled_fn, _ = aot_stage2_compile(
                 aot_state,
                 aot_graph_capture,

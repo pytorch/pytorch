@@ -9,7 +9,7 @@ import collections
 import functools
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union, OrderedDict
 from typing_extensions import ParamSpec
 
 import torch
@@ -1101,6 +1101,7 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+    extra_cache_key_data: Optional[OrderedDict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if self.pre_dispatch:
