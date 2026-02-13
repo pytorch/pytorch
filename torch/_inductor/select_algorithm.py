@@ -50,6 +50,7 @@ from .autotune_process import (
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
     TritonGPUBenchmarkRequest,
+    use_pipelined_autotuning,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
@@ -93,6 +94,7 @@ from .utils import (
     triton_type,
     triton_type_to_torch,
     unique,
+    use_aten_gemm_kernels,
 )
 from .virtualized import V
 
@@ -1062,7 +1064,13 @@ class TritonTemplateKernel(TritonKernel):
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
-            output_index = input_node.make_indexer()(index_symbols)
+            if isinstance(input_node.layout, ir.FlexibleLayout):
+                # This will set a layout constraint on the template
+                self.get_stride_and_maybe_freeze_layout(input_node)
+                with patch.object(ir.FlexibleLayout, "allow_indexing", True):
+                    output_index = input_node.make_indexer()(index_symbols)
+            else:
+                output_index = input_node.make_indexer()(index_symbols)
 
             # in def_kernel above we define the inputs with the storage offset adjusted
             # creating the load in input_node.make_indexer() will also adjust by storage offset
@@ -1557,7 +1565,40 @@ class TritonTemplateKernel(TritonKernel):
         ]
 
     def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
-        node.data.freeze_layout()
+        """
+        Get the stride of an input node for template code generation, with deferred
+        layout freezing:
+        - If the layout is FlexibleLayout, compute speculative strides without freezing
+        - Record the expected layout (as FixedLayout) as a constraint for later validation
+        - Only freeze at finalization time after validating no conflicts exist
+
+        Scheduler falls back to aten if layout constraint violated. If no aten,
+        freeze right away.
+        """
+        # realizing for safety
+        ir.ExternKernel.realize_input(node)
+        layout = node.data.layout
+        node_name = node.get_name()
+
+        if isinstance(layout, ir.FlexibleLayout):
+            if not use_aten_gemm_kernels():
+                # No ExternKernel fallback available, freeze immediately
+                node.data.freeze_layout()
+            else:
+                # Compute what strides WOULD be if frozen, without actually freezing
+                fixed_layout_copy = layout.get_fixed_layout_without_freezing()
+                # Save to graph-level constraints instead of per-kernel
+                existing = V.graph.buffer_layout_constraints.get(node_name)
+                if existing is not None and existing != fixed_layout_copy:
+                    raise AssertionError(
+                        f"Layout constraint mismatch for {node_name}: "
+                        f"existing {existing} vs new {fixed_layout_copy}"
+                    )
+                else:
+                    V.graph.buffer_layout_constraints[node_name] = fixed_layout_copy
+
+                return list(fixed_layout_copy.stride)
+        # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
 
 
@@ -2895,7 +2936,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
-            if config.pipeline_max_autotune_gemm:
+            if use_pipelined_autotuning():
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
                 )
@@ -3149,7 +3190,7 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
-        if log.isEnabledFor(logging.DEBUG) and not config.pipeline_max_autotune_gemm:
+        if log.isEnabledFor(logging.DEBUG) and not use_pipelined_autotuning():
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
 
@@ -3174,7 +3215,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         precompile_start_ts = time.time()
 
-        if not config.pipeline_max_autotune_gemm:
+        if not use_pipelined_autotuning():
             with dynamo_timed(
                 f"{name}_template_precompiling",
                 log_pt2_compile_event=True,
@@ -3219,7 +3260,7 @@ class AlgorithmSelectorCache(PersistentCache):
             prescreening_elapse = time.time() - prescreening_start_ts
             log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
-        if config.pipeline_max_autotune_gemm:
+        if use_pipelined_autotuning():
             AsyncAutotuner.start(choices, inputs_key)
             return
 
@@ -3437,7 +3478,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     elapsed_seconds,
                 )
 
-        if config.pipeline_max_autotune_gemm:
+        if use_pipelined_autotuning():
             executor = PrecompileThreadPool.get_instance()
         else:
             executor = ThreadPoolExecutor(max_workers=num_workers)
@@ -3540,7 +3581,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if exceptions:
                 _log_autotune_exceptions(exceptions)
 
-            if not config.pipeline_max_autotune_gemm:
+            if not use_pipelined_autotuning():
                 # pyrefly: ignore [missing-attribute]
                 executor.shutdown(wait=True)
 
@@ -4450,7 +4491,7 @@ def autotune_select_algorithm(*args, **kwargs):
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
-            or torch._inductor.config.pipeline_max_autotune_gemm
+            or use_pipelined_autotuning()
         )
 
     if "precompilation_timeout_seconds" not in kwargs:
