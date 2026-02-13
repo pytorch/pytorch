@@ -83,6 +83,18 @@ def remove_no_ops(
                     return False
             return True
 
+        def is_mutated(n):
+            """Check if a node is mutated by any in-place operation."""
+            for user in n.users:
+                if user.op != "call_function" or not hasattr(user.target, "_schema"):
+                    continue
+                for i, arg in enumerate(user.args):
+                    if arg is n:
+                        schema_arg = user.target._schema.arguments[i]
+                        if schema_arg.alias_info and schema_arg.alias_info.is_write:
+                            return True
+            return False
+
         def replace_no_op(node, replace_input_index):
             replacement = node.args[replace_input_index]
 
@@ -90,6 +102,13 @@ def remove_no_ops(
             # non-Tensor inputs even for ops with only Tensor inputs.
             # TODO - decompose/type promote to avoid this
             if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
+                return
+
+            # https://github.com/pytorch/pytorch/issues/174187
+            # Don't replace if the replacement value is mutated in-place.
+            # The original node acts as an implicit copy; removing it would
+            # cause users to observe the post-mutation value instead.
+            if is_mutated(replacement):
                 return
 
             if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
