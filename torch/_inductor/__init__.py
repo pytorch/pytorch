@@ -23,7 +23,6 @@ __all__ = [
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
-    "cudagraph_annotation",
     "standalone_compile",
 ]
 
@@ -452,13 +451,13 @@ from collections.abc import Callable
 
 
 @dataclasses.dataclass
-class CudagraphAnnotation:
+class _CudagraphAnnotation:
     mode: str
     fwd: bool
     bwd: bool
 
 
-class cudagraph_annotation:
+class _cudagraph_annotation:
     """Control cudagraph behavior for compiled functions.
 
     When applied as a decorator, marks a function so that any compiled graph
@@ -470,7 +469,7 @@ class cudagraph_annotation:
 
     Example::
 
-        @torch._inductor.cudagraph_annotation("disable")
+        @torch._inductor._cudagraph_annotation("disable")
         def my_fn(x):
             return x + 1
 
@@ -489,7 +488,7 @@ class cudagraph_annotation:
                 f"Invalid cudagraph annotation mode: {mode}. "
                 "Only 'disable' is supported."
             )
-        self._annotation = CudagraphAnnotation(mode=mode, fwd=fwd, bwd=bwd)
+        self._annotation = _CudagraphAnnotation(mode=mode, fwd=fwd, bwd=bwd)
 
     def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
         fn._cudagraph_annotation = self._annotation  # type: ignore[attr-defined]

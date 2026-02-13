@@ -169,6 +169,7 @@ def _try_get_metadata_from_dynamo(
         assert source is not None
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
+
         static_input_indices.append(i)
 
     # Collect the dynamo graph inputs
@@ -191,10 +192,9 @@ def _try_get_metadata_from_dynamo(
         # OutputGraph
         actual_pos = pos + len(param_keys)
 
-        tensor_dict = node.meta.get("tensor_dict", {})
-        is_static = tensor_dict.get("_dynamo_static_input_type", None)
-
-        if is_static:
+        if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
+            "_dynamo_static_input_type", None
+        ):
             static_inputs_log.debug(
                 "Adding static input pos %s for source %s", actual_pos, source_name
             )

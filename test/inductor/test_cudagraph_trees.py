@@ -3058,7 +3058,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         def test_cudagraph_annotation_disable(self):
-            @torch._inductor.cudagraph_annotation("disable")
+            @torch._inductor._cudagraph_annotation("disable")
             def helper(x):
                 return x + 1
 
@@ -3073,7 +3073,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertIsNone(self.get_manager())
 
         def test_cudagraph_annotation_disable_fwd_bwd(self):
-            @torch._inductor.cudagraph_annotation("disable")
+            @torch._inductor._cudagraph_annotation("disable")
             def helper(x):
                 return (x * x).sin()
 
@@ -3092,7 +3092,7 @@ if HAS_CUDA_AND_TRITON:
             """Annotated function only disables cudagraphs for graph segments
             that inline it. Other segments after a graph break are unaffected."""
 
-            @torch._inductor.cudagraph_annotation("disable")
+            @torch._inductor._cudagraph_annotation("disable")
             def disabled_fn(x):
                 return x + 1
 
@@ -3141,11 +3141,11 @@ if HAS_CUDA_AND_TRITON:
         def test_cudagraph_annotation_multiple_functions(self):
             """Multiple annotated functions each disable their containing graph."""
 
-            @torch._inductor.cudagraph_annotation("disable")
+            @torch._inductor._cudagraph_annotation("disable")
             def no_cg_add(x):
                 return x + 1
 
-            @torch._inductor.cudagraph_annotation("disable")
+            @torch._inductor._cudagraph_annotation("disable")
             def no_cg_mul(x):
                 return x * 3
 
@@ -3169,7 +3169,7 @@ if HAS_CUDA_AND_TRITON:
             """Annotation works with default inductor backend (cudagraphs
             enabled via setUp config, no mode='reduce-overhead')."""
 
-            @torch._inductor.cudagraph_annotation("disable")
+            @torch._inductor._cudagraph_annotation("disable")
             def helper(x):
                 return (x * x).cos()
 
@@ -3188,7 +3188,7 @@ if HAS_CUDA_AND_TRITON:
             when that module is called inside a compiled function."""
 
             class MyModule(torch.nn.Module):
-                @torch._inductor.cudagraph_annotation("disable")
+                @torch._inductor._cudagraph_annotation("disable")
                 def forward(self, x):
                     return x + 1
 
