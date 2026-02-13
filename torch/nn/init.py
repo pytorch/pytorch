@@ -103,12 +103,15 @@ def _no_grad_trunc_normal_(
 
     with torch.no_grad():
         p = norm_cdf((b - mean) / std) - norm_cdf((a - mean) / std)
-        print(p)
 
         if p > 0.3:
+            # Cast bounds to tensor dtype so the rejection mask is consistent
+            # with the tensor's representable values.
+            lo = tensor.new_tensor(a).item()
+            hi = tensor.new_tensor(b).item()
             tensor.normal_(mean, std, generator=generator)
             while True:
-                mask = (tensor < a) | (tensor > b)
+                mask = (tensor < lo) | (tensor > hi)
                 if not mask.any():
                     break
                 tensor[mask] = torch.normal(
@@ -123,19 +126,20 @@ def _no_grad_trunc_normal_(
             mode = max(a, min(mean, b))
             log_peak = -0.5 * ((mode - mean) / std) ** 2
 
-            tensor.uniform_(a, b, generator=generator)
-            while True:
-                log_pdf = -0.5 * ((tensor - mean) / std) ** 2
-                mask = torch.rand_like(tensor).log() > (log_pdf - log_peak)
-                if not mask.any():
-                    break
-                tensor[mask] = torch.empty(
-                    mask.sum().item(),
-                    dtype=tensor.dtype,
-                    device=tensor.device,
+            accepted = torch.zeros(
+                tensor.shape, dtype=torch.bool, device=tensor.device
+            )
+            while not accepted.all():
+                pending = ~accepted
+                count = pending.sum().item()
+                tensor[pending] = torch.empty(
+                    count, dtype=tensor.dtype, device=tensor.device,
                 ).uniform_(a, b, generator=generator)
+                log_pdf = -0.5 * ((tensor[pending] - mean) / std) ** 2
+                accepted[pending] = torch.rand(
+                    count, dtype=tensor.dtype, device=tensor.device,
+                ).log() <= (log_pdf - log_peak)
 
-        print("DONE")
         return tensor
 
 
