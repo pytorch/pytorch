@@ -5628,7 +5628,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             val = int(rnumel)
             val = next_power_of_2(val)
         else:
-            val = 2
+            val = 1
             while not V.graph.sizevars.statically_known_leq(rnumel, val):
                 if val > 16 * 1024:
                     raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
@@ -5856,8 +5856,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return True
         elif not self.is_combo_kernel:
             if V.graph.sizevars.statically_known_equals(tree.numel, 1):
-                if not (tree.is_reduction and self.persistent_reduction):
-                    return True
+                return True
 
         # Masks are superfluous if numel is a multiple of BLOCK
         # (We use the fact that BLOCK is required by triton to be a power of 2)
