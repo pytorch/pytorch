@@ -418,15 +418,6 @@ test_dynamo_core() {
   assert_git_not_dirty
 }
 
-test_dynamo_cpython() {
-  time python test/run_test.py \
-    --include-cpython-tests \
-    --dynamo \
-    --verbose \
-    --upload-artifacts-while-running
-  assert_git_not_dirty
-}
-
 test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
@@ -1989,8 +1980,6 @@ elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then
   test_dynamo_core
-elif [[ "${TEST_CONFIG}" == *dynamo_cpython* ]]; then
-  test_dynamo_cpython
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"

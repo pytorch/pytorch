@@ -252,6 +252,15 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_load_precompile_entry", &_load_precompile_entry);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   m.def("_set_lru_cache", &_set_lru_cache);
+  m.def(
+      "_get_frame_value_stack_with_depth", &_get_frame_value_stack_with_depth);
+  m.def("set_bytecode_debugger_callback", &set_bytecode_debugger_callback);
+
+  // NullStackValue - sentinel for NULL stack values
+  py::class_<NullStackValue>(m, "NullStackValue")
+      .def("__repr__", [](const NullStackValue&) { return "<NULL>"; });
+  m.attr("NULL_STACK_VALUE") = get_null_stack_value();
+
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   init_THPCaches();
   if (THP_PyOpcode_Caches != nullptr) {
