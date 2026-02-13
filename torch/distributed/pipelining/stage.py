@@ -1007,8 +1007,8 @@ class _PipelineStageBase(ABC):
                 distributed_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
 
             for state in distributed_state._state_ctx.all_states:
-                if state._fsdp_param_group:
-                    state._fsdp_param_group.post_backward()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.post_backward()
 
             # it would be much better if pipelining backward invoked .backward so autograd hooks
             # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,

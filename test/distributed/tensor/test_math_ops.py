@@ -848,6 +848,16 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
 
     @with_comms
+    def test_norm_0_on_psum(self):
+        # L0 norm on P(sum) should not propagate -> P(sum), should replicate
+        device_mesh = self.build_device_mesh()
+        t = torch.tensor([0, 1, 0, 3, 0, 5], device=self.device_type).float()
+        dt = distribute_tensor(t, device_mesh, [Partial()])
+        out = torch.ops.aten.linalg_vector_norm(dt, 0)
+        self.assertEqual(out.full_tensor().item(), 3.0)
+        self.assertEqual(out.placements, (Replicate(),))
+
+    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
