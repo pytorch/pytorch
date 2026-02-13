@@ -3404,7 +3404,7 @@ class View(GenericView):
             else:
                 # With backed symbols, one of Eq/Lt/Gt must be true,
                 # so reaching here is a bug. With unbacked symbols,
-                # guard_or_false can't resolve any comparison.
+                # guard_or_false can't resolve all comparisons.
                 if free_unbacked_symbols(size_old) or free_unbacked_symbols(size_new):
                     raise GuardOnDataDependentSymNode(sympy.Eq(size_new, size_old))
                 raise AssertionError
