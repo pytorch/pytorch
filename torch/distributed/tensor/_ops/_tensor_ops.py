@@ -21,7 +21,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -271,49 +274,33 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
     return new_factory_strategy
 
 
-@register_op_strategy(aten.bucketize.Tensor)
-def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
-    """
-    Propagate input sharding to output, but expect replicated for boundaries input.
-    For Partial inputs, convert to Replicate since bucketize returns indices
-    which cannot be meaningfully combined with sum/avg reductions.
-    """
-    mesh = op_schema.get_mesh_from_args()
-    input_strategy, boundaries_strategy = op_schema.args_schema
-    bucketize_strategy = OpStrategy([])
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    if not isinstance(boundaries_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(boundaries_strategy)}")
-    for arg_strategy in input_strategy.strategies:
-        # Convert Partial placements to Replicate - bucketize returns indices
-        # which cannot be combined with sum/avg reductions
-        placements = tuple(
-            Replicate() if isinstance(p, Partial) else p
-            for p in arg_strategy.output_spec.placements
-        )
-        arg_spec = DTensorSpec(
-            mesh,
-            placements,
-            arg_strategy.output_spec.tensor_meta,
-        )
-        replica_spec = DTensorSpec(
-            mesh,
-            tuple([Replicate()] * mesh.ndim),
-            boundaries_strategy.strategies[0].output_spec.tensor_meta,
-        )
-        bucketize_strategy.strategies.append(
-            OpSpec(
-                output_specs=arg_spec,
-                input_specs=(arg_spec, replica_spec),
-                redistribute_cost=[
-                    generate_redistribute_costs(input_strategy, arg_spec),
-                    generate_redistribute_costs(boundaries_strategy, replica_spec),
-                ],
-            )
-        )
+@register_single_dim_strategy(aten.bucketize.Tensor)
+def bucketize_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Bucketize returns indices into a sorted boundary tensor.
 
-    return bucketize_strategy
+    Three families of strategies:
+    1. Shard the input (and output) on any dim, keep boundaries replicated.
+    2. Shard boundaries on dim 0, replicate input, output is Partial("sum").
+       Each rank counts how many of its local boundary values each input
+       element exceeds; summing across ranks gives the correct global index.
+    3. Partial("max") or Partial("min") input with replicated boundaries.
+       Bucketize is monotonically non-decreasing in its input, so reducing
+       local bucket indices with max (or min) across ranks gives the same
+       result as bucketizing the reduced input values.
+    """
+    input_meta, _boundaries_meta = args_schema
+    assert isinstance(input_meta, TensorMeta)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(len(input_meta.shape)):
+        strategies.append(
+            [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim), Replicate()]
+        )
+    strategies.append([Partial("sum"), Replicate(), _ShardingPlaceholder(0)])
+    for reduce_op in ("max", "min"):
+        strategies.append([Partial(reduce_op), Partial(reduce_op), Replicate()])
+    return strategies
 
 
 @register_op_strategy(aten.select.int, schema_info=RuntimeSchemaInfo(1))
