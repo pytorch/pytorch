@@ -41,6 +41,7 @@ if not is_available():
 
 else:
     from torch._C._distributed_c10d import Backend as C10dBackend
+    from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _resolve_process_group,
@@ -427,8 +428,6 @@ else:
 
         def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
-            # TODO: think about how to allow pg options to be passed to world group
-            # or mesh dimension groups
             if not default_initialized:
                 init_process_group()
 
@@ -521,7 +520,7 @@ else:
                 ranks = list(range(get_world_size()))
                 dim_group = (
                     new_group(
-                        backend="cpu:gloo,cuda:nccl",
+                        backend=backend,
                         ranks=ranks,
                         group_desc="mesh_default",
                     )
@@ -540,7 +539,10 @@ else:
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
             if (
-                getattr(default_group, "bound_device_id", None) is not None
+                (
+                    getattr(default_group, "bound_device_id", None) is not None
+                    or dist_config.use_torchcomms
+                )
                 and torch.cuda.is_available()
                 and (
                     backend is None
@@ -599,7 +601,10 @@ else:
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
                     DeviceMesh._init_one_process_group(
-                        layout[dim], rank_map, dim_name, backend_override[dim]
+                        layout[dim],
+                        rank_map,
+                        dim_name,
+                        backend_override[dim],
                     )
                 )
             # Filter out None values. If any are None then they should all be None.

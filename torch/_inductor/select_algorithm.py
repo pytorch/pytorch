@@ -416,6 +416,7 @@ class TritonTemplateKernel(TritonKernel):
         workspace_arg: Optional[WorkspaceArg] = None,
         prologue_loads_all_inputs=False,
         hint_override: Optional[int] = None,
+        triton_meta: Optional[dict[str, object]] = None,
     ) -> None:
         if tma_store:
             pass
@@ -485,7 +486,7 @@ class TritonTemplateKernel(TritonKernel):
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
-        self.triton_meta: Optional[dict[str, object]] = None
+        self.triton_meta: Optional[dict[str, object]] = triton_meta
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[list[ir.ComputedBuffer]] = subgraphs
 
@@ -683,7 +684,10 @@ class TritonTemplateKernel(TritonKernel):
             if v := self.meta.get(k, None):
                 triton_meta[k] = v
 
-        self.triton_meta = triton_meta
+        if self.triton_meta is None:
+            self.triton_meta = triton_meta
+        else:
+            self.triton_meta.update(triton_meta)
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
@@ -702,7 +706,7 @@ class TritonTemplateKernel(TritonKernel):
         template_args = f"""
             num_stages={self.num_stages},
             num_warps={self.num_warps},
-            triton_meta={triton_meta!r},
+            triton_meta={self.triton_meta!r},
             inductor_meta={inductor_meta!r},
         """
 
@@ -1623,6 +1627,7 @@ class GeneratedCodeCache:
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
         hint_override: Optional[int] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
     ) -> Optional[str]:
         def layout_key(layout: ir.Layout) -> str:
             assert not isinstance(layout, ir.FlexibleLayout)
@@ -1676,6 +1681,7 @@ class GeneratedCodeCache:
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
+                "triton_meta": triton_meta,
             }
         )
 
@@ -1790,6 +1796,7 @@ class TritonTemplate(KernelTemplate):
         hint_override: Optional[int] = None,
         tma_store: bool = False,
         transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
     ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -1816,6 +1823,8 @@ class TritonTemplate(KernelTemplate):
                 num_consumer_groups,
                 num_buffers_warp_spec,
                 kwargs,
+                hint_override,
+                triton_meta,
             )
 
         assert self.template, "requires jinja2"
@@ -1871,6 +1880,7 @@ class TritonTemplate(KernelTemplate):
                 hint_override=hint_override,
                 tma_store=tma_store,
                 transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+                triton_meta=triton_meta,
                 **kernel_options,
             )
 
@@ -1992,6 +2002,7 @@ class TritonTemplate(KernelTemplate):
         hint_override: Optional[int] = None,
         tma_store: bool = False,
         transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -2039,6 +2050,7 @@ class TritonTemplate(KernelTemplate):
             hint_override=hint_override,
             tma_store=tma_store,
             transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+            triton_meta=triton_meta,
         )
 
         # May happen as result of dev by 0.
@@ -2114,6 +2126,7 @@ class TritonTemplate(KernelTemplate):
                 hint_override=hint_override,
                 tma_store=tma_store,
                 transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+                triton_meta=triton_meta,
                 **options,
             )
             render = functools.partial(
@@ -2835,7 +2848,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
     ):
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -2861,8 +2874,8 @@ class AlgorithmSelectorCache(PersistentCache):
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
-            if not isinstance(choices[0], CUDATemplateCaller):
-                # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
+            if not isinstance(choices[0], CUTLASSTemplateCaller):
+                # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
         if config.deterministic:
@@ -3838,9 +3851,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
-                if not isinstance(choice, CUDATemplateCaller):
+                if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
                     )
@@ -3849,7 +3862,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -3860,7 +3873,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     msg += "\n\nAn unrecoverable unspecified launch failure was caught during autotuning."
                     msg += "\nPlease try re-running with TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC=1.\n\n"
 
-                if isinstance(choice, CUDATemplateCaller):
+                if isinstance(choice, CUTLASSTemplateCaller):
                     log.debug(
                         "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
                         msg,
@@ -4012,7 +4025,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         candidates = []
         if (
@@ -4023,7 +4036,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 [
                     c
                     for c in choices
-                    if isinstance(c, CUDATemplateCaller)
+                    if isinstance(c, CUTLASSTemplateCaller)
                     # hardcoded to only look at swizzle=2
                     if c.info_dict().get("swizzle") == "2"
                 ]
@@ -4046,7 +4059,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 
@@ -4060,7 +4073,7 @@ class AlgorithmSelectorCache(PersistentCache):
             pruned_choices = [
                 choice
                 for choice in choices
-                if not isinstance(choice, CUDATemplateCaller)
+                if not isinstance(choice, CUTLASSTemplateCaller)
                 or choice.kernel_hash_key() in winner_kernel_hashes
             ]
             return pruned_choices
@@ -4106,7 +4119,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 candidates_to_prune.add(candidate.kernel_hash_key())
             else:
                 winner_hashes.add(candidate.hash_key())
-                if isinstance(candidate, CUDATemplateCaller):
+                if isinstance(candidate, CUTLASSTemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
 
         pruned_choices = [

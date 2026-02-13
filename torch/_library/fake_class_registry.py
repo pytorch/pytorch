@@ -72,6 +72,32 @@ class FakeScriptObject:
     def __hash__(self) -> int:
         return hash(self.real_obj)
 
+    def __deepcopy__(self, memo: dict[int, Any]) -> "FakeScriptObject":
+        if id(self) in memo:
+            return memo[id(self)]
+        new_obj = FakeScriptObject.__new__(FakeScriptObject)
+        memo[id(self)] = new_obj
+        object.__setattr__(new_obj, "wrapped_obj", copy.deepcopy(self.wrapped_obj, memo))
+        object.__setattr__(new_obj, "script_class_name", self.script_class_name)
+        new_real_obj = copy.deepcopy(self.real_obj, memo)
+        object.__setattr__(new_obj, "real_obj", new_real_obj)
+        for name, value in self.__dict__.items():
+            if name not in ("wrapped_obj", "script_class_name", "real_obj"):
+                if isinstance(value, FakeScriptMethod):
+                    object.__setattr__(
+                        new_obj,
+                        name,
+                        FakeScriptMethod(new_obj, value.method_name, value.schema),
+                    )
+                else:
+                    if hasattr(new_real_obj, name):
+                        object.__setattr__(
+                            new_obj, name, getattr(new_real_obj, name)
+                        )
+                    else:
+                        object.__setattr__(new_obj, name, value)
+        return new_obj
+
 
 class FakeScriptMethod:
     def __init__(
