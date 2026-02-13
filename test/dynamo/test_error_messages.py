@@ -2191,7 +2191,11 @@ Dynamo recompile limit exceeded
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0039.html""",
             )
 
-    @unittest.skipIf(not torch.utils._triton.has_triton_package(), "requires triton")
+    @unittest.skipIf(
+        not torch.utils._triton.has_triton()
+        or not hasattr(__import__("triton"), "set_allocator"),
+        "requires triton with set_allocator support",
+    )
     def test_triton_set_allocator(self):
         import triton
 

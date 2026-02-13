@@ -2374,9 +2374,6 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cusparselt", has_cusparselt));
 
-  ASSERT_TRUE(set_module_attr("_has_cublaslt",
-    at::globalContext().hasCuBLASLt() ? Py_True : Py_False));
-
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
 #else

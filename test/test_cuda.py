@@ -619,11 +619,7 @@ print(t.is_pinned())
         def _check_default():
             default = torch.backends.cuda.preferred_blas_library()
             if torch.version.cuda:
-                # CUDA - Lt if available, BLAS otherwise
-                if torch._C._has_cublaslt:
-                    self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
-                else:
-                    self.assertTrue(default == torch._C._BlasBackend.Cublas)
+                self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 gcn_arch = str(

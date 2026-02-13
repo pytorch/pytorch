@@ -915,7 +915,11 @@ def _optimized_add(
     def make_optimized(ordered_args):
         if ordered_args is None:
             raise AssertionError("ordered_args is None")
-        result = sympy.Add(*ordered_args, evaluate=False)
+        # Use _from_args directly to bypass _exec_constructor_postprocessors
+        # which iterates over all args. This is safe because args are only
+        # symbols or constants, which don't register postprocessors.
+        # Pass is_commutative=True to avoid fuzzy_and check over all args.
+        result = sympy.Add._from_args(ordered_args, is_commutative=True)
         return (True, result)
 
     from torch.utils._sympy.functions import _is_symbols_binary_summation
@@ -1425,6 +1429,37 @@ def _make_node_magic(method, func):
                     self._optimized_summation,
                     other._optimized_summation,
                 )
+            elif method in ("eq", "ne", "ge", "gt", "le", "lt"):
+                import sympy
+
+                from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+                # Optimization: when one side is a single unbacked symbol
+                # and other is constant, use evaluate=False to skip expensive
+                # relational evaluation. We only do this for unbacked symbols
+                # because they have no assumptions (like positive=True) that
+                # sympy would use during evaluation.
+                lhs_is_unbacked = self.expr.is_symbol and symbol_is_type(
+                    self.expr, SymT.UNBACKED_INT
+                )
+                rhs_is_unbacked = other.expr.is_symbol and symbol_is_type(
+                    other.expr, SymT.UNBACKED_INT
+                )
+                if (lhs_is_unbacked and other.expr.is_number) or (
+                    rhs_is_unbacked and self.expr.is_number
+                ):
+                    rel_class = {
+                        "eq": sympy.Eq,
+                        "ne": sympy.Ne,
+                        "ge": sympy.Ge,
+                        "gt": sympy.Gt,
+                        "le": sympy.Le,
+                        "lt": sympy.Lt,
+                    }[method]
+                    out = rel_class(self.expr, other.expr, evaluate=False)
+                else:
+                    out = func(self.expr, other.expr)
+
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)
