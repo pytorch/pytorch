@@ -761,10 +761,10 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
     """Log per-op runtime estimates and output tensor metadata for TLParse."""
 
     try:
-        to_size_hints = V.graph.sizevars.size_hints
+        to_optimization_hints = V.graph.sizevars.optimization_hints
 
         def to_list(x: Optional[Sequence[Any]]) -> list[Any]:
-            return list(to_size_hints(x)) if x is not None else []
+            return list(to_optimization_hints(x)) if x is not None else []
 
         def dtype_to_str(dtype: Any) -> Optional[str]:
             if dtype is None:
