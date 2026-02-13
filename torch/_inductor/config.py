@@ -1777,7 +1777,7 @@ class triton:
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
-        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "8")
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
