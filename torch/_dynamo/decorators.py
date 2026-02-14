@@ -99,6 +99,9 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_wrapper_id = id(  # type: ignore[attr-defined]
+                nonrecursive_disable_wrapper
+            )
             nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
             # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
@@ -880,6 +883,9 @@ def mark_unbacked(
         index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single integer or a list/tuple of integers.
         hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
             This is only used by the inductor backend for size hint queries, such as during autotuning.
+            NOTE: changing hint_override values will cause FxGraphCache misses, since hint overrides
+            affect inductor codegen decisions and are included in the cache key via
+            ShapeEnv.var_to_hint_override.
         strict (bool, default=False): If True, an error will be raised if the unbacked dimension is specialized.
             By default (strict=False), specialization is allowed and will proceed without error.
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
@@ -974,7 +980,9 @@ def mark_dynamic(
     before torch.compile.
 
     5) If hint_override is passed, the hint_override for the specified dimension will replace the provided value
-    from the first example input as the official size hint.
+    from the first example input as the official size hint. Note: changing hint_override values will cause
+    FxGraphCache misses, since hint overrides affect inductor codegen decisions (autotuning, reduction
+    strategy, etc.) and are included in the cache key via ShapeEnv.var_to_hint_override.
 
     6) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
     multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
