@@ -215,12 +215,12 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
       {static_cast<int64_t>(input_lengths.size())},
       at::TensorOptions().dtype(at::kInt).device(at::kCUDA));
 
-  C10_HIP_CHECK(hipMemcpy(
+  C10_CUDA_CHECK(hipMemcpy(
       label_lengths_gpu.data_ptr<int>(),
       target_lengths.data(),
       target_lengths.size() * sizeof(int),
       hipMemcpyHostToDevice));
-  C10_HIP_CHECK(hipMemcpy(
+  C10_CUDA_CHECK(hipMemcpy(
       input_lengths_gpu.data_ptr<int>(),
       input_lengths.data(),
       input_lengths.size() * sizeof(int),

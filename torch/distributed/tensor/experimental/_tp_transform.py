@@ -220,11 +220,12 @@ def _mark_sharding(
                 op_schema = _get_op_schema(node, placement_strategies)
 
                 # get DTensor specs for inputs and outputs
+                sharding_propagator = DTensor._op_dispatcher.sharding_propagator
                 if (
-                    op_schema.op
-                    not in DTensor._op_dispatcher.sharding_propagator.op_strategy_funcs
+                    op_schema.op not in sharding_propagator.op_strategy_funcs
+                    and op_schema.op not in sharding_propagator.op_to_rules
                     and op_schema.op
-                    not in DTensor._op_dispatcher.sharding_propagator.op_to_rules
+                    not in sharding_propagator.op_single_dim_strategy_funcs
                 ):
                     # Mark all as replicated
                     output_sharding = _generate_default_output_sharding(

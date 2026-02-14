@@ -91,7 +91,10 @@ def decode_one_token(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
 ) -> tuple[torch.Tensor, torch.Tensor]:
     # input_pos: [B, 1]
-    assert input_pos.shape[-1] == 1
+    if input_pos.shape[-1] != 1:
+        raise AssertionError(
+            f"input_pos.shape[-1] must be 1, but got {input_pos.shape[-1]}"
+        )
     logits = model(x, input_pos)
     return sample(logits, **sampling_kwargs)
 

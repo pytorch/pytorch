@@ -1482,6 +1482,35 @@ class MethodWrapperVariable(VariableTracker):
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
+        elif (self_obj is type.__dict__["__mro__"] and wrapper_name == "__get__") or (
+            self_obj is type.__dict__["__dict__"] and wrapper_name == "__get__"
+        ):
+            from .builder import SourcelessBuilder
+
+            if len(args) == 1 and not kwargs:
+                try:
+                    return SourcelessBuilder.create(
+                        tx, self.method_wrapper(args[0].as_python_constant())
+                    )
+                except AsPythonConstantNotImplementedError:
+                    pass
+
+            attr_name = (
+                "__mro__" if self_obj is type.__dict__["__mro__"] else "__dict__"
+            )
+            unimplemented(
+                gb_type=f"unsupported type.__dict__['{attr_name}'].__get__ call",
+                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
+                explanation=f"`torch.compile` only supports calling type.__dict__['{attr_name}'].__get__ "
+                "on a single constant argument (i.e. a type).",
+                hints=[
+                    f"Make sure your call to type.__dict__['{attr_name}'].__get__ only has "
+                    "one positional argument (no keyword arguments).",
+                    f"Make sure the argument to type.__dict__['{attr_name}'].__get__ is a constant "
+                    "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
 
         return super().call_function(tx, args, kwargs)
 
