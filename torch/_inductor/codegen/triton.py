@@ -5657,7 +5657,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             val = int(rnumel)
             val = next_power_of_2(val)
         else:
-            val = 2
+            val = 1
             while not V.graph.sizevars.statically_known_leq(rnumel, val):
                 if val > 16 * 1024:
                     raise ValueError(f"Failed to find static RBLOCK for {rnumel}")

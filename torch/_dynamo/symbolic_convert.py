@@ -4626,18 +4626,13 @@ class InstructionTranslatorBase(
         )
 
     def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
-        """Handle graph break for a comprehension by skipping the comprehension bytecode.
+        """Handle list/dict comprehension graph break.
 
-        Steps:
-        1. Compile the graph up to the comprehension
-        2. Load captured variables from frame_list to local slots
-        3. Add the comprehension bytecode (runs eagerly at runtime)
-        4. Generate code to pass comprehension-created variables to the resume function
-        5. Create the resume function for code after the comprehension
+        Builds a synthetic function wrapping the comprehension bytecode,
+        calls it via codegen_call_resume, then chains into the resume
+        function for the post-comprehension code.
         """
         assert sys.version_info >= (3, 12)
-
-        from .variables.tensor import TensorVariable
 
         analysis = self._analyze_comprehension()
 
@@ -4675,135 +4670,190 @@ class InstructionTranslatorBase(
 
         self.popn(stack_pops)
         meta = all_stack_locals_metadata[0]
+        cg = PyCodegen(self.output.root_tx)
 
-        if self.parent is not None:
-            self._handle_comprehension_graph_break_nested(
-                analysis,
-                start_ip,
-                stack_pops,
-                all_stack_locals_metadata,
-                stack_pops_null_mask,
+        # Runtime stack after compile_subgraph:
+        #   cells, [frame_values], *(non-popped items), *(stack_pops items w/ NULLs)
+        # frame_values[0] = [frame N locals] (no stack items yet)
+
+        nonnull_count = sum(1 for m in stack_pops_null_mask if not m)
+
+        # live_stack_depth: stack items above cells/frame_values excluding NULLs
+        # that compile_subgraph didn't codegen (tracked in stack_null_idxes).
+        live_stack_depth = len(self.stack) - len(meta.stack_null_idxes)
+
+        # --- Step 2: Pop stack_pops items and append non-nulls to frame_values[0] ---
+        # SWAP each item to TOS then LIST_APPEND or pop_null; fv_list stays at
+        # TOS throughout. Items append in TOS-first (reversed) order;
+        # _build_comprehension_fn compensates by loading in reverse.
+        cg.extend_output(
+            [
+                # frame_values[0] to TOS
+                *create_copy(live_stack_depth + stack_pops + 1),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+            ]
+        )
+        for i in reversed(range(stack_pops)):
+            cg.extend_output(create_swap(2))
+            if stack_pops_null_mask[i]:
+                cg.extend_output(cg.pop_null())
+            else:
+                cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
+        cg.extend_output([create_instruction("POP_TOP")])
+
+        # Stack: cells, [frame_values], *(non-popped items)
+
+        # --- Step 3: Build comprehension function ---
+        new_code, fn_name = self._build_comprehension_fn(
+            analysis,
+            start_ip,
+            stack_pops,
+            stack_pops_null_mask,
+            nonnull_count,
+            meta,
+        )
+
+        # --- Step 4: Extract [cells[0]] and [frame_values[0]] for codegen_call_resume ---
+        cg.extend_output(
+            [
+                *create_copy(live_stack_depth + 2),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                create_instruction("BUILD_LIST", arg=1),
+                *create_copy(live_stack_depth + 2),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                create_instruction("BUILD_LIST", arg=1),
+            ]
+        )
+
+        # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
+
+        # --- Step 5: Call comprehension function via codegen_call_resume ---
+        self.codegen_call_resume([new_code], [fn_name], cg)
+
+        # Stack: ..., *(non-popped), comp_result
+
+        # --- Step 6: Remove appended stack_pops items from frame_values[0] ---
+        if nonnull_count > 0:
+            frame_values_pos = live_stack_depth + 1 + 1  # +1 result, +1 frame_values
+            cg.extend_output(
+                [
+                    *create_copy(frame_values_pos),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                    # frame_values[0] on TOS
+                    create_dup_top(),
+                    # frame_values[0], frame_values[0]
+                    cg.create_load_const(-nonnull_count),
+                    cg.create_load_const(None),
+                    create_instruction("BUILD_SLICE", arg=2),
+                    create_instruction("DELETE_SUBSCR"),
+                    # del frame_values[0][-nonnull_count:]
+                    create_instruction("POP_TOP"),
+                ]
             )
-            return
 
-        # --- Step 2: Load captured variables from frame_list to local slots ---
-        # The comprehension bytecode uses LOAD_FAST to load captured variables.
-        # compile_subgraph put them in frame_list[0], so we load from there
-        # and STORE_FAST to ensure they're in the correct local slots.
+        # --- Step 7: Pass comprehension outputs to frame_values[0] ---
+        # Walrus vars first, then result_var.
+        vars_to_pass = analysis.walrus_vars + (
+            [analysis.result_var] if analysis.result_var else []
+        )
 
-        captured_vars_to_store: list[str] = []
-        for var_name in analysis.captured_vars:
-            if var_name not in self.symbolic_locals:
-                continue
-            if var_name not in meta.locals_names:
-                continue
+        existing_vars: dict[str, int] = {}
+        for var_name in vars_to_pass:
+            self.symbolic_locals[var_name] = UnknownVariable()
+            if var_name in meta.locals_names:
+                existing_vars[var_name] = meta.locals_names[var_name]
+            else:
+                meta.locals_names[var_name] = len(meta.locals_names)
 
-            var = self.symbolic_locals[var_name]
-            in_correct_slot = (
-                isinstance(var.source, LocalSource)
-                and var.source.local_name == var_name
+        fv_depth = live_stack_depth + 2  # comp_result + frame_values
+
+        # --- Walrus vars: extract from comp_result tuple ---
+        if analysis.walrus_vars:
+            # comp_result is (result, *walrus_vars).
+            cg.extend_output(
+                [
+                    *create_copy(fv_depth),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                ]
             )
-            # Tensors/symnodes must already be in their correct slot
-            if isinstance(var, (TensorVariable, SymNodeVariable)):
-                if not in_correct_slot:
-                    unimplemented(
-                        gb_type="Comprehension with captured tensor not in local slot",
-                        context="",
-                        explanation="Cannot use comprehension optimization when a "
-                        "captured tensor variable is not stored in its expected "
-                        "local slot.",
-                        hints=[],
-                    )
-                continue
-
-            if not in_correct_slot:
-                captured_vars_to_store.append(var_name)
-
-        if captured_vars_to_store:
-            # Stack layout: [cells], [frame_list], *(all stack values including stack_pops)
-            # At this point, popn(stack_pops) reduced symbolic stack but runtime stack
-            # still has all values. We need to add stack_pops back.
-            frame_list_pos = (
-                len(self.stack) + stack_pops - len(meta.stack_null_idxes) + 1
-            )
-            cg = PyCodegen(self)
-            for var_name in captured_vars_to_store:
-                var_idx = meta.locals_names[var_name]
+            # Stack: ..., comp_tuple, fv0
+            for j, walrus_var in enumerate(analysis.walrus_vars):
                 cg.extend_output(
                     [
-                        *create_copy(frame_list_pos),
-                        cg.create_load_const(0),
+                        *create_copy(2),
+                        cg.create_load_const(j + 1),
                         cg.create_binary_subscr(),
-                        cg.create_load_const(var_idx),
-                        cg.create_binary_subscr(),
-                        create_instruction("STORE_FAST", argval=var_name),
                     ]
                 )
-            self.output.add_output_instructions(cg.get_instructions())
+                # Stack: ..., comp_tuple, fv0, walrus_value
+                if walrus_var in existing_vars:
+                    # fv0[idx] = walrus_value
+                    cg.extend_output(
+                        [
+                            *create_copy(2),  # copy fv0
+                            cg.create_load_const(existing_vars[walrus_var]),
+                            create_instruction("STORE_SUBSCR"),
+                        ]
+                    )
+                else:
+                    cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
+                # Stack: ..., comp_tuple, fv0
+            cg.extend_output(
+                [
+                    create_instruction("POP_TOP"),  # pop fv0
+                    # Extract the result from the tuple.
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                ]
+            )
+            # Stack: ..., result
 
-        # --- Step 3: Add the comprehension bytecode ---
-
-        copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
-        self.output.add_output_instructions(copied_insts)
-
+        # --- Result: keep on stack, overwrite/append to fv[0], or discard ---
         if analysis.result_on_stack:
             self.push(UnknownVariable())
+        elif analysis.result_var:
+            cg.extend_output(
+                [
+                    *create_copy(fv_depth),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                    # Stack: ..., result, fv0
+                ]
+            )
+            if analysis.result_var in existing_vars:
+                cg.extend_output(
+                    [
+                        cg.create_load_const(existing_vars[analysis.result_var]),
+                        create_instruction("STORE_SUBSCR"),
+                        # fv0[idx] = result
+                    ]
+                )
+            else:
+                cg.extend_output(
+                    [
+                        *create_swap(2),
+                        create_instruction("LIST_APPEND", arg=1),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+        else:
+            cg.extend_output([create_instruction("POP_TOP")])
 
-        # --- Step 4: Generate code to pass variables to resume function ---
+        # Stack: cells, [frame_values], *(non-popped stack)
+        self.output.add_output_instructions(cg.get_instructions())
 
-        # Variables the comprehension creates that need to be passed to resume:
-        # - result_var: variable the comprehension result is assigned to
-        # - walrus_vars: variables created by walrus operator (:=)
-        vars_to_pass = (
-            [analysis.result_var] if analysis.result_var else []
-        ) + analysis.walrus_vars
-
-        for var_name in vars_to_pass:
-            meta.locals_names[var_name] = len(meta.locals_names)
-            self.symbolic_locals[var_name] = UnknownVariable()
-
-        if vars_to_pass:
-            # Stack layout: [cells], [frame_list], *(extra values), (result if on stack)
-            frame_list_pos = len(self.stack) - len(meta.stack_null_idxes) + 1
-            resume_cg = PyCodegen(self)
-            self._emit_extend_frame_values(resume_cg, frame_list_pos, vars_to_pass)
-            self.output.add_output_instructions(resume_cg.get_instructions())
-
-        # --- Step 5: Create the resume function ---
-
+        # --- Step 8: Create resume function chain ---
         resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
             self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
         )
 
         self.instruction_pointer = None
-
-    def _emit_extend_frame_values(
-        self,
-        cg: PyCodegen,
-        frame_values_depth: int,
-        var_names: list[str],
-    ) -> None:
-        """Emit bytecode to append local vars to frame_values[0].
-
-        frame_values_depth is how deep frame_values sits below TOS
-        (i.e., the arg to COPY to reach it).
-        """
-        cg.extend_output(
-            [
-                *create_copy(frame_values_depth),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-            ]
-        )
-        for var_name in var_names:
-            cg.extend_output(
-                [
-                    create_instruction("LOAD_FAST", argval=var_name),
-                    create_instruction("LIST_APPEND", arg=1),
-                ]
-            )
-        cg.extend_output([create_instruction("POP_TOP")])
 
     def _build_comprehension_fn(
         self,
@@ -4932,207 +4982,6 @@ class InstructionTranslatorBase(
             )
 
         return new_code, fn_name
-
-    def _handle_comprehension_graph_break_nested(
-        self,
-        analysis: ComprehensionAnalysis,
-        start_ip: int,
-        stack_pops: int,
-        all_stack_locals_metadata: list[StackLocalsMetadata],
-        stack_pops_null_mask: list[bool],
-    ) -> None:
-        """Handle comprehension graph break in a nested (inlined) context.
-
-        Builds a synthetic function wrapping the comprehension bytecode,
-        calls it via codegen_call_resume, then chains into the resume
-        function for the post-comprehension code.
-        """
-        assert config.nested_graph_breaks
-        meta = all_stack_locals_metadata[0]
-        cg = PyCodegen(self.output.root_tx)
-
-        # Runtime stack after compile_subgraph:
-        #   cells, [frame_values], *(non-popped items), *(stack_pops items w/ NULLs)
-        # frame_values[0] = [frame N locals] (no stack items yet)
-
-        nonnull_count = sum(1 for m in stack_pops_null_mask if not m)
-
-        # live_stack_depth: stack items above cells/frame_values excluding NULLs
-        # that compile_subgraph didn't codegen (tracked in stack_null_idxes).
-        live_stack_depth = len(self.stack) - len(meta.stack_null_idxes)
-
-        # --- Step 1: Pop stack_pops items and append non-nulls to frame_values[0] ---
-        # SWAP each item to TOS then LIST_APPEND or pop_null; fv_list stays at
-        # TOS throughout. Items append in TOS-first (reversed) order;
-        # _build_comprehension_fn compensates by loading in reverse.
-        cg.extend_output(
-            [
-                # frame_values[0] to TOS
-                *create_copy(live_stack_depth + stack_pops + 1),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-            ]
-        )
-        for i in reversed(range(stack_pops)):
-            cg.extend_output(create_swap(2))
-            if stack_pops_null_mask[i]:
-                cg.extend_output(cg.pop_null())
-            else:
-                cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
-        cg.extend_output([create_instruction("POP_TOP")])
-
-        # Stack: cells, [frame_values], *(non-popped items)
-
-        # --- Step 2: Build comprehension function ---
-        new_code, fn_name = self._build_comprehension_fn(
-            analysis,
-            start_ip,
-            stack_pops,
-            stack_pops_null_mask,
-            nonnull_count,
-            meta,
-        )
-
-        # --- Step 3: Extract [cells[0]] and [frame_values[0]] for codegen_call_resume ---
-        cg.extend_output(
-            [
-                *create_copy(live_stack_depth + 2),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-                create_instruction("BUILD_LIST", arg=1),
-                *create_copy(live_stack_depth + 2),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-                create_instruction("BUILD_LIST", arg=1),
-            ]
-        )
-
-        # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
-
-        # --- Step 4: Call comprehension function via codegen_call_resume ---
-        self.codegen_call_resume([new_code], [fn_name], cg)
-
-        # Stack: ..., *(non-popped), comp_result
-
-        # --- Step 5: Remove appended stack_pops items from frame_values[0] ---
-        if nonnull_count > 0:
-            frame_values_pos = live_stack_depth + 1 + 1  # +1 result, +1 frame_values
-            cg.extend_output(
-                [
-                    *create_copy(frame_values_pos),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    # frame_values[0] on TOS
-                    create_dup_top(),
-                    # frame_values[0], frame_values[0]
-                    cg.create_load_const(-nonnull_count),
-                    cg.create_load_const(None),
-                    create_instruction("BUILD_SLICE", arg=2),
-                    create_instruction("DELETE_SUBSCR"),
-                    # del frame_values[0][-nonnull_count:]
-                    create_instruction("POP_TOP"),
-                ]
-            )
-
-        # --- Step 6: Pass comprehension outputs to frame_values[0] ---
-        # Walrus vars first, then result_var.
-        vars_to_pass = analysis.walrus_vars + (
-            [analysis.result_var] if analysis.result_var else []
-        )
-
-        existing_vars: dict[str, int] = {}
-        for var_name in vars_to_pass:
-            self.symbolic_locals[var_name] = UnknownVariable()
-            if var_name in meta.locals_names:
-                existing_vars[var_name] = meta.locals_names[var_name]
-            else:
-                meta.locals_names[var_name] = len(meta.locals_names)
-
-        fv_depth = live_stack_depth + 2  # comp_result + frame_values
-
-        # --- Walrus vars: extract from comp_result tuple ---
-        if analysis.walrus_vars:
-            # comp_result is (result, *walrus_vars).
-            cg.extend_output(
-                [
-                    *create_copy(fv_depth),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                ]
-            )
-            # Stack: ..., comp_tuple, fv0
-            for j, walrus_var in enumerate(analysis.walrus_vars):
-                cg.extend_output(
-                    [
-                        *create_copy(2),
-                        cg.create_load_const(j + 1),
-                        cg.create_binary_subscr(),
-                    ]
-                )
-                # Stack: ..., comp_tuple, fv0, walrus_value
-                if walrus_var in existing_vars:
-                    # fv0[idx] = walrus_value
-                    cg.extend_output(
-                        [
-                            *create_copy(2),  # copy fv0
-                            cg.create_load_const(existing_vars[walrus_var]),
-                            create_instruction("STORE_SUBSCR"),
-                        ]
-                    )
-                else:
-                    cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
-                # Stack: ..., comp_tuple, fv0
-            cg.extend_output(
-                [
-                    create_instruction("POP_TOP"),  # pop fv0
-                    # Extract the result from the tuple.
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                ]
-            )
-            # Stack: ..., result
-
-        # --- Result: keep on stack, overwrite/append to fv[0], or discard ---
-        if analysis.result_on_stack:
-            self.push(UnknownVariable())
-        elif analysis.result_var:
-            cg.extend_output(
-                [
-                    *create_copy(fv_depth),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    # Stack: ..., result, fv0
-                ]
-            )
-            if analysis.result_var in existing_vars:
-                cg.extend_output(
-                    [
-                        cg.create_load_const(existing_vars[analysis.result_var]),
-                        create_instruction("STORE_SUBSCR"),
-                        # fv0[idx] = result
-                    ]
-                )
-            else:
-                cg.extend_output(
-                    [
-                        *create_swap(2),
-                        create_instruction("LIST_APPEND", arg=1),
-                        create_instruction("POP_TOP"),
-                    ]
-                )
-        else:
-            cg.extend_output([create_instruction("POP_TOP")])
-
-        # Stack: cells, [frame_values], *(non-popped stack)
-        self.output.add_output_instructions(cg.get_instructions())
-
-        # --- Step 7: Create resume function chain ---
-        resume_inst = self.instructions[analysis.end_ip]
-        self.output.add_output_instructions(
-            self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
-        )
-
-        self.instruction_pointer = None
 
     def _copy_comprehension_bytecode(
         self, start_ip: int, end_ip: int
