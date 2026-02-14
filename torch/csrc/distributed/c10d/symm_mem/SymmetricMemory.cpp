@@ -533,7 +533,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
   m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
   m.def(
-      "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
+      "nvshmem_put_with_signal(Tensor inp, Tensor(a) out, Tensor(a) sigpad, int signal, int peer) -> ()");
   m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
   m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
