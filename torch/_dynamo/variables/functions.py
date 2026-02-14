@@ -942,7 +942,7 @@ class BuiltinMethodVariable(BaseUserFunctionVariable):
         method_self = self.fn.__self__
         name = self.fn.__name__
         obj_source = self.source and AttrSource(self.source, "__self__")
-        obj_vt = VariableTracker.build(tx, method_self, obj_source)
+        obj_vt = VariableTracker.build(tx, method_self, obj_source, realize=True)
         return obj_vt.call_method(tx, name, args, kwargs)
 
 
@@ -2086,6 +2086,7 @@ class SkipFunctionVariable(VariableTracker):
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
+                # pyrefly: ignore [implicit-any]
                 hints = []
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented(
