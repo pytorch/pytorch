@@ -82,7 +82,7 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, EnumVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -90,12 +90,14 @@ from .dicts import (
     DictViewVariable,
     FrozensetVariable,
     is_hashable,
+    OrderedSetClassVariable,
     SetVariable,
 )
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    RangeVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -746,7 +748,10 @@ class BuiltinVariable(VariableTracker):
                 # For constants, speedup the comparison instead of using
                 # polyfill. Removing this line causes major regression for pr
                 # time benchmark - add_loop_eager.
-                result = [((ConstantVariable, ConstantVariable), compare_by_value)]
+                result = [
+                    ((ConstantVariable, ConstantVariable), compare_by_value),
+                    ((EnumVariable, EnumVariable), compare_by_value),
+                ]
 
                 op_var = BuiltinVariable(op)
                 # Special handling of SymNode variable
@@ -1649,6 +1654,18 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, variables.UserDefinedClassVariable):
             if type(arg.value).__repr__ is type.__repr__:
                 return variables.ConstantVariable.create(repr(arg.value))
+        if isinstance(
+            arg,
+            (
+                RangeVariable,
+                ConstDictVariable,
+                DefaultDictVariable,
+                OrderedSetClassVariable,
+                DictViewVariable,
+            ),
+        ):
+            return variables.ConstantVariable.create(arg.debug_repr())
+        return None
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2033,7 +2050,7 @@ class BuiltinVariable(VariableTracker):
                 variables.NNModuleVariable,
                 variables.TensorVariable,
                 variables.TupleVariable,
-                variables.DictItemsVariable,
+                DictViewVariable,
             ),
         ):
             return obj.call_method(tx, "__iter__", [], {})
