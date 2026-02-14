@@ -419,7 +419,7 @@ def pallas_compute_tiling(
         ax_last = tileable_nd - 1
         ax_second = tileable_nd - 2
         min_dim = min(ref_shape[ax_last], ref_shape[ax_second])
-        t = _pallas_tile_size(min_dim, min(_align(ax_last), _align(ax_second)))
+        t = _pallas_tile_size(min_dim, max(_align(ax_last), _align(ax_second)))
 
         if t < ref_shape[ax_second]:
             tile[ax_second] = t
