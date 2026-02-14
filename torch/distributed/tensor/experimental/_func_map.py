@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
+import warnings
 from collections.abc import Callable, Sequence
-from typing import Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -237,6 +238,16 @@ def _allgather_global_shape_uneven_sharding(
     Returns:
         A tuple of (global_shape, global_stride)
     """
+    # TODO: a CPU-side control plane for exchanging shape information would
+    # avoid the GPU sync and graph break caused by this path.
+    warnings.warn(
+        "allow_uneven_sharding=True uses all-gather to compute global shapes, "
+        "which introduces communication overhead and a CPU-GPU sync that will "
+        "cause a graph break under torch.compile. For better performance, use "
+        "out_shapes to provide global shapes directly with zero overhead.",
+        stacklevel=3,
+    )
+
     local_shape = local_tensor.shape
     global_shape = list(local_shape)
 
@@ -376,15 +387,15 @@ def _local_map_wrapped(
         flat_out, out_spec = pytree.tree_flatten(out)
 
         flat_dist_out = []
-        out_placements_tuple = (
-            out_placements if isinstance(out_placements, tuple) else (out_placements,)
+        out_placements_tuple = cast(
+            tuple[PlacementType, ...],
+            out_placements if isinstance(out_placements, tuple) else (out_placements,),
         )
         assert len(flat_out) == len(out_placements_tuple), (
             "local_map requires one PlacementType be provided for each output value,"
             f" received {len(out_placements_tuple)} out_placements but"
             f" {len(flat_out)} is expected!"
         )
-        # pyrefly: ignore [bad-argument-type]
         for out_idx, (out, spec) in enumerate(zip(flat_out, out_placements_tuple)):
             if isinstance(out, torch.Tensor):
                 assert not isinstance(out, DTensor), (
