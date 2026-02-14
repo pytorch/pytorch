@@ -10550,6 +10550,40 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         )
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
 
+    def test_where_broadcast_preserves_symint(self):
+        # The C++ infer_size_impl uses SymInt::operator== for the == 1
+        # broadcast check, which calls guard_bool and specializes any
+        # backed SymInt whose value is 1. This test creates a FakeTensor
+        # with a dynamic dim backed by 1 and verifies that where's output
+        # preserves the symbolic dim after broadcasting against a [1] tensor.
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv(specialize_zero_one=False)
+        mode = FakeTensorMode(shape_env=shape_env)
+        with mode:
+            s0 = shape_env.create_symintnode(
+                shape_env.create_symbol(
+                    val=1,
+                    source=ConstantSource("s0"),
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                    do_not_specialize_zero_one=True,
+                ),
+                hint=1,
+            )
+            t = torch.empty((s0, 8), device="meta")
+            cond = torch.empty((s0, 8), device="meta", dtype=torch.bool)
+            fill = torch.empty((1,), device="meta")
+
+            result = torch.ops.aten.where.self(cond, fill, t)
+
+        self.assertIsInstance(
+            result.shape[0],
+            torch.SymInt,
+            f"where output dim 0 should be symbolic but got {result.shape[0]}",
+        )
+
     def test_nonzero_2(self):
         class Module(torch.nn.Module):
             def forward(self, x):

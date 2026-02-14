@@ -1472,12 +1472,19 @@ def register_fast_op_impl(
     return impl_decorator
 
 
+def _is_concrete_int(x: IntLikeType, val: int) -> bool:
+    """True only when x is a plain Python int equal to val.
+
+    SymInts are never considered concrete — this avoids specializing a
+    dynamic dim whose backing value happens to equal val at trace time.
+    """
+    return isinstance(x, int) and x == val
+
+
 # infer_size_impl in ExpandUtils
 def infer_size(
     a: Sequence[IntLikeType], b: Sequence[IntLikeType]
 ) -> tuple[IntLikeType, ...]:
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     dimsA = len(a)
     dimsB = len(b)
     ndim = max(dimsA, dimsB)
@@ -1489,24 +1496,19 @@ def infer_size(
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
 
-        # NB: It is very important to test for broadcasting, before testing
-        # sizeA == sizeB.  This is because the broadcasting tests are likely
-        # to be statically known (in particular, if sizeA/sizeB is unbacked
-        # but size-like, we will unsoundly assume they never equal 1), but
-        # the sizeA == sizeB test may not be statically known.  However, once
-        # we have established that no broadcasting is happening, the
-        # sizeA == sizeB is now expect_true and we can defer it as a runtime
-        # assert (this works because Python will return the terminal
-        # expression of an or statement as-is, without bool()'ing it; if this
-        # were not the case, we'd need to write this using torch.sym_or() or
-        # something like that).
+        # NB: Only treat a dimension as broadcastable if it is the concrete
+        # Python int 1.  SymInts with backing value 1 must NOT be treated as
+        # broadcastable — doing so would specialize a dynamic dim to 1 via
+        # guard_or_false, collapsing it to a concrete constant.  If neither
+        # dim is a concrete 1, we fall through to the sizeA == sizeB check
+        # which emits a deferred runtime assert instead of a guard.
         torch._check(
-            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
+            _is_concrete_int(sizeA, 1) or _is_concrete_int(sizeB, 1) or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
         )
-        expandedSizes[i] = sizeB if guard_or_false(sizeA == 1) else sizeA
+        expandedSizes[i] = sizeB if _is_concrete_int(sizeA, 1) else sizeA
     return tuple(expandedSizes)
 
 
@@ -1670,6 +1672,35 @@ def fast_detach(
     return FakeTensor(fake_mode, out, x.device)
 
 
+def fast_where(fake_mode: FakeTensorMode, *args: Any, **kwargs: Any) -> FakeTensor:
+    """Fast path for aten.where.self using the Python infer_size.
+
+    Without this, where dispatches to the C++ Meta kernel which uses
+    TensorIterator for broadcasting — a separate code path from
+    infer_size_impl in ExpandUtils.cpp.
+    """
+    condition, self_, other = args[0], args[1], args[2]
+
+    shape = infer_size(condition.shape, self_.shape)
+    shape = infer_size(shape, other.shape)
+
+    common_device = torch.device("cpu")
+    for t in (condition, self_, other):
+        if isinstance(t, torch.Tensor) and t.device.type != "cpu":
+            common_device = t.device
+            break
+
+    _, result_dtype = elementwise_dtypes(
+        self_, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+    )
+
+    return FakeTensor(
+        fake_mode,
+        torch.empty(shape, dtype=result_dtype, device="meta"),
+        device=common_device,
+    )
+
+
 @functools.cache
 def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
     import torch._refs
@@ -1690,4 +1721,5 @@ def get_fast_op_impls() -> dict[OpOverload, Callable[..., Any]]:
         )
     )
     register_fast_op_impl(torch.ops.aten.detach.default)(fast_detach)
+    register_fast_op_impl(torch.ops.aten.where.self)(fast_where)
     return FAST_OP_IMPLEMENTATIONS

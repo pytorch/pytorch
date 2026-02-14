@@ -12,6 +12,16 @@ TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size) {
 } // namespace internal
 
 namespace {
+// True only when x is a non-symbolic integer equal to 1.  For plain int64_t
+// this is just x == 1.  For SymInt, maybe_as_int() returns nullopt when the
+// value is symbolic, so symbolic dims are never treated as broadcastable —
+// even if their backing value happens to be 1 at trace time.
+inline bool is_definitely_one(int64_t x) { return x == 1; }
+inline bool is_definitely_one(const c10::SymInt& x) {
+  auto v = x.maybe_as_int();
+  return v.has_value() && *v == 1;
+}
+
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
 template <typename Container, typename ArrayType>
 Container infer_size_impl(ArrayType a, ArrayType b) {
@@ -29,13 +39,13 @@ Container infer_size_impl(ArrayType a, ArrayType b) {
     auto sizeB = (dimB >= 0) ? b[dimB] : 1;
 
     TORCH_CHECK(
-        sizeA == sizeB || sizeA == 1 || sizeB == 1,
+        is_definitely_one(sizeA) || is_definitely_one(sizeB) || sizeA == sizeB,
         "The size of tensor a (", sizeA,
         ") must match the size of tensor b (", sizeB,
         ") at non-singleton dimension ", i);
 
       // 1s map to the other size (even 0).
-      expandedSizes[i] = sizeA == 1 ? sizeB : sizeA;
+      expandedSizes[i] = is_definitely_one(sizeA) ? sizeB : sizeA;
   }
 
   return expandedSizes;
