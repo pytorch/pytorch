@@ -494,7 +494,9 @@ class VariableBuilder:
     def _call_impl(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
-            dup_guard = make_dupe_guard(self.source, side_effect_result.source)
+            dup_guard = make_dupe_guard(
+                self.source, side_effect_result.source, side_effect_result
+            )
             if dup_guard:
                 self.install_guards(dup_guard)
 
