@@ -15756,11 +15756,12 @@ if RUN_GPU or HAS_MPS:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:
+    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
+
+    tpu_api.tpu_device()  # initialize TPU runtime
 
     class SweepInputsTpuTest(SweepInputs2, TestCase):
-        # TODO(pallas): TPU tests use cpu device with _debug_cpu_to_tpu_pallas=True
-        # to route execution to TPU. See make_pallas_tpu in test_pallas.py.
-        gen = InputGen(10, "cpu")
+        gen = InputGen(10, "tpu")
 
     SweepInputsTpuTest.populate()
 
