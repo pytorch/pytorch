@@ -2436,11 +2436,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
-            func_to_graphable,
             is_graphable_type,
             is_valid_output,
             to_graphable,
         )
+        from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
 
@@ -2551,23 +2551,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 fake_tensor_tls.allow_non_fake_inputs_override = old_val
             return res
 
-        # `flat_apply` wants a TreeSpec for the function input.
-        _, f_spec = func_to_graphable(patched_fn)
+        f_callable = _LeafCallable(patched_fn)
 
-        # TreeSpec isn't graphable, so we register the function and input
-        # specs as attributes on the graph module.
-        f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            f"{fn.__name__}_spec", f_spec
+        f_callable_proxy = tx.output.register_static_attr_and_return_proxy(
+            f"{fn.__name__}_callable", f_callable
         )
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
             # pyrefly: ignore [unbound-name]
             input_spec,
         )
-        f_spec_proxy.node.type = type(f_spec)
+        f_callable_proxy.node.type = type(f_callable)
         # pyrefly: ignore [unbound-name]
         input_spec_proxy.node.type = type(input_spec)
-        all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
+        all_args = (f_callable_proxy, input_spec_proxy, *proxified_flat_args)
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
