@@ -54,7 +54,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device) -> None
 
 def pin_memory(data, device=None):
     if isinstance(data, torch.Tensor):
-        return data.pin_memory(device)
+        return data.pin_memory()
 
     if hasattr(data, "pin_memory"):
         return data.pin_memory()
