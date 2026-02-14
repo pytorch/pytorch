@@ -17,14 +17,8 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._matrix_ops import (
-    gen_single_dim_einsum_strategies,
-    mm_single_dim_strategy,
-)
-from torch.distributed.tensor._ops.single_dim_strategy import (
-    register_single_dim_strategy,
-)
-from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
+from torch.distributed.tensor._ops._matrix_ops import gen_single_dim_einsum_strategies
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
@@ -655,11 +649,26 @@ class DistMatrixOpsTest(DTensorTestBase):
                 placements,
                 run_check=False,
             )
-            dist_res = torch.mm(dt1, dt2)
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                dist_res = torch.mm(dt1, dt2)
             expected_placements = tuple(
                 Partial(reduce_op) for _ in range(device_mesh.ndim)
             )
             self.assertEqual(dist_res.placements, expected_placements)
+            # Per-input linearity keeps one input as-is and redistributes
+            # the other from Partial to Replicate via one all-reduce per
+            # Partial mesh dim with size > 1.
+            expected_allreduce_count = sum(
+                1
+                for i, p in enumerate(placements)
+                if isinstance(p, Partial) and device_mesh.size(i) > 1
+            )
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_reduce],
+                expected_allreduce_count,
+            )
+            self.assertEqual(comm_mode.get_total_counts(), expected_allreduce_count)
             # Numeric check: redistribute to Replicate to materialize the full
             # result, then compare against the ground truth computed from the
             # full (all-reduced) inputs.
@@ -669,36 +678,47 @@ class DistMatrixOpsTest(DTensorTestBase):
             expected_val = torch.mm(full_a, full_b)
             self.assertEqual(full_res, expected_val)
 
-        propagator = DTensor._op_dispatcher.sharding_propagator
-        saved = propagator.op_single_dim_strategy_funcs.copy()
-        try:
-            # Non-single-dim strategy path (1D mesh only; gen_einsum_strategies
-            # lacks per-input linearity so multi-dim meshes won't preserve
-            # all-Partial).
-            propagator.op_single_dim_strategy_funcs.pop(torch.ops.aten.mm.default, None)
-            propagator.propagate_op_sharding.cache_clear()
-            device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-            # P(sum) coincidentally works because the contracting dim strategy
-            # produces P(sum). Other reduce_ops fail.
-            _run_mm(device_mesh, "sum")
+        for mesh_shape in mesh_shapes:
+            device_mesh = init_device_mesh(self.device_type, mesh_shape)
             for reduce_op in Partial.LINEAR_REDUCE_OPS:
-                if reduce_op != "sum":
-                    with self.assertRaises(AssertionError):
-                        _run_mm(device_mesh, reduce_op)
-            # Single-dim strategy path across all mesh shapes
-            register_single_dim_strategy(torch.ops.aten.mm.default)(
-                mm_single_dim_strategy
+                _run_mm(device_mesh, reduce_op)
+
+        # Also verify mixed Partial placements across mesh dims: on a 2D mesh,
+        # left=P(op)R and right=RP(op) should produce output=P(op)P(op)
+        # with no communication, matching the full tensor result.
+        device_mesh = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        M, K, N = 16, 12, 20
+        for reduce_op in Partial.LINEAR_REDUCE_OPS:
+            a_local = torch.randn(M, K, device=self.device_type)
+            b_local = torch.randn(K, N, device=self.device_type)
+
+            dt_a = DTensor.from_local(
+                a_local,
+                device_mesh,
+                [Partial(reduce_op), Replicate()],
+                run_check=False,
             )
-            # Must clear both Python and C++ caches after changing strategy funcs
-            _clear_sharding_prop_cache()
-            for mesh_shape in mesh_shapes:
-                device_mesh = init_device_mesh(self.device_type, mesh_shape)
-                propagator.propagate_op_sharding.cache_clear()
-                for reduce_op in Partial.LINEAR_REDUCE_OPS:
-                    _run_mm(device_mesh, reduce_op)
-        finally:
-            propagator.op_single_dim_strategy_funcs = saved
-            _clear_sharding_prop_cache()
+            dt_b = DTensor.from_local(
+                b_local,
+                device_mesh,
+                [Replicate(), Partial(reduce_op)],
+                run_check=False,
+            )
+
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                dist_res = torch.mm(dt_a, dt_b)
+
+            self.assertEqual(
+                dist_res.placements,
+                (Partial(reduce_op), Partial(reduce_op)),
+            )
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            full_res = dist_res.full_tensor()
+            full_a = dt_a.full_tensor()
+            full_b = dt_b.full_tensor()
+            self.assertEqual(full_res, torch.mm(full_a, full_b))
 
     @with_comms
     @skip_unless_torch_gpu

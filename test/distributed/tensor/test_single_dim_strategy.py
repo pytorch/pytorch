@@ -458,9 +458,10 @@ class TestExpandPlaceholder(TestCase):
         )
         assert isinstance(strategy, OpStrategy)
 
-        # For a 3D mesh with 4 single-dim strategies (3 explicit + 1 implicit replicate),
-        # we should have 4^3 = 64 strategies maximum
-        self.assertEqual(len(strategy.strategies), 64)
+        # For a 3D mesh with 8 single-dim strategies per mesh dim
+        # (3 sharding + 4 per-input linearity + 1 implicit replicate),
+        # we get 8^3 = 512 strategy combinations.
+        self.assertEqual(len(strategy.strategies), 512)
 
         all_replicate_found = False
         shard_0_found = False
@@ -539,9 +540,15 @@ class TestExpandPlaceholder(TestCase):
         )
 
         # Test Case 1: All-replicate inputs - no sharding expansion
-        # Expected: Only implicit all-replicate rule (no sharding builders available)
+        # Expected: The implicit all-replicate rule plus the per-input linearity
+        # strategies (which have no placeholders and pass through unchanged).
+        # Strategies with placeholders are dropped since there are no shard builders.
         expected_replicate = [
-            [Replicate(), Replicate(), Replicate()],  # Implicit all-replicate
+            [Replicate(), Replicate(), Replicate()],
+            [Partial("sum"), Partial("sum"), Replicate()],
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Replicate()],
+            [Partial("avg"), Replicate(), Partial("avg")],
         ]
         single_dim_strategies = _insert_single_dim_replication_strategy(
             single_dim_strategies, num_outputs=1, num_input_tensors=2
@@ -553,12 +560,17 @@ class TestExpandPlaceholder(TestCase):
         self.assertEqual(expanded_replicate, expected_replicate)
 
         # Test Case 2: (_Strided)Shard-only inputs - only (_Strided)Shard expansion
-        # Expected: 3 strategies with placeholders filled using (_Strided)Shard + implicit replicate
+        # Expected: 3 strategies with placeholders filled using (_Strided)Shard,
+        # plus the per-input linearity strategies (no placeholders), plus implicit replicate
         expected_shard = [
             [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
             [Shard(0), Shard(0), Replicate()],
             [Shard(1), Replicate(), Shard(1)],
+            [Partial("sum"), Partial("sum"), Replicate()],
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Replicate()],
+            [Partial("avg"), Replicate(), Partial("avg")],
         ]
 
         expanded_shard = _fill_single_dim_strategy_placeholders(
@@ -598,6 +610,11 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(dim=1, split_factor=4),
             ],
+            # Per-input linearity strategies (no placeholders, pass through unchanged)
+            [Partial("sum"), Partial("sum"), Replicate()],
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Replicate()],
+            [Partial("avg"), Replicate(), Partial("avg")],
         ]
         expanded_strided_shard = _fill_single_dim_strategy_placeholders(
             {
@@ -609,7 +626,8 @@ class TestExpandPlaceholder(TestCase):
         self.assertEqual(expanded_strided_shard, expected_strided_shard)
 
         # Test Case 3: Mixed Shard and _StridedShard inputs - both types of expansion
-        # Expected: 3 strategies * 2 shard types (Shard and _StridedShard) + implicit replicate
+        # Expected: 3 strategies * 2 shard types (Shard and _StridedShard),
+        # plus per-input linearity strategies, plus implicit replicate
         expected_mixed = [
             [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
@@ -630,6 +648,11 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(1, split_factor=2),
             ],
+            # Per-input linearity strategies (no placeholders, pass through unchanged)
+            [Partial("sum"), Partial("sum"), Replicate()],
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Replicate()],
+            [Partial("avg"), Replicate(), Partial("avg")],
         ]
 
         expanded_mixed = _fill_single_dim_strategy_placeholders(
