@@ -1402,6 +1402,13 @@ class _InProcessFxCompile(FxCompile):
                         # See details in vllm/compilation/pass_manager.py.
                         log.warning("failed to log pt2_configs")
 
+            # We use dual wrapper to generate autotuning code alongside with the original codegen.
+            use_dual_wrapper = (
+                aot_mode
+                and config.triton.autotune_at_compile_time
+                and config.triton.autotune_full_graph
+            )
+
             with (
                 V.set_fake_mode(fake_mode),
                 maybe_disable_comprehensive_padding(example_inputs),
@@ -1437,6 +1444,7 @@ class _InProcessFxCompile(FxCompile):
                         is_backward=is_backward,
                         is_const_graph=True,
                         fx_wrapper=fx_wrapper,
+                        use_dual_wrapper=use_dual_wrapper,  # type: ignore[arg-type]
                     )
                     with (
                         V.set_graph_handler(const_graph),
@@ -1471,6 +1479,7 @@ class _InProcessFxCompile(FxCompile):
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
+                    use_dual_wrapper=use_dual_wrapper,  # type: ignore[arg-type]
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
