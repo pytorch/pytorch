@@ -344,6 +344,7 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100/B200
+  time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
@@ -1940,6 +1941,12 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
+  TIMM_PIN="$(< .ci/docker/ci_commit_pins/timm.txt)"
+  export HF_HOME="${HF_HOME}/timm_${TIMM_PIN}"
+  if [[ "${TRANSFORMERS_OFFLINE:-1}" == "0" ]]; then
+    python benchmarks/dynamo/timm_models.py --download-only \
+      && touch "${HF_HOME}/.timm_cache_complete"
+  fi
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then

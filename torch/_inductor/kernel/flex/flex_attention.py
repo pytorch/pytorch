@@ -921,6 +921,12 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
+        # Intel GPU enables TMA by default
+        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
+
         cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
         cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)
         cur_kernel_options.setdefault("BLOCK_M2", conf.block_m2)
