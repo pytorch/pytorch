@@ -2537,6 +2537,32 @@ class TestReductions(TestCase):
             torch.tensor([1, 0], device=device, dtype=torch.int64),
         )
 
+        # NaN handling: fast path must match generic reduction behavior
+        x_nan = torch.tensor(
+            [
+                [float("nan"), 1.0, float("nan"), 2.0],
+                [0.0, float("nan"), 3.0, float("nan")],
+            ],
+            device=device,
+        )
+        self.assertEqual(
+            x_nan.argmax(dim=0),
+            x_nan.t().argmax(dim=1),
+        )
+
+        # inf / -inf edge cases
+        x_inf = torch.tensor(
+            [
+                [float("-inf"), 1.0, float("inf"), -1.0],
+                [0.0, float("inf"), 2.0, float("-inf")],
+            ],
+            device=device,
+        )
+        self.assertEqual(
+            x_inf.argmax(dim=0),
+            x_inf.t().argmax(dim=1),
+        )
+
     @dtypes(torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.int, torch.long, torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.int, torch.long, torch.half, torch.float, torch.double)
