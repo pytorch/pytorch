@@ -1335,13 +1335,6 @@ file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "
 
 enable_autograd_for_aot: bool = False
 
-_debug_cpu_to_tpu_pallas: bool = Config(
-    env_name_force="PALLAS_TARGET_TPU", default=False
-)
-pallas_take_first_jax_device_only: bool = Config(
-    env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
-)
-
 
 def get_worker_log_path() -> Optional[str]:
     log_loc = None
@@ -2275,6 +2268,9 @@ cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 # Backend to use for CUDA codegen either
 # "triton", "halide" (experimental) or "pallas" (experimental)
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
+
+# Backend to use for TPU codegen
+tpu_backend: Literal["pallas"] = "pallas"
 
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"
