@@ -6126,7 +6126,7 @@ def scaled_dot_product_attention(
         https://arxiv.org/pdf/2305.13245
     """
     # Handle zero-sized tensors to prevent segfault
-    if query.numel() == 0 or key.numel() == 0 or value.numel() == 0:
+    if query.sym_numel() == 0 or key.sym_numel() == 0 or value.sym_numel() == 0:
         # Output shape: (N, ..., Hq, L, Ev)
         # Take all dims from query except the last one, then append value's last dim
         output_shape = list(query.shape[:-1]) + [value.shape[-1]]
