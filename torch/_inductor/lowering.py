@@ -1967,16 +1967,22 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
     if offset_negative:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
-                original_shape[dim1] + offset, original_shape[dim2]
+                original_shape[dim1] + offset,
+                original_shape[dim2],
+                size_like=False,
             ),
             0,  # type: ignore[arg-type]
+            size_like=False,
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
-                original_shape[dim1], original_shape[dim2] - offset
+                original_shape[dim1],
+                original_shape[dim2] - offset,
+                size_like=False,
             ),
             0,  # type: ignore[arg-type]
+            size_like=False,
         )
 
     base_idx = (0, 0)

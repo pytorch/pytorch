@@ -666,6 +666,9 @@ def eq(left, right):
 
 
 def lt(left, right):
+    """Compare sizes: only use on inputs known to be >= 0."""
+    V.graph.sizevars.check(sympy.Ge(left, 0))
+    V.graph.sizevars.check(sympy.Ge(right, 0))
     return V.graph.sizevars.guard_or_false(sympy.Lt(left, right))
 
 
@@ -746,7 +749,9 @@ class HalideKernel(SIMDKernel):
                     node.root.lookup(
                         node.divisor * divisor,
                         V.graph.sizevars.evaluate_min(
-                            modulus, FloorDiv(node.length, divisor)
+                            modulus,
+                            FloorDiv(node.length, divisor),
+                            size_like=True,
                         ),
                     ).symbol()
                 )
@@ -803,7 +808,8 @@ class HalideKernel(SIMDKernel):
                 handled_count += len(sizes_to_add)
                 assert sizes_to_add, nodes
                 end = divisor * functools.reduce(
-                    V.graph.sizevars.evaluate_max, sizes_to_add
+                    lambda a, b: V.graph.sizevars.evaluate_max(a, b, size_like=True),
+                    sizes_to_add,
                 )
                 sizes_to_add.extend(
                     [
@@ -1047,7 +1053,9 @@ class HalideKernel(SIMDKernel):
             if old.stride != new.stride:
                 return False
             if old.size != new.size or old.expr != new.expr:
-                old.size = V.graph.sizevars.evaluate_max(old.size, new.size)
+                old.size = V.graph.sizevars.evaluate_max(
+                    old.size, new.size, size_like=True
+                )
                 old.expr = None
         return True
 

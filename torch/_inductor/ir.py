@@ -3573,8 +3573,12 @@ class SliceView(View):
             min_func = sympy.Min
             max_func = sympy.Max
         else:
-            min_func = sizevars.evaluate_min
-            max_func = sizevars.evaluate_max
+
+            def min_func(a, b):
+                return sizevars.evaluate_min(a, b, size_like=True)
+
+            def max_func(a, b):
+                return sizevars.evaluate_max(a, b, size_like=True)
 
         def clamp(x: Expr, lower: int, upper: int) -> Expr:
             clamped_lower = (

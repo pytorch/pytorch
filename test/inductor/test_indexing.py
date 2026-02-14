@@ -495,44 +495,109 @@ instantiate_parametrized_tests(ExprPrinterTests)
 
 
 class TestEvaluateMinMax(InductorTestCase):
-    def test_evaluate_min_unbacked_symint_no_range_raises(self):
-        """evaluate_min should raise TypeError when u0 has no sign constraint."""
+    # --- size_like=True tests: inputs constrained >= 0 internally ---
+
+    def test_evaluate_min_size_like_diff(self):
+        """size_like=True: min((u0-u2), 10*(u0-u2)) resolves via internal >= 0 check."""
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u2 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(
+            sizevars.evaluate_min(u0 - u2, 10 * (u0 - u2), size_like=True),
+            u0 - u2,
+        )
+
+    def test_evaluate_min_size_like_multiple(self):
+        """size_like=True: min(u0, k*u0) resolves via range analysis."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, 10 * u0, size_like=True), u0)
+        self.assertEqual(sizevars.evaluate_min(10 * u0, u0, size_like=True), u0)
+        self.assertEqual(sizevars.evaluate_min(u0, 100 * u0, size_like=True), u0)
+
+    def test_evaluate_min_size_like_equal(self):
+        """size_like=True: min(u0, u0) returns u0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, u0, size_like=True), u0)
+
+    def test_evaluate_max_size_like_multiple(self):
+        """size_like=True: max(u0, k*u0) resolves via range analysis."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_max(u0, 10 * u0, size_like=True), 10 * u0)
+        self.assertEqual(sizevars.evaluate_max(10 * u0, u0, size_like=True), 10 * u0)
+
+    # --- size_like=False tests: no >= 0 constraint enforced ---
+
+    def test_evaluate_min_no_size_like_with_negative(self):
+        """size_like=False: min with potentially negative unbacked symints raises."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
         with self.assertRaises(TypeError):
-            sizevars.evaluate_min(u0, 10 * u0)
+            sizevars.evaluate_min(u0 - u1, 10 * (u0 - u1), size_like=False)
 
-    def test_evaluate_min_unbacked_symint_multiple(self):
-        """evaluate_min should handle min(u0, k*u0) for unbacked symints via range analysis."""
+    def test_evaluate_min_no_size_like_partial_check_left_only(self):
+        """size_like=False: checking left >= 0 suffices since Le simplifies to 9*(u0-u1) >= 0."""
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        sizevars.check(sympy.Ge(u0, 0))
-        self.assertEqual(sizevars.evaluate_min(u0, 10 * u0), u0)
-        self.assertEqual(sizevars.evaluate_min(10 * u0, u0), u0)
-        self.assertEqual(sizevars.evaluate_min(u0, 100 * u0), u0)
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0 - u1, 0))
+        self.assertEqual(
+            sizevars.evaluate_min(u0 - u1, 10 * (u0 - u1), size_like=False),
+            u0 - u1,
+        )
 
-    def test_evaluate_min_unbacked_symint_equal(self):
-        """evaluate_min should handle min(u0, u0) for unbacked symints."""
+    def test_evaluate_min_no_size_like_partial_check_right_only(self):
+        """size_like=False: checking right >= 0 also suffices (implies left >= 0)."""
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        self.assertEqual(sizevars.evaluate_min(u0, u0), u0)
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(10 * (u0 - u1), 0))
+        self.assertEqual(
+            sizevars.evaluate_min(u0 - u1, 10 * (u0 - u1), size_like=False),
+            u0 - u1,
+        )
 
-    def test_evaluate_max_unbacked_symint_multiple(self):
-        """evaluate_max should handle max(u0, k*u0) for unbacked symints via range analysis."""
+    def test_evaluate_min_no_size_like_with_manual_check(self):
+        """size_like=False: works after manually constraining both inputs >= 0."""
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        sizevars.check(sympy.Ge(u0, 0))
-        self.assertEqual(sizevars.evaluate_max(u0, 10 * u0), 10 * u0)
-        self.assertEqual(sizevars.evaluate_max(10 * u0, u0), 10 * u0)
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0 - u1, 0))
+        sizevars.check(sympy.Ge(10 * (u0 - u1), 0))
+        self.assertEqual(
+            sizevars.evaluate_min(u0 - u1, 10 * (u0 - u1), size_like=False),
+            u0 - u1,
+        )
+
+    def test_evaluate_max_no_size_like_concrete(self):
+        """size_like=False: works with concrete values even when negative."""
+        sizevars = SizeVarAllocator()
+        self.assertEqual(sizevars.evaluate_max(-5, 3, size_like=False), 3)
+        self.assertEqual(sizevars.evaluate_min(-5, 3, size_like=False), -5)
 
     def test_guard_or_false_lt_unbacked_symint(self):
-        """guard_or_false(Lt(u0, k*u0)) should resolve via range analysis for unbacked symints."""
+        """guard_or_false(Lt(u0, k*u0)) cannot resolve without knowing u0 >= 0."""
         sizevars = SizeVarAllocator()
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        sizevars.check(sympy.Ge(u0, 1))
-        self.assertTrue(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
+        # u0 range is (-inf, inf), so Lt(u0, 10*u0) => 9*u0 > 0 is unprovable
+        self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
         self.assertFalse(sizevars.guard_or_false(sympy.Lt(10 * u0, u0)))
         self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, u0)))
+
+    def test_guard_or_false_le_unbacked_symint_with_check(self):
+        """guard_or_false(Le(u0, k*u0)) resolves after constraining u0 >= 0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0, 0))
+        # Le(u0, 10*u0) => 9*u0 >= 0, provable with u0 >= 0
+        self.assertTrue(sizevars.guard_or_false(sympy.Le(u0, 10 * u0)))
+        # Le(10*u0, u0) => -9*u0 >= 0 => u0 <= 0, not provable with u0 >= 0
+        self.assertFalse(sizevars.guard_or_false(sympy.Le(10 * u0, u0)))
+        # Lt(u0, 10*u0) => 9*u0 > 0 => u0 > 0, not provable (u0 could be 0)
+        self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
 
 
 if __name__ == "__main__":

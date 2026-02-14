@@ -503,12 +503,18 @@ class SizeVarAllocator:
         """
         return self.guard_or_false(sympy.Eq(size, 1))
 
-    def evaluate_min(self, left: Expr, right: Expr) -> Expr:
-        """return the smaller of left and right, and guard on that choice"""
+    def evaluate_min(self, left: Expr, right: Expr, *, size_like: bool) -> Expr:
+        """Return the smaller of left and right, and guard on that choice.
+
+        When size_like=True, inputs are checked to be >= 0.
+        """
         if isinstance(left, Expr):
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+        if size_like:
+            self.check(sympy.Ge(left, 0))
+            self.check(sympy.Ge(right, 0))
         if self.guard_or_false(sympy.Le(left, right)):
             return left
         if self.guard_or_false(sympy.Le(right, left)):
@@ -517,11 +523,14 @@ class SizeVarAllocator:
             f"evaluate_min({left}, {right}) with unbacked symints"
         ) from None
 
-    def evaluate_max(self, left: Expr, right: Expr) -> Expr:
-        """return the larger of left and right, and guard on that choice"""
+    def evaluate_max(self, left: Expr, right: Expr, *, size_like: bool) -> Expr:
+        """Return the larger of left and right, and guard on that choice.
+
+        When size_like=True, inputs are checked to be >= 0.
+        """
         # Always choose the opposite of eval min for consistency
         # This means min(a, b) and max(a, b) produce the same guards
-        min_val = self.evaluate_min(left, right)
+        min_val = self.evaluate_min(left, right, size_like=size_like)
         return right if min_val is left else left
 
     def guard_int(self, expr: Union[Expr, int]) -> int:
