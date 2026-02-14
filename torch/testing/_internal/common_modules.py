@@ -1666,6 +1666,85 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
     return module_inputs
 
 
+def module_error_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for CrossEntropyLoss that test error messages for invalid inputs.
+    """
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    samples = []
+
+    # Target out of range: target class index exceeds number of classes
+    # Only test on CPU - CUDA may trigger kernel assertion instead of Python exception
+    device_str = str(device)
+    if 'cuda' not in device_str:
+        samples.append(
+            ErrorModuleInput(
+                ModuleInput(
+                    constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(
+                        make_input((3, 5)),  # 3 samples, 5 classes
+                        torch.tensor([0, 1, 10], device=device, dtype=torch.long),  # 10 is out of range
+                    ),
+                ),
+                error_on=ModuleErrorEnum.FORWARD_ERROR,
+                error_type=IndexError,
+                error_regex=r"Target 10 is out of bounds"
+            )
+        )
+
+    # Batch size mismatch: input and target have different batch sizes
+    samples.append(
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(),
+                forward_input=FunctionInput(
+                    make_input((3, 5)),  # batch_size=3
+                    torch.tensor([0, 1], device=device, dtype=torch.long),  # batch_size=2
+                ),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex=r"Expected input batch_size \(3\) to match target batch_size \(2\)"
+        )
+    )
+
+    # Weight wrong size: weight tensor doesn't match number of classes
+    samples.append(
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(weight=torch.ones(3, device=device, dtype=dtype)),
+                forward_input=FunctionInput(
+                    make_input((3, 5)),  # 5 classes
+                    torch.tensor([0, 1, 2], device=device, dtype=torch.long),
+                ),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"weight tensor should be defined either for all 5 classes or no classes.*got weight tensor of shape.*3"
+        )
+    )
+
+    # Invalid reduction mode
+    samples.append(
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(reduction='invalid'),
+                forward_input=FunctionInput(
+                    make_input((3, 5)),
+                    torch.tensor([0, 1, 2], device=device, dtype=torch.long),
+                ),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex=r"invalid is not a valid value for reduction"
+        )
+    )
+
+    return samples
+
+
+
 
 def module_inputs_torch_nn_CTCLoss(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4069,6 +4148,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.CrossEntropyLoss,
                module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_CrossEntropyLoss,
                dtypes=get_all_fp_dtypes(include_half=True, include_bfloat16=False),
                decorators=(
                    # No channels_last support for loss functions.
