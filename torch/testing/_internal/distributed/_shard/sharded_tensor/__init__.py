@@ -14,10 +14,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
-if TEST_WITH_ROCM:
-    TEST_GPU_NUM = min(4, max(2, torch.cuda.device_count()))
-else:
-    TEST_GPU_NUM = 4
+TEST_GPU_NUM = 4
 
 
 class ShardedTensorTestBase(MultiProcessTestCase):

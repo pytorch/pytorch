@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skip_if_lt_x_gpu,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -132,6 +133,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
             all_gather(data_or_fn=func)
 
     @parametrize("device", ["cpu", "cuda"])
+    @skip_if_lt_x_gpu(4)
     def test_check_rng_sync(
         self,
         device,
