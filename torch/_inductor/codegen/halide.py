@@ -685,32 +685,27 @@ class DimensionInfo:
 
 
 def eq(left, right):
-    if V.graph.sizevars.statically_known_equals(left, right):
-        return True
-    try:
-        a = V.graph.sizevars.size_hint_or_throw(left)
-        b = V.graph.sizevars.size_hint_or_throw(right)
-    except TypeError:  # unbacked symints
-        return False
-    if a == b:
-        V.graph.sizevars.check_equals(left, right)
-    return a == b
+    return V.graph.sizevars.guard_or_false(sympy.Eq(left, right))
 
 
 def lt(left, right):
-    if V.graph.sizevars.statically_known_lt(left, right):
+    """Compare sizes: only use on inputs known to be >= 0."""
+    if V.graph.sizevars.guard_or_false(sympy.Lt(left, right)):
         return True
-    try:
-        a = V.graph.sizevars.size_hint_or_throw(left)
-        b = V.graph.sizevars.size_hint_or_throw(right)
-    except TypeError:  # unbacked symints
-        gcd = sympy.gcd(left, right)
-        if gcd == left:
-            return left != right
-        return False
-    if a < b:
-        V.graph.sizevars.check_lt(left, right)
-    return a < b
+
+    # GCD fallback: if gcd(left, right) == left then left divides right,
+    # so left <= right.  Combined with left != right this gives left < right.
+    #
+    # TODO: This is NOT always sound for unbacked symints.
+    # e.g. lt(u0, 10*u0): gcd=u0, gcd==left, u0 != 10*u0 → returns True,
+    # but if u0=0 then 0 < 0 is False.  The >= 0 checks mitigate the
+    # negative case but the zero case remains.
+    # TODO shall we add a runtime assertion at least.
+    gcd = sympy.gcd(left, right)
+    if gcd == left:
+        return left != right
+
+    return False
 
 
 class HalideKernel(SIMDKernel):
@@ -790,7 +785,8 @@ class HalideKernel(SIMDKernel):
                     node.root.lookup(
                         node.divisor * divisor,
                         V.graph.sizevars.evaluate_min(
-                            modulus, FloorDiv(node.length, divisor)
+                            modulus,
+                            FloorDiv(node.length, divisor),
                         ),
                     ).symbol()
                 )
@@ -847,7 +843,8 @@ class HalideKernel(SIMDKernel):
                 handled_count += len(sizes_to_add)
                 assert sizes_to_add, nodes
                 end = divisor * functools.reduce(
-                    V.graph.sizevars.evaluate_max, sizes_to_add
+                    lambda a, b: V.graph.sizevars.evaluate_max(a, b),
+                    sizes_to_add,
                 )
                 sizes_to_add.extend(
                     [
