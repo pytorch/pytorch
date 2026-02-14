@@ -669,7 +669,22 @@ def lt(left, right):
     """Compare sizes: only use on inputs known to be >= 0."""
     V.graph.sizevars.check(sympy.Ge(left, 0))
     V.graph.sizevars.check(sympy.Ge(right, 0))
-    return V.graph.sizevars.guard_or_false(sympy.Lt(left, right))
+    if V.graph.sizevars.guard_or_false(sympy.Lt(left, right)):
+        return True
+
+    # GCD fallback: if gcd(left, right) == left then left divides right,
+    # so left <= right.  Combined with left != right this gives left < right.
+    #
+    # TODO: This is NOT always sound for unbacked symints.
+    # e.g. lt(u0, 10*u0): gcd=u0, gcd==left, u0 != 10*u0 → returns True,
+    # but if u0=0 then 0 < 0 is False.  The >= 0 checks mitigate the
+    # negative case but the zero case remains.
+    # TODO shall we add a runtime assertion at least.
+    gcd = sympy.gcd(left, right)
+    if gcd == left:
+        return left != right
+
+    return False
 
 
 class HalideKernel(SIMDKernel):
@@ -751,7 +766,6 @@ class HalideKernel(SIMDKernel):
                         V.graph.sizevars.evaluate_min(
                             modulus,
                             FloorDiv(node.length, divisor),
-                            size_like=True,
                         ),
                     ).symbol()
                 )
@@ -808,7 +822,7 @@ class HalideKernel(SIMDKernel):
                 handled_count += len(sizes_to_add)
                 assert sizes_to_add, nodes
                 end = divisor * functools.reduce(
-                    lambda a, b: V.graph.sizevars.evaluate_max(a, b, size_like=True),
+                    lambda a, b: V.graph.sizevars.evaluate_max(a, b),
                     sizes_to_add,
                 )
                 sizes_to_add.extend(
@@ -1053,9 +1067,7 @@ class HalideKernel(SIMDKernel):
             if old.stride != new.stride:
                 return False
             if old.size != new.size or old.expr != new.expr:
-                old.size = V.graph.sizevars.evaluate_max(
-                    old.size, new.size, size_like=True
-                )
+                old.size = V.graph.sizevars.evaluate_max(old.size, new.size)
                 old.expr = None
         return True
 

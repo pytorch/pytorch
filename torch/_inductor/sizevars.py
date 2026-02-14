@@ -503,34 +503,41 @@ class SizeVarAllocator:
         """
         return self.guard_or_false(sympy.Eq(size, 1))
 
-    def evaluate_min(self, left: Expr, right: Expr, *, size_like: bool) -> Expr:
-        """Return the smaller of left and right, and guard on that choice.
-
-        When size_like=True, inputs are checked to be >= 0.
-        """
+    def evaluate_min(self, left: Expr, right: Expr) -> Expr:
+        """Return the smaller of left and right, and guard on that choice."""
         if isinstance(left, Expr):
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        if size_like:
-            self.check(sympy.Ge(left, 0))
-            self.check(sympy.Ge(right, 0))
         if self.guard_or_false(sympy.Le(left, right)):
             return left
         if self.guard_or_false(sympy.Le(right, left)):
             return right
+
+        # GCD fallback: if gcd(a, b) == a then a divides b, implying a <= b.
+        #
+        # TODO: This is NOT always sound for unbacked symints.  It can
+        # produce wrong results when:
+        #   - inputs can be negative: gcd(u0, 10*u0) = u0, returns u0,
+        #     but if u0 < 0 then u0 > 10*u0 (e.g. u0=-1: min(-1,-10) = -10)
+        #   - a factor can be zero: gcd(u0, u0*u1) = u0, returns u0,
+        #     but if u1=0 then u0*u1=0 < u0 (e.g. u0=5,u1=0: min(5,0) = 0)
+        # TODO shall we add a runtime assertion at least.
+        gcd = sympy.gcd(left, right)
+        if left == gcd:
+            return left
+        if right == gcd:
+            return right
+
         raise TypeError(
             f"evaluate_min({left}, {right}) with unbacked symints"
         ) from None
 
-    def evaluate_max(self, left: Expr, right: Expr, *, size_like: bool) -> Expr:
-        """Return the larger of left and right, and guard on that choice.
-
-        When size_like=True, inputs are checked to be >= 0.
-        """
+    def evaluate_max(self, left: Expr, right: Expr) -> Expr:
+        """Return the larger of left and right, and guard on that choice."""
         # Always choose the opposite of eval min for consistency
         # This means min(a, b) and max(a, b) produce the same guards
-        min_val = self.evaluate_min(left, right, size_like=size_like)
+        min_val = self.evaluate_min(left, right)
         return right if min_val is left else left
 
     def guard_int(self, expr: Union[Expr, int]) -> int:
