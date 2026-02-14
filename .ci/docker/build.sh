@@ -400,6 +400,7 @@ fi
 
 # Build image
 docker buildx build \
+       --network=host \
        ${no_cache_flag} \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
