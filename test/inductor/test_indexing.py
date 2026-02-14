@@ -494,6 +494,47 @@ class ExprPrinterTests(InductorTestCase):
 instantiate_parametrized_tests(ExprPrinterTests)
 
 
+class TestEvaluateMinMax(InductorTestCase):
+    def test_evaluate_min_unbacked_symint_no_range_raises(self):
+        """evaluate_min should raise TypeError when u0 has no sign constraint."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        with self.assertRaises(TypeError):
+            sizevars.evaluate_min(u0, 10 * u0)
+
+    def test_evaluate_min_unbacked_symint_multiple(self):
+        """evaluate_min should handle min(u0, k*u0) for unbacked symints via range analysis."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0, 0))
+        self.assertEqual(sizevars.evaluate_min(u0, 10 * u0), u0)
+        self.assertEqual(sizevars.evaluate_min(10 * u0, u0), u0)
+        self.assertEqual(sizevars.evaluate_min(u0, 100 * u0), u0)
+
+    def test_evaluate_min_unbacked_symint_equal(self):
+        """evaluate_min should handle min(u0, u0) for unbacked symints."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, u0), u0)
+
+    def test_evaluate_max_unbacked_symint_multiple(self):
+        """evaluate_max should handle max(u0, k*u0) for unbacked symints via range analysis."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0, 0))
+        self.assertEqual(sizevars.evaluate_max(u0, 10 * u0), 10 * u0)
+        self.assertEqual(sizevars.evaluate_max(10 * u0, u0), 10 * u0)
+
+    def test_guard_or_false_lt_unbacked_symint(self):
+        """guard_or_false(Lt(u0, k*u0)) should resolve via range analysis for unbacked symints."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0, 1))
+        self.assertTrue(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
+        self.assertFalse(sizevars.guard_or_false(sympy.Lt(10 * u0, u0)))
+        self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, u0)))
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
