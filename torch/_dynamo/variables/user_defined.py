@@ -1605,12 +1605,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
 
                 # Reuse the source if we've already resolved the same
-                # descriptor object (e.g. same property reached via
-                # different subclasses) to avoid redundant ID_MATCH guards.
-                obj_id = id(descriptor)
+                # descriptor object for the same attribute name (e.g. same
+                # property reached via different subclasses) to avoid
+                # redundant ID_MATCH guards.  We include name in the key
+                # because distinct attributes can point to the same object
+                # (e.g. a = b = some_obj, or interned small integers).
+                cache_key = (id(descriptor), name)
                 cache = tx.output.mro_source_cache
-                if obj_id in cache:
-                    return cache[obj_id]
+                if cache_key in cache:
+                    return cache[cache_key]
 
                 if idx != 0:
                     mro_source = TypeMROSource(self.cls_source)
@@ -1619,7 +1622,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     klass_source = self.cls_source
                 dict_source = TypeDictSource(klass_source)
                 out_source = DictGetItemSource(dict_source, name)
-                cache[obj_id] = out_source
+                cache[cache_key] = out_source
                 return out_source
 
         unimplemented(
