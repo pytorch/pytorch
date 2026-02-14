@@ -4835,7 +4835,7 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
 
 
 def make_dupe_guard(
-    obj_source: Source, dupe_source: Source | None
+    obj_source: Source, dupe_source: Source | None, cached_vt: Any
 ) -> Optional[functools.partial[Any]]:
     # Note - we may end up in a situation where we invoke something like
     # def fn(x, y)
@@ -4845,6 +4845,15 @@ def make_dupe_guard(
     # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
     # In the fn(x, x) example call above look like a graph with a single input.
     # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
+
+    # We want to insert object aliasing guards only when it really matters, for
+    # user defined objects, we trace through them and insert guards at the leaf
+    # objects. So, we should delay the insertion of these duplicate guards only
+    # when the tracing diverges for those leaf objects.
+    from torch._dynamo.variables import UserDefinedObjectVariable
+
+    if isinstance(cached_vt, UserDefinedObjectVariable):
+        return None
 
     # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
     # leave unsourced - like a local list created and discharged entirely within a local scope.
