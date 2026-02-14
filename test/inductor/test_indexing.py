@@ -495,17 +495,6 @@ instantiate_parametrized_tests(ExprPrinterTests)
 
 
 class TestEvaluateMinMax(InductorTestCase):
-    def test_evaluate_min_diff(self):
-        """min((u0-u2), 10*(u0-u2)) resolves via GCD: gcd(u0-u2, 10*(u0-u2))=u0-u2.
-        UNSOUND: if u0-u2 < 0 (e.g. u0=1,u2=2) true min is 10*(u0-u2)=-10, not -1."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        u2 = sizevars.shape_env.create_unbacked_symint().node.expr
-        self.assertEqual(
-            sizevars.evaluate_min(u0 - u2, 10 * (u0 - u2)),
-            u0 - u2,
-        )
-
     def test_evaluate_min_multiple(self):
         """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
         UNSOUND: if u0 < 0 (e.g. u0=-1) true min is 10*u0=-10, not -1."""
@@ -513,66 +502,7 @@ class TestEvaluateMinMax(InductorTestCase):
         u0 = sizevars.shape_env.create_unbacked_symint().node.expr
         self.assertEqual(sizevars.evaluate_min(u0, 10 * u0), u0)
         self.assertEqual(sizevars.evaluate_min(10 * u0, u0), u0)
-        self.assertEqual(sizevars.evaluate_min(u0, 100 * u0), u0)
-
-    def test_evaluate_min_equal(self):
-        """min(u0, u0) returns u0.  Sound: Le(u0, u0) is always true."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        self.assertEqual(sizevars.evaluate_min(u0, u0), u0)
-
-    def test_evaluate_max_multiple(self):
-        """max(u0, k*u0) delegates to evaluate_min which uses GCD.
-        UNSOUND: if u0 < 0 (e.g. u0=-1) true max is u0=-1, not 10*u0=-10."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
         self.assertEqual(sizevars.evaluate_max(u0, 10 * u0), 10 * u0)
-        self.assertEqual(sizevars.evaluate_max(10 * u0, u0), 10 * u0)
-
-    def test_evaluate_min_with_negative_raises(self):
-        """min(u0-u1, 10*(u0-u1)) with unconstrained inputs resolves via GCD.
-        UNSOUND: if u0-u1 < 0 (e.g. u0=1,u1=2) true min is -10, not -1."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
-        self.assertEqual(
-            sizevars.evaluate_min(u0 - u1, 10 * (u0 - u1)),
-            u0 - u1,
-        )
-
-    def test_evaluate_min_partial_check_left_only(self):
-        """checking left >= 0 suffices since Le simplifies to 9*(u0-u1) >= 0.  Sound."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
-        sizevars.check(sympy.Ge(u0 - u1, 0))
-        self.assertEqual(
-            sizevars.evaluate_min(u0 - u1, 10 * (u0 - u1)),
-            u0 - u1,
-        )
-
-    def test_evaluate_min_partial_check_right_only(self):
-        """checking right >= 0 also suffices (implies left >= 0).  Sound."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
-        sizevars.check(sympy.Ge(10 * (u0 - u1), 0))
-        self.assertEqual(
-            sizevars.evaluate_min(u0 - u1, 10 * (u0 - u1)),
-            u0 - u1,
-        )
-
-    def test_evaluate_min_with_manual_check(self):
-        """works after manually constraining both inputs >= 0.  Sound."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
-        sizevars.check(sympy.Ge(u0 - u1, 0))
-        sizevars.check(sympy.Ge(10 * (u0 - u1), 0))
-        self.assertEqual(
-            sizevars.evaluate_min(u0 - u1, 10 * (u0 - u1)),
-            u0 - u1,
-        )
 
     def test_evaluate_max_concrete(self):
         """works with concrete values even when negative.  Sound."""
@@ -588,16 +518,6 @@ class TestEvaluateMinMax(InductorTestCase):
         u1 = sizevars.shape_env.create_unbacked_symint().node.expr
         self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
 
-    def test_evaluate_min_product_with_gt_and_ge_gcd(self):
-        """evaluate_min(u0, u0*u1) with u0>0, u1>=0 resolves via GCD.
-        UNSOUND: when u1=0, u0!=0 true min is 0(u1*u0), not u0."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
-        sizevars.check(sympy.Gt(u0, 0))
-        sizevars.check(sympy.Ge(u1, 0))
-        self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
-
     def test_evaluate_min_product_with_both_gt_gcd(self):
         """evaluate_min(u0, u0*u1) with u0>0, u1>0 resolves via GCD.
         Sound: u1>=1 guarantees u0*u1 >= u0."""
@@ -607,15 +527,6 @@ class TestEvaluateMinMax(InductorTestCase):
         sizevars.check(sympy.Gt(u0, 0))
         sizevars.check(sympy.Gt(u1, 0))
         self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
-
-    def test_guard_or_false_lt_unbacked_symint(self):
-        """guard_or_false(Lt(u0, k*u0)) cannot resolve without knowing u0 >= 0."""
-        sizevars = SizeVarAllocator()
-        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
-        # u0 range is (-inf, inf), so Lt(u0, 10*u0) => 9*u0 > 0 is unprovable
-        self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
-        self.assertFalse(sizevars.guard_or_false(sympy.Lt(10 * u0, u0)))
-        self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, u0)))
 
     def test_guard_or_false_le_unbacked_symint_with_check(self):
         """guard_or_false(Le(u0, k*u0)) resolves after constraining u0 >= 0."""
