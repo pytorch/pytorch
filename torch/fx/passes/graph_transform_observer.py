@@ -77,20 +77,37 @@ class GraphTransformObserver:
         return cls.__pass_count
 
     def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> Optional[T]:
+        from torch._dynamo.utils import dynamo_timed
+
         with self:
-            if not self._check_disable_pass():
+            if self._check_disable_pass():
+                return None
+            with dynamo_timed(
+                f"pass.{self.subsystem}.{self.passname}"
+                if self.subsystem
+                else f"pass.{self.passname}"
+            ):
                 return pass_fn(self.gm)
 
-        return None
-
     def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> Optional[T]:
+        from torch._dynamo.utils import dynamo_timed
+
         with self:
-            if not self._check_disable_pass():
+            if self._check_disable_pass():
+                return None
+            with dynamo_timed(
+                f"pass.{self.subsystem}.{self.passname}"
+                if self.subsystem
+                else f"pass.{self.passname}"
+            ):
                 return pass_fn(self.gm.graph)
 
-        return None
-
     def _check_disable_pass(self):
+        from torch._inductor import config as inductor_config
+
+        if self.passname.upper() in inductor_config.disabled_passes.upper():
+            return True
+
         if self.subsystem is None:
             return False
 

@@ -149,6 +149,7 @@ class ATenExportArtifact:
     gm: torch.fx.GraphModule
     sig: ExportGraphSignature
     constants: dict[str, _ConstantAttributeType]
+    inferred_out_spec: TreeSpec
 
 
 @dataclasses.dataclass(frozen=True)
@@ -281,24 +282,43 @@ def _extract_fake_inputs(gm, args, kwargs):
         else:
             fake_vals.append(node.meta.get("example_value"))
 
-    if in_shuffle_graph := getattr(gm, "_in_shuffle_graph", None):
-        flat_args = pytree.tree_leaves((args, kwargs))
-        node_map = {
-            node: i
-            for i, node in enumerate(
-                next(iter(reversed(in_shuffle_graph.graph.nodes))).args[0]
-            )
-            if node.op == "placeholder"
-        }
-        new_fake_inps: list[Any] = []
-        for i, node in enumerate(
-            in_shuffle_graph.graph.find_nodes(op="placeholder")[1:]
-        ):
-            if node in node_map:
-                new_fake_inps.append(fake_inps[node_map[node]])
+    if dynamo_bytecode_flatten := getattr(gm, "_dynamo_bytecode_flatten", None):
+        # In _extract_fake_inputs, the goal is to make real inputs into
+        # fake (and symbolic) inputs. The way currently it's implemented
+        # is by looking at the node.meta["val"] of the placeholder nodes.
+        # This doesn't work when the graph is Dynamo flattened, because now
+        # plceholder nodes doesn't have the ordering like pytree inputs do.
+        # Instead, we need to look at how the inputs are shuffled, and map
+        # the inputs to their actual fake inputs and symbolic inputs.
+        # Since inputs can also contain symints, we cannot simply use the
+        # FakeTensorMode memo to look up tensors only there.
+
+        fake_inps = []
+        positions = {}
+        idx = 0
+
+        def mark_inputs(x):
+            # x can be a tensor or symbolic integer or a normal constant.
+            nonlocal idx
+            fake_inps.append(x)
+            if isinstance(x, torch.Tensor):
+                ret = x
             else:
-                new_fake_inps.append(flat_args[i])
-        fake_inps = new_fake_inps
+                ret = object()
+            if id(ret) not in positions:
+                positions[id(ret)] = idx
+            idx += 1
+            return ret
+
+        dummy_args = pytree.tree_map(mark_inputs, args + tuple(kwargs.values()))
+        shuffled_args = dynamo_bytecode_flatten(*dummy_args)
+
+        for node, shuffled_arg in zip(
+            gm.graph.find_nodes(op="placeholder"), shuffled_args
+        ):
+            if id(shuffled_arg) in positions:
+                fake_inps[positions[id(shuffled_arg)]] = node.meta.get("val")
+
     # We get both because now we might have a combination of symint and tensor
     # inputs, and we want to check that the shape env is consistent between
     # both. Unfortunately we can't see what fake mode is attached to the shape
@@ -672,6 +692,7 @@ def _produce_aten_artifact(
         gm,
         export_graph_signature,
         constants,
+        inferred_out_spec=graph_signature.out_spec,
     )
 
 
@@ -1613,35 +1634,38 @@ def _strict_export(
                 )
 
     # Fix the graph output signature to be tuple if scalar
-
-    # gm_torch_level.graph._codegen is made a _PyTreeCodeGen in rewrite_signature in eval_frame.py
-    if not isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen):
-        raise AssertionError(
-            f"expected gm_torch_level.graph._codegen to be _PyTreeCodeGen, got {type(gm_torch_level.graph._codegen)}"
-        )
-
+    wrap_tuple = False
     # Calling gm_torch_level._out_spec is not safe because gm_torch_level might be
     # a _LazyGraphModule, which does not populate _out_spec when calling recompile().
     # TODO: Fix recompile() in  _LazyGraphModule. T207713214
-    out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
+    if isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen):
+        out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
+        orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
-    # Used to get rid of lint type error.
-    if out_spec is None:
-        raise AssertionError("out_spec must not be None")
-    if orig_out_spec is None:
-        raise AssertionError("orig_out_spec must not be None")
+        # Used to get rid of lint type error.
+        if out_spec is None:
+            raise AssertionError("out_spec must not be None")
+        if out_spec.type not in (list, tuple):
+            # aot_export expect the return type to always be a tuple.
+            out_spec = pytree.treespec_tuple([out_spec])
+            wrap_tuple = True
+        gm_torch_level.graph._codegen.pytree_info = _PyTreeInfo(
+            orig_arg_names,
+            gm_torch_level._in_spec,
+            out_spec,
+        )
+    elif isinstance(
+        gm_torch_level.graph._codegen,
+        torch._dynamo.functional_export._DynamoBytecodeCodeGen,
+    ):
+        # Since we're using bytecode codegen, we need to separately apply tuple
+        # output instead of modifying pytree spec inplace.
+        orig_arg_names = gm_torch_level.graph._codegen.orig_arg_names
+        out_spec = orig_out_spec = None
+        wrap_tuple = gm_torch_level.graph._codegen.wrap_tuple = True
+    else:
+        raise RuntimeError(f"Unknown codegen type: {gm_torch_level.graph._codegen}")
 
-    # aot_export expect the return type to always be a tuple.
-    if out_spec.type not in (list, tuple):
-        out_spec = pytree.treespec_tuple([out_spec])
-
-    orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
-
-    gm_torch_level.graph._codegen.pytree_info = _PyTreeInfo(
-        orig_arg_names,
-        gm_torch_level._in_spec,
-        out_spec,
-    )
     gm_torch_level.recompile()
 
     _normalize_nn_module_stack(gm_torch_level, type(mod))
@@ -1714,10 +1738,16 @@ def _strict_export(
     # 5. Rename constants nodes in graph module from buffers to constants
     _rename_constants_nodes(gm, export_graph_signature)
 
+    if orig_out_spec is None:
+        out_spec = aten_export_artifact.inferred_out_spec
+        if wrap_tuple:
+            out_spec = out_spec.children()[0]
+    else:
+        out_spec = orig_out_spec
     return ExportArtifact(
         aten=aten_export_artifact,
         in_spec=orig_in_spec,
-        out_spec=orig_out_spec,
+        out_spec=out_spec,
         fake_mode=dynamo_fake_mode,
         module_call_specs=gm_torch_level.meta["module_call_specs"],
     )
@@ -2124,22 +2154,33 @@ def _non_strict_export(
 
         return _aot_export_non_strict
 
-    (
-        fake_mode,
-        fake_args,
-        fake_kwargs,
-        equalities_inputs,
-        original_signature,
-        dynamic_shapes,
-    ) = make_fake_inputs(
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
+    # NOTE: We need to enter _compiling_state_context() here so that FakeTensors
+    # created for params/buffers are properly tracked for leak detection.
+    # See detect_non_strict_fake_tensor_leaks config.
+    # We only enter the context if leak detection is enabled to avoid changing
+    # behavior when the config is OFF.
+    _fakify_ctx = (
+        _compiling_state_context()
+        if torch._export.config.detect_non_strict_fake_tensor_leaks
+        else nullcontext()
     )
+    with _fakify_ctx:
+        (
+            fake_mode,
+            fake_args,
+            fake_kwargs,
+            equalities_inputs,
+            original_signature,
+            dynamic_shapes,
+        ) = make_fake_inputs(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
+        )
 
-    fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
+        fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
     def _produce_guards_callback(gm):
         return produce_guards_and_solve_constraints(
@@ -2337,13 +2378,32 @@ def _export_for_training(
         if len(legit_leak) > 0:
             for fake_val in legit_leak:
                 if id(fake_val) in _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT:
-                    stack_trace = _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[
-                        id(fake_val)
-                    ].meta.get("stack_trace", "<unknown stack trace>")
+                    node = _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(fake_val)]
+                    stack_trace = node.meta.get("stack_trace")
+                    node_name = node.name
+
+                    # If no stack trace on this node (e.g., placeholder), look at users
+                    if stack_trace is None:
+                        for user in node.users:
+                            user_stack = user.meta.get("stack_trace")
+                            if user_stack is not None:
+                                stack_trace = f"Used by '{user.name}':\n{user_stack}"
+                                break
+
+                    stack_trace = (
+                        "<no stack trace available>"
+                        if stack_trace is None
+                        else stack_trace
+                    )
 
                     # Get shape and dtype info
                     shape_info = f"shape={fake_val.shape}, dtype={fake_val.dtype}"
-                    leak_info = f"FakeTensor({shape_info}): {stack_trace}"
+                    leak_info = f"FakeTensor({shape_info}) from node '{node_name}':\n{stack_trace}"
+                    leak_sources.append(leak_info)
+                else:
+                    # Fallback: no proxy mapping found, show basic info
+                    shape_info = f"shape={fake_val.shape}, dtype={fake_val.dtype}"
+                    leak_info = f"FakeTensor({shape_info}): <no proxy mapping found>"
                     leak_sources.append(leak_info)
 
             # Format the warning message more nicely

@@ -1284,6 +1284,8 @@ class CheckpointPolicy(enum.Enum):
       pass and will not be recomputed during the backward pass
     - ``{MUST,PREFER}_RECOMPUTE``: The operation's output will not be saved during the
       forward pass and will be recomputed during the backward pass
+    - ``{MUST,PREFER}_CPU_OFFLOAD``: The operation's output will be saved during the
+      forward pass, offloaded to CPU, and reloaded to GPU during the backward pass
 
     Use ``MUST_*`` over ``PREFER_*`` to indicate that the policy should not be overridden
     by other subsystems like `torch.compile`.
@@ -1301,6 +1303,8 @@ class CheckpointPolicy(enum.Enum):
     PREFER_SAVE = 1
     MUST_RECOMPUTE = 2
     PREFER_RECOMPUTE = 3
+    MUST_CPU_OFFLOAD = 4
+    PREFER_CPU_OFFLOAD = 5
 
 
 def _policy_from_bool(b):
@@ -1569,6 +1573,10 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
+    # recompute_fn should respect the device context of the original forward
+    fwd_default_device = torch.get_default_device()
+    device_ctx = torch.device(fwd_default_device)
+
     def recompute_fn(*inputs) -> None:
         kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables
@@ -1587,7 +1595,7 @@ def _checkpoint_without_reentrant_generator(
             device_autocast_ctx = torch.amp.autocast(
                 device_type=device_type, **device_autocast_kwargs
             ) if torch.amp.is_autocast_available(device_type) else contextlib.nullcontext()
-            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
+            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context, device_ctx:  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(

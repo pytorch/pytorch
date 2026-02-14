@@ -493,7 +493,7 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
             prefix_valid = True
 
         if flag == 2:
-            test_target = -1
+            test_target = tl.full([], -1, index.dtype)  # Match the original type
         else:
             test_target = test_target - 1
 

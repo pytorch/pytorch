@@ -1123,11 +1123,8 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // Otherwise split the output across lanes in a warp.
     config.output_mult[0] = config.split_output(block_width);
   }
-#ifdef USE_ROCM
-  constexpr int min_values_per_thread = 64;
-#else
+
   constexpr int min_values_per_thread = 16;
-#endif
   constexpr int max_values_per_thread = 256;
 
   const int warp_split_threshold =
@@ -1135,6 +1132,12 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   bool split_across_warps = config.values_per_thread() >= warp_split_threshold;
   const int num_mp =
       at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+#ifdef USE_ROCM
+  bool force_splitting_output = iter.ndim() == 2 &&
+      reduction_on_fastest_striding_dimension &&
+      config.values_per_thread() < 1024 && num_mp < 100;
+  split_across_warps = !force_splitting_output && split_across_warps;
+#endif
 
   if (split_across_warps) {
     // Divide the input across warps in a thread-block, if that leaves at least
@@ -1148,6 +1151,21 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
 
   int max_threads_per_mp =
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor;
+#ifdef USE_ROCM
+  // If the grid consists of a single threadblock, do not change the max threads per
+  // MP value. This will increase the parallelism across the y dimension of the grid.
+  bool uses_a_single_block = config.grid().x == config.grid().y == config.grid().z == 1;
+
+  if (!uses_a_single_block) {
+    // Control the number of threadblocks by adjusting the maximum number of
+    // threads per multi-processor. These numbers better reflect the maximum
+    // theoretical achievable threads per MP for the reduction operation.
+    if (iter.ndim() == 1 || iter.ndim() == 3)
+      max_threads_per_mp = 512;
+    else if (iter.ndim() == 2)
+      max_threads_per_mp = 256;
+  }
+#endif
   const int blocks_per_sm = max_threads_per_mp / config.num_threads;
   const int target_grid_size = num_mp * blocks_per_sm;
   int grid = config.grid().x;
@@ -1165,6 +1183,35 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // a large number of values to deal with. But we don't want values_per_thread to be larger than
     // max_values_per_thread
     config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
+#ifdef USE_ROCM
+    // In cases where a number of threadblocks along the y direction of the grid
+    // is needed then make sure they are reduced to the number of MPs. For
+    // smaller sizes, use half the number of MPs. For smaller sizes than half
+    // the number of MPs use the original value unless the value is less than 16
+    // blocks in which case it is more profitable to use just 1 block.
+    if (config.ctas_per_output > num_mp)
+      if (num_mp < 128)
+        config.ctas_per_output =
+            num_mp * (config.ctas_per_output > 512 ? 4 : 2);
+      else
+        config.ctas_per_output = num_mp;
+    else if (config.ctas_per_output > div_up(num_mp, 2))
+      config.ctas_per_output = div_up(num_mp, 2);
+    else if (config.ctas_per_output < 16)
+      config.ctas_per_output = 1;
+    bool is_channel_last = iter.tensor_base(1).is_contiguous(at::MemoryFormat::ChannelsLast);
+    if (iter.ndim() == 3 && !reduction_on_fastest_striding_dimension && !is_channel_last) {
+      config.ctas_per_output = 4;
+      int vpt = config.values_per_thread();
+      // Capping the number of values per thread to 2048 for now
+      // based on known use cases.
+      while (vpt >= 2048) {
+        config.ctas_per_output *= 2;
+        // Computes the new values per thread without side effects
+        vpt = config.mock_values_per_thread(config.ctas_per_output);
+      }
+    }
+#endif
     if (config.ctas_per_output > 1) {
       config.input_mult[2] = config.split_input(config.ctas_per_output);
     }

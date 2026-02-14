@@ -695,6 +695,17 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if isinstance(conf, BlackwellGPUGemmConfig):
                 key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
 
+            # Add TlxGemmConfig specific fields to key if present
+            if config.is_fbcode() and config.triton.enable_tlx_templates:
+                from torch._inductor.fb.tlx_templates.registry import (
+                    get_tlx_config_key_and_kwargs,
+                )
+
+                tlx_key_fields, tlx_kwargs = get_tlx_config_key_and_kwargs(conf)
+                key += tlx_key_fields
+            else:
+                tlx_kwargs = {}
+
             if key not in used and (
                 max_mm_configs is None or len(used) < max_mm_configs
             ):
@@ -713,6 +724,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
+
+                # Add TlxGemmConfig specific fields if present
+                kwargs.update(tlx_kwargs)
 
                 yield self.triton_config(conf.num_stages, num_warps, **kwargs)
 
@@ -741,9 +755,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         for hint_override in [None] + config.multi_kernel_hints:
             m_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         m,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -751,9 +764,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             n_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         n,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -761,9 +773,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             k_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         k,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),

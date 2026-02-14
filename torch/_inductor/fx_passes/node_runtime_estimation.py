@@ -13,9 +13,70 @@ from typing import Any, Optional
 import torch
 import torch.fx as fx
 from torch._inductor.fx_passes.bucketing import _schedulable_wait_node
-from torch._inductor.utils import clear_on_fresh_cache, tabulate_2d
+from torch._inductor.utils import clear_on_fresh_cache
 from torch._logging import getArtifactLogger, trace_structured
 from torch.fx.operator_schemas import normalize_function
+
+
+def _format_csv(headers: list[str], rows: list[list[str]]) -> str:
+    """Format data as CSV. Human-readable and easily parseable."""
+    lines = [",".join(headers)]
+    for row in rows:
+        lines.append(",".join(str(v) for v in row))
+    return "\n".join(lines)
+
+
+def _get_collective_key(coll_node: fx.Node) -> str:
+    """Extract a unique key for a collective node including group info and tensor size."""
+    from torch._inductor import fx_utils
+
+    opt_args_kwargs = normalize_function(
+        coll_node.target,  # type: ignore[arg-type]
+        args=coll_node.args,
+        kwargs=coll_node.kwargs,
+        normalize_to_only_use_kwargs=True,
+    )
+    assert opt_args_kwargs is not None
+    _, kwargs = opt_args_kwargs
+    group_name = kwargs.get("group_name", None)
+    group_size = kwargs.get("group_size", None)
+
+    tensor_bytes: Optional[int] = None
+    success, args, kw = fx_utils.get_fake_args_kwargs(coll_node)
+    if success:
+
+        def extract_first_tensor_bytes(t: torch.Tensor) -> torch.Tensor:
+            nonlocal tensor_bytes
+            if tensor_bytes is None:
+                shape = [get_hint(dim) for dim in t.shape]
+                if all(s is not None for s in shape):
+                    numel = functools.reduce(operator.mul, shape, 1)
+                    tensor_bytes = numel * t.dtype.itemsize
+            return t
+
+        torch.utils._pytree.tree_map_only(
+            torch.Tensor, extract_first_tensor_bytes, (args, kw)
+        )
+
+    return f"{coll_node.target} group_size:{group_size} group_name:{group_name} input_bytes:{tensor_bytes}"
+
+
+def _get_collective_estimations(coll_node: fx.Node) -> tuple[float, float]:
+    """Get NCCL and Inductor analytical estimations for a collective node.
+
+    Returns: (nccl_ms, inductor_ms)
+    """
+    nccl_ms = (
+        torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
+            coll_node, None, use_nccl_estimator=True
+        )
+    )
+    inductor_ms = (
+        torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
+            coll_node, None, use_nccl_estimator=False
+        )
+    )
+    return nccl_ms, inductor_ms
 
 
 # Setup logger for artifact logging
@@ -236,18 +297,18 @@ def _log_compute_estimations(
     rows = [
         [
             _node_summary(node),
-            est_b * 1e3,
-            est_a * 1e3,
-            (est_a / est_b) if est_b > 0 else 0,
-            (est_a - est_b) * 1e3,
-            count_flops_fx(node),
+            f"{est_b * 1e3:.4f}",
+            f"{est_a * 1e3:.4f}",
+            f"{(est_a / est_b) if est_b > 0 else 0:.4f}",
+            f"{(est_a - est_b) * 1e3:.4f}",
+            str(count_flops_fx(node)),
         ]
         for node, est_b, est_a in zip(
             compute_nodes, benchmarked_estimations, analytical_estimations
         )
     ]
 
-    log_str = tabulate_2d(rows, headers)
+    log_str = _format_csv(headers, rows)
 
     trace_structured(
         "artifact",
@@ -260,8 +321,6 @@ def _log_compute_estimations(
 
 
 def _log_graph_collective_benchmarks(gm: fx.GraphModule, artifact_name: str) -> None:
-    from torch._inductor import fx_utils
-
     collective_nodes = []
     collective_keys = []
     benchmarked = []
@@ -270,38 +329,7 @@ def _log_graph_collective_benchmarks(gm: fx.GraphModule, artifact_name: str) -> 
         if _schedulable_wait_node(node):
             start = node.args[0]
             collective_nodes.append(start)
-            opt_args_kwargs = normalize_function(
-                start.target,  # type: ignore[arg-type]
-                args=start.args,
-                kwargs=start.kwargs,
-                normalize_to_only_use_kwargs=True,
-            )
-            assert opt_args_kwargs is not None
-            _, kwargs = opt_args_kwargs
-            group_name = kwargs.get("group_name", None)
-            group_size = kwargs.get("group_size", None)
-
-            # Extract first tensor input size in bytes
-            tensor_bytes: Optional[int] = None
-            success, args, kw = fx_utils.get_fake_args_kwargs(start)
-            if success:
-
-                def extract_first_tensor_bytes(t: torch.Tensor) -> torch.Tensor:
-                    nonlocal tensor_bytes
-                    if tensor_bytes is None:
-                        shape = [get_hint(dim) for dim in t.shape]
-                        if all(s is not None for s in shape):
-                            numel = functools.reduce(operator.mul, shape, 1)
-                            tensor_bytes = numel * t.dtype.itemsize
-                    return t
-
-                torch.utils._pytree.tree_map_only(
-                    torch.Tensor, extract_first_tensor_bytes, (args, kw)
-                )
-
-            collective_keys.append(
-                f"{start.target} group_size:{group_size} group_name:{group_name} input_bytes:{tensor_bytes}"
-            )
+            collective_keys.append(_get_collective_key(start))
             benchmarked_ms, _ = benchmark_collective_with_cuda_events(start, nruns=5)
             benchmarked.append(benchmarked_ms if benchmarked_ms else 0.0)
 
@@ -322,63 +350,69 @@ def _log_graph_collective_benchmarks(gm: fx.GraphModule, artifact_name: str) -> 
 
 def _log_collective_benchmarks(
     collective_nodes: list[fx.Node],
-    collective_keys: list[str],
-    benchmarked_medians: list[float],
-    world_size: int,
-    artifact_name: str,
+    collective_keys: Optional[list[str]] = None,
+    benchmarked_medians: Optional[list[float]] = None,
+    world_size: Optional[int] = None,
+    artifact_name: str = "fx_collectives_analytical_estimation",
 ) -> None:
-    """Log collective benchmarks with analytical comparisons for tlparse."""
-    headers = [
-        "Collective Key",
-        "Benchmarked(ms)",
-        "NCCL Est(ms)",
-        "Inductor Est(ms)",
-        "NCCL Diff(ratio)",
-        "Inductor Diff(ratio)",
-    ]
+    """Log collective estimations for tlparse. Includes benchmarks if provided."""
+    if world_size is None:
+        world_size = (
+            torch.distributed.get_world_size()
+            if torch.distributed.is_initialized()
+            else 1
+        )
+
+    has_benchmarks = benchmarked_medians is not None
+
+    if has_benchmarks:
+        headers = [
+            "Collective Key",
+            "Benchmarked(ms)",
+            "NCCL Est(ms)",
+            "Inductor Est(ms)",
+            "NCCL Diff(ratio)",
+            "Inductor Diff(ratio)",
+        ]
+    else:
+        headers = [
+            "Collective Key",
+            "NCCL Est(ms)",
+            "Inductor Est(ms)",
+        ]
 
     rows = []
-    collective_benchmarks = {}
-    for key, benchmarked_ms, coll_node in zip(
-        collective_keys, benchmarked_medians, collective_nodes
-    ):
-        # NCCL estimator (deterministic, no need to align)
-        nccl_ms = (
-            torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                coll_node, None, use_nccl_estimator=True
+    for i, coll_node in enumerate(collective_nodes):
+        key = collective_keys[i] if collective_keys else _get_collective_key(coll_node)
+        nccl_ms, inductor_ms = _get_collective_estimations(coll_node)
+
+        if benchmarked_medians is not None:
+            benchmarked_ms = benchmarked_medians[i]
+            nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+            inductor_diff_pct = (
+                (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
             )
-        )
-
-        # Inductor analytical (deterministic, no need to align)
-        inductor_ms = (
-            torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
-                coll_node, None, use_nccl_estimator=False
+            rows.append(
+                [
+                    key,
+                    f"{benchmarked_ms:.4f}",
+                    f"{nccl_ms:.4f}",
+                    f"{inductor_ms:.4f}",
+                    f"{nccl_diff_pct:.2f}",
+                    f"{inductor_diff_pct:.2f}",
+                ]
             )
-        )
+        else:
+            rows.append(
+                [
+                    key,
+                    f"{nccl_ms:.4f}",
+                    f"{inductor_ms:.4f}",
+                ]
+            )
 
-        collective_benchmarks[key] = {
-            "benchmarked_ms": benchmarked_ms,
-            "analytical_nccl_ms": nccl_ms,
-            "analytical_inductor_ms": inductor_ms,
-        }
-
-        # Compute percentage differences
-        nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
-        inductor_diff_pct = (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
-
-        rows.append(
-            [
-                key,
-                f"{benchmarked_ms:.4f}",
-                f"{nccl_ms:.4f}",
-                f"{inductor_ms:.4f}",
-                f"{nccl_diff_pct:.2f}",
-                f"{inductor_diff_pct:.2f}",
-            ]
-        )
-
-    log_str = f"World size: {world_size}\n"
-    log_str += tabulate_2d(rows, headers)
+    log_str = f"# World size: {world_size}\n"
+    log_str += _format_csv(headers, rows)
 
     trace_structured(
         "artifact",
