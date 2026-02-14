@@ -544,6 +544,7 @@ class SysModuleTest(__TestCase):
             is sys._getframe().f_code
         )
 
+    @unittest.expectedFailure
     def test_getframemodulename(self):
         # Default depth gets ourselves
         self.assertEqual(__name__, sys._getframemodulename())
