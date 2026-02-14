@@ -14407,16 +14407,19 @@
   variants: function
   dispatch:
     CPU, CUDA: linalg_eig
+    MPS: linalg_eig
 
 - func: linalg_eig.out(Tensor self, *, Tensor(a!) eigenvalues, Tensor(b!) eigenvectors) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_eig_out
+    MPS: linalg_eig_out
 
 - func: _linalg_eigvals(Tensor self) -> Tensor
   python_module: linalg
   dispatch:
     CPU, CUDA: _linalg_eigvals
+    MPS: _linalg_eigvals
 
 - func: linalg_eigvals(Tensor self) -> Tensor
   python_module: linalg
@@ -14425,6 +14428,7 @@
   python_module: linalg
   dispatch:
     CPU, CUDA: linalg_eigvals_out
+    MPS: linalg_eigvals_out
 
 # This function is exposes the `compute_v` flag, which is then used to implement `linalg.eigh` and
 # `linalg.eigvalsh` as composite functions that call this one
@@ -14435,6 +14439,7 @@
   structured: True
   dispatch:
     CPU, CUDA: _linalg_eigh_out
+    MPS: _linalg_eigh_out
 
 - func: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg

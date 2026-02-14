@@ -1371,8 +1371,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
     ),
@@ -1410,8 +1408,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::linalg_eig' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1448,8 +1444,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(
@@ -1487,8 +1481,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # Exception: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
     ),
     OpInfo(

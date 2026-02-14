@@ -1415,6 +1415,56 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   return self;
 }
 
+static void linalg_eigh_mps_impl(
+    const Tensor& eigenvalues,
+    const Tensor& eigenvectors,
+    const Tensor& infos,
+    bool upper,
+    bool compute_eigenvectors) {
+  auto eigenvectors_cpu = eigenvectors.to(kCPU);
+  auto eigenvalues_cpu = at::empty_like(eigenvalues, eigenvalues.options().device(kCPU));
+  auto infos_cpu = at::zeros_like(infos, infos.options().device(kCPU));
+
+  linalg_eigh_stub(kCPU, eigenvalues_cpu, eigenvectors_cpu, infos_cpu, upper, compute_eigenvectors);
+
+  eigenvalues.copy_(eigenvalues_cpu);
+  eigenvectors.copy_(eigenvectors_cpu);
+  infos.copy_(infos_cpu);
+}
+
+static void linalg_eig_mps_impl(
+    Tensor& eigenvalues,
+    Tensor& eigenvectors,
+    Tensor& infos,
+    const Tensor& input,
+    bool compute_eigenvectors) {
+  auto input_cpu = input.to(kCPU);
+  auto eigenvalues_cpu = eigenvalues.to(kCPU);
+  auto eigenvectors_cpu = eigenvectors.to(kCPU);
+  auto infos_cpu = infos.to(kCPU);
+
+  linalg_eig_stub(kCPU, eigenvalues_cpu, eigenvectors_cpu, infos_cpu, input_cpu, compute_eigenvectors);
+
+  eigenvalues.copy_(eigenvalues_cpu);
+  if (compute_eigenvectors) {
+    eigenvectors.copy_(eigenvectors_cpu);
+  }
+  infos.copy_(infos_cpu);
+}
+
+static void linalg_eig_make_complex_eigenvectors_mps_impl(
+    const Tensor& complex_vectors,
+    const Tensor& complex_values,
+    const Tensor& real_vectors) {
+  auto complex_vectors_cpu = at::empty_like(complex_vectors, complex_vectors.options().device(kCPU));
+  auto complex_values_cpu = complex_values.to(kCPU);
+  auto real_vectors_cpu = real_vectors.to(kCPU);
+
+  linalg_eig_make_complex_eigenvectors_stub(kCPU, complex_vectors_cpu, complex_values_cpu, real_vectors_cpu);
+
+  complex_vectors.copy_(complex_vectors_cpu);
+}
+
 static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, bool upper) {
   using namespace mps;
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
@@ -1673,5 +1723,8 @@ REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
 REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
+REGISTER_DISPATCH(linalg_eigh_stub, mps::linalg_eigh_mps_impl);
+REGISTER_DISPATCH(linalg_eig_stub, mps::linalg_eig_mps_impl);
+REGISTER_DISPATCH(linalg_eig_make_complex_eigenvectors_stub, mps::linalg_eig_make_complex_eigenvectors_mps_impl);
 
 } // namespace at::native

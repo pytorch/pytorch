@@ -9542,22 +9542,8 @@ class TestLinalgMPS(TestCaseMPS):
                       (0, 0), (3, 0, 0), ]:  # zero numel square matrices
             A = random_hermitian_pd_matrix(sizes[-1], *sizes[:-2], dtype=dtype, device=device)
             hermitian = True
-            # escape only when NotImplementedError of downstream function is raised
-            # TODO: remove this once the required function is implemented
-            try:
-                run_test_main(A, hermitian)
-            except NotImplementedError as e:
-                with self.assertRaisesRegex(
-                        NotImplementedError,
-                        "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
-                    raise e
-            try:
-                run_test_numpy(A, hermitian)
-            except NotImplementedError as e:
-                with self.assertRaisesRegex(
-                        NotImplementedError,
-                        "The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device."):
-                    raise e
+            run_test_main(A, hermitian)
+            run_test_numpy(A, hermitian)
 
     @parametrize("m", [1, 32, 64])
     @parametrize("n", [48, 64])
