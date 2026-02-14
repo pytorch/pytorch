@@ -33,6 +33,7 @@ from torch._inductor.codecache import (
     get_hash,
     PyCodeCache,
 )
+from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
     do_bench_using_profiling,
     get_gpu_type,
@@ -43,6 +44,12 @@ from torch._inductor.utils import (
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
 
+
+# Inactivity timeout for AutotuneProcessPool in seconds.
+# Default: 600 seconds (10 minutes). Set to 0 to disable.
+AUTOTUNE_POOL_INACTIVITY_TIMEOUT = int(
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_POOL_INACTIVITY_TIMEOUT", "600")
+)
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -445,6 +452,7 @@ class BenchmarkRequest:
                 )
             self.output_tensor_meta = output_tensor_meta[0]
         else:
+            # pyrefly: ignore [bad-assignment]
             self.output_tensor_meta: TensorMeta = output_tensor_meta
 
         self.extra_args = extra_args
@@ -1072,11 +1080,13 @@ class AutotuneProcessPool:
 
     _instance: Optional[AutotuneProcessPool] = None
     _lock: threading.Lock = threading.Lock()
+    _shutdown_for_inactivity: bool = False
 
     def __init__(self):
         self._pool: ProcessPoolExecutor | None = self._init_pool()
         self._warmup_future: Future[Any] | None = None
         self._warmup_start_time: float | None = None
+        self._timer: Timer | None = self._init_timer()
 
     @classmethod
     def get_instance(cls):
@@ -1091,9 +1101,39 @@ class AutotuneProcessPool:
     @property
     def pool(self):
         """Get the process pool."""
+        assert config.pipeline_max_autotune_gemm, (
+            "To use AutotuneProcessPool, pipeline_max_autotune_gemm must be enabled"
+        )
         if self._pool is None:
             self._pool = self._init_pool()
+            self._timer = self._init_timer()
         return self._pool
+
+    def _init_timer(self) -> Timer | None:
+        if AUTOTUNE_POOL_INACTIVITY_TIMEOUT > 0:
+            return Timer(AUTOTUNE_POOL_INACTIVITY_TIMEOUT, self._on_inactivity_timeout)
+        return None
+
+    def _record_activity(self) -> None:
+        if self._timer is not None:
+            self._timer.record_call()
+
+    def _on_inactivity_timeout(self) -> None:
+        autotuning_log.info(
+            "AutotuneProcessPool shutting down due to inactivity (timeout=%ds)",
+            AUTOTUNE_POOL_INACTIVITY_TIMEOUT,
+        )
+
+        with self._lock:
+            if self._pool is not None:
+                self._pool.shutdown(wait=False)
+                self._pool = None
+            self._timer = None
+
+            # Mark that the pool was shut down for inactivity.
+            # This prevents the pool from being recreated on recompiles
+            # which likely do not require large amounts of autotuning.
+            AutotuneProcessPool._shutdown_for_inactivity = True
 
     def _init_pool(self):
         """
@@ -1126,7 +1166,10 @@ class AutotuneProcessPool:
             with self._lock:
                 if self._warmup_future is None:
                     self._warmup_start_time = time.perf_counter()
-                    self._warmup_future = self.pool.submit(_warmup_autotune_subprocess)
+                    self._warmup_future = self.pool.submit(
+                        _init_autotune_subprocess,
+                        allow_tf32=torch.backends.cuda.matmul.allow_tf32,
+                    )
                     self._warmup_future.add_done_callback(self._on_warmup_complete)
                     autotuning_log.info("Warmup job submitted")
         # pyrefly: ignore[bad-return]
@@ -1140,7 +1183,7 @@ class AutotuneProcessPool:
 
         try:
             result = future.result()
-            autotuning_log.error(
+            autotuning_log.info(
                 "AutotuneProcessPool warmup completed successfully in %.4f seconds: %s",
                 warmup_elapsed_time,
                 result,
@@ -1154,10 +1197,16 @@ class AutotuneProcessPool:
 
     def submit(self, fn, *args, **kwargs) -> Future[Any]:
         """Submit a job to the pool and return a Future."""
-        return self.pool.submit(fn, *args, **kwargs)
+        future = self.pool.submit(fn, *args, **kwargs)
+        if self._timer is not None:
+            future.add_done_callback(lambda _: self._record_activity())
+        return future
 
     def _shutdown(self):
         """Shutdown the pool on exit."""
+        if self._timer is not None:
+            self._timer.quit()
+            self._timer = None
         if self._pool is not None:
             self._pool.shutdown(wait=False)
             self._pool = None
@@ -1172,7 +1221,14 @@ class AutotuneProcessPool:
                     cls._instance = None
 
 
-def _warmup_autotune_subprocess() -> bool:
+def use_pipelined_autotuning() -> bool:
+    return (
+        config.pipeline_max_autotune_gemm
+        and not AutotuneProcessPool._shutdown_for_inactivity
+    )
+
+
+def _init_autotune_subprocess(allow_tf32: bool) -> bool:
     """
     Warmup function run in the autotune subprocess.
     """
@@ -1181,6 +1237,8 @@ def _warmup_autotune_subprocess() -> bool:
     # Initialize dummy tensor for CUDA context
     if torch.cuda.is_available():
         torch.zeros(1, device="cuda")
+
+    torch.backends.cuda.matmul.allow_tf32 = allow_tf32
 
     return True
 

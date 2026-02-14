@@ -1206,6 +1206,61 @@ class FSDPTestMixin:
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
 
+    @classmethod
+    def _run(cls, rank, test_name, file_name, pipe, **kwargs):  # type: ignore[override]
+        self = cls(test_name)
+        self.rank = rank
+        self.file_name = file_name
+        fake_pg = kwargs.get("fake_pg", False)
+
+        print(f"dist init r={self.rank}, world={self.world_size}")
+        if DEVICE_TYPE != "cpu" and torch.accelerator.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
+        # Specify gloo backend to make 'init_process_group()' succeed,
+        # Actual tests will be skipped if there is no enough GPUs.
+        try:
+            if fake_pg:
+                store = torch.testing._internal.distributed.fake_pg.FakeStore()
+                dist.init_process_group(
+                    backend="fake",
+                    world_size=self.world_size,
+                    rank=rank,
+                    store=store,
+                )
+            else:
+                dist.init_process_group(
+                    init_method=self.init_method,
+                    backend=DISTRIBUTED_BACKEND,
+                    world_size=int(self.world_size),
+                    rank=self.rank,
+                )
+        except RuntimeError as e:
+            if "recompile" in e.args[0]:
+                sys.exit(TEST_SKIPS["backend_unavailable"].exit_code)
+
+            raise
+
+        device_ids = None
+        device_id = self.rank % DEVICE_COUNT
+        if TEST_CUDA or TEST_XPU:
+            torch.accelerator.set_device_index(device_id)
+        device_ids = [device_id]
+
+        # Execute barrier prior to running test to ensure that every process
+        # has finished initialization and that the following test
+        # immediately exiting due to a skip doesn't cause flakiness.
+        dist.barrier(device_ids=device_ids)
+
+        torch._dynamo.reset()
+        set_rng_seed()
+        self.run_test(test_name, pipe)
+        torch._dynamo.reset()
+
+        dist.barrier(device_ids=device_ids)
+
+        dist.destroy_process_group()
+
     def _train_for_several_steps(
         self,
         model: nn.Module,
@@ -1350,6 +1405,8 @@ class FSDPTestMixin:
                 ref_model = DDP(
                     model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE
                 )
+            elif DEVICE_TYPE == "cpu":
+                ref_model = DDP(model)
             else:
                 ref_model = DDP(model, device_ids=[rank], output_device=rank)
         else:
@@ -1626,14 +1683,12 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
                     )
                     continue
                 # barrier to ensure thread reading the same value
-                original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
                 original_compile_threads = torch._inductor.config.compile_threads
                 torch.distributed.barrier()
 
                 if mode == FullyShardMode.EAGER:
                     fully_shard_patch = original_fully_shard
                 elif mode == FullyShardMode.COMPILED_COMPUTE:
-                    torch._dynamo.config.skip_fsdp_hooks = True
                     torch._inductor.config.compile_threads = 1
                     fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
                 else:
@@ -1648,7 +1703,6 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
                 # other threads use patched func before this thread restores
                 torch.distributed.barrier()
                 func.__globals__[original_fully_shard.__name__] = original_fully_shard
-                torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
                 torch._inductor.config.compile_threads = original_compile_threads
 
         return wrapper
