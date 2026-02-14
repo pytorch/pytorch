@@ -631,13 +631,27 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
         self.conv_configs: list[BaseConfig] = [
+            # BLOCK_K=16 configs
             ConvConfig(64, 256, 16, 2, 4),
             ConvConfig(256, 64, 16, 2, 4),
             ConvConfig(1024, 16, 16, 1, 8),
+            # BLOCK_K=32 configs
             ConvConfig(128, 128, 32, 2, 8),
             ConvConfig(64, 64, 32, 2, 4),
             ConvConfig(64, 256, 32, 2, 8),
             ConvConfig(256, 64, 32, 2, 8),
+            # BLOCK_K=64 configs
+            ConvConfig(128, 128, 64, 3, 8),
+            ConvConfig(64, 128, 64, 4, 4),
+            ConvConfig(128, 64, 64, 4, 4),
+            ConvConfig(256, 128, 64, 2, 8),
+            ConvConfig(128, 256, 64, 2, 8),
+            # BLOCK_K=128 configs - optimal when IN_C=128 (single iteration over channels)
+            ConvConfig(128, 128, 128, 2, 8),
+            ConvConfig(128, 128, 128, 3, 8),
+            ConvConfig(64, 128, 128, 4, 4),
+            ConvConfig(256, 128, 128, 2, 8),
+            ConvConfig(128, 256, 128, 2, 8),
         ]
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
