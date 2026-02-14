@@ -667,8 +667,6 @@ def eq(left, right):
 
 def lt(left, right):
     """Compare sizes: only use on inputs known to be >= 0."""
-    V.graph.sizevars.check(sympy.Ge(left, 0))
-    V.graph.sizevars.check(sympy.Ge(right, 0))
     if V.graph.sizevars.guard_or_false(sympy.Lt(left, right)):
         return True
 

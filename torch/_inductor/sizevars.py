@@ -752,6 +752,7 @@ class SizeVarAllocator:
         assert fallback is not None
 
         original = expr
+        expr = self.simplify(expr)
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
