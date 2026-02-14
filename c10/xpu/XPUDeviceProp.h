@@ -43,7 +43,7 @@ namespace c10::xpu {
    * on the device. */                                                         \
   _(max_num_sub_groups)                                                        \
                                                                                \
-  /* a std::vector of size_t containing the set of sub-group sizes  supported  \
+  /* a std::vector of size_t containing the set of sub-group sizes supported   \
    * by the device. */                                                         \
   _(sub_group_sizes)                                                           \
                                                                                \

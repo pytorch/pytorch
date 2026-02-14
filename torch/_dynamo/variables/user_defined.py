@@ -605,6 +605,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     )
                 items = bound_args.arguments["iterable"].force_unpack_var_sequence(tx)
             else:
+                # pyrefly: ignore [implicit-any]
                 items = []
 
             if "maxlen" in bound_args.arguments:
@@ -1348,7 +1349,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # use `type(...)` to ignore instance attrs.
                     func_source = AttrSource(TypeSource(desc_source), "__set__")
                 desc_var = VariableTracker.build(tx, descriptor, desc_source)
-                func_var = VariableTracker.build(tx, setter, func_source)
+                func_var = VariableTracker.build(tx, setter, func_source, realize=True)
                 args = [desc_var, self, value]
                 return func_var.call_function(tx, args, {})
             # NOTE: else we assume the descriptor (if any) has a
@@ -1464,7 +1465,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             assert self.source is not None
             func_src = AttrSource(self.source, "__func__")
-            func_var = VariableTracker.build(tx, func, func_src)
+            func_var = VariableTracker.build(tx, func, func_src, realize=True)
             obj_src = AttrSource(self.source, "__self__")
             obj_var = VariableTracker.build(tx, obj, obj_src)
             return func_var.call_function(tx, [obj_var] + args, kwargs)  # type: ignore[arg-type]
@@ -1733,7 +1734,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if self.source:
                 # Read the class attribute to reach the property
                 source = AttrSource(self.get_source_by_walking_mro(name), "fget")
-            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
+            fget_vt = VariableTracker.build(
+                tx, subobj.fget, source=source, realize=True
+            )
             return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
@@ -2165,6 +2168,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         # Collect positional and keyword-only arguments
         pos_args = []
+        # pyrefly: ignore [implicit-any]
         kw_args = []
         for field in fields(dataclass_cls):
             if not field.init:

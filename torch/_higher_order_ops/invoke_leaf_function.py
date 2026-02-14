@@ -309,20 +309,23 @@ def _make_forward(
                     for inp in inputs
                 )
 
-                state["outputs"] = tuple(
-                    GradientInfo(
-                        edge=get_gradient_edge(out),
-                        size=out.size(),
-                        stride=out.stride(),
-                        dtype=out.dtype,
-                        device=out.device,
+                if outputs is None:
+                    state["outputs"] = ()
+                else:
+                    state["outputs"] = tuple(
+                        GradientInfo(
+                            edge=get_gradient_edge(out),
+                            size=out.size(),
+                            stride=out.stride(),
+                            dtype=out.dtype,
+                            device=out.device,
+                        )
+                        if isinstance(out, torch.Tensor)
+                        and out.requires_grad
+                        and out.grad_fn is not None
+                        else None
+                        for out in outputs
                     )
-                    if isinstance(out, torch.Tensor)
-                    and out.requires_grad
-                    and out.grad_fn is not None
-                    else None
-                    for out in outputs
-                )
 
         return pytree.tree_map_only(
             torch.Tensor,
