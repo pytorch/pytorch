@@ -362,6 +362,42 @@ void nccl_wait_signal(const c10::intrusive_ptr<SymmetricMemory>& hdl, int64_t pe
 } // namespace c10d::nccl_extension
 
 
+namespace {
+// Boxed functions for the APIs that use custom class `SymmetricMemory`.
+// Why do we need boxed functions?
+// Problem:
+// `SymmetricMemory` is a custom class that needs to be TorchBind'ed first
+// before it can be supported by the dispatcher. Since both TorchBind
+// registration and m.impl registration happen in static initialization, we can
+// hit static initialization order fiasco since C++ provides no ordering
+// guarantees for static initializers across translation units.
+// Solution:
+// Use boxed kernels that operate on the IValue stack directly. The
+// makeFromBoxedFunction path never calls inferFunctionSchemaFromFunctor at all:
+// For details, see https://github.com/pytorch/pytorch/pull/174034.
+
+void nccl_put_signal_boxed(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    c10::Stack* stack) {
+  auto peer = torch::jit::pop(*stack).toInt();
+  auto hdl = torch::jit::pop(*stack).toCustomClass<
+      c10d::symmetric_memory::SymmetricMemory>();
+  auto tensor = torch::jit::pop(*stack).toTensor();
+  c10d::nccl_extension::nccl_put_signal(tensor, hdl, peer);
+}
+
+void nccl_wait_signal_boxed(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    c10::Stack* stack) {
+  auto peer = torch::jit::pop(*stack).toInt();
+  auto hdl = torch::jit::pop(*stack).toCustomClass<
+      c10d::symmetric_memory::SymmetricMemory>();
+  c10d::nccl_extension::nccl_wait_signal(hdl, peer);
+}
+} // namespace
+
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nccl_put", c10d::nccl_extension::nccl_put);
   m.impl("nccl_get", c10d::nccl_extension::nccl_get);
@@ -369,12 +405,14 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   // TODO: rename with more descriptive name
   m.impl("nccl_wait_for_signal", c10d::nccl_extension::nccl_wait_for_signal);
   m.impl("nccl_put_with_signal", c10d::nccl_extension::nccl_put_with_signal);
-  // API that uses internal signal mechanism
-  m.impl("nccl_put_signal", c10d::nccl_extension::nccl_put_signal);
+  // API that uses internal signal mechanism and accepts handle
+  m.impl("nccl_put_signal",
+      torch::CppFunction::makeFromBoxedFunction<&nccl_put_signal_boxed>());
 }
 
 // Use CompositeExplicitAutograd as key since ops do not accept tensor as input
 TORCH_LIBRARY_IMPL(symm_mem, CompositeExplicitAutograd, m) {
-  // API that uses internal signal mechanism
-  m.impl("nccl_wait_signal", c10d::nccl_extension::nccl_wait_signal);
+  // API that uses internal signal mechanism and accepts handle
+  m.impl("nccl_wait_signal",
+      torch::CppFunction::makeFromBoxedFunction<&nccl_wait_signal_boxed>());
 }

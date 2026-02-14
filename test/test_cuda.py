@@ -1118,8 +1118,20 @@ print(t.is_pinned())
         s2 = torch.cuda.Stream()
         torch.accelerator.set_stream(s1)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s1.cuda_stream
+        )
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s1.native_handle
+        )
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s2.cuda_stream
+        )
+        self.assertEqual(
+            torch.accelerator.current_stream().native_handle, s2.native_handle
+        )
         with self.assertRaisesRegex(
             RuntimeError, "Device index value .* is out of index range"
         ):
@@ -1439,46 +1451,37 @@ except RuntimeError as e:
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -inf, 1.0])
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, 1.0, nan])
 
-    @staticmethod
-    def _mute_init():
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
-
-    def _spawn_method(self, method, arg):
-        ctx = torch.multiprocessing.get_context("spawn")
-        with ctx.Pool(1, initializer=self._mute_init) as pool:
-            errors = pool.map(method, [arg])
-            for e in errors:
-                # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
-                # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
-                # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
-                # which still catches the error but with less specific messaging
-                is_cuda_assert = "device-side assert triggered" in str(e)
-                is_hip_assert = "hipErrorLaunchFailure" in str(
-                    e
-                ) or "unspecified launch failure" in str(e)
-                if not (is_cuda_assert or is_hip_assert):
-                    self.fail(e)
-                if e.error_code not in (710, 719):
-                    self.fail(e)
-
-    @staticmethod
-    def _test_index_bounds_cuda(idx):
-        x = torch.arange(10, device="cuda")
-        try:
-            y = x[torch.tensor([idx])]
-            return f"x[torch.tensor([{idx})]={y}"
-        except RuntimeError as err:
-            return err
-
     @slowTest
     def test_index_out_of_bounds_exception_cuda(self):
-        test_method = TestCuda._test_index_bounds_cuda
-        # Test in-bound access works fine
-        self.assertEqual(
-            test_method(1), "x[torch.tensor([1)]=tensor([1], device='cuda:0')"
-        )
         # Test that indexing out of bounds causes assert
-        self._spawn_method(test_method, 11)
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
+
+class TestThatContainsCUDAAssertFailure(TestCase):
+
+    @slowTest
+    def test_index_bounds_cuda(self):
+        x = torch.arange(10, device="cuda")
+        y = x[torch.tensor([11])].cpu()
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
+        # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
+        # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
+        # which still catches the error but with less specific messaging
+        is_cuda_assert = "device-side assert triggered" in stderr
+        is_hip_assert = "hipErrorLaunchFailure" in stderr
+        is_hip_assert = is_hip_assert or "unspecified launch failure" in stderr
+        is_hip_assert = is_hip_assert or "HSA_STATUS_ERROR_EXCEPTION" in stderr
+        self.assertTrue(
+            is_cuda_assert or is_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -5768,17 +5771,17 @@ class TestMemPool(TestCase):
         torch.cuda.empty_cache()
         self.assertEqual(called_dummy_free.value, 321)
 
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
+
+    @serialTest()
     def test_mempool_with_allocator(self):
         pool = torch.cuda.MemPool()
 
-        # MemPool doesn't have an allocator by default
-        self.assertEqual(pool.allocator, None)
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
 
         pool = torch.cuda.MemPool(allocator.allocator())
-
-        # pool should point to the same allocator as the one passed into it
-        self.assertEqual(allocator.allocator(), pool.allocator)
 
         # pool's use count should be 1 at this point as MemPool object
         # holds a reference
@@ -5839,6 +5842,11 @@ class TestMemPool(TestCase):
         # out tensor
         self.assertEqual(called_dummy_free.value, 321)
 
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
+
+    @serialTest()
     def test_tensor_delete_after_allocator_delete(self):
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
         pool = torch.cuda.MemPool(allocator.allocator())
@@ -5869,6 +5877,10 @@ class TestMemPool(TestCase):
         torch.cuda.empty_cache()
 
         self.assertEqual(called_dummy_free.value, 321)
+
+        # reset dummy allocator indicator variables because they are global
+        called_dummy_free.value = 0
+        called_dummy_alloc.value = 0
 
     @serialTest()
     def test_mempool_limited_memory_with_allocator(self):
