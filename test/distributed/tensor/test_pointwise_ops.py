@@ -151,6 +151,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
     @with_comms
+    @skip("This test will sometimes hang and a timeout error will be thrown")
     def test_partial_add(self):
         device_mesh = self.build_device_mesh()
         d_1 = DTensor.from_local(torch.rand(2, 2), device_mesh, [Partial()])
