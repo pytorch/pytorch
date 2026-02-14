@@ -116,5 +116,5 @@
         dk=dk_out_transposed,
         dv=dv_out_transposed,
         block_sparse_tensors=block_sparse_tensors,
-        deterministic={{DETERMINISTIC}},
+        deterministic=torch.are_deterministic_algorithms_enabled(),
     )

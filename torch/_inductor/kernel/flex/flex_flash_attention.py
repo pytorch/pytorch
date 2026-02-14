@@ -604,9 +604,6 @@ def create_flex_flash_attention_backward_kernel(
             DQ_WRITE_ORDER_SPT=dq_write_order_spt,
             SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
             SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
-            # NB: resolved at template-render time so the value is part of the Inductor cache key
-            DETERMINISTIC=torch.are_deterministic_algorithms_enabled()
-            and not torch.is_deterministic_algorithms_warn_only_enabled(),
         )
 
     for choice in choices:
