@@ -304,6 +304,80 @@ class DistMatrixOpsTest(DTensorTestBase):
             test_placement_comb([spec[0]], [spec[1]])
 
     @with_comms
+    def test_mm_large_tensors(self):
+        """
+        Test mm with larger tensors to ensure DTensor works correctly at scale.
+        Larger tensors require relaxed tolerances due to accumulated floating-point
+        errors from the much larger number of operations (~134M vs ~1.5K ops).
+        """
+        device_mesh = self.build_device_mesh()
+        shard0_spec = Shard(0)
+        shard1_spec = Shard(1)
+        replica_spec = Replicate()
+
+        t1 = torch.randn(512, 512, device=self.device_type, requires_grad=True)
+        t2 = torch.randn(512, 512, device=self.device_type, requires_grad=True)
+        local_res = torch.mm(t1, t2)
+
+        # Compute reference result in float64 for accuracy comparison
+        t1_fp64 = t1.to(torch.float64)
+        t2_fp64 = t2.to(torch.float64)
+        reference_res = torch.mm(t1_fp64, t2_fp64).to(torch.float32)
+
+        def test_placement_comb(
+            placements1: list[Placement], placements2: list[Placement]
+        ) -> None:
+            dt1 = distribute_tensor(t1, device_mesh, placements1)
+            dt2 = distribute_tensor(t2, device_mesh, placements2)
+            dist_res: DTensor = cast(DTensor, torch.mm(dt1, dt2)).redistribute(
+                device_mesh, [replica_spec]
+            )
+            dist_res_local = dist_res.to_local()
+
+            # Compute errors relative to float64 reference to verify both computations
+            # have similar accuracy
+            local_abs_err = (local_res - reference_res).abs()
+            dist_abs_err = (dist_res_local - reference_res).abs()
+
+            local_max_err = local_abs_err.max().item()
+            dist_max_err = dist_abs_err.max().item()
+            local_mean_err = local_abs_err.mean().item()
+            dist_mean_err = dist_abs_err.mean().item()
+
+            # Verify that local and distributed have comparable errors vs fp64 reference
+            # Both should be within the same order of magnitude
+            # If distributed were systematically worse, we'd see significantly larger errors
+            err_ratio = max(local_max_err, dist_max_err) / (
+                min(local_max_err, dist_max_err) + 1e-10
+            )
+            # Error ratio should be close to 1.0 if both have similar accuracy
+            # Allow up to 5x difference due to different rounding patterns from computation order
+            self.assertLess(
+                err_ratio,
+                5.0,
+                f"Error ratio {err_ratio:.2f} too large. "
+                f"Local max err: {local_max_err:.2e}, Dist max err: {dist_max_err:.2e}. "
+                f"Local mean err: {local_mean_err:.2e}, Dist mean err: {dist_mean_err:.2e}",
+            )
+
+            # Both local and distributed results are compared against float64 reference
+            # Relaxed tolerances needed for large tensors: 512x512x512 = 134M operations
+            # vs 12x8x16 = 1.5K operations in test_mm (87,000x more operations)
+            self.assertEqual(local_res, reference_res, atol=1e-3, rtol=1e-2)
+            self.assertEqual(dist_res_local, reference_res, atol=1e-3, rtol=1e-2)
+            self.assertEqual(dist_res_local, local_res, atol=1e-3, rtol=1e-2)
+
+            # backward
+            grad_dist_res = torch.ones_like(dist_res)
+            dist_res.backward(grad_dist_res)
+            self.assertIsNotNone(dt1.grad)
+
+        placement_specs = [shard0_spec, shard1_spec, replica_spec]
+        shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
+        for spec in shard_specs_comb:
+            test_placement_comb([spec[0]], [spec[1]])
+
+    @with_comms
     def test_mm_single_dim_strategy(self):
         register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
         # unshardable input where some rank have empty _local_tensor
