@@ -823,6 +823,7 @@ if _enabled:
 
         @property
         def original_name(self):
+            # pyrefly: ignore [unnecessary-comparison]
             if type(self) is str(self._c._type().name()):
                 return ""
             return str(self._c._type().name())

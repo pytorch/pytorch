@@ -1133,6 +1133,10 @@ class Replicate(torch._C._distributed.Replicate):
 
 
 class Partial(torch._C._distributed.Partial):
+    # reduce_ops that distribute over addition, enabling per-input linearity
+    # for bilinear ops like mm: reduce_op(A_i @ B) = reduce_op(A_i) @ B
+    LINEAR_REDUCE_OPS: tuple[str, ...] = ("sum", "avg")
+
     """
     The ``Partial(reduce_op)`` placement describes the DTensor that is pending
     reduction on a specified ``DeviceMesh`` dimension, where each rank on the
