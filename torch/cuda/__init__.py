@@ -193,7 +193,10 @@ def is_bf16_supported(including_emulation: bool = True):
 
     device = torch.cuda.current_device()
 
-    if torch.cuda.get_device_properties(device).major >= 8:
+    # Check for CUDA version and device compute capability.
+    # This is a fast way to check for it.
+    cuda_version = torch.version.cuda
+    if cuda_version is not None and torch.cuda.get_device_properties(device).major >= 8:
         return True
 
     if not including_emulation:
