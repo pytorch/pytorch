@@ -1671,7 +1671,9 @@ def merge_view_inputs(
         return fwd_inputs, fwd_inputs_descs, None
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
+    # pyrefly: ignore [implicit-any]
     base_args = []
+    # pyrefly: ignore [implicit-any]
     other_args = []
     base_args_descs = []
     other_args_descs = []
@@ -2001,6 +2003,7 @@ def _backward_prologue_functional(
     # assert all(x is None for x in metadata_only_inps)
     # assert all(x is None for x in aliased_outputs)
     # TODO: replace this with FunctionalizedRngRuntimeWrapper
+    # pyrefly: ignore [implicit-any]
     rng_args = []
     if metadata.is_rng_op_functionalized:
         # Add the seed and offset to args
@@ -2847,6 +2850,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             )
                         ):
                             lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (  # type: ignore[union-attr]
+                                # pyrefly: ignore [implicit-any]
                                 []
                             )
 
