@@ -119,6 +119,7 @@ from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
+    DictGetItemSource,
     GetItemSource,
     GlobalStateSource,
     is_constant_source,
@@ -718,7 +719,7 @@ class OutputGraph(OutputGraphCommon):
         # are same, we dont want OBJECT_ALIASING guards on them. For these
         # objects, we have DICT_CONTAINS absent guards on the mro walk, so there
         # is no need of the OBJECT_ALIASING guards.
-        self.mro_source_cache: dict[int, Source] = {}
+        self.mro_source_cache: dict[int, DictGetItemSource] = {}
         # Tracks (id(klass), attr_name) pairs that already have a
         # DICT_CONTAINS absent guard installed during MRO walks.  When
         # multiple subclasses share the same intermediate MRO class, we

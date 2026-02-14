@@ -1171,7 +1171,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if isinstance(method, staticmethod):
-                source = AttrSource(self.get_source_by_walking_mro(tx, name), "__func__")
+                source = AttrSource(
+                    self.get_source_by_walking_mro(tx, name), "__func__"
+                )
                 fn_vt = VariableTracker.build(
                     tx, method.__func__, source=source, realize=True
                 )

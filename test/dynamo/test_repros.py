@@ -1749,7 +1749,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(cnt.frame_count, """1""")
         if torch._dynamo.config.automatic_dynamic_shapes:
             if not torch._dynamo.config.assume_static_by_default:
-                self.assertExpectedInline(cnt.op_count, """4""")
+                self.assertExpectedInline(cnt.op_count, """3""")
             else:
                 self.assertExpectedInline(cnt.op_count, """3""")
         else:

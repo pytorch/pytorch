@@ -1783,7 +1783,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Accessing from __dict__ does not resolve the descriptor, it
                 # returns a staticmethod object, so access the __func__
                 # attribute to get to the actual function.
-                source = AttrSource(self.get_source_by_walking_mro(tx, name), "__func__")
+                source = AttrSource(
+                    self.get_source_by_walking_mro(tx, name), "__func__"
+                )
             func = subobj.__get__(self.value)
             return VariableTracker.build(tx, func, source)
         elif isinstance(subobj, classmethod):
@@ -1792,7 +1794,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 # Accessing from __dict__ does not resolve the descriptor, it
                 # returns a classmethod object, so access the __func__
                 # attribute to get to the actual function.
-                source_fn = AttrSource(self.get_source_by_walking_mro(tx, name), "__func__")  # type: ignore[assignment]
+                source_fn = AttrSource(
+                    self.get_source_by_walking_mro(tx, name), "__func__"
+                )  # type: ignore[assignment]
             return variables.UserMethodVariable(
                 subobj.__func__,
                 self.var_getattr(tx, "__class__"),
