@@ -3742,7 +3742,7 @@ def linear_cross_entropy(
         )
     out_features = linear_weight.shape[:-2]
     num_classes = linear_weight.shape[-2]
-    num_batches, in_features = input.shape
+    in_features = input.shape[-1]
     if out_features:
         linear_weight = linear_weight.reshape(
             (num_classes * math.prod(out_features), in_features)
@@ -3755,6 +3755,7 @@ def linear_cross_entropy(
         and input.dim() == 2
         and not out_features
     ):
+        num_batches = input.shape[0]
         if weight is None:
             # optimization todo: support unspecified weight in LinearCrossEntropyFunction
             weight = torch.ones(
@@ -3787,6 +3788,7 @@ def linear_cross_entropy(
     if target.dtype.is_floating_point:
         logits_shape = target.shape
     elif target.shape:
+        num_batches = input.shape[0]
         logits_shape = (num_batches, num_classes, *out_features)
     else:
         logits_shape = (num_classes,)
