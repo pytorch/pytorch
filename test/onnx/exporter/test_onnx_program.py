@@ -30,13 +30,7 @@ class ONNXProgramRenameAxesTest(common_utils.TestCase):
         model = ir.Model(
             ir.Graph(
                 inputs=inputs,
-                outputs=[
-                    ir.Value(
-                        name="output",
-                        type=ir.DataType.FLOAT,
-                        shape=ir.Shape(["s0", "s1"]),
-                    )
-                ],
+                outputs=[inputs[0]],
                 nodes=[],
             ),
             ir_version=9,
