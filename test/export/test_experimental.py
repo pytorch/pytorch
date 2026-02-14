@@ -782,21 +782,15 @@ def forward(self, x):
             gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
             test_inputs = make_inputs()
             self.assertExpectedInline(
-                gm._in_shuffle_graph.code.strip("\r\n "),
-                """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    return (arg1_1, arg2_1)""",
-            )
-            self.assertExpectedInline(
                 gm.code.strip("\r\n "),
                 """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0,))
-    L_bar_x , L_bar_y , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
+    _fn_args = (args_0, )
+    L_bar_x , L_bar_y , = self._dynamo_bytecode_flatten(*_fn_args)
     l_bar_x = L_bar_x
     l_bar_y = L_bar_y
     add = l_bar_x + l_bar_y;  l_bar_x = l_bar_y = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, add), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((add,), _fn_args)""",
             )
             self.assertEqual(gm(*test_inputs), foo(*test_inputs))
         finally:
@@ -819,25 +813,18 @@ def forward(self, args_0):
         inps = (torch.randn(10, 32),)
         ep = dynamo_graph_capture_for_export(MyModel())(*inps)
         self.assertExpectedInline(
-            ep._in_shuffle_graph.code.strip("\r\n "),
-            """\
-def forward(self, arg0_1, arg1_1):
-    _tensor_constant0 = self._tensor_constant0
-    return (arg1_1, _tensor_constant0)""",
-        )
-        self.assertExpectedInline(
             ep.code.strip("\r\n "),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_x_ , L_outer_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_x_ , L_outer_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_x_ = L_x_
     l_outer_ = L_outer_
     z = l_x_ + l_outer_;  l_x_ = l_outer_ = None
     y = z[(slice(None, -1, None), slice(None, None, None))];  z = None
     stacked = torch.stack([y, y, y], dim = 0);  y = None
     reshaped = stacked.reshape(-1, 3, 32);  stacked = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, reshaped), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((reshaped,), _fn_args)""",
         )
         self.assertEqual(ep(*inps), MyModel()(*inps))
 
@@ -916,12 +903,12 @@ def forward(self, args_0):
             gm.code.strip("\r\n "),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_args_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_args_0_ = L_args_0_
-    add = l_args_0_ + 1
+    add = l_args_0_ + 1;  add = None
     mul = l_args_0_ * 2;  l_args_0_ = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul, add), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((mul,), _fn_args)""",
         )
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 

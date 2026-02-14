@@ -9,7 +9,7 @@ from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_utils import parametrize, run_tests, TEST_WITH_ROCM
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -64,13 +64,21 @@ class AttentionBlock(nn.Module):
         x_packed: torch.Tensor,
         cu_seq: torch.Tensor,
         max_len: int,
-        is_causal: bool = False,
         scale: float | None = None,
+        window_size: tuple[int, int] = (-1, -1),
     ):
         q, k, v = self.get_varlen_qkv(x_packed)
 
         attn_out = varlen_attn(
-            q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal, scale=scale
+            q,
+            k,
+            v,
+            cu_seq,
+            cu_seq,
+            max_len,
+            max_len,
+            scale=scale,
+            window_size=window_size,
         )
         attn_out = attn_out.view(-1, self.embed_dim)
 
@@ -80,8 +88,8 @@ class AttentionBlock(nn.Module):
         self,
         x_padded: torch.Tensor,
         seq_lengths: torch.Tensor,
-        is_causal: bool = False,
         scale: float | None = None,
+        window_size: tuple[int, int] = (-1, -1),
     ):
         batch_size, seq_len, _ = x_padded.shape
 
@@ -97,12 +105,24 @@ class AttentionBlock(nn.Module):
             batch_size, self.num_heads, seq_len, seq_len
         )
 
-        if is_causal:
+        if window_size == (-1, 0):
             causal_mask = torch.tril(
                 torch.ones(seq_len, seq_len, device=x_padded.device, dtype=torch.bool)
             )
             # Combine: attention allowed where BOTH padding is valid AND causal constraint is met
             attn_mask = attn_mask & causal_mask[None, None, :, :]
+
+        if window_size[0] >= 0 or window_size[1] >= 0:
+            window_mask = torch.zeros(
+                seq_len, seq_len, dtype=torch.bool, device=x_padded.device
+            )
+            for i in range(seq_len):
+                start = i - window_size[0] if window_size[0] >= 0 else 0
+                end = i + window_size[1] + 1 if window_size[1] >= 0 else seq_len
+                start = max(start, 0)
+                end = min(end, seq_len)
+                window_mask[i, start:end] = True
+            attn_mask = attn_mask & window_mask[None, None, :, :]
 
         q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -140,32 +160,33 @@ def create_variable_length_batch(
         length = torch.randint(1, shape.max_seq_len // 64 + 1, (1,)).item() * 64
         seq_lengths.append(min(length, shape.max_seq_len))
 
-    seq_lengths = torch.tensor(seq_lengths, device=device)
-
-    sequences = [
-        torch.randn(
-            seq_len, shape.embed_dim, device=device, dtype=dtype, requires_grad=True
-        )
+    sequences_fp32 = [
+        torch.randn(seq_len, shape.embed_dim, device=device, dtype=torch.float32)
         for seq_len in seq_lengths
     ]
 
-    x_packed, cu_seq, max_len = pack_sequences(sequences, device)
-    x_padded = torch.zeros(
-        shape.batch_size, max_len, shape.embed_dim, device=device, dtype=dtype
-    )
+    x_packed_fp32, cu_seq, max_len = pack_sequences(sequences_fp32, device)
+    seq_lengths = torch.tensor(seq_lengths, device=device)
 
+    x_padded_fp32 = torch.zeros(
+        shape.batch_size, max_len, shape.embed_dim, device=device, dtype=torch.float32
+    )
     start_idx = 0
     for i, seq_len in enumerate(seq_lengths):
         end_idx = start_idx + seq_len
-        x_padded[i, :seq_len] = x_packed[start_idx:end_idx]
+        x_padded_fp32[i, :seq_len] = x_packed_fp32[start_idx:end_idx]
         start_idx = end_idx
-    x_padded = x_padded.clone().detach().requires_grad_()
+
+    x_packed = x_packed_fp32.detach().clone().to(dtype).requires_grad_(True)
+    x_padded = x_padded_fp32.detach().clone().to(dtype).requires_grad_(True)
+    x_padded_ref = x_padded_fp32.detach().clone().requires_grad_(True)
 
     return {
         "seq_lengths": seq_lengths,
         "cu_seq": cu_seq,
         "x_packed": x_packed,
         "x_padded": x_padded,
+        "x_padded_ref": x_padded_ref,
         "max_len": max_len,
     }
 
@@ -173,6 +194,9 @@ def create_variable_length_batch(
 class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_basic_functionality(self, device, dtype):
@@ -196,9 +220,7 @@ class TestVarlenAttention(NNTestCase):
             [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
         )
 
-        output = attention_block.forward_varlen(
-            x_packed, cu_seq, shape.max_seq_len, is_causal=False
-        )
+        output = attention_block.forward_varlen(x_packed, cu_seq, shape.max_seq_len)
 
         self.assertEqual(output.shape, (total_tokens, shape.embed_dim))
         self.assertEqual(output.device, torch.device(device))
@@ -221,6 +243,9 @@ class TestVarlenAttention(NNTestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_custom_op_compliance(self, device, dtype):
@@ -279,6 +304,9 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
+    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_custom_op_registration(self, device, dtype):
         torch.manual_seed(42)
@@ -305,9 +333,7 @@ class TestVarlenAttention(NNTestCase):
             attention_block.forward_varlen, backend="eager", fullgraph=True
         )
         with OpLoggingMode() as mode:
-            output = compiled_forward(
-                x_packed, cu_seq, shape.max_seq_len, is_causal=False
-            )
+            output = compiled_forward(x_packed, cu_seq, shape.max_seq_len)
 
             varlen_grad_out = torch.ones_like(output)
             _ = torch.autograd.grad(
@@ -329,132 +355,181 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
+    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("is_causal", [False, True])
     @parametrize("scale", [None, 0.1])
-    def test_varlen_vs_sdpa(self, device, dtype, is_causal, scale):
+    @parametrize(
+        "window_size",
+        [
+            (-1, -1),
+            (-1, 0),
+            (4, 0),
+            (-1, 4),
+            (0, 0),
+            (1, 0),
+            (0, 1),
+            (0, -1),
+            (4, 4),
+            (8, 2),
+            (1025, 1025),
+        ],
+    )
+    def test_varlen_vs_sdpa(self, device, dtype, scale, window_size):
         torch.manual_seed(42)
 
         shape = VarlenShape(
             batch_size=4, max_seq_len=1024, embed_dim=1024, num_heads=16
         )
 
-        attention_block = AttentionBlock(
-            shape.embed_dim, shape.num_heads, device, dtype
-        )
+        batch_data = create_variable_length_batch(shape, device, dtype)
+        seq_lengths = batch_data["seq_lengths"]
+        cu_seq = batch_data["cu_seq"]
+        max_len = batch_data["max_len"]
+        x_packed = batch_data["x_packed"]
+        x_padded = batch_data["x_padded"]
+        x_padded_ref = batch_data["x_padded_ref"]
 
         golden_attention_block = AttentionBlock(
             shape.embed_dim, shape.num_heads, device, torch.float32
         )
-
-        variable_length_batch_data = create_variable_length_batch(shape, device, dtype)
-        golden_variable_length_batch_data = create_variable_length_batch(
-            shape, device, torch.float32
+        attention_block = AttentionBlock(
+            shape.embed_dim, shape.num_heads, device, dtype
         )
+        with torch.no_grad():
+            attention_block.qkv_proj.weight.copy_(
+                golden_attention_block.qkv_proj.weight.to(dtype)
+            )
+            attention_block.out_proj.weight.copy_(
+                golden_attention_block.out_proj.weight.to(dtype)
+            )
 
         varlen_output = attention_block.forward_varlen(
-            variable_length_batch_data["x_packed"],
-            variable_length_batch_data["cu_seq"],
-            variable_length_batch_data["max_len"],
-            is_causal=is_causal,
+            x_packed,
+            cu_seq,
+            max_len,
             scale=scale,
+            window_size=window_size,
         )
         sdpa_output = attention_block.forward_sdpa(
-            variable_length_batch_data["x_padded"],
-            variable_length_batch_data["seq_lengths"],
-            is_causal=is_causal,
+            x_padded,
+            seq_lengths,
             scale=scale,
+            window_size=window_size,
         )
-
         golden_sdpa_output = golden_attention_block.forward_sdpa(
-            golden_variable_length_batch_data["x_padded"],
-            golden_variable_length_batch_data["seq_lengths"],
-            is_causal=is_causal,
+            x_padded_ref,
+            seq_lengths,
             scale=scale,
+            window_size=window_size,
         )
 
         start_idx = 0
-        for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
+        for i, seq_len in enumerate(seq_lengths):
             end_idx = start_idx + seq_len
 
             varlen_seq = varlen_output[start_idx:end_idx]
             sdpa_seq = sdpa_output[i, :seq_len]
-            golden_sdpa_seq = golden_sdpa_output[i, :seq_len]
+            golden_seq = golden_sdpa_output[i, :seq_len]
 
-            fwd_atol = (
-                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            fwd_atol = 2 * (golden_seq + 0.3 - 0.3 - golden_seq).abs().max().item()
+
+            varlen_error = (varlen_seq - golden_seq.to(dtype)).abs().max().item()
+            sdpa_error = (sdpa_seq - golden_seq.to(dtype)).abs().max().item()
+
+            self.assertLessEqual(
+                varlen_error,
+                2 * sdpa_error + fwd_atol,
             )
-
-            varlen_error = (varlen_seq - fwd_atol).abs().max().item()
-            sdpa_error = (sdpa_seq - fwd_atol).abs().max().item()
-
-            self.assertLessEqual(varlen_error, 2 * sdpa_error + fwd_atol)
 
             start_idx = end_idx
 
-        varlen_grad_out = torch.ones_like(varlen_output)
-        sdpa_grad_out = torch.ones_like(sdpa_output)
-        golden_sdpa_grad_out = torch.ones_like(golden_sdpa_output)
-
+        grad_out = torch.randn_like(varlen_output)
+        sdpa_grad_out = torch.zeros_like(sdpa_output)
+        golden_sdpa_grad_out = torch.zeros(
+            shape.batch_size,
+            max_len,
+            shape.embed_dim,
+            device=device,
+            dtype=torch.float32,
+        )
         start_idx = 0
-        for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
+        for i, seq_len in enumerate(seq_lengths):
             end_idx = start_idx + seq_len
-            sdpa_grad_out[i, :seq_len] = varlen_grad_out[start_idx:end_idx]
+            sdpa_grad_out[i, :seq_len] = grad_out[start_idx:end_idx]
+            golden_sdpa_grad_out[i, :seq_len] = grad_out[start_idx:end_idx].to(
+                torch.float32
+            )
             start_idx = end_idx
 
         varlen_grad = torch.autograd.grad(
             outputs=varlen_output,
-            inputs=variable_length_batch_data["x_packed"],
-            grad_outputs=varlen_grad_out,
-            retain_graph=True,
-            create_graph=False,
-            allow_unused=False,
+            inputs=x_packed,
+            grad_outputs=grad_out,
         )[0]
 
         sdpa_grad = torch.autograd.grad(
             outputs=sdpa_output,
-            inputs=variable_length_batch_data["x_padded"],
+            inputs=x_padded,
             grad_outputs=sdpa_grad_out,
-            retain_graph=True,
-            create_graph=False,
-            allow_unused=False,
         )[0]
 
         golden_sdpa_grad = torch.autograd.grad(
             outputs=golden_sdpa_output,
-            inputs=golden_variable_length_batch_data["x_padded"],
+            inputs=x_padded_ref,
             grad_outputs=golden_sdpa_grad_out,
-            retain_graph=True,
-            create_graph=False,
-            allow_unused=False,
         )[0]
 
         start_idx = 0
-        for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
+        for i, seq_len in enumerate(seq_lengths):
             end_idx = start_idx + seq_len
 
             varlen_grad_seq = varlen_grad[start_idx:end_idx]
             sdpa_grad_seq = sdpa_grad[i, :seq_len]
-            golden_sdpa_seq = golden_sdpa_grad[i, :seq_len]
+            golden_grad_seq = golden_sdpa_grad[i, :seq_len]
 
-            fwd_atol = (
-                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            bwd_atol = (
+                2 * (golden_grad_seq + 0.3 - 0.3 - golden_grad_seq).abs().max().item()
             )
 
-            varlen_error = (varlen_grad_seq - fwd_atol).abs().max().item()
-            sdpa_error = (sdpa_grad_seq - fwd_atol).abs().max().item()
+            varlen_error = (
+                (varlen_grad_seq - golden_grad_seq.to(dtype)).abs().max().item()
+            )
+            sdpa_error = (sdpa_grad_seq - golden_grad_seq.to(dtype)).abs().max().item()
 
-            self.assertLessEqual(varlen_error, sdpa_error + fwd_atol)
+            self.assertLessEqual(
+                varlen_error,
+                2 * sdpa_error + bwd_atol,
+            )
 
             start_idx = end_idx
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
+    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("is_causal", [False, True])
+    @parametrize(
+        "window_size",
+        [
+            (-1, -1),
+            (-1, 0),
+            (4, 0),
+            (-1, 4),
+            (0, 0),
+            (1, 0),
+            (0, 1),
+            (0, -1),
+            (4, 4),
+            (8, 2),
+            (1025, 1025),
+        ],
+    )
     @parametrize("num_perms", [1, 3, 5])
-    def test_batch_invariance(self, device, dtype, is_causal, num_perms):
+    def test_batch_invariance(self, device, dtype, window_size, num_perms):
         torch.manual_seed(42)
 
         batch_size, max_seq_len = 4, 128
@@ -491,7 +566,7 @@ class TestVarlenAttention(NNTestCase):
             cu_seq_orig,
             max_seq_len,
             max_seq_len,
-            is_causal,
+            window_size=window_size,
         )
 
         original_grad_out = torch.randn_like(original_output)
@@ -525,7 +600,7 @@ class TestVarlenAttention(NNTestCase):
                 cu_seq_perm,
                 max_seq_len,
                 max_seq_len,
-                is_causal,
+                window_size=window_size,
             )
 
             for i in range(batch_size):

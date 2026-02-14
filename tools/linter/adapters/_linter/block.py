@@ -6,12 +6,12 @@ import token
 from enum import Enum
 from functools import cached_property, total_ordering
 from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from tokenize import TokenInfo
+    from typing_extensions import Self
 
 
 _OVERRIDES = {"@override", "@typing_extensions.override", "@typing.override"}

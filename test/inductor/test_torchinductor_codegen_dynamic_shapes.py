@@ -419,6 +419,12 @@ test_failures = {
     # Refinement means we don't actually generate dynamic shapes (but only on
     # cpu apparently?!)
     "test_nonzero_unbacked_refinement_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_scalar_various_values_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
+    "test_bucketize_scalar_with_options_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
 }
 
 add_test_failures(test_failures, dynamic_shapes_test_failures)
