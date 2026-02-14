@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import warnings
+
 import torch
 import torch.distributed as dist
 from torch.autograd.function import Function
@@ -317,3 +319,546 @@ class BackwardHookFunction(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *args):
         return args
+
+
+class LinearCrossEntropyFunction(torch.autograd.Function):
+    """Implements linear_cross_entropy operation with chunking along
+    batches, features, and classes dimensions.
+
+    Chunking considerably reduces the memory usage in forward and
+    backward computations. On the other hand, chunking may reduce
+    processing performance, especially when the chunk sizes are set
+    too small or chunking along the classes dimension that requires
+    extra computations.
+
+    In the following we'll provide an optimal chunking strategy to
+    reduce the memory usage of the linear_cross_entropy forward and
+    backward operations while maximizing the processing performance of
+    the operation when using chunking.
+
+    A chunking strategy is defined by the following chunk sizes along
+    batches, features, and classes dimensions:
+
+      batches_chunk_size
+      features_chunk_size
+      classes_chunk_size
+
+    that directly affect the performance of the linear_cross_entropy
+    operation: smaller chunk sizes reduce the memory consumption of
+    the operation while chunking along classes dimension requires
+    extra computations and therefore decreases processing
+    performance. We use a parameter, `max_memory_gb`, to find an
+    optimal chunking strategy:
+
+      `max_memory_gb` is the upper bound to memory size that
+      linear_cross_entropy should use for forward and backward
+      computations.
+
+    In addition, a parameter `min_chunk_size` is used to restrict the
+    allowed chunk sizes to satisfy the following conditions::
+
+      batches_chunk_size >= min(min_chunk_size, num_batches)
+      batches_chunk_size % min_chunk_size == 0
+      features_chunk_size >= min(min_chunk_size, in_features)
+      features_chunk_size % min_chunk_size == 0
+      classes_chunk_size >= min(min_chunk_size, num_classes)
+      classes_chunk_size % min_chunk_size == 0
+
+    so that underlying, say, CUDA kernels could perform more
+    efficiently.
+
+    To compute the optimal chunking strategy, use::
+
+      opt_options = LinearCrossEntropyFunction.optimal_chunking(
+          options,
+          num_batches,
+          in_features,
+          num_classes,
+          input_requires_grad,
+          linear_weight_requires_grad,
+          device,
+          dtype,
+      )
+
+    where `options` is a dictionary with the following keys:
+
+      max_memory_gb (int, optional) - specifies the upper bound to
+        memory usage by the linear_cross_entropy in GB. On a CUDA
+        device, the default is 0.75 % of GPU memory, otherwise, 64 GB.
+
+      min_chunk_size (int, optional) - specifies minimal chunk size in
+        chunking along batches, features, and classes
+        dimensions. Default is 1024.
+
+      grad_inplace (bool, optional) - when True, backward will use
+        inplace multiplication to compute the gradients to save extra
+        storage space. Warning: when True, torch.autograd.gradcheck
+        will fail.  Default is False.
+
+      batches_chunk_size (int, optional) - fix chunk size along
+        batches dimension. By default, optimal chunk size along
+        batches dimension is computed.
+
+      features_chunk_size (int, optional) - fix chunk size along
+        features dimension. By default, optimal chunk size along
+        features dimension is computed.
+
+      classes_chunk_size (int, optional) - fix chunk size along
+        classes dimension. Note that chunking along classes dimension
+        will involve extra computations and will affect processing
+        performance. By default, optimal chunk size along classes
+        dimension is computed.
+
+    `opt_options` is a copy of `options` dictionary, with computed
+    optimal values of batches_chunk_size, features_chunk_size, and
+    classes_chunk_size inserted. If `options` already contains these
+    keys, the corresponding items are kept constant. If
+    `max_memory_gb` is too small or `min_chunk_size` is too large, the
+    chunking strategy defined by
+    `{batches,features,classes}_chunk_size` will be smallest possible
+    under specified constraints except the constraint defined by
+    `max_memory_gb` may be not be satisfied.
+
+    """
+
+    @staticmethod
+    def optimal_chunking(
+        options: dict,
+        num_batches: int,
+        in_features: int,
+        num_classes: int,
+        input_requires_grad: bool,
+        linear_weight_requires_grad: bool,
+        device: torch.device,
+        dtype: torch.dtype,
+        target_dtype: torch.dtype,
+    ):
+        """Compute optimal chunking strategy. See
+        :class:`LinearCrossEntropyFunction` for details.
+        """
+        opt_options = options.copy()
+        if (
+            "batches_chunk_size" in options
+            and "features_chunk_size" in options
+            and "classes_chunk_size" in options
+        ):
+            # all variables are fixed, nothing to optimize
+            return opt_options
+
+        grad_inplace = opt_options.get("grad_inplace", False)
+
+        def get_numel_forward(
+            batches_chunk_size: int, features_chunk_size: int, classes_chunk_size: int
+        ):
+            # Keep this function in sync with LinearCrossEntropyFunction.forward method!
+
+            count = 0  # count elements with dtype
+            # input:
+            count += num_batches * in_features
+            # linear_weight:
+            count += num_classes * in_features
+            if target_dtype.is_floating_point:
+                count += num_batches
+            else:
+                count += num_batches * torch.int64.itemsize // dtype.itemsize
+            # weight:
+            count += num_classes
+            # X:
+            count += batches_chunk_size * classes_chunk_size
+            # expXsum:
+            count += batches_chunk_size * 2
+            if classes_chunk_size != num_classes:
+                # mask, t_, weight_t_ and related subexpressions, in the 1st for-loop:
+                count += batches_chunk_size * 7
+            if input_requires_grad or linear_weight_requires_grad:
+                # -weight_t / expXsum
+                count += batches_chunk_size * 2
+                if classes_chunk_size != num_classes:
+                    # mask, t_, weight_t_ and related subexpressions, in the 2nd for-loop:
+                    count += batches_chunk_size * 7
+            if input_requires_grad:
+                # grad_input:
+                count += num_batches * in_features * (1 if grad_inplace else 2)
+            if linear_weight_requires_grad:
+                # grad_linear_weight:
+                count += num_classes * in_features * (1 if grad_inplace else 2)
+                # G:
+                count += features_chunk_size * classes_chunk_size
+                if classes_chunk_size != num_classes:
+                    # x_[mask]:
+                    count += batches_chunk_size
+            return count
+
+        min_chunk_size: int = opt_options.get("min_chunk_size", 1024)
+        max_memory_gb = opt_options.get("max_memory_gb")
+        if max_memory_gb is None:
+            if device.type == "cuda":
+                max_memory_gb = int(torch.cuda.mem_get_info(device)[0] * 0.75 / 1e9)
+            else:
+                max_memory_gb = 64
+
+        max_total_numel = int(max_memory_gb * 1e9 / dtype.itemsize)
+
+        min_classes_chunk_size: int = min(
+            opt_options.get("classes_chunk_size", min_chunk_size), num_classes
+        )
+        max_classes_chunk_size: int = max(
+            opt_options.get("classes_chunk_size", num_classes),
+            min_classes_chunk_size,
+        )
+        min_features_chunk_size: int = min(
+            opt_options.get("features_chunk_size", min_chunk_size), in_features
+        )
+        max_features_chunk_size: int = max(
+            opt_options.get("features_chunk_size", in_features),
+            min_features_chunk_size,
+        )
+        min_batches_chunk_size: int = min(
+            opt_options.get("batches_chunk_size", min_chunk_size), num_batches
+        )
+        max_batches_chunk_size: int = max(
+            opt_options.get("batches_chunk_size", num_batches),
+            min_batches_chunk_size,
+        )
+        # we start with most efficient chunking strategy (that is, no
+        # chunking at all and doing chunking along classes as a last
+        # resort) until we'll find one that meets the max_memory_gb
+        # criteria:
+        for classes_chunk_size in reversed(
+            range(min_classes_chunk_size, max_classes_chunk_size + 1, min_chunk_size)
+        ):
+            minimal_features_batches_nof_chunks: float | None = None
+            features_batches_chunk_sizes = None, None
+            for features_chunk_size in reversed(
+                range(
+                    min_features_chunk_size, max_features_chunk_size + 1, min_chunk_size
+                )
+            ):
+                for batches_chunk_size in reversed(
+                    range(
+                        min_batches_chunk_size,
+                        max_batches_chunk_size + 1,
+                        min_chunk_size,
+                    )
+                ):
+                    n = get_numel_forward(
+                        batches_chunk_size, features_chunk_size, classes_chunk_size
+                    )
+                    if n <= max_total_numel:
+                        features_batches_nof_chunks = (
+                            num_batches / batches_chunk_size
+                            + in_features / features_chunk_size
+                        )
+                        if (
+                            minimal_features_batches_nof_chunks is None
+                            or features_batches_nof_chunks
+                            < minimal_features_batches_nof_chunks
+                        ):
+                            minimal_features_batches_nof_chunks = (
+                                features_batches_nof_chunks
+                            )
+                            features_batches_chunk_sizes = (
+                                features_chunk_size,
+                                batches_chunk_size,
+                            )
+            if minimal_features_batches_nof_chunks is not None:
+                features_chunk_size, batches_chunk_size = features_batches_chunk_sizes
+                opt_options.update(
+                    classes_chunk_size=classes_chunk_size,
+                    features_chunk_size=features_chunk_size,
+                    batches_chunk_size=batches_chunk_size,
+                )
+                return opt_options
+
+        constraints = [f"{num_batches=}, {in_features=}, {num_classes=}"]
+        for k, v in opt_options.items():
+            if k not in {"max_memory_gb", "min_chunk_size"}:
+                constraints.append(f"{k}={v}")
+        constraints = ", ".join(constraints)
+        warnings.warn(
+            "failed to find optimal chunking strategy for linear_cross_entropy: "
+            f"{max_memory_gb=} is too small or {min_chunk_size=} is too large. Constraints: {constraints}"
+        )
+
+        # Return a strategy that corresponds to minimal chunking size:
+        opt_options.update(
+            classes_chunk_size=min_classes_chunk_size,
+            features_chunk_size=min_features_chunk_size,
+            batches_chunk_size=min_batches_chunk_size,
+        )
+        return opt_options
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def forward(
+        ctx,
+        input: torch.Tensor,
+        linear_weight: torch.Tensor,
+        target: torch.Tensor,
+        weight: torch.Tensor,
+        reduction: str,
+        options: dict,
+    ):
+        device = input.device
+        dtype = input.dtype
+        num_batches, in_features = input.shape
+        num_classes, _ = linear_weight.shape
+
+        ctx.grad_inplace = options.get("grad_inplace", False)
+        batches_chunk_size = options.get("batches_chunk_size", num_batches)
+        features_chunk_size = options.get("features_chunk_size", in_features)
+        classes_chunk_size = options.get("classes_chunk_size", num_classes)
+
+        def ensure_size(input, dim, size):
+            if input.shape[dim] != size:
+                return input.narrow(dim, 0, size)
+            return input
+
+        def chunk_iter(total_size, chunk_size):
+            for start in range(0, total_size, chunk_size):
+                if start + chunk_size > total_size:
+                    yield start, total_size - start
+                else:
+                    yield start, chunk_size
+
+        if target.dtype.is_floating_point:
+            raise NotImplementedError(
+                "LinearCrossEntropyFunction does not support probability targets"
+            )
+        else:
+            weight_target = weight.index_select(0, target)
+            if reduction == "mean":
+                weight = weight.clone()
+                d = weight_target.sum()
+                weight.div_(d)
+                weight_target.div_(d)
+            elif reduction == "sum":
+                pass
+            else:
+                raise NotImplementedError(
+                    f"LinearCrossEntropyFunction does not support {reduction=}"
+                )
+
+        # A chunk buffer used to hold logits, softmax of logits:
+
+        X = torch.empty(
+            (batches_chunk_size, classes_chunk_size),
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+        )
+        if input.requires_grad:
+            grad_input = torch.empty(
+                input.shape, device=device, dtype=dtype, requires_grad=False
+            )
+        else:
+            grad_input = None
+
+        if linear_weight.requires_grad:
+            grad_linear_weight = torch.zeros(
+                linear_weight.shape, device=device, dtype=dtype, requires_grad=False
+            )
+            # A chunk buffer used in grad_linear_weight computation:
+            G = torch.empty(
+                (classes_chunk_size, features_chunk_size),
+                device=device,
+                dtype=dtype,
+                requires_grad=False,
+            )
+        else:
+            grad_linear_weight = G = None
+
+        if reduction in {"mean", "sum"}:
+            output = torch.zeros((), device=device, dtype=dtype, requires_grad=False)
+        else:
+            raise NotImplementedError(
+                f"LinearCrossEntropyFunction does not support {reduction=}"
+            )
+
+        # chunking along batches dimension:
+        for bchunk_start, bchunk_size in chunk_iter(num_batches, batches_chunk_size):
+            x = input.narrow(0, bchunk_start, bchunk_size)
+            t = target.narrow(0, bchunk_start, bchunk_size)
+            weight_t = weight_target.narrow(0, bchunk_start, bchunk_size)
+            X_ = ensure_size(X, 0, bchunk_size)
+            expXsum: torch.Tensor = torch.empty(())
+            Xmax: torch.Tensor = torch.empty(())
+
+            # Compute output.
+
+            # chunking along classes dimension:
+            for cchunk_start, cchunk_size in chunk_iter(
+                num_classes, classes_chunk_size
+            ):
+                L_ = linear_weight.narrow(0, cchunk_start, cchunk_size)
+                X__ = ensure_size(X_, 1, cchunk_size)
+                corrXmax: torch.Tensor = torch.empty(())
+
+                torch.mm(x, L_.T, out=X__)  # projection
+
+                if cchunk_start == 0:
+                    Xmax = X__.max(dim=1, keepdim=True)[0]
+                else:
+                    # correct Xmax
+                    corrXmax = Xmax
+                    Xmax = X__.max(dim=1, keepdim=True)[0].max(corrXmax)
+                    corrXmax.sub_(Xmax)
+
+                X__.sub_(Xmax)
+
+                if cchunk_start > 0:
+                    # correct output due to possibly under-estimated Xmax
+                    total_mask = t < cchunk_start
+                    output.sub_(
+                        weight_t[total_mask].dot(corrXmax[total_mask].squeeze(1))
+                    )
+
+                if cchunk_size == num_classes:
+                    output.sub_(weight_t.dot(X__.gather(1, t.unsqueeze(1)).squeeze(1)))
+                else:
+                    # chunking along classes dimension is expensive!
+                    mask = (cchunk_start <= t) & (t < cchunk_start + cchunk_size)
+                    t_ = t.masked_select(mask) - cchunk_start
+                    weight_t_ = weight_t.masked_select(mask)
+                    output.sub_(
+                        weight_t_.dot(X__[mask].gather(1, t_.unsqueeze(1)).squeeze(1))
+                    )
+
+                X__.exp_()
+
+                if cchunk_start == 0:
+                    expXsum = X__.sum(dim=1)
+                else:
+                    # correct expXsum due to possibly under-estimated Xmax
+                    expXsum.add_(corrXmax.squeeze(1))
+                    expXsum.exp_()
+                    expXsum.add_(X__.sum(dim=1))
+
+                if input.requires_grad or linear_weight.requires_grad:
+                    # X__ content will be reused in the classes
+                    # chunking for-loop below
+                    X__.mul_(-(weight_t / expXsum).unsqueeze(1))
+
+                expXsum.log_()
+
+            output.add_(weight_t.dot(expXsum))
+
+            # Compute gradients.
+
+            if input.requires_grad or linear_weight.requires_grad:
+                if grad_input is not None:
+                    grad_x = grad_input.narrow(0, bchunk_start, bchunk_size)
+                    torch.index_select(linear_weight, 0, t, out=grad_x)
+                    grad_x.mul_(-weight_t.unsqueeze(1))  # todo: eliminate neg
+                else:
+                    grad_x = None
+
+                if linear_weight.requires_grad:
+                    if num_classes != classes_chunk_size:
+                        # not-trivial chunking along classes dimension
+                        # requires recomputing X__
+                        expXsum.exp_()
+
+                # chunking along classes dimension:
+                for cchunk_start, cchunk_size in chunk_iter(
+                    num_classes, classes_chunk_size
+                ):
+                    X__ = ensure_size(X_, 1, cchunk_size)
+                    if num_classes == classes_chunk_size:  # trivial chunking
+                        t_ = t
+                        L_ = linear_weight
+                        weight_ = weight
+                        # X__ is computed in the classes chunking
+                        # for-loop above
+                        mask = None
+                    else:
+                        # chunking along classes dimension is
+                        # expensive!
+
+                        # recompute X__, however, we can reuse Xmax
+                        # and expXsum computed from the classes
+                        # chunking for-loop above
+                        mask = (cchunk_start <= t) & (t < cchunk_start + cchunk_size)
+                        t_ = t.masked_select(mask) - cchunk_start
+                        L_ = linear_weight.narrow(0, cchunk_start, cchunk_size)
+                        weight_ = weight.narrow(0, cchunk_start, cchunk_size)
+                        torch.addmm(Xmax, x, L_.T, beta=-1, out=X__)
+                        X__.exp_()
+                        X__.mul_(
+                            -(weight_t / expXsum).unsqueeze(1)
+                        )  # todo: eliminate neg
+
+                    if grad_x is not None:
+                        grad_x.addmm_(X__, L_, alpha=-1)
+
+                    if grad_linear_weight is not None:
+                        G_ = ensure_size(G, 0, cchunk_size)
+                        grad_L_ = grad_linear_weight.narrow(
+                            0, cchunk_start, cchunk_size
+                        )
+
+                        # chunking along features dimension:
+                        for fchunk_start, fchunk_size in chunk_iter(
+                            in_features, features_chunk_size
+                        ):
+                            x_ = x.narrow(1, fchunk_start, fchunk_size)
+                            G__ = ensure_size(G_, 1, fchunk_size)
+                            G__.zero_()
+                            if num_classes == classes_chunk_size:
+                                G__.index_add_(0, t, x_)
+                            else:
+                                G__.index_add_(0, t_, x_[mask])
+                            G__.mul_(weight_.unsqueeze(1))
+                            G__.addmm_(X__.T, x_, alpha=-1, beta=-1)
+                            grad_L_.narrow(1, fchunk_start, fchunk_size).add_(G__)
+
+        save_indices: list[int | None] = [None, None]
+        saved = []
+        if input.requires_grad:
+            save_indices[0] = len(saved)
+            saved.append(grad_input)
+        if linear_weight.requires_grad:
+            save_indices[1] = len(saved)
+            saved.append(grad_linear_weight)
+        if saved:
+            ctx.save_indices = save_indices
+            ctx.save_for_backward(*saved)
+
+        return output
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def backward(ctx, grad_output):
+        result = [None] * 6
+
+        if ctx.needs_input_grad[0] or ctx.needs_input_grad[1]:
+            saved = ctx.saved_tensors
+            if ctx.needs_input_grad[0]:
+                grad_input = saved[ctx.save_indices[0]]
+            else:
+                grad_input = None
+            if ctx.needs_input_grad[1]:
+                grad_linear_weight = saved[ctx.save_indices[1]]
+            else:
+                grad_linear_weight = None
+            if ctx.grad_inplace:
+                # With grad_inplace, the memory usage size is reduced
+                # 2x when reusing pre-computed grad_input and
+                # grad_linear_weight storages. However, gradcheck does
+                # not like that.
+                if grad_input is not None:
+                    grad_input.mul_(grad_output)
+                    result[0] = grad_input
+                if grad_linear_weight is not None:
+                    grad_linear_weight.mul_(grad_output)
+                    result[1] = grad_linear_weight
+            else:
+                # gradcheck-friendly backward:
+                if grad_input is not None:
+                    # creates a new tensor that increases memory usage size
+                    result[0] = grad_input * grad_output
+                if grad_linear_weight is not None:
+                    # creates a new tensor that increases memory usage size
+                    result[1] = grad_linear_weight * grad_output
+
+        return tuple(result)

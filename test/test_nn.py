@@ -7336,6 +7336,119 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
 
+    def test_linear_cross_entropy_loss(self, dtype=torch.float32):
+
+        def make_target(num_classes, shape, ii, device, dtype):
+            if dtype.is_floating_point:
+                raise AssertionError("chunking not yet implemented for target with probabilities")
+            else:
+                target = torch.randint(
+                    0,
+                    num_classes,
+                    shape,
+                    device=device,
+                    dtype=dtype,
+                    requires_grad=False,
+                )
+                if ii >= 0 and torch.all(target == ii):
+                    target[0] = random.sample(sorted(set(range(num_classes)) - {ii}), 1)[0]
+                return target
+
+        def sizes_options_and_optimal_options():
+            max_memory_gb = 1.5e-6 * dtype.itemsize / torch.float32.itemsize
+            num_batches, in_features, num_classes = sizes = (8, 8, 8)
+            # small sizes give maximal chunk sizes for best processing performance:
+            yield sizes, dict(), dict(batches_chunk_size=num_batches,
+                                      features_chunk_size=in_features,
+                                      classes_chunk_size=num_classes)
+            # restricted memory availability gives minimal chunking sizes:
+            options = dict(max_memory_gb=1.1e-6, min_chunk_size=2)
+            yield sizes, options, dict(batches_chunk_size=2, features_chunk_size=2, classes_chunk_size=2, **options)
+            # chunking along classes dimension is avoided if possible:
+            options = dict(max_memory_gb=max_memory_gb, min_chunk_size=4)
+            yield sizes, options, dict(batches_chunk_size=4, features_chunk_size=4, classes_chunk_size=4, **options)
+            # to save more memory (read: enables a larger classes
+            # chunk), use grad_inplace=True, however, gradcheck will fail:
+            options = dict(max_memory_gb=max_memory_gb, min_chunk_size=4, grad_inplace=True)
+            yield sizes, options, dict(batches_chunk_size=4, features_chunk_size=4, classes_chunk_size=8, **options)
+            # constraint optimal options, chunking along classes dimension could not be avoided:
+            options = dict(max_memory_gb=max_memory_gb, min_chunk_size=4, features_chunk_size=8)
+            yield sizes, options, dict(batches_chunk_size=4, classes_chunk_size=4, **options)
+            # constraint size can be smaller than the minimal chunk size:
+            options = dict(max_memory_gb=max_memory_gb, min_chunk_size=4, features_chunk_size=2)
+            yield sizes, options, dict(batches_chunk_size=4, classes_chunk_size=4, **options)
+
+
+        def samples(device, dtype):
+
+            optimal_chunking = torch.nn.modules._functions.LinearCrossEntropyFunction.optimal_chunking
+
+            for (num_batches, in_features, num_classes), options, expected_optimal_options in sizes_options_and_optimal_options():
+
+                # test optimal chunking:
+                with warnings.catch_warnings(record=True) as w:
+                    optimal_options = optimal_chunking(
+                        options, num_batches, in_features, num_classes, True, True, device, dtype, torch.int64)
+                    if w and not str(w[-1].message).startswith("failed to find optimal chunking strategy"):
+                        raise ValueError(f"unexpected warning: {w[-1].message}")
+                self.assertEqual(optimal_options, expected_optimal_options)
+
+                weights = [None, torch.exp(torch.randn(num_classes, device=device, dtype=dtype, requires_grad=False))]
+
+                # generate samples for LinearCrossEntropyLoss and its forward:
+                for reduction, ii, ls, w, of in product(
+                        ["sum", "mean", "none"],
+                        [-100, 0, num_classes - 1],
+                        [0.0, 0.1],
+                        weights,
+                        [(), (3, 2)]):
+                    module_args = (in_features, num_classes)
+                    module_kwargs = dict(
+                        out_features=of,
+                        device=device,
+                        dtype=dtype,
+                        reduction=reduction,
+                        weight=w,
+                        ignore_index=ii,
+                        label_smoothing=ls,
+                        options=optimal_options
+                    )
+                    input = torch.randn(
+                        (num_batches, in_features),
+                        device=device,
+                        dtype=dtype,
+                        requires_grad=True,
+                    )
+                    target = make_target(num_classes, (num_batches, *of), ii, device, torch.int64)
+                    yield module_args, module_kwargs, (input, target)
+
+        for module_args, module_kwargs, (input, target) in samples(device=torch.device('cpu'), dtype=dtype):
+            native_module_kwargs = module_kwargs.copy()
+            native_module_kwargs['options'] = None  # use native implementation, no chunking
+
+            torch.manual_seed(1245)
+            loss = nn.LinearCrossEntropyLoss(*module_args, **module_kwargs)
+
+            torch.manual_seed(1245)  # ensures equal linear weights in loss and ref_loss
+            ref_loss = nn.LinearCrossEntropyLoss(*module_args, **native_module_kwargs)
+            ref_input = input.clone().detach().requires_grad_(True)
+
+            out = loss(input, target)
+            ref_out = ref_loss(ref_input, target)
+
+            self.assertEqual(out, ref_out)
+
+            if module_kwargs.get('options', {}).get('grad_inplace', False) or dtype != torch.float64:
+                # checking backward directly because gradcheck may
+                # fail when grad_inplace=True or dtype is not float64
+                out.sum().backward()
+                ref_out.sum().backward()
+
+                self.assertEqual(input.grad, ref_input.grad)
+                self.assertEqual(loss.linear.weight.grad, ref_loss.linear.weight.grad)
+            else:
+                torch.autograd.gradcheck(ref_loss, (ref_input, target))
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
