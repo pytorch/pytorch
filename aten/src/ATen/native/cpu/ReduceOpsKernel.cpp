@@ -379,9 +379,10 @@ void max_values_kernel_impl(TensorIterator& iter) {
 
 void argmax_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmax_cpu", [&] {
+    using arg_t = std::pair<scalar_t, int64_t>;
+    auto op = ArgMaxOps<scalar_t>{};
+
     if (is_reduce_lastdim(iter)) {
-      using arg_t = std::pair<scalar_t, int64_t>;
-      auto op = ArgMaxOps<scalar_t>{};
       binary_kernel_reduce_lastdim(iter, [&](char* result_data_bytes, char* self_data_bytes, int64_t size) {
         int64_t* result_data = (int64_t*)result_data_bytes;
         scalar_t* self_data = (scalar_t*)self_data_bytes;
@@ -394,9 +395,36 @@ void argmax_kernel_impl(TensorIterator &iter) {
       });
       return;
     }
+
+    if (
+        iter.num_reduce_dims() == 1 &&
+        iter.is_dim_reduced(0) &&
+        iter.ninputs() == 1 &&
+        iter.shape()[0] == 2) {
+      const int64_t reduce_stride = iter.strides(1)[0];
+      int64_t grain_size =
+          std::max((int64_t)1, at::internal::GRAIN_SIZE / 2);
+      TensorIterator sub_iter(iter);
+      sub_iter.narrow(0, 0, 1);
+      auto loop = [&](char** data, const int64_t* strides, int64_t size) {
+        char* out = data[0];
+        char* in = data[1];
+        for (int64_t i = 0; i < size; ++i) {
+          arg_t acc = arg_t(lower_bound<scalar_t>(), 0);
+          acc = op.reduce(acc, c10::load<scalar_t>(in), 0);
+          acc = op.reduce(acc, c10::load<scalar_t>(in + reduce_stride), 1);
+          *(int64_t*)out = acc.second;
+          out += strides[0];
+          in += strides[1];
+        }
+      };
+      sub_iter.for_each(loop, grain_size);
+      return;
+    }
+
     binary_kernel_reduce(
       iter,
-      ArgMaxOps<scalar_t>{},
+      op,
       std::pair<scalar_t, int64_t>(lower_bound<scalar_t>(), 0));
   });
 }

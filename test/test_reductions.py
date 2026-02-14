@@ -2522,6 +2522,21 @@ class TestReductions(TestCase):
         self.assertEqual(x.argmax(dim=-2, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
         self.assertEqual(x.argmin(dim=-2, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
 
+    def test_argmax_dim0_two_rows(self, device):
+        x = torch.tensor([[1.0, 5.0, 3.0], [2.0, 4.0, 3.0]], device=device)
+        self.assertEqual(
+            x.argmax(dim=0),
+            torch.tensor([1, 0, 0], device=device, dtype=torch.int64),
+        )
+
+        # non-contiguous input should preserve tie-breaking semantics
+        y = x[:, ::2]
+        self.assertFalse(y.is_contiguous())
+        self.assertEqual(
+            y.argmax(dim=0),
+            torch.tensor([1, 0], device=device, dtype=torch.int64),
+        )
+
     @dtypes(torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.int, torch.long, torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.int, torch.long, torch.half, torch.float, torch.double)
