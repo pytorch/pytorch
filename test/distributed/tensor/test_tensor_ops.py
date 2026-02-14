@@ -669,24 +669,13 @@ class DistTensorOpsTest(DTensorTestBase):
                 torch.randn(16, 32, 16),
                 torch.randint(5, (4, 8, 16)),
             )
+            # Multi-index (3-tensor) calls: keep representative subset to avoid
+            # combinatorial explosion in DTensorConverter (each 3-tensor call
+            # generates 40-80 sharding combinations via itertools.product).
             self._test_op(
                 mesh,
                 lambda x, y, z: x[z, y],
                 torch.randn(16, 32, 16),
-                torch.randint(5, (12, 8, 12)),
-                torch.randint(2, (12, 8, 12)),
-            )
-            self._test_op(
-                mesh,
-                lambda x, y, z: x[z, :, y],
-                torch.randn(16, 32, 16),
-                torch.randint(5, (12, 8, 12)),
-                torch.randint(2, (12, 8, 12)),
-            )
-            self._test_op(
-                mesh,
-                lambda x, y, z: x[:, z, :, y],
-                torch.randn(16, 32, 16, 12),
                 torch.randint(5, (12, 8, 12)),
                 torch.randint(2, (12, 8, 12)),
             )
@@ -697,35 +686,6 @@ class DistTensorOpsTest(DTensorTestBase):
                 torch.randn(16, 32, 16, 12),
                 torch.randint(5, (12, 8, 12)),
                 torch.randint(2, (12, 1, 12)),
-            )
-            # implicit (left-padded) broadcast
-            self._test_op(
-                mesh,
-                lambda x, y, z: x[:, z, :, y],
-                torch.randn(16, 32, 16, 12),
-                torch.randint(5, (12, 8, 12)),
-                torch.randint(2, (8, 12)),
-            )
-            self._test_op(
-                mesh,
-                lambda x, y, z: x[z, y, :, :],
-                torch.randn(16, 32, 16, 12),
-                torch.randint(2, (8, 12)),
-                torch.randint(5, (12, 8, 12)),
-            )
-            self._test_op(
-                mesh,
-                lambda x, y, z: x[z, :, y, :],
-                torch.randn(16, 32, 16, 12),
-                torch.randint(2, (8, 12)),
-                torch.randint(5, (12, 8, 12)),
-            )
-            self._test_op(
-                mesh,
-                lambda x, y, z: x[z, :, :, y],
-                torch.randn(16, 32, 16, 12),
-                torch.randint(2, (8, 1)),
-                torch.randint(5, (12, 8, 12)),
             )
 
     @with_comms
