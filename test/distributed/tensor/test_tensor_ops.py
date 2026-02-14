@@ -5,6 +5,7 @@ import itertools
 import unittest
 
 import torch
+from torch.distributed._local_tensor import LocalTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -18,11 +19,17 @@ from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import MI200_ARCH, run_tests, skipIfRocmArch
+from torch.testing._internal.common_utils import (
+    MI200_ARCH,
+    run_tests,
+    serialTest,
+    skipIfRocmArch,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorConverter,
     DTensorTestBase,
+    LocalDTensorTestBase,
     with_comms,
 )
 
@@ -612,6 +619,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @skipIfRocmArch(MI200_ARCH)
     @with_comms
+    @serialTest()
     def test_index(self):
         meshes = [
             self.build_device_mesh(),  # 1D mesh
@@ -986,6 +994,57 @@ class DistTensorOpsTest(DTensorTestBase):
                     unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
                 ):
                     self.assertEqual(x.full_tensor(), y)
+
+
+class DistBucketizeTest(LocalDTensorTestBase):
+    @with_comms
+    def test_bucketize_partial_input(self):
+        # Bucketize returns indices, which cannot be combined with sum/avg
+        # reductions. Partial inputs should be converted to Replicate.
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            input_tensor = torch.tensor(
+                [[2.0, 4.0, 6.0, 8.0], [0.0, 1.0, 5.0, 9.0]],
+                device=self.device_type,
+            )
+
+            for reduce_op in ("sum", "avg", "max"):
+                partial_input = DTensor.from_local(
+                    input_tensor, mesh, [Partial(reduce_op)]
+                )
+                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+                result = torch.bucketize(partial_input, dist_boundaries)
+
+                # Output must be Replicate, not Partial
+                self.assertTrue(
+                    result.placements[0].is_replicate(),
+                    f"Expected Replicate output but got {result.placements[0]} "
+                    f"for Partial({reduce_op}) input",
+                )
+                # Expected is bucketize on the materialized global tensor, which
+                # differs per reduce_op (e.g. Partial("sum") allreduce-sums the
+                # local tensors across ranks).
+                global_input = partial_input.full_tensor()
+                expected = torch.bucketize(global_input, boundaries)
+                self.assertEqual(result.to_local(), expected)
+
+    @with_comms
+    def test_bucketize_sharded_input(self):
+        # Sharded inputs should propagate sharding to output normally.
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            input_tensor = torch.randn(8, 4, device=self.device_type)
+            expected = torch.bucketize(input_tensor, boundaries)
+
+            for shard_dim in range(2):
+                dist_input = distribute_tensor(input_tensor, mesh, [Shard(shard_dim)])
+                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+                result = torch.bucketize(dist_input, dist_boundaries)
+
+                self.assertTrue(result.placements[0].is_shard(shard_dim))
+                self.assertEqual(result.full_tensor(), expected)
 
 
 class DistArgMaxArgMinTest(DTensorTestBase):
