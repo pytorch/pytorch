@@ -525,10 +525,10 @@ class P2POpVariable(VariableTracker):
 
     def __init__(
         self,
-        op: ConstantVariable,
-        peer: ConstantVariable,
-        tag: ConstantVariable,
-        tensor: ConstantVariable,
+        op: VariableTracker,
+        peer: VariableTracker,
+        tag: VariableTracker,
+        tensor: VariableTracker,
         pg: VariableTracker,
         **kwargs,
     ):
@@ -556,9 +556,8 @@ class P2POpVariable(VariableTracker):
         )
         tensor_var = get_param("tensor", 1, transform=lambda x: x.realize())
         peer_var = get_param("peer", 2)
-        tag_var = get_param("tag", 3, default=0, transform=ConstantVariable.create)
-        # We currently only allow compilation for the default pg.
-        group_var = get_param("group", 4, default="", transform=ConstantVariable.create)
+        group_var = get_param("group", 3, default=ConstantVariable.create(""))
+        tag_var = get_param("tag", 4, default=ConstantVariable.create(0))
 
         return P2POpVariable(
             op=op_var, tensor=tensor_var, peer=peer_var, tag=tag_var, pg=group_var
@@ -566,9 +565,6 @@ class P2POpVariable(VariableTracker):
 
     def python_type(self):
         return torch.distributed.P2POp
-
-    def call_method(self, tx, name, args, kwargs):
-        return super().call_method(tx, name, args, kwargs)
 
     def as_proxy(self):
         return self.tensor.as_proxy()

@@ -6164,15 +6164,31 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @torch._dynamo.config.patch({"enable_p2p_compilation": True})
-    @unittest.expectedFailure
     def test_compiled_with_reduce_overhead(self):
-        # This test should work once inductor is informed of this new collective.
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
         pg = self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
+        peer = 1 - self.rank
 
-        @torch.compile(mode="reduce-overhead")
-        def f(ops_list):
-            return (dist.batch_isend_irecv(ops_list)).wait()
+        def f(tensor):
+            recv_buf = torch.empty_like(tensor)
+            work = dist.batch_isend_irecv(
+                [
+                    dist.P2POp(dist.isend, tensor, peer),
+                    dist.P2POp(dist.irecv, recv_buf, peer),
+                ]
+            )
+            for w in work:
+                w.wait()
+            return recv_buf
+
+        compiled_f = torch.compile(f, mode="reduce-overhead")
+        tensor = torch.ones(10, device=device) * self.rank
+        result = compiled_f(tensor)
+        torch.cuda.synchronize(device=device)
+        expected = torch.ones(10, device=device) * peer
+        self.assertEqual(result, expected)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

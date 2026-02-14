@@ -1401,7 +1401,9 @@ def _irecv_meta(self, *args):
 
 
 def _batch_p2p_ops_meta(op_list, peer_list, tag_list, tensors, group_name):
-    return list(tensors)
+    return [
+        t if op == "irecv" else torch.empty_like(t) for op, t in zip(op_list, tensors)
+    ]
 
 
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):

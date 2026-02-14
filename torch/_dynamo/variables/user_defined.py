@@ -46,7 +46,7 @@ import torch.nn
 from torch._guards import Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
@@ -512,9 +512,15 @@ class UserDefinedClassVariable(UserDefinedVariable):
         constant_args = check_constant_args(args, kwargs)
 
         if self.value is torch.distributed.P2POp:
-            from ..distributed_utils import p2p_compile_guard
-
-            p2p_compile_guard()
+            if not config.enable_p2p_compilation:
+                unimplemented(
+                    gb_type="P2P compilation disabled",
+                    context="torch.distributed.P2POp",
+                    explanation="P2P compilation is disabled.",
+                    hints=[
+                        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
+                    ],
+                )
 
             from .distributed import P2POpVariable
 
