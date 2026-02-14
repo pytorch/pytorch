@@ -174,6 +174,7 @@ ops_dde_xfail = {
     xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "trilinear"),
     xfail("nn.functional.l1_loss"),
+    xfail("nn.functional.linear_cross_entropy"),
     xfail("nn.functional.local_response_norm"),
     xfail("nn.functional.max_pool1d"),
     xfail("nn.functional.max_pool2d"),

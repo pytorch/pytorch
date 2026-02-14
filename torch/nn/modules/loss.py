@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import math
 from collections.abc import Callable
 from typing_extensions import deprecated
 
@@ -6,6 +7,7 @@ from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
 
 from .distance import PairwiseDistance
+from .linear import Linear
 from .module import Module
 
 
@@ -25,6 +27,7 @@ __all__ = [
     "HuberLoss",
     "SoftMarginLoss",
     "CrossEntropyLoss",
+    "LinearCrossEntropyLoss",
     "MultiLabelSoftMarginLoss",
     "CosineEmbeddingLoss",
     "MarginRankingLoss",
@@ -57,6 +60,43 @@ class _WeightedLoss(_Loss):
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
         self.weight: Tensor | None
+
+
+class _LinearLoss(_Loss):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+        reduction: str = "mean",
+    ) -> None:
+        super().__init__(None, None, reduction)
+        self.linear = Linear(in_features, out_features, bias, device, dtype)
+
+
+class _WeightedLinearLoss(_LinearLoss):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        device=None,
+        dtype=None,
+        reduction: str = "mean",
+        weight: Tensor | None = None,
+    ) -> None:
+        super().__init__(
+            in_features,
+            out_features,
+            bias,
+            device,
+            dtype,
+            reduction,
+        )
+        self.register_buffer("loss_weight", weight)
+        self.loss_weight: Tensor | None
 
 
 class L1Loss(_Loss):
@@ -1398,6 +1438,131 @@ class CrossEntropyLoss(_WeightedLoss):
             ignore_index=self.ignore_index,
             reduction=self.reduction,
             label_smoothing=self.label_smoothing,
+        )
+
+
+class LinearCrossEntropyLoss(_WeightedLinearLoss):
+    r"""This criterion computes the cross entropy loss between input,
+    affinely transformed to logits, and target.
+
+    See :class:`~torch.nn.CrossEntropyLoss` for the definition of cross entropy loss.
+
+    Args:
+        in_features (int): Size of each input sample.
+        num_classes (int): Number of classes, :math:`C`.
+        out_features (tuple[int], optional): specifies dimensions
+            :math:`(d_1, d_2, ..., d_K)` for K-dimensional loss. Note
+            that :attr:`out_features` is only applicable when the
+            target contains class probabilities.  Default: ``()``.
+        device (:class:`torch.device`, optional): the desired device
+            of linear weight and bias.  Default: ``None``.
+        dtype (:class:`torch.dtype`, optional): the desired dtype of
+            linear weight and bias. Default: ``None``.
+        weight (Tensor, optional): a manual rescaling weight given to
+            each class.  If given, has to be a Tensor of size `C`.
+        ignore_index (int, optional): Specifies a target value that is
+            ignored and does not contribute to the input
+            gradient. When :attr:`size_average` is ``True``, the loss
+            is averaged over non-ignored targets. Note that
+            :attr:`ignore_index` is only applicable when the target
+            contains class indices.
+        reduction (str, optional): Specifies the reduction to apply to
+            the output: ``'none'`` | ``'mean'`` | ``'sum'``.
+            ``'none'``: no reduction will be applied,
+            ``'mean'``: the weighted mean of the output is taken,
+            ``'sum'``: the output will be summed.
+            Note: :attr:`size_average` and :attr:`reduce` are in the
+            process of being deprecated, and in the meantime,
+            specifying either of those two args will override
+            :attr:`reduction`.
+            Default: ``'mean'``.
+        label_smoothing (float, optional): A float in [0.0, 1.0].
+            Specifies the amount of smoothing when computing the loss,
+            where 0.0 means no smoothing. The targets become a mixture
+            of the original ground truth and a uniform distribution as
+            described in `Rethinking the Inception Architecture for
+            Computer Vision
+            <https://arxiv.org/abs/1512.00567>`__.
+            Default: :math:`0.0`.
+
+    Shape:
+        - Input: Shape :math:`(in_features)`, :math:`(N, in_features)`.
+        - Target: If containing class indices, shape :math:`()`,
+          :math:`(N)` or :math:`(N, *out_features)` where each value
+          should be between :math:`[0, C)`. The target data type is
+          required to be long when using class indices.
+          If containing class probabilities, the target must have
+          shape :math:`(C)` or :math:`(N, C, *out_features)`, and
+          each value should be between :math:`[0, 1]`. This means the
+          target data type is required to be float when using class
+          probabilities. Note that PyTorch does not strictly enforce
+          probability constraints on the class probabilities and that
+          it is the user's responsibility to ensure ``target``
+          contains valid probability distributions (see below examples
+          section for more details).
+        - Output: If reduction is 'none', shape :math:`()`,
+          :math:`(N)` or :math:`(N, *out_features)` depending on the
+          shape of the input. Otherwise, scalar.
+
+        where :math:`N` is batch size.
+    """
+
+    __constants__ = [
+        "num_classes",
+        "reduction",
+        "out_features",
+        "ignore_index",
+        "label_smoothing",
+    ]
+    num_classes: int
+    out_features: tuple[int, ...]
+    ignore_index: int
+    label_smoothing: float
+
+    def __init__(
+        self,
+        in_features: int,
+        num_classes: int,
+        *,
+        out_features: tuple[int, ...] = (),
+        device=None,
+        dtype=None,
+        reduction: str = "mean",
+        weight: Tensor | None = None,
+        ignore_index: int = -100,
+        label_smoothing: float = 0.0,
+    ) -> None:
+        bias = False  # linear_cross_entropy does not depend on bias
+        super().__init__(
+            in_features,
+            num_classes * math.prod(out_features),
+            bias,
+            device,
+            dtype,
+            reduction,
+            weight,
+        )
+        self.num_classes = num_classes
+        self.out_features = out_features
+        self.ignore_index = ignore_index
+        self.label_smoothing = label_smoothing
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """Runs the forward pass."""
+        return F.linear_cross_entropy(  # pyrefly: ignore [missing-attribute]
+            input,
+            self.linear.weight,
+            target,
+            weight=self.loss_weight,
+            reduction=self.reduction,
+            ignore_index=self.ignore_index,
+            label_smoothing=self.label_smoothing,
+        )
+
+    def extra_repr(self) -> str:
+        return (
+            f"num_classes={self.num_classes}, reduction={self.reduction}, "
+            f"out_features={self.out_features}, ignore_index={self.ignore_index}, label_smoothing={self.label_smoothing}"
         )
 
 
