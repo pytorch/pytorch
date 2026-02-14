@@ -46,6 +46,25 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+class _DictWithForward(nn.ModuleDict):
+    def __init__(self, in_features=8, out_features=8):
+        super().__init__({"lin": nn.Linear(in_features, out_features)})
+
+    def forward(self, x):
+        return self["lin"](x)
+
+
+class _ListWithForward(nn.ModuleList):
+    def __init__(self, in_features=8, out_features=8):
+        super().__init__([nn.Linear(in_features, out_features)])
+
+    def forward(self, x):
+        out = x
+        for m in self:
+            out = m(out)
+        return out
+
+
 device_type = torch.device(get_devtype())
 
 
@@ -153,6 +172,31 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
         )
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=dp_mesh)
+
+
+class TestFullyShardContainerSubclasses(FSDPTestMultiThread):
+    """Tests that fully_shard accepts ModuleDict/ModuleList subclasses that implement forward()."""
+
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_moduledict_subclass_with_forward(self):
+        model = _DictWithForward(8, 8)
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        # Should not raise due to container type since forward() is implemented
+        fsdp_model = fully_shard(model, mesh=mesh)
+        x = torch.randn(2, 8, device=device_type)
+        _ = fsdp_model(x)
+
+    @skip_if_lt_x_gpu(1)
+    def test_modulelist_subclass_with_forward(self):
+        model = _ListWithForward(8, 8)
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        fsdp_model = fully_shard(model, mesh=mesh)
+        x = torch.randn(2, 8, device=device_type)
+        _ = fsdp_model(x)
 
 
 class TestFullyShardMeshArg(FSDPTestMultiThread):
