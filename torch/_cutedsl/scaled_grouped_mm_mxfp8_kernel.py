@@ -50,6 +50,8 @@ class Sm100GroupedBlockScaledGemmKernel:
     # Compile-time tuning knobs.
     AB_TMA_LOAD_UNROLL = 2
     NUM_WARPS_PER_CTA = 12
+    GENERIC_REG_REQUIREMENT = 136
+    ACCUM_REG_REQUIREMENT = 232
 
     def __init__(
         self,
@@ -86,20 +88,23 @@ class Sm100GroupedBlockScaledGemmKernel:
         self.tensormap_update_mode = utils.TensorMapUpdateMode.SMEM
 
         self.occupancy = 1
-        # Warp roles:
-        #   - epilogue warps: 0..3
-        #   - mma warp: 4
-        #   - producer-side helper warps: 5..11
+        # Warp roles (matching CUTLASS C++ WarpCategory ordering):
+        #   - mma warp: 0
+        #   - scheduler warp: 1
+        #   - mainloop load warp: 2
+        #   - epilogue load warp: 3
+        #   - epilogue warps: 4..7
+        #   - tensormap update warps: 8..11
+        self.mma_warp_id = 0
+        self.scheduler_warp_id = 1
+        self.mainloop_load_warp_id = 2
+        self.epilogue_load_warp_id = 3
         self.epilog_warp_id = (
-            0,
-            1,
-            2,
-            3,
+            4,
+            5,
+            6,
+            7,
         )
-        self.mma_warp_id = 4
-        self.scheduler_warp_id = 5
-        self.mainloop_load_warp_id = 6
-        self.epilogue_load_warp_id = 7
         self.tensormap_update_warp_id = (8, 9, 10, 11)
         self.tensormap_worker_warp_id = (
             self.scheduler_warp_id,
@@ -974,6 +979,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             or warp_idx == self.tensormap_update_warp_id[2]
             or warp_idx == self.tensormap_update_warp_id[3]
         ):
+            cute.arch.warpgroup_reg_dealloc(self.GENERIC_REG_REQUIREMENT)
             is_scheduler_warp = warp_idx == self.scheduler_warp_id
             is_mainloop_load_warp = warp_idx == self.mainloop_load_warp_id
             #
@@ -1241,6 +1247,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         # Specialized MMA warp
         #
         if warp_idx == self.mma_warp_id:
+            cute.arch.warpgroup_reg_dealloc(self.GENERIC_REG_REQUIREMENT)
             #
             # Initialize tensormaps for A, B, SFA and SFB
             #
@@ -1465,6 +1472,7 @@ class Sm100GroupedBlockScaledGemmKernel:
         # Specialized epilogue descriptor warp
         #
         if warp_idx == self.epilogue_load_warp_id:
+            cute.arch.warpgroup_reg_dealloc(self.GENERIC_REG_REQUIREMENT)
             self.epilog_tensormap_init_barrier.arrive_and_wait()
             tile_sched = utils.StaticPersistentTileScheduler.create(
                 tile_sched_params, cute.arch.block_idx(), grid_dim
@@ -1526,7 +1534,8 @@ class Sm100GroupedBlockScaledGemmKernel:
         #
         # Specialized epilogue warps
         #
-        if warp_idx < self.mma_warp_id:
+        if warp_idx >= self.epilog_warp_id[0] and warp_idx <= self.epilog_warp_id[-1]:
+            cute.arch.warpgroup_reg_alloc(self.ACCUM_REG_REQUIREMENT)
             # Initialize tensormap for C
             tensormap_manager.init_tensormap_from_atom(
                 tma_atom_c,
@@ -1560,7 +1569,7 @@ class Sm100GroupedBlockScaledGemmKernel:
             #
             # Partition for epilogue
             #
-            epi_tidx = tidx
+            epi_tidx = tidx % (32 * len(self.epilog_warp_id))
             tiled_copy_t2r, tTR_tAcc_base, tTR_rAcc = (
                 self.epilog_tmem_copy_and_partition(
                     epi_tidx, tCtAcc_base, tCgC, epi_tile, use_2cta_instrs

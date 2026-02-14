@@ -1,5 +1,6 @@
 import argparse
 import importlib
+import statistics
 import subprocess
 import sys
 import warnings
@@ -102,6 +103,114 @@ def _do_bench_cuda(fn, warmup=10, rep=100):
     end.record()
     torch.cuda.synchronize()
     return start.elapsed_time(end) * 1e3 / rep
+
+
+def _percentile(values: list[float], q: float) -> float:
+    if not values:
+        raise ValueError("values cannot be empty")
+    if q <= 0:
+        return float(min(values))
+    if q >= 100:
+        return float(max(values))
+    xs = sorted(float(v) for v in values)
+    pos = (len(xs) - 1) * (q / 100.0)
+    lo = int(pos)
+    hi = min(lo + 1, len(xs) - 1)
+    frac = pos - lo
+    return xs[lo] * (1.0 - frac) + xs[hi] * frac
+
+
+def _format_stat_triplet(values: list[float]) -> str:
+    med = statistics.median(values)
+    p10 = _percentile(values, 10.0)
+    p90 = _percentile(values, 90.0)
+    return f"{med:.2f} us (p10={p10:.2f}, p90={p90:.2f})"
+
+
+def _nvidia_smi(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["nvidia-smi", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _maybe_warn_perf_tuning_failure(
+    context: str, proc: subprocess.CompletedProcess[str]
+) -> None:
+    stderr = (proc.stderr or "").strip()
+    stdout = (proc.stdout or "").strip()
+    msg = stderr if stderr else stdout
+    if proc.returncode != 0:
+        warnings.warn(
+            (
+                f"GPU perf tuning failed during {context}: {msg}. "
+                "Skipping further clock/persistence changes for this run."
+            ),
+            stacklevel=2,
+        )
+
+
+def _query_gpu_clock_info(device_index: int) -> str | None:
+    query_candidates = [
+        "clocks.sm,clocks.mem,clocks.max.sm,clocks.max.mem,pstate",
+        "clocks.sm,clocks.mem,clocks.max.graphics,clocks.max.memory,pstate",
+    ]
+    for query in query_candidates:
+        proc = _nvidia_smi(
+            [
+                "-i",
+                str(device_index),
+                f"--query-gpu={query}",
+                "--format=csv,noheader,nounits",
+            ]
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip().splitlines()[0]
+    return None
+
+
+def _configure_gpu_perf_once(device_index: int) -> None:
+    before = _query_gpu_clock_info(device_index)
+    if before is not None:
+        print(f"GPU[{device_index}] clocks before tuning: {before}")
+
+    proc_pm = _nvidia_smi(["-i", str(device_index), "-pm", "1"])
+    if proc_pm.returncode != 0:
+        _maybe_warn_perf_tuning_failure("enabling persistence mode", proc_pm)
+        return
+
+    max_info = _query_gpu_clock_info(device_index)
+    if max_info is None:
+        warnings.warn(
+            "Failed to query max GPU clocks; skipping GPU clock locking.",
+            stacklevel=2,
+        )
+        return
+    # Query returns: sm, mem, max_sm, max_mem, pstate
+    parts = [x.strip() for x in max_info.split(",")]
+    if len(parts) < 5:
+        warnings.warn(
+            f"Unexpected GPU clock query format: '{max_info}', skipping GPU clock locking.",
+            stacklevel=2,
+        )
+        return
+    max_sm = parts[2]
+    max_mem = parts[3]
+
+    proc_lgc = _nvidia_smi(["-i", str(device_index), "-lgc", f"{max_sm},{max_sm}"])
+    if proc_lgc.returncode != 0:
+        _maybe_warn_perf_tuning_failure("locking SM clocks", proc_lgc)
+        return
+    proc_lmc = _nvidia_smi(["-i", str(device_index), "-lmc", f"{max_mem},{max_mem}"])
+    if proc_lmc.returncode != 0:
+        _maybe_warn_perf_tuning_failure("locking memory clocks", proc_lmc)
+        return
+
+    after = _query_gpu_clock_info(device_index)
+    if after is not None:
+        print(f"GPU[{device_index}] clocks after tuning:  {after}")
 
 
 def _maybe_wrap_cuda_graph(fn, label: str, use_cuda_graphs: bool):
@@ -322,17 +431,21 @@ def benchmark_scaled_grouped_mm(
     use_cuda_graphs=False,
     warmup=2,
     rep=20,
+    paired_trials=1,
     backend="both",
     emit_us_only=False,
     do_correctness=True,
     mma_tile_mn: tuple[int, int] | None = None,
     cluster_shape_mn: tuple[int, int] | None = None,
     transpose_ab: bool | None = None,
+    set_max_gpu_clocks=False,
 ):
     if dtype is None:
         dtype = torch.bfloat16
     if backend not in ("both", "cpp", "cute"):
         raise ValueError(f"backend must be one of both/cpp/cute, got {backend}")
+    if paired_trials < 1:
+        raise ValueError(f"paired_trials must be >= 1, got {paired_trials}")
     if (mma_tile_mn is None) != (cluster_shape_mn is None):
         raise ValueError(
             "mma_tile_mn and cluster_shape_mn must be provided together or omitted together"
@@ -371,6 +484,7 @@ def benchmark_scaled_grouped_mm(
     run_cpp = backend in ("both", "cpp")
     run_cute = backend in ("both", "cute")
     input_dtype_name = "bf16" if dtype == torch.bfloat16 else "fp16"
+    gpu_perf_configured = False
 
     results = []
 
@@ -408,6 +522,10 @@ def benchmark_scaled_grouped_mm(
     for g, m, n, k in gmnk:
         if not is_blackwell():
             raise RuntimeError("Benchmark requires Blackwell (sm_100).")
+        if set_max_gpu_clocks and not gpu_perf_configured:
+            dev_idx = torch.cuda.current_device()
+            _configure_gpu_perf_once(dev_idx)
+            gpu_perf_configured = True
 
         (
             xq,
@@ -451,39 +569,47 @@ def benchmark_scaled_grouped_mm(
         )
         fn_cute = _make_cute_call(fn_cute_base)
 
+        cpp_samples = []
+        cute_samples = []
+        speedup_samples = []
+
         if use_subprocess and backend == "both":
-            us_cpp = _bench_backend_subprocess(
-                g=g,
-                m=m,
-                n=n,
-                k=k,
-                input_dtype=input_dtype_name,
-                seed=seed,
-                grouping=grouping,
-                warmup=warmup,
-                rep=rep,
-                backend="cpp",
-                use_cuda_graphs=use_cuda_graphs,
-                mma_tile_mn=mma_tile_mn,
-                cluster_shape_mn=cluster_shape_mn,
-                transpose_ab=transpose_ab,
-            )
-            us_cute = _bench_backend_subprocess(
-                g=g,
-                m=m,
-                n=n,
-                k=k,
-                input_dtype=input_dtype_name,
-                seed=seed,
-                grouping=grouping,
-                warmup=warmup,
-                rep=rep,
-                backend="cute",
-                use_cuda_graphs=use_cuda_graphs,
-                mma_tile_mn=mma_tile_mn,
-                cluster_shape_mn=cluster_shape_mn,
-                transpose_ab=transpose_ab,
-            )
+            for _ in range(paired_trials):
+                trial_cpp = _bench_backend_subprocess(
+                    g=g,
+                    m=m,
+                    n=n,
+                    k=k,
+                    input_dtype=input_dtype_name,
+                    seed=seed,
+                    grouping=grouping,
+                    warmup=warmup,
+                    rep=rep,
+                    backend="cpp",
+                    use_cuda_graphs=use_cuda_graphs,
+                    mma_tile_mn=mma_tile_mn,
+                    cluster_shape_mn=cluster_shape_mn,
+                    transpose_ab=transpose_ab,
+                )
+                trial_cute = _bench_backend_subprocess(
+                    g=g,
+                    m=m,
+                    n=n,
+                    k=k,
+                    input_dtype=input_dtype_name,
+                    seed=seed,
+                    grouping=grouping,
+                    warmup=warmup,
+                    rep=rep,
+                    backend="cute",
+                    use_cuda_graphs=use_cuda_graphs,
+                    mma_tile_mn=mma_tile_mn,
+                    cluster_shape_mn=cluster_shape_mn,
+                    transpose_ab=transpose_ab,
+                )
+                cpp_samples.append(trial_cpp)
+                cute_samples.append(trial_cute)
+                speedup_samples.append(trial_cpp / trial_cute)
         else:
             bench_fn_cpp = (
                 _maybe_wrap_cuda_graph(fn_cpp, "cpp", use_cuda_graphs)
@@ -495,16 +621,32 @@ def benchmark_scaled_grouped_mm(
                 if run_cute
                 else None
             )
-            us_cpp = (
-                _do_bench_cuda(bench_fn_cpp, warmup=warmup, rep=rep)
-                if run_cpp
-                else None
-            )
-            us_cute = (
-                _do_bench_cuda(bench_fn_cute, warmup=warmup, rep=rep)
-                if run_cute
-                else None
-            )
+            if run_cpp and run_cute:
+                for _ in range(paired_trials):
+                    trial_cpp = _do_bench_cuda(bench_fn_cpp, warmup=warmup, rep=rep)
+                    trial_cute = _do_bench_cuda(bench_fn_cute, warmup=warmup, rep=rep)
+                    cpp_samples.append(trial_cpp)
+                    cute_samples.append(trial_cute)
+                    speedup_samples.append(trial_cpp / trial_cute)
+            else:
+                if run_cpp:
+                    cpp_samples = [
+                        _do_bench_cuda(bench_fn_cpp, warmup=warmup, rep=rep)
+                        for _ in range(paired_trials)
+                    ]
+                if run_cute:
+                    cute_samples = [
+                        _do_bench_cuda(bench_fn_cute, warmup=warmup, rep=rep)
+                        for _ in range(paired_trials)
+                    ]
+
+        us_cpp = statistics.median(cpp_samples) if cpp_samples else None
+        us_cute = statistics.median(cute_samples) if cute_samples else None
+        speedup = (
+            statistics.median(speedup_samples)
+            if speedup_samples
+            else (us_cpp / us_cute if us_cpp and us_cute else None)
+        )
 
         if emit_us_only:
             print(f"{us_cpp if run_cpp else us_cute}")
@@ -516,6 +658,18 @@ def benchmark_scaled_grouped_mm(
             print(f"  C++: {us_cpp:.2f} us")
         if us_cute is not None:
             print(f"  CuTeDSL: {us_cute:.2f} us")
+        if paired_trials > 1:
+            if cpp_samples:
+                print(f"  C++ samples: {_format_stat_triplet(cpp_samples)}")
+            if cute_samples:
+                print(f"  CuTeDSL samples: {_format_stat_triplet(cute_samples)}")
+            if speedup_samples:
+                s_med = statistics.median(speedup_samples)
+                s_p10 = _percentile(speedup_samples, 10.0)
+                s_p90 = _percentile(speedup_samples, 90.0)
+                print(
+                    f"  speedup samples: {s_med:.3f} (p10={s_p10:.3f}, p90={s_p90:.3f})"
+                )
 
         if do_correctness and run_cpp and run_cute:
             try:
@@ -534,7 +688,7 @@ def benchmark_scaled_grouped_mm(
                 "K": k,
                 "C++ (us)": us_cpp,
                 "CuTeDSL (us)": us_cute,
-                "speedup": us_cpp / us_cute if us_cpp and us_cute else None,
+                "speedup": speedup,
             }
         )
         print()
@@ -642,6 +796,18 @@ if __name__ == "__main__":
         help="Measured iterations for timing loops.",
     )
     parser.add_argument(
+        "--paired-trials",
+        type=int,
+        default=1,
+        help="Number of paired timing trials per shape (C++ then CuTeDSL). Reports median timings and median per-trial speedup.",
+    )
+    parser.add_argument(
+        "--set-max-gpu-clocks",
+        action="store_true",
+        default=False,
+        help="Attempt to enable persistence mode and lock SM/MEM clocks to max via nvidia-smi once at startup.",
+    )
+    parser.add_argument(
         "--backend",
         choices=["both", "cpp", "cute"],
         default="both",
@@ -675,10 +841,12 @@ if __name__ == "__main__":
         use_cuda_graphs=args.use_cuda_graphs,
         warmup=args.warmup,
         rep=args.rep,
+        paired_trials=args.paired_trials,
         backend=args.backend,
         emit_us_only=args.emit_us_only,
         do_correctness=not args.no_correctness,
         mma_tile_mn=args.mma_tile_mn,
         cluster_shape_mn=args.cluster_shape_mn,
         transpose_ab=(None if args.transpose_ab is None else args.transpose_ab == "on"),
+        set_max_gpu_clocks=args.set_max_gpu_clocks,
     )
