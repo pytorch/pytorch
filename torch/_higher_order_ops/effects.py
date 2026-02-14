@@ -4,6 +4,10 @@ from typing import Any, Optional, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.new_compile_print import (
+    compile_print_bwd,
+    compile_print_fwd,
+)
 from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
@@ -62,6 +66,8 @@ _register_effectful_op("aten::_print", _EffectType.ORDERED)
 _register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
 _register_effectful_op(hop_print, _EffectType.ORDERED)
+_register_effectful_op(compile_print_fwd, _EffectType.ORDERED)
+_register_effectful_op(compile_print_bwd, _EffectType.ORDERED)
 
 
 class WithEffects(HigherOrderOperator):
@@ -219,8 +225,7 @@ def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema
         return op._schema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
-    elif op == hop_print:
-        # hop_print currently expects (format_str, *kwargs) as its arguments
+    elif op in (hop_print, compile_print_fwd, compile_print_bwd):
         extra_kwargs = kwargs or {}
         return op.gen_schema(*args, **extra_kwargs)
     else:

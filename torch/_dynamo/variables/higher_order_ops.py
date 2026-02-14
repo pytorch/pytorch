@@ -5526,6 +5526,71 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         return out
 
 
+class CompilePrintFwdVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.compile_print_fwd"
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+        from .lazy import LazyVariableTracker
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        # First two args are opaque CallbackWrapper objects, rest are tensors
+        fwd_callback = args[0].as_proxy()
+        bwd_callback = args[1].as_proxy()
+        tensor_args = args[2:]
+
+        tensor_proxies = [arg.as_proxy() for arg in tensor_args]
+        proxy_args = (fwd_callback, bwd_callback, *tensor_proxies)
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=proxy_args,
+                kwargs={},
+            ),
+        )
+
+
+class CompilePrintBwdVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.ops.higher_order.compile_print_bwd"
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+        from .lazy import LazyVariableTracker
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        # First arg is opaque CallbackWrapper object, rest are tensors
+        bwd_callback = args[0].as_proxy()
+        tensor_args = args[1:]
+
+        tensor_proxies = [arg.as_proxy() for arg in tensor_args]
+        proxy_args = (bwd_callback, *tensor_proxies)
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=proxy_args,
+                kwargs={},
+            ),
+        )
+
+
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
@@ -5556,4 +5621,6 @@ _hop_name_to_variable_class = {
     "invoke_subgraph": InvokeSubgraphHigherOrderVariable,
     "custom_function_call": CustomFunctionHigherOrderOperatorVariable,
     "local_map_hop": LocalMapWrappedHigherOrderVariable,
+    "compile_print_fwd": CompilePrintFwdVariable,
+    "compile_print_bwd": CompilePrintBwdVariable,
 }
