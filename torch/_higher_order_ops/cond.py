@@ -67,19 +67,15 @@ class CondOp(HigherOrderOperator):
             then_outputs,
         ) = check_input_alias_and_mutation_return_outputs(then_gm)
 
-        if false_fn is not None:
-            else_gm: torch.fx.GraphModule = materialize_as_graph(false_fn, operands)
-            (
-                _,
-                _,
-                _,
-                else_mutated_inputs,
-                _,
-            ) = check_input_alias_and_mutation_return_outputs(else_gm)
-            mutated_inputs = set(then_mutated_inputs) | set(else_mutated_inputs)
-        else:
-            else_gm = None  # type: ignore[assignment]
-            mutated_inputs = set(then_mutated_inputs)
+        else_gm: torch.fx.GraphModule = materialize_as_graph(false_fn, operands)
+        (
+            _,
+            _,
+            _,
+            else_mutated_inputs,
+            _,
+        ) = check_input_alias_and_mutation_return_outputs(else_gm)
+        mutated_inputs = set(then_mutated_inputs) | set(else_mutated_inputs)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("pred", pred)
@@ -97,17 +93,23 @@ class CondOp(HigherOrderOperator):
 cond_op = CondOp()
 
 
-def _noop_false_branch(true_fn, operands):
-    """Return empty tensors matching the metadata of true_fn's outputs."""
-    true_outs = true_fn(*operands)
-    flat_outs, spec = pytree.tree_flatten(true_outs)
-    empty_outs = []
-    for out in flat_outs:
-        if isinstance(out, torch.Tensor):
-            empty_outs.append(torch.empty_like(out))
-        else:
-            empty_outs.append(out)
-    return pytree.tree_unflatten(empty_outs, spec)
+def _make_noop_false_fn(true_fn):
+    def false_fn(*operands):
+        true_outs = true_fn(*operands)
+        flat_outs, spec = pytree.tree_flatten(true_outs)
+        empty_outs = []
+        for o in flat_outs:
+            if isinstance(o, torch.Tensor):
+                empty_outs.append(
+                    torch.empty_strided(
+                        o.shape, o.stride(), dtype=o.dtype, device=o.device
+                    )
+                )
+            else:
+                empty_outs.append(o)
+        return pytree.tree_unflatten(empty_outs, spec)
+
+    return false_fn
 
 
 @exposed_in("torch")
@@ -121,6 +123,7 @@ def cond(
     Conditionally applies `true_fn` or `false_fn`.
 
     .. warning::
+
         `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types.
         Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
@@ -185,12 +188,13 @@ def cond(
             are allowed in a branch)
 
     """
+    if false_fn is None:
+        false_fn = _make_noop_false_fn(true_fn)
+
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
     if isinstance(pred, (bool, int, float)):
-        # This is the non-strict export case. Strict export and torch.compile are
-        # handled above in dynamo.
         if torch.compiler.is_compiling():
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
@@ -198,12 +202,9 @@ def cond(
                 UserWarning,
                 stacklevel=2,
             )
-        # This is the eager case. We can just run the true or false branch.
         if pred:
             return true_fn(*operands)
         else:
-            if false_fn is None:
-                return _noop_false_branch(true_fn, operands)
             return false_fn(*operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
@@ -215,7 +216,7 @@ def cond(
                 f"Expected pred to be bool or single-element tensor, but got {pred}."
             )
 
-        if not callable(true_fn) or (false_fn is not None and not callable(false_fn)):
+        if not callable(true_fn) or not callable(false_fn):
             raise RuntimeError("Expect both branches to be callable.")
 
         if not isinstance(operands, (tuple, list)) or pytree.tree_any(
@@ -251,42 +252,37 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         )
 
     true_graph = reenter_make_fx(true_fn)(*operands)
+    false_graph = reenter_make_fx(false_fn)(*operands)
 
-    if false_fn is None:
-        false_graph = None
-    else:
-        false_graph = reenter_make_fx(false_fn)(*operands)
+    true_outs = []
+    false_outs = []
+    for node in true_graph.graph.nodes:
+        if node.op == "output":
+            true_outs.extend(node.args)
 
-        true_outs = []
-        false_outs = []
-        for node in true_graph.graph.nodes:
-            if node.op == "output":
-                true_outs.extend(node.args)
+    for node in false_graph.graph.nodes:
+        if node.op == "output":
+            false_outs.extend(node.args)
 
-        for node in false_graph.graph.nodes:
-            if node.op == "output":
-                false_outs.extend(node.args)
-
-        flat_true_outs = pytree.arg_tree_leaves(*true_outs)
-        flat_false_outs = pytree.arg_tree_leaves(*false_outs)
-        if len(flat_true_outs) != len(flat_false_outs):
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected to return same number of outputs but got:"
-                f"\n  true branch returns {len(flat_true_outs)} item(s)"
-                f"\n  false branch returns {len(flat_false_outs)} item(s)"
-            )
+    flat_true_outs = pytree.arg_tree_leaves(*true_outs)
+    flat_false_outs = pytree.arg_tree_leaves(*false_outs)
+    if len(flat_true_outs) != len(flat_false_outs):
+        raise torch._dynamo.exc.CondOpArgsMismatchError(
+            f"Expected to return same number of outputs but got:"
+            f"\n  true branch returns {len(flat_true_outs)} item(s)"
+            f"\n  false branch returns {len(flat_false_outs)} item(s)"
+        )
 
     i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
     proxy_mode.tracer.root.register_module(true_name, true_graph)
 
-    if false_graph is not None:
-        false_name = f"false_graph_{i}"
-        if hasattr(proxy_mode.tracer.root, false_name):
-            raise AssertionError(
-                f"proxy_mode.tracer.root already has attribute {false_name}"
-            )
-        proxy_mode.tracer.root.register_module(false_name, false_graph)
+    false_name = f"false_graph_{i}"
+    if hasattr(proxy_mode.tracer.root, false_name):
+        raise AssertionError(
+            f"proxy_mode.tracer.root already has attribute {false_name}"
+        )
+    proxy_mode.tracer.root.register_module(false_name, false_graph)
 
     args = (pred, true_graph, false_graph, operands)
 
@@ -313,8 +309,6 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
     if pred:
         return true_fn(*operands)
     else:
-        if false_fn is None:
-            return _noop_false_branch(true_fn, operands)
         return false_fn(*operands)
 
 
@@ -329,16 +323,8 @@ class CondAutogradOp(torch.autograd.Function):
         *operands,
     ):
         ctx._pred = pred
-        ctx._false_fn_is_none = false_fn is None
-        ctx._true_bw_fn = create_bw_fn(
-            true_fn,
-            operands,
-        )
-        if false_fn is not None:
-            ctx._false_bw_fn = create_bw_fn(
-                false_fn,
-                operands,
-            )
+        ctx._true_bw_fn = create_bw_fn(true_fn, operands)
+        ctx._false_bw_fn = create_bw_fn(false_fn, operands)
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         save_values_for_backward(ctx, operands)
@@ -366,24 +352,17 @@ class CondAutogradOp(torch.autograd.Function):
 
             return wrapped
 
-        true_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._true_bw_fn),
-            args,
-            ctx._fw_include_key_set,
-            ctx._fw_exclude_key_set,
-            force_enable_grad=True,
-        )
-
-        if ctx._false_fn_is_none:
-            false_bw_gm = None
-        else:
-            false_bw_gm = materialize_as_graph(
-                create_fn_remove_none(ctx._false_bw_fn),
+        def _materialize_bw(bw_fn):
+            return materialize_as_graph(
+                create_fn_remove_none(bw_fn),
                 args,
                 ctx._fw_include_key_set,
                 ctx._fw_exclude_key_set,
                 force_enable_grad=True,
             )
+
+        true_bw_gm = _materialize_bw(ctx._true_bw_fn)
+        false_bw_gm = _materialize_bw(ctx._false_bw_fn)
         grads = cond_op(
             ctx._pred,
             true_bw_gm,
@@ -420,8 +399,6 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 
     with mode, ignore_fresh_unbacked:
         flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
-        if false_fn is None:
-            return pytree.tree_unflatten(flat_true_outs, true_out_spec)
         flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
         if true_out_spec != false_out_spec:
             raise RuntimeError(
@@ -720,18 +697,12 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     unwrapped_pred = ctx.unwrap_tensors(pred)
     with ctx.redispatch_to_next():
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
-        if false_fn is not None:
-            functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
-        else:
-            functional_false = None
+        functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        branches = [(true_fn, "cond_true")]
-        if false_fn is not None:
-            branches.append((false_fn, "cond_false"))
-        for branch, branch_name in branches:
-            _check_alias_and_mutation(
-                branch, unwrapped_inputs, branch_name, pre_dispatch
-            )
+        _check_alias_and_mutation(true_fn, unwrapped_inputs, "cond_true", pre_dispatch)
+        _check_alias_and_mutation(
+            false_fn, unwrapped_inputs, "cond_false", pre_dispatch
+        )
 
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
@@ -765,33 +736,17 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
         tensors = (pred_,) + tensors
         in_dims = (0,) + in_dims
 
-        if false_fn is None:
-
-            def fn(p, *args):
-                t = true_fn(*args)
-                e = (
-                    tuple(torch.empty_like(o) for o in t)
-                    if isinstance(t, tuple)
-                    else torch.empty_like(t)
-                )
-                if isinstance(t, tuple):
-                    return tuple(torch.where(p, ti, ei) for ti, ei in zip(t, e))
-                return torch.where(p, t, e)
-
-        else:
-
-            def fn(p, *args):
-                t = true_fn(*args)
-                f = false_fn(*args)
-                return torch.where(p, t[0], f[0])
+        def fn(p, *args):
+            t = true_fn(*args)
+            f_val = false_fn(*args)[0]
+            return torch.where(p, t[0], f_val)
 
         with interpreter.lower():
             result = torch.vmap(fn, in_dims=in_dims)(*tensors)
 
     else:
         true_fn = torch.vmap(true_fn, in_dims=in_dims)
-        if false_fn is not None:
-            false_fn = torch.vmap(false_fn, in_dims=in_dims)
+        false_fn = torch.vmap(false_fn, in_dims=in_dims)
 
         with interpreter.lower():
             result = cond_op(pred, true_fn, false_fn, tensors)

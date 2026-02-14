@@ -270,6 +270,7 @@ def add_call_function(
     # Set backend metadata if provided
     if config is not None:
         if "custom" not in proxy.node.meta:
+            # pyrefly: ignore [implicit-any]
             proxy.node.meta["custom"] = {}
         proxy.node.meta["custom"]["nested_region_config"] = config
         assert proxy.node.target == torch._higher_order_ops.invoke_subgraph
@@ -930,6 +931,7 @@ def are_same_graph_modules(
                 if not isinstance(b_value, torch.Tensor):
                     return False
                 # Extract fake tensor metadata for a and b and then compare
+                # pyrefly: ignore [implicit-any]
                 a_result = []
                 state = _CacheKeyState(fake_mode.shape_env)
                 a_metadata = extract_tensor_metadata(a_value)
@@ -1688,6 +1690,7 @@ def speculate_subgraph_with_auto_output_flattening(
             # be actual FX graph outputs.
             # Collect only tensor and symint VTs that should be graph outputs.
             # We walk the output structure and extract proxyable VTs.
+            # pyrefly: ignore [implicit-any]
             graph_output_vt_list = []
 
             def visit(vt: VariableTracker) -> None:
@@ -2224,10 +2227,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Specialize into one of the branches since pred is constant
         pred, true_fn, false_fn, operands = args
-        false_fn_is_none = (
-            isinstance(false_fn, ConstantVariable)
-            and false_fn.as_python_constant() is None
-        )
         if type(args[0]) is ConstantVariable:
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
@@ -2237,15 +2236,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             if pred.as_python_constant():
                 return true_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
             else:
-                if false_fn_is_none:
-                    unimplemented(
-                        gb_type="torch.cond: constant pred with None false_fn",
-                        context="pred is False and false_fn is None",
-                        explanation="Cannot specialize on the false branch when false_fn is None.",
-                        hints=[
-                            *graph_break_hints.USER_ERROR,
-                        ],
-                    )
                 return false_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
 
         # predicate
@@ -2291,8 +2281,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # branches
         _check_supported_callable_arg(tx, true_fn, "true_fn")
-        if not false_fn_is_none:
-            _check_supported_callable_arg(tx, false_fn, "false_fn")
+        _check_supported_callable_arg(tx, false_fn, "false_fn")
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,
@@ -2364,80 +2353,62 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         (true_r, true_spec, true_graph, true_lifted_freevars) = speculate_branch(True)
         true_nn_modules = dict(tx.output.nn_modules)
 
-        if false_fn_is_none:
-            true_name = tx.output.install_subgraph(
-                "cond_true",
-                torch.fx.GraphModule(true_nn_modules, true_graph),
+        (
+            false_r,
+            false_spec,
+            false_graph,
+            false_lifted_freevars,
+        ) = speculate_branch(False)
+        false_nn_modules = dict(tx.output.nn_modules)
+
+        same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+            true_spec.treespec, false_spec.treespec
+        ).as_python_constant()
+        # 3.14: NotImplemented cannot be converted to bool
+        if same_spec is not NotImplemented and not same_spec:
+            unimplemented(
+                gb_type="torch.cond: differing branch outputs",
+                context=f"true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
+                explanation="Expected branches to return the same pytree structure.",
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
             )
 
-            true_node = make_attr(tx, true_name)
-            false_node = None
+        (
+            true_graph,
+            false_graph,
+            true_shared,
+            _false_shared,
+            unique_true,
+            unique_false,
+        ) = _merge_graph_inputs(
+            true_graph,
+            true_lifted_freevars,
+            "true_branch",
+            false_graph,
+            false_lifted_freevars,
+            "false_branch",
+        )
 
-            all_freevars = list(true_lifted_freevars.keys())
+        true_name = tx.output.install_subgraph(
+            "cond_true",
+            torch.fx.GraphModule(true_nn_modules, true_graph),
+        )
+        false_name = tx.output.install_subgraph(
+            "cond_false",
+            torch.fx.GraphModule(false_nn_modules, false_graph),
+        )
 
-            p_args = (
-                pred.as_proxy(),
-                true_node,
-                false_node,
-                tuple(all_freevars),
-            )
-        else:
-            (
-                false_r,
-                false_spec,
-                false_graph,
-                false_lifted_freevars,
-            ) = speculate_branch(False)
-            false_nn_modules = dict(tx.output.nn_modules)
+        true_node = make_attr(tx, true_name)
+        false_node = make_attr(tx, false_name)
 
-            same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
-                true_spec.treespec, false_spec.treespec
-            ).as_python_constant()
-            # 3.14: NotImplemented cannot be converted to bool
-            if same_spec is not NotImplemented and not same_spec:
-                unimplemented(
-                    gb_type="torch.cond: differing branch outputs",
-                    context=f"true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
-                    explanation="Expected branches to return the same pytree structure.",
-                    hints=[
-                        *graph_break_hints.USER_ERROR,
-                    ],
-                )
-
-            (
-                true_graph,
-                false_graph,
-                true_shared,
-                _false_shared,
-                unique_true,
-                unique_false,
-            ) = _merge_graph_inputs(
-                true_graph,
-                true_lifted_freevars,
-                "true_branch",
-                false_graph,
-                false_lifted_freevars,
-                "false_branch",
-            )
-
-            true_name = tx.output.install_subgraph(
-                "cond_true",
-                torch.fx.GraphModule(true_nn_modules, true_graph),
-            )
-            false_name = tx.output.install_subgraph(
-                "cond_false",
-                torch.fx.GraphModule(false_nn_modules, false_graph),
-            )
-
-            true_node = make_attr(tx, true_name)
-            false_node = make_attr(tx, false_name)
-
-            p_args = (
-                pred.as_proxy(),
-                true_node,
-                false_node,
-                tuple(true_shared + unique_true + unique_false),
-            )
+        p_args = (
+            pred.as_proxy(),
+            true_node,
+            false_node,
+            tuple(true_shared + unique_true + unique_false),
+        )
 
         return _call_function_and_unflatten_output(
             tx,
@@ -3685,6 +3656,7 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
         # to (body_node, lifted_args_tuple, {})
         body_node = p_args[0]
         lifted_args = p_args[1:]
+        # pyrefly: ignore [implicit-any]
         p_args = (body_node, tuple(lifted_args), {})
 
         # add hints into p_kwargs
@@ -4782,6 +4754,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             return bwd_freevars.get(vt.proxy, vt.proxy).node  # type: ignore[attr-defined]
 
         # Find the mapping between orig_fwd_args and bwd_out
+        # pyrefly: ignore [implicit-any]
         outer_fwd_proxy_to_bwd_node = {}
         if isinstance(bwd_out, variables.BaseListVariable):
             bwd_outs = bwd_out.items
@@ -4935,6 +4908,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # we intentionally inserted a `None` VariableTracker for these positions,
         # so the backward graph contains no placeholder for them.
         bwd_input_nodes = list(bwd_graph.find_nodes(op="placeholder"))
+        # pyrefly: ignore [implicit-any]
         fwd_vt_to_bwd_node = {}
         bwd_idx = 0
         if isinstance(fwd_out, variables.BaseListVariable):
@@ -4980,6 +4954,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         # Mechanical steps from here on. We have the extra_fwd_outputs and rewired_bwd_inputs. Lets make the changes.
         # Lets change the fwd graph outputs.
+        # pyrefly: ignore [implicit-any]
         fwd_output_nodes = []
         for node in fwd_graph.find_nodes(op="output"):
             fwd_output_nodes = node.args[0]
@@ -5186,6 +5161,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             assert isinstance(fn_vt, UnspecializedNNModuleVariable)
             fn_id = id(fn_vt.value.forward.__func__)  # type: ignore[attr-defined]
             fn_name = fn_vt.value.forward.__name__  # type: ignore[attr-defined]
+        # pyrefly: ignore [implicit-any]
         previously_installed_submodules = []
         if invoke_subgraph_cache:
             previously_installed_submodules = (

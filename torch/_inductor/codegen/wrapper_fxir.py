@@ -54,10 +54,8 @@ from .wrapper import (
     ConditionalLine,
     DynamicScalarLine,
     EnterDeviceContextManagerLine,
-    EnterNoopLine,
     EnterSubgraphLine,
     ExitDeviceContextManagerLine,
-    ExitNoopLine,
     ExitSubgraphLine,
     ExternKernelAllocLine,
     ExternKernelOutLine,
@@ -696,13 +694,10 @@ class FxConverter:
 
         ir_node = line.node
 
+        assert ir_node.true_subgraph is not None
+        assert ir_node.false_subgraph is not None
         true_subgm = self._get_subgm_attr(ir_node.true_subgraph)
-        if ir_node.false_subgraph is not None:
-            false_subgm: Optional[torch.fx.Node] = self._get_subgm_attr(
-                ir_node.false_subgraph
-            )
-        else:
-            false_subgm = None
+        false_subgm = self._get_subgm_attr(ir_node.false_subgraph)
 
         def generate_buffer(node: Optional[ir.IRNode]) -> Optional[torch.fx.Node]:
             assert node is not None
@@ -769,12 +764,6 @@ class FxConverter:
     def _generate_exit_subgraph(self, line: WrapperLine) -> None:
         assert isinstance(line, ExitSubgraphLine)
         # We ignore memory planning lines in FX IR.
-
-    def _generate_enter_noop(self, line: WrapperLine) -> None:
-        assert isinstance(line, EnterNoopLine)
-
-    def _generate_exit_noop(self, line: WrapperLine) -> None:
-        assert isinstance(line, ExitNoopLine)
 
     def _generate_free(self, line: WrapperLine) -> None:
         assert isinstance(line, FreeLine)

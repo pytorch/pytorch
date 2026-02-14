@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import collections
 import contextlib
 import dis
 import unittest
@@ -446,6 +447,117 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
         ref = create_tma(x)
         res = torch.compile(create_tma, backend="eager")(x)
         self.assertEqual(ref, res)
+
+    def test_self_referential_sourceful(self):
+        l = []
+        l.append((0, l))
+
+        def fn(x, l):
+            x = x + 1
+            # self-referential object on the stack during a graph break
+            print(l)
+            return x + len(l)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3)
+        self.assertEqual(fn(inp, l), opt_fn(inp, l))
+
+    def test_self_referential_sourceless(self):
+        @torch.compile(backend="eager")
+        def fn(x, construct_fn):
+            l = construct_fn()
+
+            x += 1
+            print(l)
+            x += 1
+            # if reconstruction failed on the graph break, we should error here
+            assert torch.compiler.is_compiling()
+            return l
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn2(x, construct_fn):
+            l = construct_fn()
+            x += 1
+            return l
+
+        def construct_list():
+            l = []
+            l.append(l)
+            return l
+
+        out = fn(torch.ones(3), construct_list)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_list)
+        self.assertIs(out[0], out)
+
+        def construct_deque():
+            d = collections.deque()
+            d.append(d)
+            return d
+
+        out = fn(torch.ones(3), construct_deque)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_deque)
+        self.assertIs(out[0], out)
+
+        def construct_dict():
+            d = {}
+            d[0] = d
+            return d
+
+        out = fn(torch.ones(3), construct_dict)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_dict)
+        self.assertIs(out[0], out)
+
+        def construct_ordereddict():
+            d = collections.OrderedDict()
+            d[0] = d
+            return d
+
+        out = fn(torch.ones(3), construct_ordereddict)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_ordereddict)
+        self.assertIs(out[0], out)
+
+        def construct_defaultdict():
+            d = collections.defaultdict()
+            d[0] = d
+            return d
+
+        out = fn(torch.ones(3), construct_defaultdict)
+        self.assertIs(out[0], out)
+        out = fn2(torch.ones(3), construct_defaultdict)
+        self.assertIs(out[0], out)
+
+    def test_non_self_referential_list_is_not_stored(self):
+        # Non-self referential list should not be stored as a temporary variable.
+        def fn(x):
+            l = [1, 2, 3]
+            return x, l
+
+        def gn(x):
+            l = [1, 2, 3]
+            l.append(l)
+            return x, l
+
+        def hook(instructions: list[dis.Instruction]):
+            from torch._dynamo.bytecode_transformation import create_dup_top
+
+            dup_top_inst = create_dup_top().opname
+            for i, inst in enumerate(instructions):
+                if inst.opname == "BUILD_LIST" and i + 2 < len(instructions):
+                    assert not (
+                        instructions[i + 1].opname == dup_top_inst
+                        and instructions[i + 2].opname == "STORE_FAST"
+                    ), "found list stored as tmp"
+
+        with self.register_bytecode_hook(hook):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            opt_fn(torch.ones(3))
+            with self.assertRaisesRegex(AssertionError, "found list stored as tmp"):
+                opt_gn = torch.compile(gn, backend="eager", fullgraph=True)
+                opt_gn(torch.ones(3))
 
 
 if __name__ == "__main__":

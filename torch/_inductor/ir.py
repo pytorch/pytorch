@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -3847,7 +3848,11 @@ class Layout(OutputSpec):
         if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            strides, make_channels_last_strides_for(shape), shape
+            # pyrefly: ignore [bad-specialization]
+            strides,
+            # pyrefly: ignore [bad-specialization]
+            make_channels_last_strides_for(shape),
+            shape,
         ):
             if size != 1 and left != right:
                 return False
@@ -4053,6 +4058,15 @@ class FlexibleLayout(Layout):
     """
 
     allow_indexing = False
+
+    def get_fixed_layout_without_freezing(self) -> FixedLayout:
+        """
+        Compute what the strides would be if this layout were frozen,
+        without actually modifying the layout. This is used for speculative
+        stride computation during Triton template code generation.
+        """
+        # Create a temporary copy and use as_fixed to keep freezing path in sync
+        return copy.deepcopy(self).as_fixed()
 
     # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
@@ -5760,9 +5774,12 @@ class ConcatKernel(NopKernel):
         assert isinstance(fx_node_args, list), type(fx_node_args)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
+            # pyrefly: ignore [missing-attribute]
             "val" in arg.meta
             and (
+                # pyrefly: ignore [missing-attribute]
                 arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                # pyrefly: ignore [missing-attribute]
                 or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
             )
             for arg in fx_node_args
@@ -8980,7 +8997,7 @@ class Conditional(ExternKernel):
         predicate: IRNode,
         operands: Sequence[IRNode],
         true_subgraph: Subgraph,
-        false_subgraph: Optional[Subgraph],
+        false_subgraph: Subgraph,
         layout: MultiOutputLayout,
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]],
     ) -> None:
@@ -9014,7 +9031,7 @@ class Conditional(ExternKernel):
         cls,
         predicate: TensorBox,
         true_fn: Subgraph,
-        false_fn: Optional[Subgraph],
+        false_fn: Subgraph,
         operands: list[TensorBox],
     ) -> list[MultiOutput]:
         """Create a Sequence of IRNodes from a conditional statement (see .lowering.cond)"""
@@ -9039,15 +9056,15 @@ class Conditional(ExternKernel):
                     ret.append(output)
                 else:
                     ret.append(
+                        # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
                             TensorBox(output), fake.stride(), allow_padding=False
                         )
                     )
+            # pyrefly: ignore [bad-return]
             return ret
 
         for subgraph in (true_fn, false_fn):
-            if subgraph is None:
-                continue
             if subgraph.graph is None:
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
@@ -9069,28 +9086,27 @@ class Conditional(ExternKernel):
                 f"The outputs of the true_fn subgraph of torch.cond are aliased: {true_outputs}"
             )
 
-        if false_fn is not None:
-            assert false_fn.graph is not None
-            false_outputs = false_fn.graph.graph_outputs
+        assert false_fn.graph is not None
+        false_outputs = false_fn.graph.graph_outputs
 
-            if _has_aliased_buffers(false_outputs):
-                raise AssertionError(
-                    "Output aliasing is currently not supported in compiled torch.cond. "
-                    f"The outputs of the false_fn subgraph of torch.cond are aliased: {false_outputs}"
-                )
-
-            assert len(true_outputs) == len(false_outputs), (
-                true_outputs,
-                false_outputs,
+        if _has_aliased_buffers(false_outputs):
+            raise AssertionError(
+                "Output aliasing is currently not supported in compiled torch.cond. "
+                f"The outputs of the false_fn subgraph of torch.cond are aliased: {false_outputs}"
             )
-            for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
-                assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
-                assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
-                assert t_o.get_layout().offset == f_o.get_layout().offset, (
-                    i,
-                    t_o,
-                    f_o,
-                )
+
+        assert len(true_outputs) == len(false_outputs), (
+            true_outputs,
+            false_outputs,
+        )
+        for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
+            assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
+            assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
+            assert t_o.get_layout().offset == f_o.get_layout().offset, (
+                i,
+                t_o,
+                f_o,
+            )
 
         # Determine device from operands and predicate
         # The predicate can be on a different device (e.g., CPU for control flow)
