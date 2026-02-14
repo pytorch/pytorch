@@ -285,7 +285,12 @@ def setup_compilation_env():
 
 @contextmanager
 def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _symbolic_trace_tls = getattr(torch.fx._symbolic_trace, "_is_fx_tracing_tls", None)
+    _old_is_tracing = (
+        getattr(_symbolic_trace_tls, "flag", False)
+        if _symbolic_trace_tls is not None
+        else False
+    )
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
     _old_capture_scalar_outputs = torch._dynamo.config.capture_scalar_outputs
     # The issue is tracked in https://github.com/pytorch/pytorch/issues/144360: when dynamo finds
@@ -299,13 +304,13 @@ def _set_compilation_env():
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        torch.fx._symbolic_trace._set_is_fx_tracing(False)
         # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
     finally:
-        torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch.fx._symbolic_trace._set_is_fx_tracing(_old_is_tracing)
         torch._dynamo.config.allow_empty_graphs = _old_allow_empty_graphs
         torch._dynamo.config.capture_scalar_outputs = _old_capture_scalar_outputs
 

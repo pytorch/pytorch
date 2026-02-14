@@ -8,6 +8,7 @@ import inspect
 import logging
 import math
 import os
+import threading
 import warnings
 from collections.abc import Callable
 from itertools import chain
@@ -38,7 +39,7 @@ _orig_module_getattr: Callable = torch.nn.Module.__getattr__
 
 _proxyable_classes: dict[type, None] = {}
 
-_is_fx_tracing_flag = False
+_is_fx_tracing_tls = threading.local()
 
 _ConstantAttributeType: TypeAlias = Union[
     torch.Tensor, torch.ScriptObject, FakeScriptObject, pytree.TreeSpec
@@ -60,11 +61,17 @@ def is_fx_tracing_warning():
 
 def is_fx_tracing():
     is_fx_tracing_warning()
-    return _is_fx_tracing_flag
+    return getattr(_is_fx_tracing_tls, "flag", False)
+
+
+def _set_is_fx_tracing(value: bool) -> None:
+    _is_fx_tracing_tls.flag = value
 
 
 def is_fx_symbolic_tracing():
-    return _is_fx_tracing_flag and not torch.compiler.is_compiling()
+    return (
+        getattr(_is_fx_tracing_tls, "flag", False) and not torch.compiler.is_compiling()
+    )
 
 
 @compatibility(is_backward_compatible=True)
@@ -776,9 +783,8 @@ class Tracer(TracerBase):
 
             A ``Graph`` representing the semantics of the passed-in ``root``.
         """
-        global _is_fx_tracing_flag
-        old_is_fx_tracing_flag = _is_fx_tracing_flag
-        _is_fx_tracing_flag = True
+        old_is_fx_tracing_flag = getattr(_is_fx_tracing_tls, "flag", False)
+        _set_is_fx_tracing(True)
         try:
             if isinstance(root, torch.nn.Module):
                 # do real recompilation for _LazyGraphModule before retracing since the trace
@@ -904,7 +910,7 @@ class Tracer(TracerBase):
 
             raise
         finally:
-            _is_fx_tracing_flag = old_is_fx_tracing_flag
+            _set_is_fx_tracing(old_is_fx_tracing_flag)
         return self.graph
 
     def __deepcopy__(self, memo):

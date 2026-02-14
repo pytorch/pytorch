@@ -12,6 +12,7 @@ import operator
 import os
 import re
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
@@ -379,6 +380,8 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
 
+# Thread-safe lazy initialization for device op overrides
+device_op_overrides_lock = threading.RLock()
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 custom_backend_passes: dict[str, Optional[CustomGraphModulePass]] = {}
 custom_backend_codegen_configs: dict[str, Optional[ConfigModule]] = {}
@@ -613,19 +616,23 @@ def index_prevent_reordering(
 def register_device_op_overrides(
     device: str, device_op_overrides: DeviceOpOverrides
 ) -> None:
-    device_op_overrides_dict[device] = device_op_overrides
+    with device_op_overrides_lock:
+        device_op_overrides_dict[device] = device_op_overrides
 
 
 def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     assert isinstance(device, str), type(device)
 
-    if not device_op_overrides_dict:
-        from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
-        from .cuda import device_op_overrides  # noqa: F401
-        from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
-        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+    if device in device_op_overrides_dict:
+        return device_op_overrides_dict[device]
 
-    return device_op_overrides_dict[device]
+    with device_op_overrides_lock:
+        if device not in device_op_overrides_dict:
+            from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
+            from .cuda import device_op_overrides  # noqa: F401
+            from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+
+        return device_op_overrides_dict[device]
 
 
 DTYPE_TO_COMPUTATION_DTYPE: dict[torch.dtype, torch.dtype] = {
