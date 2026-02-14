@@ -114,14 +114,14 @@ void nvshmem_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer) {
   nvshmemx_signal_wait_until_on_stream(static_cast<uint64_t*>(sigpad.data_ptr()), NVSHMEM_CMP_EQ, signal, stream);
 }
 
-void nvshmem_put_with_signal(at::Tensor& tensor, at::Tensor& sigpad, int64_t signal, int64_t peer) {
-  auto buffer_size = tensor.numel() * tensor.element_size();
+void nvshmem_put_with_signal(at::Tensor& inp, at::Tensor& out, at::Tensor& sigpad, int64_t signal, int64_t peer) {
+  auto buffer_size = inp.numel() * inp.element_size();
 
-  c10::cuda::CUDAGuard guard(tensor.device());
+  c10::cuda::CUDAGuard guard(inp.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   nvshmemx_putmem_signal_on_stream(
-    tensor.mutable_data_ptr(),
-    tensor.mutable_data_ptr(),
+    out.mutable_data_ptr(),
+    inp.const_data_ptr(),
     buffer_size,
     static_cast<uint64_t*>(sigpad.mutable_data_ptr()),
     signal,

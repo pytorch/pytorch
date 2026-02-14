@@ -29,7 +29,7 @@ at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::s
 
 TORCH_API void nvshmem_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer);
 
-TORCH_API void nvshmem_put_with_signal(at::Tensor& tensor, at::Tensor& sigpad, int64_t signal, int64_t peer);
+TORCH_API void nvshmem_put_with_signal(at::Tensor& inp, at::Tensor& out, at::Tensor& sigpad, int64_t signal, int64_t peer);
 
 at::Tensor nvshmem_all_to_all(
     at::Tensor& input,
