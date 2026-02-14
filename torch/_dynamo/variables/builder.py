@@ -32,6 +32,7 @@ import operator
 import random
 import re
 import sys
+import time
 import types
 import weakref
 from collections.abc import Callable, MutableMapping
@@ -60,6 +61,7 @@ from torch._library.opaque_object import (
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
+    should_hoist,
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
@@ -131,6 +133,7 @@ from ..source import (
     NumpyTensorSource,
     OptimizerSource,
     RandomValueSource,
+    SkipGuardSource,
     Source,
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
@@ -215,6 +218,7 @@ from .functions import (
     FunctoolsWrapsVariable,
     SysFunctionVariable,
     TritonKernelVariable,
+    TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
@@ -291,6 +295,7 @@ from .torch_function import (
 )
 from .user_defined import (
     FrozenDataClassVariable,
+    InspectVariable,
     IntWrapperVariable,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
@@ -479,6 +484,15 @@ class VariableBuilder:
         self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value: object) -> VariableTracker:
+        _t0 = time.time_ns()
+        try:
+            return self._call_impl(value)
+        finally:
+            self.tx.output.bytecode_tracing_timings.variable_builder_call_ns += (
+                time.time_ns() - _t0
+            )
+
+    def _call_impl(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
@@ -737,6 +751,9 @@ class VariableBuilder:
             def from_tensor() -> None:
                 pass
 
+        def set_allocator() -> None:
+            pass
+
         if has_triton_experimental_host_tma():
             from triton.tools.experimental_descriptor import (  # noqa: F811
                 create_1d_tma_descriptor,
@@ -744,6 +761,11 @@ class VariableBuilder:
             )
         if has_triton_tensor_descriptor_host_tma():
             from triton.tools.tensor_descriptor import TensorDescriptor  # noqa: F811
+        if has_triton():
+            import triton as triton_mod
+
+            if hasattr(triton_mod, "set_allocator"):
+                set_allocator = triton_mod.set_allocator  # noqa: F811
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -1353,6 +1375,8 @@ class VariableBuilder:
             return CreateTMADescriptorExperimentalVariable(rank=2)
         elif value is TensorDescriptor.from_tensor:
             return CreateTMADescriptorStableVariable()
+        elif value is set_allocator:
+            return TritonSetAllocatorSkipVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1601,7 +1625,7 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
-            if is_opaque_value_type(type(value)):
+            if is_opaque_value_type(type(value)) and not should_hoist(type(value)):
                 proxy = value
             else:
                 proxy = self.tx.output.root_tracer.create_graph_input(
@@ -1809,7 +1833,14 @@ class VariableBuilder:
 
     def wrap_user_defined(self, value: Any) -> VariableTracker:
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        result = UserDefinedObjectVariable(value, source=self.source)
+        if InspectVariable.is_matching_object(value):
+            # Skip guards on inspect related variable trackers because they are
+            # not important for recompiles (something else will also change to
+            # cause recompiles) and can cause a large number of OBJECT_ALIASING
+            # guards.
+            result = InspectVariable(value, source=SkipGuardSource(self.source))
+        else:
+            result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):
             # don't allow STORE_ATTR mutation with custom __setattr__
             return result
@@ -1818,15 +1849,6 @@ class VariableBuilder:
     def wrap_listlike(
         self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
     ) -> VariableTracker:
-        for item in value:
-            if item is value:
-                unimplemented(
-                    gb_type="list elements are pointing to the list itself",
-                    context="",
-                    explanation="Dynamo does not support lists whose items reference to itself",
-                    hints=["Avoid using self referential list"],
-                )
-
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -3956,6 +3978,25 @@ def _automatic_dynamic(
 
 # See note [Tensor Fakification and Symbol Caching]
 def wrap_to_fake_tensor_and_record(
+    e: Any,
+    tx: "InstructionTranslatorBase",
+    *,
+    source: Source | None,
+    is_tensor: bool,
+    parent_context: Any | None = None,
+) -> Any:
+    _t0 = time.time_ns()
+    try:
+        return _wrap_to_fake_tensor_and_record_impl(
+            e, tx, source=source, is_tensor=is_tensor, parent_context=parent_context
+        )
+    finally:
+        tx.output.bytecode_tracing_timings.wrap_to_fake_tensor_and_record_ns += (
+            time.time_ns() - _t0
+        )
+
+
+def _wrap_to_fake_tensor_and_record_impl(
     e: Any,
     tx: "InstructionTranslatorBase",
     *,
