@@ -853,8 +853,8 @@ class TestMPS(TestCaseMPS):
         mps_tensor = mps_tensor.cpu()
         all_vals = torch.cat([cpu_tensor, mps_tensor])
         min_val, max_val = all_vals.min().item(), all_vals.max().item()
-        cpu_hist = torch.histc(cpu_tensor, bins=50, min=min_val, max=max_val) + 1e-10
-        mps_hist = torch.histc(mps_tensor, bins=50, min=min_val, max=max_val) + 1e-10
+        cpu_hist = torch.histc(cpu_tensor.float(), bins=50, min=min_val, max=max_val) + 1e-10
+        mps_hist = torch.histc(mps_tensor.float(), bins=50, min=min_val, max=max_val) + 1e-10
         p = cpu_hist / cpu_hist.sum()
         q = mps_hist / mps_hist.sum()
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
@@ -7994,6 +7994,7 @@ class TestMPS(TestCaseMPS):
             ("random_with_range", lambda t: t.random_(0, 10)),
             ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
             ("cauchy_", lambda t: t.cauchy_()),
+            ("geometric_", lambda t: t.geometric_(p=0.9)),
         ]
 
         for name, op_func in ops:
@@ -8036,20 +8037,25 @@ class TestMPS(TestCaseMPS):
 
     def test_distributions(self):
         ops = [
-            ("normal_", lambda t: t.normal_(0, 1)),
-            ("uniform_", lambda t: t.uniform_(0, 1)),
-            ("exponential_", lambda t: t.exponential_(1.0)),
-            ("bernoulli_", lambda t: t.bernoulli_(0.5)),
-            ("random_", lambda t: t.random_()),
-            ("random_with_to", lambda t: t.random_(10)),
-            ("random_with_range", lambda t: t.random_(0, 10)),
-            ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
-            ("cauchy_", lambda t: t.cauchy_()),
+            ("normal_", lambda t: t.normal_(0, 1), []),
+            ("uniform_", lambda t: t.uniform_(0, 1), []),
+            ("exponential_", lambda t: t.exponential_(1.0), []),
+            ("bernoulli_", lambda t: t.bernoulli_(0.5), []),
+            ("random_", lambda t: t.random_(), []),
+            ("random_with_to", lambda t: t.random_(10), []),
+            ("random_with_range", lambda t: t.random_(0, 10), []),
+            ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0), []),
+            ("cauchy_", lambda t: t.cauchy_(), []),
+            ("geometric_", lambda t: t.geometric_(p=0.2), [torch.int32, torch.int16, torch.int8, torch.uint8]),
         ]
-        for name, op_func in ops:
+        for name, op_func, extra_dtypes in ops:
             with self.subTest(operation=name):
                 cpu_tensor = op_func(torch.zeros(100, 100)).flatten()
                 mps_tensor = op_func(torch.zeros(100, 100)).flatten()
+                self._helper_kl_divergence(cpu_tensor, mps_tensor)
+            for extra_dtype in extra_dtypes:
+                cpu_tensor = op_func(torch.zeros(100, 100, dtype=extra_dtype)).flatten()
+                mps_tensor = op_func(torch.zeros(100, 100, dtype=extra_dtype)).flatten()
                 self._helper_kl_divergence(cpu_tensor, mps_tensor)
 
     # Test add
@@ -12615,7 +12621,6 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.softmin',
         'cross', 'linalg.cross',
         'prod', 'masked.prod',
-        'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
         'nn.functional.interpolate',
@@ -12672,8 +12677,8 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    def _run_op(self, op, mps_sample):
-        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+    def _run_op(self, op, mps_sample, dtype=None):
+        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
@@ -12684,13 +12689,17 @@ class TestConsistency(TestCaseMPS):
                 # TODO: Handle list inputs later
                 if not isinstance(mps_out, torch.Tensor):
                     raise
+                if mps_sample.input.dtype not in [torch.float16, torch.bfloat16]:
+                    raise
+                dtype = torch.float32
 
-                if mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
-                    # Often CPU ops are not implemented for low precision dtypes
-                    # In that case, upcast to higher precision and try again
-                    cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
-                    cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
-                    cpu_out = cpu_out.to(dtype=mps_out.dtype)
+                # Often CPU ops are not implemented for low precision dtypes
+                # In that case, upcast to higher precision and try again
+                cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+
+        if dtype is not None:
+            cpu_out = cpu_out.to(dtype=mps_out.dtype)
 
         return mps_out, cpu_out, cpu_sample
 
@@ -12707,7 +12716,11 @@ class TestConsistency(TestCaseMPS):
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 
-            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
+            opt_dtype = None
+            # CPU implementation is less precise than MPS one so compare MPS to full fp32
+            if dtype in [torch.float16, torch.bfloat16] and op.name == "grid_sampler_3d":
+                opt_dtype = torch.float32
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
@@ -12723,9 +12736,6 @@ class TestConsistency(TestCaseMPS):
                and mps_sample.kwargs.get("scale_factors") == [1.7, 0.9]):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
-
-            if op.name in ["grid_sampler_3d", "asinh"]:
-                atol, rtol = 1e-4, 1e-4
 
             if op.name == "kthvalue":
                 self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
@@ -12745,8 +12755,7 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device, dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
-                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-                set_seed=False):
+                set_seed=True):
             #
             # Forward check
             #
@@ -12861,6 +12870,32 @@ class TestConsistency(TestCaseMPS):
         out_cpu = torch.grid_sampler_3d(input, grid_nan, 0, 0, True)
         out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
         self.assertEqual(out_mps, out_cpu)
+
+    def test_householder_product_race(self, device):
+        # Regression testing for https://github.com/pytorch/pytorch/issues/173972
+        # Check correctness for input matrices that have more elements than the
+        # maximum number of threads per threadgroup. Before the issue was fixed,
+        # this test would fail due to a race.
+        max_threads_per_threadgroup = torch.mps.compile_shader("kernel void foo() {}").foo.max_threads_per_threadgroup
+        m0 = int(max_threads_per_threadgroup**(0.5))
+
+        for m in range(m0, 5 * m0, m0):
+            for num_batches in range(1, 11):
+                A = torch.eye(m, m).repeat(num_batches, 1, 1)
+                # Set one random non-diagonal element of each identity matrix to
+                # 1. This is better than using a fully random matrix, because
+                # that can cause fairly large errors for CPU vs MPS due to
+                # normal floating point error.
+                for i in range(num_batches):
+                    j = random.randint(0, m - 1)
+                    k = j
+                    while k == j:
+                        k = random.randint(0, m - 1)
+                    A[i, j, k] = 1
+                tau = torch.randn(num_batches, m)
+                r_cpu = torch.orgqr(A, tau)
+                r_mps = torch.orgqr(A.to('mps'), tau.to('mps'))
+                self.assertEqual(r_cpu, r_mps)
 
     def test_fmax_mixed_dtypes(self, device):
         # Regression testing for https://github.com/pytorch/pytorch/issues/149951

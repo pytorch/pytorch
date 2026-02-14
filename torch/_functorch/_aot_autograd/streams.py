@@ -26,7 +26,8 @@ Graph: TypeAlias = torch.fx.Graph
 
 
 def get_roofline_estimate(node: Node) -> float:
-    assert node.op == "call_function", "non-func node in roofline estimate"
+    if node.op != "call_function":
+        raise AssertionError(f"non-func node in roofline estimate: {node.op}")
 
     def map_value(x: Any) -> Any:
         return x.meta.get("value", x) if isinstance(x, Node) else x
@@ -128,7 +129,11 @@ def populate_stream_timeline(
         total_time = 0.0
         for node in graph.nodes:
             # mlazos: not sure if we should include forward here too but don't think it matters
-            if is_bwd_node(node) and get_stream(node) == stream_index:
+            if (
+                node.op == "call_function"
+                and is_bwd_node(node)
+                and get_stream(node) == stream_index
+            ):
                 total_time += get_roofline_estimate(node)
                 stream_to_timeline[stream_index][node] = (
                     total_time  # NB: total time includes the node's runtime
@@ -148,17 +153,20 @@ def handle_synced_deallocation(
     node: Node,
     last_usage: Node,
 ) -> None:
-    assert is_bwd_node(node), (
-        "synced allocations should only be handled on backward nodes"
-    )
-    assert is_bwd_node(last_usage), (
-        "synced allocations should only be handled on backward nodes"
-    )
+    if not is_bwd_node(node):
+        raise AssertionError(
+            "synced allocations should only be handled on backward nodes"
+        )
+    if not is_bwd_node(last_usage):
+        raise AssertionError(
+            "synced allocations should only be handled on backward nodes"
+        )
     allocating_stream = get_stream(node)
     side_stream = get_stream(last_usage)
-    assert allocating_stream != side_stream, (
-        "allocating and side stream should be different for synced deallocations"
-    )
+    if allocating_stream == side_stream:
+        raise AssertionError(
+            "allocating and side stream should be different for synced deallocations"
+        )
     if not torch.cuda.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
@@ -250,12 +258,12 @@ def insert_backward_syncs(gm: torch.fx.GraphModule) -> None:
     """Inserts stream syncs for backward nodes if consumer and producer are on different streams"""
     node_to_wait_event_ind: dict[Node, int] = {}
     for node in gm.graph.nodes:
-        if is_bwd_node(node):
+        if node.op == "call_function" and is_bwd_node(node):
             flat_args = _get_flat_args(node, {})
             cur_node_stream = get_stream(node)
 
             for arg in flat_args:
-                if is_bwd_node(arg):
+                if arg.op == "call_function" and is_bwd_node(arg):
                     arg_stream = get_stream(arg)
                     if arg_stream != cur_node_stream and get_device(arg).type != "cpu":
                         insert_sync(gm.graph, node, arg, node_to_wait_event_ind)
@@ -272,7 +280,7 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
     # a trace of all the nodes running in a given stream
     stream_to_exec_trace: dict[Optional[int], IndexedDict[Node, float]] = {}
     for node in gm.graph.nodes:
-        if is_bwd_node(node):
+        if node.op == "call_function" and is_bwd_node(node):
             allocating_stream = get_stream(node)
             users = list(node.users.keys())
             if not users:
@@ -287,7 +295,7 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
                 )
 
 
-def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
+def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
     for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
         arg_stream = get_stream(epi_copy.args[1])
         copy_stream = get_stream(epi_copy)
@@ -297,7 +305,7 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
 
 def populate_fw_metadata_with_stream_indices(
     gm: torch.fx.GraphModule, fw_metadata: "ViewAndMutationMeta"
-):
+) -> None:
     """
     Populates fw_metadata.mutated_inp_stream_indices with stream indices from the compiled graph.
 
@@ -318,9 +326,10 @@ def populate_fw_metadata_with_stream_indices(
         output_node = node
         break
 
-    assert output_node is not None, (
-        "No output node found in the graph when extracting stream indices"
-    )
+    if output_node is None:
+        raise AssertionError(
+            "No output node found in the graph when extracting stream indices"
+        )
 
     # The output node's args[0] is a tuple/list of all outputs
     output_args = output_node.args[0]

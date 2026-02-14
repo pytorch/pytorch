@@ -3014,3 +3014,45 @@ Examples::
     tensor(0.3223)
 """,
 )
+
+_powsum = _add_docstr(
+    _linalg.linalg__powsum,
+    r"""
+linalg._powsum(x, ord, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes the sum of the absolute values raised to the power ``ord``.
+
+This function computes ``sum(abs(x)**ord)`` without applying the final root,
+which is useful for distributed computing where the root should only be applied
+once after reducing across all ranks.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+
+Args:
+    x (Tensor): tensor, flattened by default, or optionally over dimension(s)
+                specified by :attr:`dim`.
+    ord (int, float): the exponent value. Can be any real number.
+
+Keyword args:
+    dim (int, Tuple[int], optional): dimension(s) to reduce over.
+                                     Default: ``None`` (all dimensions).
+    keepdim (bool, optional): whether the output has :attr:`dim` retained. Default: ``False``.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+          If specified, the input tensor is cast to :attr:`dtype` before the operation
+          is performed. Default: ``None``.
+    out (Tensor, optional): output tensor. Ignored if ``None``. Default: ``None``.
+
+Returns:
+    A real-valued tensor, even when :attr:`x` is complex.
+
+Example::
+
+    >>> x = torch.tensor([1., 2., 3.])
+    >>> torch.linalg._powsum(x, 2)
+    tensor(14.)
+    >>> torch.linalg.vector_norm(x, 2)
+    tensor(3.7417)
+    >>> torch.linalg._powsum(x, 2) ** 0.5  # equivalent to vector_norm
+    tensor(3.7417)
+""",
+)
