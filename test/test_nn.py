@@ -7371,7 +7371,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # chunk), use grad_inplace=True, however, gradcheck will fail:
             options = dict(max_memory_gb=max_memory_gb, min_chunk_size=4, grad_inplace=True)
             yield sizes, options, dict(batches_chunk_size=4, features_chunk_size=4, classes_chunk_size=8, **options)
-            # constraint optimal options, chunking along classes dimension could not be avoided:
+            # constraint optimal options, chunking along classes
+            # dimension could not be avoided:
             options = dict(max_memory_gb=max_memory_gb, min_chunk_size=4, features_chunk_size=8)
             yield sizes, options, dict(batches_chunk_size=4, classes_chunk_size=4, **options)
             # constraint size can be smaller than the minimal chunk size:
