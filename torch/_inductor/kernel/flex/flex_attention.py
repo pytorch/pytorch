@@ -17,7 +17,7 @@ from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
-from ...lowering import empty, empty_strided, lowerings, register_lowering
+from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...select_algorithm import (
     autotune_select_algorithm,
     SymbolicGridFn,
@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 Expr = sympy.Expr
 
 
@@ -737,6 +738,7 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
     )
+
     freeze_irnodes(all_joint_outputs)
 
     joint_outputs = process_joint_outputs(
@@ -779,6 +781,15 @@ def flex_attention_backward(*args, **kwargs):
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
                 "is not yet implemented. Running non-deterministic backward.",
             )
+        # TODO: Implement dLSE support in flash-attention backward by folding
+        # grad_logsumexp into the dPsum preprocess step.
+        if grad_logsumexp is not None:
+            raise NotImplementedError(
+                "FLASH backend backward does not support differentiating through "
+                "logsumexp (dLSE). This happens when the loss depends on the LSE "
+                "output of flex_attention. "
+                "Use BACKEND='TRITON' or avoid differentiating through logsumexp."
+            )
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
@@ -815,13 +826,18 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     # Create delta which will is needed for the bwd's kernel
-    grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
     mul_delta = lowerings[aten.mul](out, grad_out)
     delta = lowerings[aten.sum](mul_delta, axis=-1)
-    delta = lowerings[aten.sub](delta, grad_lse_exp2)
-    delta = ExternKernel.require_contiguous(delta)
-
-    grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
+    delta = lowerings[prims.convert_element_type](delta, torch.float32)
+    if grad_logsumexp is not None:
+        grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
+        grad_lse_exp2 = ExternKernel.require_contiguous(grad_lse_exp2)
+        delta = lowerings[aten.sub](delta, grad_lse_exp2)
+        delta = ExternKernel.require_contiguous(delta)
+        delta, grad_lse_exp2 = maybe_realize([delta, grad_lse_exp2])
+    else:
+        delta = ExternKernel.require_contiguous(delta)
+        (delta,) = maybe_realize([delta])
 
     # # see NOTE:[TritonTemplates with multiple outputs]
     query_size = [Bq, Hq, seq_len_q, qk_head_dim]
@@ -1016,7 +1032,16 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
+    # Cast captured grads to match original buffer dtypes. Gradients are accumulated
+    # in fp32 for precision, then cast to the original dtype (e.g., bf16) here.
+    captured_grads = tuple(
+        to_dtype(g, orig.get_dtype())
+        if g is not None and g.get_dtype() != orig.get_dtype()
+        else g
+        for g, orig in zip(joint_outputs.captured_grads, score_mod_other_buffers)
+    )
+
+    return (grad_query, grad_key, grad_value, captured_grads)
 
 
 def get_bwd_subgraph_outputs(
