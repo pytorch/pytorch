@@ -225,11 +225,7 @@ class SubstringSet:
         return item in self.items
 
 
-DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
-    [
-        "cuda",
-    ]
-)
+DEVICE_SUPPORTS_BACKWARDS = SubstringSet(["cuda", "xpu"])
 
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
@@ -969,7 +965,6 @@ class TestFlexAttention(InductorTestCase):
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
-
         if requires_grad:
             backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=device)
             golden_out1.backward(backward_grad1.to(torch.float64))
@@ -1448,6 +1443,60 @@ class TestFlexAttention(InductorTestCase):
 
         for seqlen in [a, b]:
             create_block_mask_from_seqlens(seqlen, seqlen)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_create_block_mask_recompile_persistent_reduction_oob(self, device):
+        """Recompiling create_block_mask with a much smaller Q_LEN must not OOB.
+
+        When Q_LEN shrinks enough that (Q_LEN+15)//16 == 1 for all guarded
+        values, _get_persistent_RBLOCK must return R0_BLOCK=1 (not 2) so
+        the constant all-True mask does not read out of bounds.
+        """
+        compiled_create_block_mask = torch.compile(create_block_mask)
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        KV_LEN = 2048
+
+        compiled_create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=7896,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+
+        compiled_bm = compiled_create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=2,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+        eager_bm = create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=2,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+
+        torch.testing.assert_close(
+            compiled_bm.full_q_num_blocks,
+            eager_bm.full_q_num_blocks,
+        )
+        torch.testing.assert_close(
+            compiled_bm.q_num_blocks,
+            eager_bm.q_num_blocks,
+        )
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -5294,11 +5343,13 @@ class GraphModule(torch.nn.Module):
     @skip_on_cpu
     @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
     def test_tma_with_customer_kernel_options(self, device):
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         make_tensor = functools.partial(
             torch.ones,
             (1, 1, 256, 128),
             device=device,
             dtype=torch.bfloat16,
+            requires_grad=requires_grad,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
@@ -5317,6 +5368,40 @@ class GraphModule(torch.nn.Module):
 
         # vanilla compiled vs TMA compiled
         torch.testing.assert_close(out_tma_compiled, out_compiled, atol=2e-1, rtol=2e-1)
+
+        if requires_grad:
+            grad_output = torch.randn_like(out_compiled)
+
+            out_compiled.backward(grad_output)
+            compiled_grads = [query.grad, key.grad, value.grad]
+            query.grad = None
+            key.grad = None
+            value.grad = None
+
+            out_tma_compiled.backward(grad_output)
+            tma_grads = [query.grad, key.grad, value.grad]
+            query.grad = None
+            key.grad = None
+            value.grad = None
+
+            torch.testing.assert_close(
+                compiled_grads[0],
+                tma_grads[0],
+                atol=2e-1,
+                rtol=2e-1,
+            )
+            torch.testing.assert_close(
+                compiled_grads[1],
+                tma_grads[1],
+                atol=2e-1,
+                rtol=2e-1,
+            )
+            torch.testing.assert_close(
+                compiled_grads[2],
+                tma_grads[2],
+                atol=2e-1,
+                rtol=2e-1,
+            )
 
     @supported_platform
     @skip_on_cpu
@@ -6867,7 +6952,8 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 supports_learnable_bias = unittest.skipUnless(
     (
-        (torch.cuda.is_available() and has_triton())
+        (torch.xpu.is_available() and has_triton())
+        or (torch.cuda.is_available() and has_triton())
         and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
     ),
     "Requires Triton + A100 or Triton + ROCm",
