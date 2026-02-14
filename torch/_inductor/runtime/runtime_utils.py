@@ -579,17 +579,24 @@ def _make_index_map(
 
     When *swap_last_two* is True the grid args for the last two buffer dims
     are swapped so that the tile iteration follows the transposed layout.
+
+    All returned values are explicitly ``jnp.int32`` so that TPU Mosaic
+    lowering (which rejects 64-bit types) works when ``jax_enable_x64`` is
+    active.  The casts are created inside the function body (not captured)
+    to satisfy JAX's "index_map must not capture constants" rule.
     """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
     # Pre-build the mapping so the returned lambda is a plain lookup.
     mapping = {ba: gd for ba, gd in tiled_pairs}
 
     if n_grid == 0 or (n_grid == 1 and not mapping):
-        # grid=(1,), nothing tiled — one-arg identity returning all zeros
-        return lambda _i: (0,) * buf_nd
+        return lambda _i: tuple(jnp.int32(0) for _ in range(buf_nd))
 
     def index_map(*grid_args):
         return tuple(
-            grid_args[mapping[d]] if d in mapping else 0 for d in range(buf_nd)
+            jnp.int32(grid_args[mapping[d]]) if d in mapping else jnp.int32(0)
+            for d in range(buf_nd)
         )
 
     return index_map

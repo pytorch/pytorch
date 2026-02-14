@@ -2983,7 +2983,7 @@ class PallasKernel(SIMDKernel):
             if self.tile_cpu_tpu:
                 self._codegen_tiled_specs(ctx)
             else:
-                code.writeline("indexer = lambda n: lambda i: [i] * n")
+                code.writeline("indexer = lambda n: lambda i: [jnp.int32(i)] * n")
                 code.writeline("out_specs_pallas = tuple(")
                 code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
                 code.writeline(
