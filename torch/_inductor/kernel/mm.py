@@ -419,11 +419,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 
-            if use_triton_tma_template(mat1, mat2, output_layout=layout):
-                templates_to_use.append(persistent_tma_mm_template)
-
             if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+            elif use_triton_tma_template(mat1, mat2, output_layout=layout):
+                templates_to_use.append(persistent_tma_mm_template)
 
             if (
                 inductor_config.is_fbcode()
@@ -665,11 +664,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
-        if use_triton_tma_template(mat1, mat2, output_layout=layout):
-            templates_to_use.append(persistent_tma_mm_template)
-
         if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+        elif use_triton_tma_template(mat1, mat2, output_layout=layout):
+            templates_to_use.append(persistent_tma_mm_template)
 
         templates_to_use.append(addmm_contiguous_subgraph_template)
 

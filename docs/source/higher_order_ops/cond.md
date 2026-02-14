@@ -1,3 +1,13 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+mystnb:
+  execution_timeout: 30
+  execution_show_tb: True
+  merge_streams: True
+---
+
 (cond)=
 
 # Control Flow - Cond
@@ -24,8 +34,8 @@ This unlocks great flexibility in writing and deploying models that change model
 the **value** or **shape** of inputs or intermediate outputs of tensor operations.
 
 ```{warning}
-`torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
-doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
+`torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types.
+Please look forward to a more stable implementation in a future version of PyTorch.
 Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 ```
 
@@ -33,11 +43,11 @@ Read more about feature classification at: https://pytorch.org/blog/pytorch-feat
 
 Below is an example that uses cond to branch based on input shape:
 
-```python
+```{code-cell}
 import torch
 
 def true_fn(x: torch.Tensor):
-    return x.cos() + x.sin()
+    return x.cos()
 
 def false_fn(x: torch.Tensor):
     return x.sin()
@@ -51,12 +61,6 @@ class DynamicShapeCondPredicate(torch.nn.Module):
         super().__init__()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        def true_fn(x: torch.Tensor):
-            return x.cos()
-
-        def false_fn(x: torch.Tensor):
-            return x.sin()
-
         return torch.cond(x.shape[0] > 4, true_fn, false_fn, (x,))
 
 dyn_shape_mod = DynamicShapeCondPredicate()
@@ -64,45 +68,24 @@ dyn_shape_mod = DynamicShapeCondPredicate()
 
 We can eagerly run the model and expect the results vary based on input shape:
 
-```python
+```{code-cell}
 inp = torch.randn(3)
 inp2 = torch.randn(5)
-assert torch.equal(dyn_shape_mod(inp), false_fn(inp))
-assert torch.equal(dyn_shape_mod(inp2), true_fn(inp2))
+print(dyn_shape_mod(inp), false_fn(inp))
+print(dyn_shape_mod(inp2), true_fn(inp2))
 ```
 
-We can export the model for further transformations and deployment:
+We can export the model for further transformations and deployment. This gives
+us an exported program as shown below:
 
-```python
+```{code-cell}
 inp = torch.randn(4, 3)
-dim_batch = torch.export.Dim("batch", min=2)
-ep = torch.export.export(DynamicShapeCondPredicate(), (inp,), {}, dynamic_shapes={"x": {0: dim_batch}})
+ep = torch.export.export(
+    DynamicShapeCondPredicate(),
+    (inp,),
+    dynamic_shapes={"x": {0: torch.export.Dim.DYNAMIC}}
+)
 print(ep)
-```
-
-This gives us an exported program as shown below:
-
-```
-class GraphModule(torch.nn.Module):
-    def forward(self, arg0_1: f32[s0, 3]):
-        sym_size: Sym(s0) = torch.ops.aten.sym_size.int(arg0_1, 0)
-        gt: Sym(s0 > 4) = sym_size > 4;  sym_size = None
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional: f32[s0, 3] = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
-        return (conditional,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, 3]):
-            cos: f32[s0, 3] = torch.ops.aten.cos.default(arg0_1)
-            sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-            add: f32[s0, 3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
-            return add
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, 3]):
-            sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-            return sin
 ```
 
 Notice that `torch.cond` is lowered to `torch.ops.higher_order.cond`, its predicate becomes a Symbolic expression over the shape of input,
@@ -110,7 +93,13 @@ and branch functions becomes two sub-graph attributes of the top level graph mod
 
 Here is another example that showcases how to express a data-dependent control flow:
 
-```python
+```{code-cell}
+def true_fn(x: torch.Tensor):
+    return x.cos() + x.sin()
+
+def false_fn(x: torch.Tensor):
+    return x.sin()
+
 class DataDependentCondPredicate(torch.nn.Module):
     """
     A basic usage of cond based on data dependent predicate.
@@ -120,32 +109,10 @@ class DataDependentCondPredicate(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.cond(x.sum() > 4.0, true_fn, false_fn, (x,))
-```
 
-The exported program we get after export:
-
-```
-class GraphModule(torch.nn.Module):
-    def forward(self, arg0_1: f32[s0, 3]):
-        sum_1: f32[] = torch.ops.aten.sum.default(arg0_1)
-        gt: b8[] = torch.ops.aten.gt.Scalar(sum_1, 4.0);  sum_1 = None
-
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional: f32[s0, 3] = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = None
-        return (conditional,)
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, 3]):
-            cos: f32[s0, 3] = torch.ops.aten.cos.default(arg0_1)
-            sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-            add: f32[s0, 3] = torch.ops.aten.add.Tensor(cos, sin);  cos = sin = None
-            return add
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, 3]):
-            sin: f32[s0, 3] = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-            return sin
+inp = torch.randn(4, 3)
+ep = torch.export.export(DataDependentCondPredicate(), (inp,), dynamic_shapes={"x": {0: torch.export.Dim.DYNAMIC}})
+print(ep)
 ```
 
 ## Invariants of torch.ops.higher_order.cond
