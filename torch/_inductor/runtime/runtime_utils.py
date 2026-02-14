@@ -375,6 +375,7 @@ def pallas_compute_tiling(
     ref_shape: tuple[int, ...],
     transpose: bool = False,
     skip_last_n: int = 0,
+    exact_only: bool = False,
 ) -> tuple[tuple[int, ...], tuple[int, ...], dict[int, int]]:
     """Compute tile shape, grid and axis→grid-dim mapping for CPU/TPU.
 
@@ -388,6 +389,10 @@ def pallas_compute_tiling(
 
     *skip_last_n* prevents tiling the last N dimensions (used when those
     dims correspond to internal reduction ranges that must remain full).
+
+    *exact_only* restricts tiling to dimensions that divide evenly by the
+    tile size (no remainder blocks).  Required on TPU where Mosaic needs
+    block shapes to match the XLA memory layout.
 
     Returns ``(tile_shape, grid, axis_to_grid)`` where *axis_to_grid*
     maps each tiled reference-shape axis index to its position in the
@@ -414,6 +419,14 @@ def pallas_compute_tiling(
     def _align(ax: int) -> int:
         return _TPU_ALIGN_LAST if ax == nd - 1 else _TPU_ALIGN_SECOND_LAST
 
+    def _can_tile_ax(dim: int, t: int) -> bool:
+        """Check if tiling dim to t is valid."""
+        if t >= dim:
+            return False
+        if exact_only and dim % t != 0:
+            return False
+        return True
+
     if transpose and tileable_nd >= 2:
         # Square tile for both last-2 tileable dims
         ax_last = tileable_nd - 1
@@ -421,21 +434,21 @@ def pallas_compute_tiling(
         min_dim = min(ref_shape[ax_last], ref_shape[ax_second])
         t = _pallas_tile_size(min_dim, max(_align(ax_last), _align(ax_second)))
 
-        if t < ref_shape[ax_second]:
+        if _can_tile_ax(ref_shape[ax_second], t):
             tile[ax_second] = t
             axis_to_grid[ax_second] = len(grid_parts)
-            grid_parts.append((ref_shape[ax_second] + t - 1) // t)
+            grid_parts.append(ref_shape[ax_second] // t)
 
-        if t < ref_shape[ax_last]:
+        if _can_tile_ax(ref_shape[ax_last], t):
             tile[ax_last] = t
             axis_to_grid[ax_last] = len(grid_parts)
-            grid_parts.append((ref_shape[ax_last] + t - 1) // t)
+            grid_parts.append(ref_shape[ax_last] // t)
     else:
         # Second-to-last tileable dim (added first so it becomes grid dim 0)
         if tileable_nd >= 2:
             ax = tileable_nd - 2
             t = _pallas_tile_size(ref_shape[ax], _align(ax))
-            if t < ref_shape[ax]:
+            if _can_tile_ax(ref_shape[ax], t):
                 tile[ax] = t
                 axis_to_grid[ax] = len(grid_parts)
                 grid_parts.append((ref_shape[ax] + t - 1) // t)
@@ -444,7 +457,7 @@ def pallas_compute_tiling(
         if tileable_nd >= 1:
             ax = tileable_nd - 1
             t = _pallas_tile_size(ref_shape[ax], _align(ax))
-            if t < ref_shape[ax]:
+            if _can_tile_ax(ref_shape[ax], t):
                 tile[ax] = t
                 axis_to_grid[ax] = len(grid_parts)
                 grid_parts.append((ref_shape[ax] + t - 1) // t)
