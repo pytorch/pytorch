@@ -17,7 +17,13 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._matrix_ops import gen_single_dim_einsum_strategies
+from torch.distributed.tensor._ops._matrix_ops import (
+    gen_single_dim_einsum_strategies,
+    mm_single_dim_strategy,
+)
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
