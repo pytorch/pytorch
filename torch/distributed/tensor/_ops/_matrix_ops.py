@@ -418,7 +418,9 @@ def gen_single_dim_einsum_strategies(
     return strategies_over_one_mesh_dim
 
 
-@register_single_dim_strategy(aten.mm.default, allow_unbacked_sharding=True)
+# TODO enable in a separate PR along with more extensive validation.
+# currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
+# @register_single_dim_strategy(aten.mm.default)
 def mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -431,7 +433,7 @@ def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.addmm.default, allow_unbacked_sharding=True)
+@register_single_dim_strategy(aten.addmm.default)
 def addmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -446,20 +448,13 @@ def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.bmm.default, allow_unbacked_sharding=True)
-def bmm_single_dim_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    return gen_single_dim_einsum_strategies("bmk,bkn->bmn")
-
-
 @register_op_strategy(aten.baddbmm.default)
 def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.baddbmm.default, allow_unbacked_sharding=True)
+@register_single_dim_strategy(aten.baddbmm.default)
 def baddbmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:

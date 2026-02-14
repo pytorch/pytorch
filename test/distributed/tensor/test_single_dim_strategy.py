@@ -34,7 +34,6 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     _get_unique_placements,
     _insert_single_dim_replication_strategy,
     _ShardingPlaceholder,
-    _SingleDimStrategyInfo,
     register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
@@ -130,7 +129,7 @@ class TestExpandPlaceholder(TestCase):
                 linearity=linearity or -1
             )
             expanded = _expand_single_dim_strategy_to_mesh(
-                mesh, op_schema, _SingleDimStrategyInfo(strategy_fn), output_meta
+                mesh, op_schema, strategy_fn, output_meta
             )
             strategy = expanded(op, op_schema.args_meta, op_schema.kwargs_meta)
 
@@ -247,9 +246,7 @@ class TestExpandPlaceholder(TestCase):
             expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
                 mesh,
                 op_schema,
-                _SingleDimStrategyInfo(
-                    single_mesh_dim_linear_pointwise_strategy(linearity=1)
-                ),
+                single_mesh_dim_linear_pointwise_strategy(linearity=1),
                 output_tensor_meta,
             )
             strategy = expanded_strategy_fn(
@@ -334,10 +331,7 @@ class TestExpandPlaceholder(TestCase):
             )
 
             expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                mesh,
-                op_schema,
-                _SingleDimStrategyInfo(cat_single_dim_strategy),
-                output_meta,
+                mesh, op_schema, cat_single_dim_strategy, output_meta
             )
             strategy = expanded_strategy_fn(
                 torch.ops.aten.cat.default, op_schema.args_meta, op_schema.kwargs_meta
@@ -451,7 +445,7 @@ class TestExpandPlaceholder(TestCase):
 
         # Expand the strategy to the full mesh
         expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-            mesh, op_schema, _SingleDimStrategyInfo(mm_single_dim_strategy), output_meta
+            mesh, op_schema, mm_single_dim_strategy, output_meta
         )
         strategy = expanded_strategy_fn(
             torch.ops.aten.matmul.default, op_schema.args_meta, op_schema.kwargs_meta
@@ -907,10 +901,7 @@ class TestExpandPlaceholder(TestCase):
         # because _insert_single_dim_replication_strategy created [R, R] (2 elements)
         # instead of [R, R, R, R] (4 elements for 3 outputs + 1 input)
         expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-            mesh,
-            op_schema,
-            _SingleDimStrategyInfo(mock_multi_output_strategy),
-            output_metas,
+            mesh, op_schema, mock_multi_output_strategy, output_metas
         )
         strategy = expanded_strategy_fn(
             torch.ops.aten.abs.default,
@@ -996,10 +987,7 @@ class TestExpandPlaceholder(TestCase):
             "in-place operations that require placement changes are not supported",
         ):
             expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                mesh,
-                op_schema,
-                _SingleDimStrategyInfo(mock_pointwise_strategy),
-                input_meta,
+                mesh, op_schema, mock_pointwise_strategy, input_meta
             )
             expanded_strategy_fn(
                 torch.ops.aten.clamp_.default,

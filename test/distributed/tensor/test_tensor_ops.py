@@ -833,7 +833,6 @@ class DistTensorOpsTest(DTensorTestBase):
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.single_dim_strategy import (
             _ShardingPlaceholder,
-            _SingleDimStrategyInfo,
         )
         from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 
@@ -863,7 +862,7 @@ class DistTensorOpsTest(DTensorTestBase):
         with (
             patch.dict(
                 propagator.op_single_dim_strategy_funcs,
-                {op: _SingleDimStrategyInfo(func=to_copy_single_dim_strategy)},
+                {op: to_copy_single_dim_strategy},
             ),
             patch.dict(
                 propagator.op_to_schema_info_for_single_dim_strategy, {op: schema_info}
