@@ -692,16 +692,12 @@ class FxConverter:
     def _generate_conditional(self, line: WrapperLine) -> None:
         assert isinstance(line, ConditionalLine)
 
-        def get_subgm_attr(subgraph: Optional[ir.Subgraph]) -> torch.fx.Node:
-            assert subgraph is not None
-            return self._get_subgm_attr(subgraph)
-
-        # Access the subgraphs as getattrs.
         ir_node = line.node
-        (true_subgm, false_subgm) = [
-            get_subgm_attr(subgraph)
-            for subgraph in (ir_node.true_subgraph, ir_node.false_subgraph)
-        ]
+
+        assert ir_node.true_subgraph is not None
+        assert ir_node.false_subgraph is not None
+        true_subgm = self._get_subgm_attr(ir_node.true_subgraph)
+        false_subgm = self._get_subgm_attr(ir_node.false_subgraph)
 
         def generate_buffer(node: Optional[ir.IRNode]) -> Optional[torch.fx.Node]:
             assert node is not None

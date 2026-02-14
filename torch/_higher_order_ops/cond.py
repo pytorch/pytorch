@@ -59,7 +59,6 @@ class CondOp(HigherOrderOperator):
         from torch._higher_order_ops.utils import materialize_as_graph
 
         then_gm: torch.fx.GraphModule = materialize_as_graph(true_fn, operands)
-        else_gm: torch.fx.GraphModule = materialize_as_graph(false_fn, operands)
         (
             _,
             _,
@@ -67,12 +66,14 @@ class CondOp(HigherOrderOperator):
             then_mutated_inputs,
             then_outputs,
         ) = check_input_alias_and_mutation_return_outputs(then_gm)
+
+        else_gm: torch.fx.GraphModule = materialize_as_graph(false_fn, operands)
         (
             _,
             _,
             _,
             else_mutated_inputs,
-            else_outputs,
+            _,
         ) = check_input_alias_and_mutation_return_outputs(else_gm)
         mutated_inputs = set(then_mutated_inputs) | set(else_mutated_inputs)
 
@@ -92,11 +93,30 @@ class CondOp(HigherOrderOperator):
 cond_op = CondOp()
 
 
+def _make_noop_false_fn(true_fn):
+    def false_fn(*operands):
+        true_outs = true_fn(*operands)
+        flat_outs, spec = pytree.tree_flatten(true_outs)
+        empty_outs = []
+        for o in flat_outs:
+            if isinstance(o, torch.Tensor):
+                empty_outs.append(
+                    torch.empty_strided(
+                        o.shape, o.stride(), dtype=o.dtype, device=o.device
+                    )
+                )
+            else:
+                empty_outs.append(o)
+        return pytree.tree_unflatten(empty_outs, spec)
+
+    return false_fn
+
+
 @exposed_in("torch")
 def cond(
     pred: Union[bool, int, float, torch.Tensor],
     true_fn: Callable,
-    false_fn: Callable,
+    false_fn: Optional[Callable],
     operands: Union[tuple, list] = (),
 ) -> Any:
     r"""
@@ -168,12 +188,13 @@ def cond(
             are allowed in a branch)
 
     """
+    if false_fn is None:
+        false_fn = _make_noop_false_fn(true_fn)
+
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
     if isinstance(pred, (bool, int, float)):
-        # This is the non-strict export case. Strict export and torch.compile are
-        # handled above in dynamo.
         if torch.compiler.is_compiling():
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
@@ -181,7 +202,6 @@ def cond(
                 UserWarning,
                 stacklevel=2,
             )
-        # This is the eager case. We can just run the true or false branch.
         if pred:
             return true_fn(*operands)
         else:
@@ -255,13 +275,13 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
     i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
+    proxy_mode.tracer.root.register_module(true_name, true_graph)
+
     false_name = f"false_graph_{i}"
     if hasattr(proxy_mode.tracer.root, false_name):
         raise AssertionError(
             f"proxy_mode.tracer.root already has attribute {false_name}"
         )
-
-    proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
 
     args = (pred, true_graph, false_graph, operands)
@@ -303,16 +323,8 @@ class CondAutogradOp(torch.autograd.Function):
         *operands,
     ):
         ctx._pred = pred
-        ctx._true_bw_fn = create_bw_fn(
-            true_fn,
-            operands,
-        )
-        ctx._false_bw_fn = create_bw_fn(
-            false_fn,
-            operands,
-        )
-        # We snapshot the dispatch keys in forward for materializing the
-        # the bw_graph in backward.
+        ctx._true_bw_fn = create_bw_fn(true_fn, operands)
+        ctx._false_bw_fn = create_bw_fn(false_fn, operands)
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         save_values_for_backward(ctx, operands)
@@ -324,8 +336,6 @@ class CondAutogradOp(torch.autograd.Function):
     def backward(ctx, *flat_grads):
         operands = saved_values(ctx)
         args = operands + flat_grads
-        # TODO: we need to materialize the bw graphs because dynamo is unable to
-        # trace through the joint function when torch.compile torch.autograd.grad.
 
         grads_tensor_masks = []
 
@@ -342,20 +352,17 @@ class CondAutogradOp(torch.autograd.Function):
 
             return wrapped
 
-        true_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._true_bw_fn),
-            args,
-            ctx._fw_include_key_set,
-            ctx._fw_exclude_key_set,
-            force_enable_grad=True,
-        )
-        false_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._false_bw_fn),
-            args,
-            ctx._fw_include_key_set,
-            ctx._fw_exclude_key_set,
-            force_enable_grad=True,
-        )
+        def _materialize_bw(bw_fn):
+            return materialize_as_graph(
+                create_fn_remove_none(bw_fn),
+                args,
+                ctx._fw_include_key_set,
+                ctx._fw_exclude_key_set,
+                force_enable_grad=True,
+            )
+
+        true_bw_gm = _materialize_bw(ctx._true_bw_fn)
+        false_bw_gm = _materialize_bw(ctx._false_bw_fn)
         grads = cond_op(
             ctx._pred,
             true_bw_gm,
@@ -386,10 +393,6 @@ def inner(mode, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(FakeTensorMode)
 def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
-    # Ignore here, because if you've gotten here but you're not manually
-    # tracing the inner graphs, that means that you intend to reuse the graph
-    # directly.  Which means the old unbacked symbol bindings are appropriate.
-    # This strategy will not work if unbacked symbols can escape.
     ignore_fresh_unbacked = contextlib.nullcontext()
     if mode.shape_env:
         ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
@@ -696,10 +699,10 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         functional_true = ctx.functionalize(_maybe_run_with_interpreter(true_fn))
         functional_false = ctx.functionalize(_maybe_run_with_interpreter(false_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
-            _check_alias_and_mutation(
-                branch, unwrapped_inputs, branch_name, pre_dispatch
-            )
+        _check_alias_and_mutation(true_fn, unwrapped_inputs, "cond_true", pre_dispatch)
+        _check_alias_and_mutation(
+            false_fn, unwrapped_inputs, "cond_false", pre_dispatch
+        )
 
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
@@ -730,21 +733,18 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
     )
 
     if pred_is_batched:
-        # prepend "pred" and vmap everything
         tensors = (pred_,) + tensors
         in_dims = (0,) + in_dims
 
         def fn(p, *args):
             t = true_fn(*args)
-            f = false_fn(*args)
-            return torch.where(p, t[0], f[0])
+            f_val = false_fn(*args)[0]
+            return torch.where(p, t[0], f_val)
 
         with interpreter.lower():
             result = torch.vmap(fn, in_dims=in_dims)(*tensors)
 
     else:
-        # predicate is known at this stage and it is a boolean expression or a
-        # tensor with one element.
         true_fn = torch.vmap(true_fn, in_dims=in_dims)
         false_fn = torch.vmap(false_fn, in_dims=in_dims)
 

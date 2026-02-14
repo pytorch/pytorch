@@ -2407,7 +2407,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             pred.as_proxy(),
             true_node,
             false_node,
-            # We pick true_shared but it shouldn't matter
             tuple(true_shared + unique_true + unique_false),
         )
 

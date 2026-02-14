@@ -3726,7 +3726,6 @@ class PythonWrapperCodegen(CodeGen):
 
         predicate = conditional.predicate.codegen_reference()
         if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
-            # move the Tensor predicate to host
             predicate = f"{predicate}.item()"
 
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
@@ -3742,6 +3741,7 @@ class PythonWrapperCodegen(CodeGen):
 
         self.writeline(ExitSubgraphLine(self))
         self.writeline("else:")
+
         self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
         if V.graph.aot_mode:
             outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]

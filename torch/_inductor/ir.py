@@ -9066,7 +9066,6 @@ class Conditional(ExternKernel):
 
         for subgraph in (true_fn, false_fn):
             if subgraph.graph is None:
-                # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
                     example_inputs=fake_operands,
@@ -9074,31 +9073,40 @@ class Conditional(ExternKernel):
                 )
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
-                    # Force subgraph outputs to have the expected strides from
-                    # FakeTensor metadata. This ensures both branches produce
-                    # outputs with consistent strides.
                     subgraph.graph.graph_outputs = _require_exact_strides(
                         subgraph.graph.graph_outputs, fake_outputs
                     )
 
         assert true_fn.graph is not None
-        assert false_fn.graph is not None
         true_outputs = true_fn.graph.graph_outputs
+
+        if _has_aliased_buffers(true_outputs):
+            raise AssertionError(
+                "Output aliasing is currently not supported in compiled torch.cond. "
+                f"The outputs of the true_fn subgraph of torch.cond are aliased: {true_outputs}"
+            )
+
+        assert false_fn.graph is not None
         false_outputs = false_fn.graph.graph_outputs
 
-        for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
-            if _has_aliased_buffers(true_outputs):
-                raise AssertionError(
-                    "Output aliasing is currently not supported in compiled torch.cond. "
-                    f"The outputs of the {name} subgraph of torch.cond are aliased: {outputs}"
-                )
+        if _has_aliased_buffers(false_outputs):
+            raise AssertionError(
+                "Output aliasing is currently not supported in compiled torch.cond. "
+                f"The outputs of the false_fn subgraph of torch.cond are aliased: {false_outputs}"
+            )
 
-        # make sure true and false outputs are structurally equivalent
-        assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
+        assert len(true_outputs) == len(false_outputs), (
+            true_outputs,
+            false_outputs,
+        )
         for i, (t_o, f_o) in enumerate(zip(true_outputs, false_outputs)):
             assert t_o.get_device() == f_o.get_device(), (i, t_o, f_o)
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
-            assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
+            assert t_o.get_layout().offset == f_o.get_layout().offset, (
+                i,
+                t_o,
+                f_o,
+            )
 
         # Determine device from operands and predicate
         # The predicate can be on a different device (e.g., CPU for control flow)

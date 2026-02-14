@@ -288,6 +288,20 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [x])
 
+    class NoOpFalseBranch(torch.nn.Module):
+        def forward(self, p, a, b):
+            def true_fn(x, y):
+                return x + y
+
+            return torch.cond(p, true_fn, None, [a, b])
+
+    class NoOpFalseBranchMultipleOutputs(torch.nn.Module):
+        def forward(self, p, a, b, c):
+            def true_fn(x, y, z):
+                return x * y, z / 2.71, (y - x).sum(dim=1)
+
+            return torch.cond(p, true_fn, None, [a, b, c])
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -810,6 +824,50 @@ class CondTests(TestCase):
             device="cpu",  # device for predicate
             dynamic=True,
         )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_cond_noop_false_branch(self, device, dynamic):
+        model = CondModels.NoOpFalseBranch()
+        inputs = [
+            torch.randn(10, 20, device=device),
+            torch.randn(10, 20, device=device),
+        ]
+        compiled_model = torch.compile(model, backend="inductor", fullgraph=True)
+
+        pred_true = torch.tensor(True, device=device)
+        result_eager = model(pred_true, *inputs)
+        result_compiled = compiled_model(pred_true, *inputs)
+        self.assertEqual(result_eager, result_compiled)
+
+        pred_false = torch.tensor(False, device=device)
+        result_compiled_false = compiled_model(pred_false, *inputs)
+        self.assertEqual(result_compiled_false.shape, result_eager.shape)
+        self.assertEqual(result_compiled_false.dtype, result_eager.dtype)
+        self.assertEqual(result_compiled_false.device, result_eager.device)
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    def test_cond_noop_false_branch_multiple_outputs(self, device):
+        model = CondModels.NoOpFalseBranchMultipleOutputs()
+        inputs = [
+            torch.randn(10, 20, device=device),
+            torch.randn(10, 20, device=device),
+            torch.randn(30, 40, device=device),
+        ]
+        compiled_model = torch.compile(model, backend="inductor", fullgraph=True)
+
+        pred_true = torch.tensor(True, device=device)
+        result_eager = model(pred_true, *inputs)
+        result_compiled = compiled_model(pred_true, *inputs)
+        self.assertEqual(result_eager, result_compiled)
+
+        pred_false = torch.tensor(False, device=device)
+        result_compiled_false = compiled_model(pred_false, *inputs)
+        for r_false, r_true in zip(result_compiled_false, result_eager):
+            self.assertEqual(r_false.shape, r_true.shape)
+            self.assertEqual(r_false.dtype, r_true.dtype)
 
 
 class WhileLoopModels:
