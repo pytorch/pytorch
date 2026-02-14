@@ -2735,6 +2735,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         decorated_fn = self.value
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
         fake_impl = decorated_fn._torchdynamo_leaf_fake_fn
+        mutates_args = getattr(
+            decorated_fn, "_torchdynamo_leaf_mutates_args", frozenset()
+        )
 
         if fake_impl is None:
             raise ValueError(
@@ -2746,6 +2749,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
+
         flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
             VariableTracker.build(tx, (args_with_states, kwargs_with_states))
         ).unpack_var_sequence(tx)
@@ -2755,6 +2759,49 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         input_spec = (
             input_spec_var.as_python_constant()
         )  # pyrefly: ignore [unbound-name]
+
+        mutated_flat_indices = 0
+        if mutates_args:
+            import inspect
+
+            from torch._higher_order_ops.invoke_leaf_function import LeafModuleState
+
+            class _AttrDict:
+                pass
+
+            def _set_nested_attr(obj: _AttrDict, fqn: str, value: Any) -> None:
+                parts = fqn.split(".")
+                for part in parts[:-1]:
+                    if not hasattr(obj, part):
+                        setattr(obj, part, _AttrDict())
+                    obj = getattr(obj, part)
+                setattr(obj, parts[-1], value)
+
+            def _lms_to_attr_dict(val: Any) -> Any:
+                if isinstance(val, LeafModuleState):
+                    target = _AttrDict()
+                    for fqn, sentinel in val.named_parameters.items():
+                        _set_nested_attr(target, fqn, sentinel)
+                    for fqn, sentinel in val.named_buffers.items():
+                        _set_nested_attr(target, fqn, sentinel)
+                    return target
+                return val
+
+            sig = inspect.signature(real_impl)
+            sentinels = list(range(len(flat_arg_proxies)))
+            args_struct, kwargs_struct = pytree.tree_unflatten(sentinels, input_spec)
+            args_eval, kwargs_eval = pytree.tree_map(
+                _lms_to_attr_dict,
+                (args_struct, kwargs_struct),
+                is_leaf=lambda x: isinstance(x, LeafModuleState),
+            )
+            namespace = dict(sig.bind(*args_eval, **kwargs_eval).arguments)
+
+            for expr in mutates_args:
+                result = eval(expr, {"__builtins__": {}}, namespace)  # noqa: S307
+                for sentinel in pytree.tree_leaves(result):
+                    if isinstance(sentinel, int):
+                        mutated_flat_indices |= 1 << sentinel
 
         def wrap_impl_for_leaf_module_state(
             impl: Callable[..., Any],
@@ -2790,6 +2837,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
+            mutated_flat_indices,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(

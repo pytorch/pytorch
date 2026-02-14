@@ -263,7 +263,9 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapped
 
 
-def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+def leaf_function(
+    fn: Optional[Callable[_P, _R]] = None, *, mutates_args: Optional[set[str]] = None
+) -> Any:
     """
     Decorator to mark a function as a leaf function for :func:`torch.compile`.
 
@@ -438,15 +440,39 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
           Logging/printing inside the leaf function is fine since it doesn't affect
           correctness.
 
-        - **In-place mutations on inputs**: In-place mutations on input tensors are
-          detected and will raise an error. Clone inputs before mutating.
+        - **In-place mutations on inputs**: Undeclared in-place mutations on input
+          tensors are detected and will raise an error. Either declare mutations via
+          ``mutates_args`` or clone inputs before mutating.
 
           Bad::
 
             @leaf_function
             def my_leaf_fn(x):
-                x.add_(1)  # Will raise: "In-place mutation detected"
+                x.add_(1)  # Will raise: "Undeclared in-place mutation"
                 return (x,)
+
+          Good::
+
+            @leaf_function(mutates_args={"buf"})
+            def my_leaf_fn(x, buf):
+                buf.add_(1)  # OK: declared in mutates_args
+                return (x + buf,)
+
+          For pytree args (lists, tuples, dicts of tensors), use the parameter name
+          to declare mutation on all contained tensors::
+
+            @leaf_function(mutates_args={"buffers"})
+            def my_leaf_fn(x, buffers):
+                for buf in buffers:
+                    buf.add_(1)  # OK: 'buffers' declared in mutates_args
+                return (x + sum(buffers),)
+
+          Or use bracket notation for fine-grained control::
+
+            @leaf_function(mutates_args={"buffers[0]"})
+            def my_leaf_fn(x, buffers):
+                buffers[0].add_(1)  # OK: 'buffers[0]' declared
+                return (x + buffers[1],)  # buffers[1] is not cloned
 
         - **Closures in fake implementation**: Tensors or modules captured from enclosing scopes
           in the fake implementation will cause compilation errors. The real function can
@@ -517,17 +543,29 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     Args:
         fn: The function being decorated.
+        mutates_args: Set of Python expressions (as strings) identifying arguments
+            that the function mutates in-place. Each string is evaluated against
+            the function's parameters. Examples: ``'buf'`` for a plain tensor,
+            ``'model.running_mean'`` for an nn.Module buffer,
+            ``'buffers'`` to mark all tensors in a list, ``'buffers[0]'`` for a
+            specific element, ``'state["key"]'`` for a dict entry.
     """
+    if fn is None:
+        return functools.partial(leaf_function, mutates_args=mutates_args)
+
     from . import trace_rules
 
     _check_mutually_exclusive_decorators(fn, "leaf_function")
 
     @functools.wraps(fn)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        return fn(*args, **kwargs)
+        return fn(*args, **kwargs)  # pyrefly: ignore [not-callable, bad-return]
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
+    inner._torchdynamo_leaf_mutates_args = (  # pyrefly: ignore [missing-attribute]
+        frozenset(mutates_args) if mutates_args else frozenset()
+    )  # type: ignore[attr-defined]
 
     # Follow nonstrict_trace implementation
     wrapped_id = id(inner)
