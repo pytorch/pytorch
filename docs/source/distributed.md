@@ -191,6 +191,10 @@ Initialization is not thread-safe. Process group creation should be performed fr
 inconsistent 'UUID' assignment across ranks, and to prevent races during initialization that can lead to hangs.
 :::
 
+:::{note}
+`torch.distributed` assumes that all processes participating in a distributed job run the same PyTorch version. Mixed-version clusters are outside the supported deployment model and may result in undefined behavior or runtime failures. When troubleshooting distributed initialization issues, verifying that all ranks report the same `torch.__version__` is a recommended first diagnostic step.
+:::
+
 ```{eval-rst}
 .. autofunction:: is_available
 ```
