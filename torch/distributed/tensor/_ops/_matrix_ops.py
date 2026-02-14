@@ -273,6 +273,7 @@ from ._einsum_strategy import EinsumDims
 def gen_single_dim_einsum_strategies(
     equation: str,
     *,
+    linearity: bool = False,
     bias_shape: torch.Size | None = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """
@@ -292,9 +293,8 @@ def gen_single_dim_einsum_strategies(
         2.2: Shard on lhs only dim or rhs only dim: both output and lhs or rhs
         input should shard on this free dim.
 
-    3. Per-input linearity (Partial): Since matmul is linear in each input
-       independently, one input can remain Partial while others are Replicate,
-       producing a Partial output.
+    3. Linearity (Partial): If enabled, set Partial on output and inputs over
+       the same device mesh dim.
 
     4. Bias input (optional): If bias_shape is provided, a bias placement
        is inserted after the output placement. The bias placement is derived from
@@ -404,16 +404,12 @@ def gen_single_dim_einsum_strategies(
         ]
         strategies_over_one_mesh_dim.append(_maybe_add_bias(rhs_placement_list))
 
-    # Per-input linearity: matmul is linear in each input independently.
-    # One input Partial, the other Replicate → output Partial.
-    for reduce_op in Partial.LINEAR_REDUCE_OPS:
-        output_placement = Partial(reduce_op)
-        strategies_over_one_mesh_dim.append(
-            _maybe_add_bias([output_placement, Partial(reduce_op), Replicate()])
-        )
-        strategies_over_one_mesh_dim.append(
-            _maybe_add_bias([output_placement, Replicate(), Partial(reduce_op)])
-        )
+    # linearity strategy
+    if linearity:
+        linearity_placement_list: list[Placement | _ShardingPlaceholder] = [Partial()]
+        for _ in input_dims:
+            linearity_placement_list.append(Partial())
+        strategies_over_one_mesh_dim.append(_maybe_add_bias(linearity_placement_list))
 
     return strategies_over_one_mesh_dim
 

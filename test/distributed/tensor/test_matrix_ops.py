@@ -23,7 +23,7 @@ from torch.distributed.tensor._ops._matrix_ops import (
 from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
-from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_utils import (
@@ -583,81 +583,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         # tests that currently pass
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
-
-    @with_comms
-    @skip_unless_torch_gpu
-    def test_mm_partial_inputs(self):
-        # mm with Partial inputs should produce Partial output via per-input
-        # linearity, for both the default and single-dim strategy paths,
-        # across various mesh dimensionalities and reduce ops (sum, avg).
-        mesh_shapes = [
-            (self.world_size,),
-            (self.world_size // 2, 2),
-            (self.world_size // 2, 2, 1),
-            (1, self.world_size // 2, 2, 1),
-            (1, 1, self.world_size // 2, 2, 1),
-        ]
-
-        def _run_mm(device_mesh, reduce_op="sum"):
-            placements = [Partial(reduce_op)] * device_mesh.ndim
-            a_local = torch.randn(16, 12, device=self.device_type)
-            b_local = torch.randn(12, 20, device=self.device_type)
-            dt1 = DTensor.from_local(
-                a_local,
-                device_mesh,
-                placements,
-                run_check=False,
-            )
-            dt2 = DTensor.from_local(
-                b_local,
-                device_mesh,
-                placements,
-                run_check=False,
-            )
-            dist_res = torch.mm(dt1, dt2)
-            expected_placements = tuple(
-                Partial(reduce_op) for _ in range(device_mesh.ndim)
-            )
-            self.assertEqual(dist_res.placements, expected_placements)
-            # Numeric check: redistribute to Replicate to materialize the full
-            # result, then compare against the ground truth computed from the
-            # full (all-reduced) inputs.
-            full_res = dist_res.full_tensor()
-            full_a = dt1.full_tensor()
-            full_b = dt2.full_tensor()
-            expected_val = torch.mm(full_a, full_b)
-            self.assertEqual(full_res, expected_val)
-
-        propagator = DTensor._op_dispatcher.sharding_propagator
-        saved = propagator.op_single_dim_strategy_funcs.copy()
-        try:
-            # Non-single-dim strategy path (1D mesh only; gen_einsum_strategies
-            # lacks per-input linearity so multi-dim meshes won't preserve
-            # all-Partial).
-            propagator.op_single_dim_strategy_funcs.pop(torch.ops.aten.mm.default, None)
-            propagator.propagate_op_sharding.cache_clear()
-            device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-            # P(sum) coincidentally works because the contracting dim strategy
-            # produces P(sum). Other reduce_ops fail.
-            _run_mm(device_mesh, "sum")
-            for reduce_op in Partial.LINEAR_REDUCE_OPS:
-                if reduce_op != "sum":
-                    with self.assertRaises(AssertionError):
-                        _run_mm(device_mesh, reduce_op)
-            # Single-dim strategy path across all mesh shapes
-            register_single_dim_strategy(torch.ops.aten.mm.default)(
-                mm_single_dim_strategy
-            )
-            # Must clear both Python and C++ caches after changing strategy funcs
-            _clear_sharding_prop_cache()
-            for mesh_shape in mesh_shapes:
-                device_mesh = init_device_mesh(self.device_type, mesh_shape)
-                propagator.propagate_op_sharding.cache_clear()
-                for reduce_op in Partial.LINEAR_REDUCE_OPS:
-                    _run_mm(device_mesh, reduce_op)
-        finally:
-            propagator.op_single_dim_strategy_funcs = saved
-            _clear_sharding_prop_cache()
 
     @with_comms
     @skip_unless_torch_gpu
