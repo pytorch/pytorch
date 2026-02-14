@@ -86,6 +86,8 @@ class CUDAPeerAllocInfo : public c10::intrusive_ptr_target {
       int rank,
       int world_size);
 
+  ~CUDAPeerAllocInfo() override;
+
  private:
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs_;
   std::vector<void*> buffers_;
