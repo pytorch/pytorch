@@ -20,7 +20,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._ops._view_ops import (
-    _is_last_shard_on_tensor_dim_plus,
+    _is_last_shard_on_tensor_dim,
     Broadcast,
     dim_maps,
     Flatten,
@@ -34,11 +34,41 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
 from torch.utils import _pytree as pytree
+
+
+def _get_all_factorizations(n):
+    """Return all ways to factor n into a tuple of integers > 1.
+
+    Each factorization has length >= 2 (non-trivial unflatten).
+    Order matters for view operations, so all permutations are included.
+
+    Examples:
+        12 -> [(2, 6), (6, 2), (3, 4), (4, 3), (2, 2, 3), (2, 3, 2), (3, 2, 2)]
+        36 -> [(2, 18), (18, 2), (3, 12), ..., (2, 2, 9), ..., (2, 2, 3, 3), ...]
+    """
+    from itertools import permutations
+
+    def get_sorted_factorizations(remaining, min_factor=2):
+        if remaining == 1:
+            return [()]
+        result = []
+        for f in range(min_factor, remaining + 1):
+            if remaining % f == 0:
+                for sub in get_sorted_factorizations(remaining // f, f):
+                    result.append((f,) + sub)
+        return result
+
+    sorted_facts = get_sorted_factorizations(n)
+    all_factorizations = set()
+    for factors in sorted_facts:
+        if len(factors) >= 2:
+            for perm in permutations(factors):
+                all_factorizations.add(perm)
+    return list(all_factorizations)
 
 
 class TestViewOps(DTensorTestBase):
@@ -233,8 +263,9 @@ class TestViewOps(DTensorTestBase):
         shard.view(-1)
 
         shard = dtensor.redistribute(device_mesh=device_mesh, placements=[Shard(dim=1)])
-        with self.assertRaisesRegex(RuntimeError, "Sharding propagation failed"):
-            shard.view(-1)
+        # Shard(1) on the last flattened dim with uneven sharding is now allowed
+        # (produces _StridedShard output)
+        shard.view(-1)
 
         # 8 is the uneven case since mesh dim is 6
         tensor = torch.randn((8, 256))
@@ -989,7 +1020,7 @@ class TestViewOps(DTensorTestBase):
                 )
             if local_tensor_dims[shard_dim] % mesh.size(idx) != 0:
                 # uneven shard on last flattened dim is supported
-                assert _is_last_shard_on_tensor_dim_plus(idx, placements)
+                assert _is_last_shard_on_tensor_dim(idx, placements)
                 local_tensor_dims[shard_dim] = math.ceil(
                     local_tensor_dims[shard_dim] * 1.0 / mesh.size(idx)
                 )
@@ -1036,6 +1067,200 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(inps_viewed.placements, expected_placements)
         self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
         self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    def test_dtensor_flatten_shard_outside_range(self):
+        """Test that Shard on a dim outside the flatten range passes through correctly.
+
+        When flattening dims [flatten_start, flatten_end), a Shard on a dim outside
+        this range should be preserved with adjusted dim index:
+        - Shard before range: dim unchanged
+        - Shard after range: dim shifts by -(flatten_end - flatten_start - 1)
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # Use sizes divisible by mesh size to avoid uneven-shard complications
+        dim_size = mesh.size(0) * 2
+        test_cases = [
+            # (tensor_dims, flatten_start, flatten_end, shard_dim, expected_shard_dim)
+            # Shard before range
+            ([dim_size] * 3, 1, 3, 0, 0),
+            ([dim_size] * 4, 1, 3, 0, 0),
+            ([dim_size] * 4, 2, 4, 0, 0),
+            ([dim_size] * 4, 2, 4, 1, 1),
+            # Shard after range
+            ([dim_size] * 4, 0, 2, 2, 1),
+            ([dim_size] * 4, 0, 2, 3, 2),
+            ([dim_size] * 4, 0, 3, 3, 1),
+            ([dim_size] * 4, 1, 3, 3, 2),
+        ]
+
+        for (
+            tensor_dims,
+            flatten_start,
+            flatten_end,
+            shard_dim,
+            expected_shard_dim,
+        ) in test_cases:
+            placements = (Shard(shard_dim),)
+            nelem = math.prod(tensor_dims)
+            global_inps = torch.arange(nelem).view(tensor_dims)
+            dt = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
+
+            flat_dims = self._get_viewed_tensor_dims(
+                tensor_dims, flatten_start, flatten_end
+            )
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                dt_flat = dt.view(flat_dims)
+
+            expected_placements = (Shard(expected_shard_dim),)
+            self.assertEqual(dt_flat.placements, expected_placements)
+            expected_local = distribute_tensor(
+                global_inps.view(flat_dims),
+                mesh,
+                expected_placements,
+                src_data_rank=None,
+            )._local_tensor
+            self.assertEqual(dt_flat._local_tensor, expected_local)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # 2D mesh: test shard outside range with (Shard, Replicate) and (Replicate, Shard)
+        mesh_2d = init_device_mesh(self.device_type, (3, self.world_size // 3))
+        dim_size_2d = mesh_2d.size(0) * mesh_2d.size(1) * 2
+        test_cases_2d = [
+            # (tensor_dims, flatten_start, flatten_end, shard_dim)
+            ([dim_size_2d] * 4, 0, 2, 2),  # shard after range
+            ([dim_size_2d] * 4, 0, 2, 3),  # shard after range
+            ([dim_size_2d] * 4, 1, 3, 0),  # shard before range
+            ([dim_size_2d] * 4, 2, 4, 0),  # shard before range
+            ([dim_size_2d] * 4, 2, 4, 1),  # shard right before range
+        ]
+        for tensor_dims, flatten_start, flatten_end, shard_dim in test_cases_2d:
+            num_merged = flatten_end - flatten_start - 1
+            expected_shard_dim = (
+                shard_dim if shard_dim < flatten_start else shard_dim - num_merged
+            )
+            for mesh_dim_idx in range(2):
+                placements = tuple(
+                    Shard(shard_dim) if i == mesh_dim_idx else Replicate()
+                    for i in range(2)
+                )
+                nelem = math.prod(tensor_dims)
+                global_inps = torch.arange(nelem).view(tensor_dims)
+                dt = distribute_tensor(
+                    global_inps, mesh_2d, placements, src_data_rank=None
+                )
+
+                flat_dims = self._get_viewed_tensor_dims(
+                    tensor_dims, flatten_start, flatten_end
+                )
+                comm_mode = CommDebugMode()
+                with comm_mode:
+                    dt_flat = dt.view(flat_dims)
+
+                expected_placements = tuple(
+                    Shard(expected_shard_dim) if i == mesh_dim_idx else Replicate()
+                    for i in range(2)
+                )
+                self.assertEqual(dt_flat.placements, expected_placements)
+                expected_local = distribute_tensor(
+                    global_inps.view(flat_dims),
+                    mesh_2d,
+                    expected_placements,
+                    src_data_rank=None,
+                )._local_tensor
+                self.assertEqual(dt_flat._local_tensor, expected_local)
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    def test_dtensor_flatten_unflatten_roundtrip(self):
+        """Flatten then unflatten should recover the original placements and data.
+
+        Tests the full round-trip: DTensor -> flatten -> unflatten -> compare with original.
+        Covers sharding on dims before, within, and after the flatten range.
+        Also tests unflatten -> flatten direction.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        dim_size = mesh.size(0) * 2  # evenly divisible
+
+        # flatten -> unflatten round-trip
+        test_cases = [
+            # (tensor_dims, flatten_start, flatten_end, shard_dim)
+            # Shard on first of flattened dims
+            ([dim_size, dim_size], 0, 2, 0),
+            # Shard on second of flattened dims
+            ([dim_size, dim_size], 0, 2, 1),
+            # 3D: shard in range (leading)
+            ([dim_size, dim_size, dim_size], 0, 2, 0),
+            # 3D: shard in range (second)
+            ([dim_size, dim_size, dim_size], 0, 2, 1),
+            # 3D: shard outside range (after)
+            ([dim_size, dim_size, dim_size], 0, 2, 2),
+            # 3D: shard before range
+            ([dim_size, dim_size, dim_size], 1, 3, 0),
+            # 3D: shard in range (first of second pair)
+            ([dim_size, dim_size, dim_size], 1, 3, 1),
+            # 3D: shard in range (second of second pair)
+            ([dim_size, dim_size, dim_size], 1, 3, 2),
+            # 4D: shard first of 3 flattened
+            ([dim_size] * 4, 0, 3, 0),
+            # 4D: shard last of 3 flattened
+            ([dim_size] * 4, 0, 3, 2),
+            # 4D: shard outside range (after)
+            ([dim_size] * 4, 0, 3, 3),
+            # 4D: shard before range
+            ([dim_size] * 4, 1, 3, 0),
+            # 4D: shard after range
+            ([dim_size] * 4, 1, 3, 3),
+        ]
+
+        for tensor_dims, flatten_start, flatten_end, shard_dim in test_cases:
+            placements = (Shard(shard_dim),)
+            nelem = math.prod(tensor_dims)
+            global_inps = torch.arange(nelem).view(tensor_dims)
+            dt = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
+
+            # Flatten
+            flat_dims = self._get_viewed_tensor_dims(
+                tensor_dims, flatten_start, flatten_end
+            )
+            dt_flat = dt.view(flat_dims)
+
+            # Unflatten back
+            dt_roundtrip = dt_flat.view(tensor_dims)
+
+            self.assertEqual(dt_roundtrip.placements, placements)
+            self.assertEqual(dt_roundtrip._local_tensor, dt._local_tensor)
+
+        # unflatten -> flatten round-trip
+        # Start with a flattened tensor, unflatten it, then flatten back
+        for tensor_dims, flatten_start, flatten_end, shard_dim in test_cases:
+            flat_dims = self._get_viewed_tensor_dims(
+                tensor_dims, flatten_start, flatten_end
+            )
+            # Compute the shard dim in the flattened view
+            if shard_dim < flatten_start:
+                flat_shard_dim = shard_dim
+            elif shard_dim < flatten_end:
+                flat_shard_dim = (
+                    flatten_start  # all flattened dims merge to flatten_start
+                )
+            else:
+                flat_shard_dim = shard_dim - (flatten_end - flatten_start - 1)
+
+            placements = (Shard(flat_shard_dim),)
+            nelem = math.prod(flat_dims)
+            global_inps = torch.arange(nelem).view(flat_dims)
+            dt = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
+
+            # Unflatten
+            dt_unflat = dt.view(tensor_dims)
+
+            # Flatten back
+            dt_roundtrip = dt_unflat.view(flat_dims)
+
+            self.assertEqual(dt_roundtrip.placements, placements)
+            self.assertEqual(dt_roundtrip._local_tensor, dt._local_tensor)
 
     def generate_tensor_dims_1d(
         self, tensor_ndim, flatten_start, flatten_end, shard_dim, mesh
@@ -1203,42 +1428,13 @@ class TestViewOps(DTensorTestBase):
         inps = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
         inps_viewed = inps.view(tensor_dims_unflatten)
         self.assertEqual(inps_viewed.placements, expected_placements)
-
-    def _get_all_factorizations(self, n):
-        """
-        Return all ways to factor n into a tuple of integers > 1.
-        Each factorization has length >= 2 (non-trivial unflatten).
-        Order matters for view operations, so all permutations are included.
-
-        Examples:
-            12 -> [(2, 6), (6, 2), (3, 4), (4, 3), (2, 2, 3), (2, 3, 2), (3, 2, 2)]
-            36 -> [(2, 18), (18, 2), (3, 12), ..., (2, 2, 9), ..., (2, 2, 3, 3), ...]
-        """
-        from itertools import permutations
-
-        def get_sorted_factorizations(remaining, min_factor=2):
-            """Get all factorizations where factors are in non-decreasing order."""
-            if remaining == 1:
-                return [()]
-
-            result = []
-            for f in range(min_factor, remaining + 1):
-                if remaining % f == 0:
-                    for sub in get_sorted_factorizations(remaining // f, f):
-                        result.append((f,) + sub)
-            return result
-
-        # Get sorted factorizations (to avoid duplicates before permutation)
-        sorted_facts = get_sorted_factorizations(n)
-
-        # Filter for length >= 2 (non-trivial) and generate all permutations
-        all_factorizations = set()
-        for factors in sorted_facts:
-            if len(factors) >= 2:
-                for perm in permutations(factors):
-                    all_factorizations.add(perm)
-
-        return list(all_factorizations)
+        expected_local_tensor = distribute_tensor(
+            torch.arange(nelem).view(tensor_dims_unflatten),
+            mesh,
+            expected_placements,
+            src_data_rank=None,
+        )._local_tensor
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
 
     def _test_dtensor_unflatten_1d_shard_arbitrary(
         self, tensor_dims, unflatten_dim, placements, mesh
@@ -1252,7 +1448,7 @@ class TestViewOps(DTensorTestBase):
 
         # Get all non-trivial factorizations of unflatten_dim size
         unflatten_size = tensor_dims[unflatten_dim]
-        factorizations = self._get_all_factorizations(unflatten_size)
+        factorizations = _get_all_factorizations(unflatten_size)
 
         # Skip if no non-trivial factorization exists (prime number)
         if not factorizations:
@@ -1416,7 +1612,7 @@ class TestViewOps(DTensorTestBase):
         # We iterate over factorizations of a fixed flattened size (e.g., 144).
         # For each factorization with len >= 3, we pick all valid index pairs.
         flattened_size = 144  # = 12 * 6 * 2, has many factorizations
-        factorizations = self._get_all_factorizations(flattened_size)
+        factorizations = _get_all_factorizations(flattened_size)
 
         # Filter for factorizations with >= 3 factors (need prefix + 2 shard dims)
         valid_factorizations = [f for f in factorizations if len(f) >= 3]
@@ -1441,7 +1637,9 @@ class TestViewOps(DTensorTestBase):
                     uneven_shard_on_mesh_dim1 = (
                         factor1 % mesh_size1 != 0 and not is_last_split_idx1
                     )
-                    expect_error = uneven_shard_on_mesh_dim0 or uneven_shard_on_mesh_dim1
+                    expect_error = (
+                        uneven_shard_on_mesh_dim0 or uneven_shard_on_mesh_dim1
+                    )
 
                     if expect_error:
                         with self.assertRaisesRegex(
@@ -1468,7 +1666,7 @@ class TestViewOps(DTensorTestBase):
         # - Factor at shard_idx must be divisible by mesh.size(1) for even sharding
         #   (except for last split dim where uneven sharding is allowed)
         flattened_size_rs = 72  # = 12 * 6, has many factorizations
-        factorizations_rs = self._get_all_factorizations(flattened_size_rs)
+        factorizations_rs = _get_all_factorizations(flattened_size_rs)
 
         # Filter for factorizations with >= 2 factors (need prefix + shard dim)
         valid_factorizations_rs = [f for f in factorizations_rs if len(f) >= 2]
@@ -1503,7 +1701,7 @@ class TestViewOps(DTensorTestBase):
         # Test (Replicate, Replicate): unflatten should preserve Replicate placement
         # Uses all factorizations to comprehensively test that Replicate is preserved.
         flattened_size_rr = 72  # = 12 * 6, has many factorizations
-        factorizations_rr = self._get_all_factorizations(flattened_size_rr)
+        factorizations_rr = _get_all_factorizations(flattened_size_rr)
 
         for factors in factorizations_rr:
             # Test with the flattened dim at different positions
@@ -1561,6 +1759,13 @@ class TestViewOps(DTensorTestBase):
         inps = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
         inps_viewed = inps.view(tensor_dims_unflatten)
         self.assertEqual(inps_viewed.placements, expected_placements)
+        expected_local_tensor = distribute_tensor(
+            torch.arange(nelem).view(tensor_dims_unflatten),
+            mesh,
+            expected_placements,
+            src_data_rank=None,
+        )._local_tensor
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
 
     def _test_dtensor_unflatten_2d_ss_factors(
         self,
@@ -1596,16 +1801,11 @@ class TestViewOps(DTensorTestBase):
         # Compute split_factors for both mesh dims
         # For mesh dim 0: product of dims before shard_dim0 (using global dims)
         split_factor0 = math.prod(factors[:shard_idx0])
-        if split_factor0 == 0:
-            split_factor0 = 1  # empty product
 
-        # For mesh dim 1: match DTensor's computation in _view_ops.py (lines 700-709)
-        # DTensor computes: prod(group_shape[0:split_id]) // mesh_sizes[earlier_mesh_dims]
-        # So we compute product of all dims before shard_idx1, then divide by mesh.size(0)
+        # For mesh dim 1: match DTensor's computation in _view_ops.py
+        # prod(group_shape[0:split_id]) // mesh_sizes[earlier_mesh_dims]
         split_factor1 = math.prod(factors[:shard_idx1])
         split_factor1 = split_factor1 // mesh.size(0)
-        if split_factor1 == 0:
-            split_factor1 = 1  # handle truncation from uneven division
 
         input_placement0 = _StridedShard(flatten_start, split_factor=split_factor0)
         input_placement1 = _StridedShard(flatten_start, split_factor=split_factor1)
@@ -1622,6 +1822,63 @@ class TestViewOps(DTensorTestBase):
 
         self.assertEqual(inps_viewed.placements, expected_placements)
         self.assertEqual(comm_mode.get_total_counts(), 0)
+        expected_local_tensor = distribute_tensor(
+            torch.arange(nelem).view(tensor_dims_unflatten),
+            mesh,
+            expected_placements,
+            src_data_rank=None,
+        )._local_tensor
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
+
+    @with_comms
+    def test_dtensor_flatten_unflatten_2d_reversed_mesh(self):
+        """Test flatten/unflatten with reversed mesh shape (2, 3) to catch ordering bugs.
+
+        The main 2D tests use mesh (3, 2). This test uses (2, 3) to verify that
+        the sharding propagation correctly handles different mesh dim sizes in
+        different positions.
+        """
+        assert self.world_size == 6
+        mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        dim_size = mesh.size(0) * mesh.size(1) * 2  # divisible by both mesh dims
+
+        # Flatten with (S, S) pattern
+        for tensor_ndim in [3]:
+            for flatten_start in range(tensor_ndim):
+                for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
+                    for shard_dim0 in range(flatten_start, flatten_end):
+                        for shard_dim1 in range(shard_dim0, flatten_end):
+                            tensor_dims = tuple([dim_size] * tensor_ndim)
+                            placements = (Shard(shard_dim0), Shard(shard_dim1))
+                            self._test_dtensor_flatten_2d_ss(
+                                tensor_dims,
+                                flatten_start,
+                                flatten_end,
+                                mesh,
+                                placements,
+                            )
+
+        # Unflatten with (SS, SS) pattern — representative factorizations
+        factors_list = [(6, 4, 3), (4, 6, 2), (3, 2, 6), (2, 6, 4)]
+        for factors in factors_list:
+            for shard_idx0 in range(1, len(factors) - 1):
+                for shard_idx1 in range(shard_idx0 + 1, len(factors)):
+                    factor0 = factors[shard_idx0]
+                    factor1 = factors[shard_idx1]
+                    uneven0 = factor0 % mesh.size(0) != 0
+                    is_last1 = shard_idx1 == len(factors) - 1
+                    uneven1 = factor1 % mesh.size(1) != 0 and not is_last1
+                    if uneven0 or uneven1:
+                        with self.assertRaisesRegex(
+                            RuntimeError, "is not evenly divisible"
+                        ):
+                            self._test_dtensor_unflatten_2d_ss_factors(
+                                factors, shard_idx0, shard_idx1, mesh
+                            )
+                    else:
+                        self._test_dtensor_unflatten_2d_ss_factors(
+                            factors, shard_idx0, shard_idx1, mesh
+                        )
 
     @with_comms
     def test_view_redistribution(self):
@@ -1792,7 +2049,7 @@ class TestViewOps3D(DTensorTestBase):
         # - We need at least 1 factor as prefix (for split_factor > 1 for first shard)
         # - We need at least 1 dim outside flatten range
         flattened_size = 288  # = 2 * 2 * 2 * 6 * 6, has many factorizations
-        factorizations = self._get_all_factorizations(flattened_size)
+        factorizations = _get_all_factorizations(flattened_size)
 
         # Filter for factorizations with >= 4 factors (need prefix + 3 shard dims)
         valid_factorizations = [f for f in factorizations if len(f) >= 4]
@@ -1828,7 +2085,8 @@ class TestViewOps3D(DTensorTestBase):
 
                         if expect_error:
                             with self.assertRaisesRegex(
-                                RuntimeError, "is not evenly divisible by mesh dimension"
+                                RuntimeError,
+                                "is not evenly divisible by mesh dimension",
                             ):
                                 self._test_dtensor_unflatten_3d_sss_factors(
                                     factors,
@@ -1853,7 +2111,7 @@ class TestViewOps3D(DTensorTestBase):
         # - We need at least 2 factors in the flatten range for two shard dims
         # - We need at least 1 factor as prefix (for split_factor > 1 for first shard)
         flattened_size_rss = 144  # = 12 * 6 * 2, has many factorizations
-        factorizations_rss = self._get_all_factorizations(flattened_size_rss)
+        factorizations_rss = _get_all_factorizations(flattened_size_rss)
 
         # Filter for factorizations with >= 3 factors (need prefix + 2 shard dims)
         valid_factorizations_rss = [f for f in factorizations_rss if len(f) >= 3]
@@ -1874,7 +2132,9 @@ class TestViewOps3D(DTensorTestBase):
                     uneven_shard_on_mesh_dim2 = (
                         factor1 % mesh_size2 != 0 and not is_last_split_idx1
                     )
-                    expect_error = uneven_shard_on_mesh_dim1 or uneven_shard_on_mesh_dim2
+                    expect_error = (
+                        uneven_shard_on_mesh_dim1 or uneven_shard_on_mesh_dim2
+                    )
 
                     if expect_error:
                         with self.assertRaisesRegex(
@@ -1897,7 +2157,7 @@ class TestViewOps3D(DTensorTestBase):
         # Test (Replicate, Replicate, _StridedShard) pattern - mesh dims 0,1 replicate,
         # mesh dim 2 shards.
         flattened_size_rrs = 72  # = 12 * 6, has many factorizations
-        factorizations_rrs = self._get_all_factorizations(flattened_size_rrs)
+        factorizations_rrs = _get_all_factorizations(flattened_size_rrs)
 
         # Filter for factorizations with >= 2 factors (need prefix + shard dim)
         valid_factorizations_rrs = [f for f in factorizations_rrs if len(f) >= 2]
@@ -1931,7 +2191,7 @@ class TestViewOps3D(DTensorTestBase):
 
         # Test (Replicate, Replicate, Replicate): unflatten should preserve Replicate placement
         flattened_size_rrr = 72  # = 12 * 6, has many factorizations
-        factorizations_rrr = self._get_all_factorizations(flattened_size_rrr)
+        factorizations_rrr = _get_all_factorizations(flattened_size_rrr)
 
         for factors in factorizations_rrr:
             # Test with the flattened dim at different positions
@@ -1956,42 +2216,6 @@ class TestViewOps3D(DTensorTestBase):
                 self.assertEqual(
                     dt_unflattened.shape, torch.Size(tensor_dims_unflatten)
                 )
-
-    def _get_all_factorizations(self, n):
-        """
-        Return all ways to factor n into a tuple of integers > 1.
-        Each factorization has length >= 2 (non-trivial unflatten).
-        Order matters for view operations, so all permutations are included.
-
-        Examples:
-            12 -> [(2, 6), (6, 2), (3, 4), (4, 3), (2, 2, 3), (2, 3, 2), (3, 2, 2)]
-            36 -> [(2, 18), (18, 2), (3, 12), ..., (2, 2, 9), ..., (2, 2, 3, 3), ...]
-        """
-        from itertools import permutations
-
-        def get_sorted_factorizations(remaining, min_factor=2):
-            """Get all factorizations where factors are in non-decreasing order."""
-            if remaining == 1:
-                return [()]
-
-            result = []
-            for f in range(min_factor, remaining + 1):
-                if remaining % f == 0:
-                    for sub in get_sorted_factorizations(remaining // f, f):
-                        result.append((f,) + sub)
-            return result
-
-        # Get sorted factorizations (to avoid duplicates before permutation)
-        sorted_facts = get_sorted_factorizations(n)
-
-        # Filter for length >= 2 (non-trivial) and generate all permutations
-        all_factorizations = set()
-        for factors in sorted_facts:
-            if len(factors) >= 2:
-                for perm in permutations(factors):
-                    all_factorizations.add(perm)
-
-        return list(all_factorizations)
 
     def _test_dtensor_unflatten_3d_sss_factors(
         self,
@@ -2030,20 +2254,10 @@ class TestViewOps3D(DTensorTestBase):
         # Compute split_factors for all three mesh dims
         # For mesh dim 0: product of dims before shard_dim0
         split_factor0 = math.prod(factors[:shard_idx0])
-        if split_factor0 == 0:
-            split_factor0 = 1  # empty product
 
-        # For mesh dim 1: product of all dims before shard_idx1, then divide by mesh.size(0)
-        split_factor1 = math.prod(factors[:shard_idx1])
-        split_factor1 = split_factor1 // mesh.size(0)
-        if split_factor1 == 0:
-            split_factor1 = 1
+        split_factor1 = math.prod(factors[:shard_idx1]) // mesh.size(0)
 
-        # For mesh dim 2: product of all dims before shard_idx2, then divide by mesh.size(0) * mesh.size(1)
-        split_factor2 = math.prod(factors[:shard_idx2])
-        split_factor2 = split_factor2 // (mesh.size(0) * mesh.size(1))
-        if split_factor2 == 0:
-            split_factor2 = 1
+        split_factor2 = math.prod(factors[:shard_idx2]) // (mesh.size(0) * mesh.size(1))
 
         input_placement0 = _StridedShard(flatten_start, split_factor=split_factor0)
         input_placement1 = _StridedShard(flatten_start, split_factor=split_factor1)
@@ -2061,6 +2275,13 @@ class TestViewOps3D(DTensorTestBase):
 
         self.assertEqual(inps_viewed.placements, expected_placements)
         self.assertEqual(comm_mode.get_total_counts(), 0)
+        expected_local_tensor = distribute_tensor(
+            torch.arange(nelem).view(tensor_dims_unflatten),
+            mesh,
+            expected_placements,
+            src_data_rank=None,
+        )._local_tensor
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
 
     def _test_dtensor_unflatten_3d_rss_factors(
         self,
@@ -2099,10 +2320,7 @@ class TestViewOps3D(DTensorTestBase):
         assert split_factor0 > 1, f"Expected split_factor0 > 1, got {split_factor0}"
 
         # For mesh dim 2: product of all dims before shard_idx1, then divide by mesh.size(1)
-        split_factor1 = math.prod(factors[:shard_idx1])
-        split_factor1 = split_factor1 // mesh.size(1)
-        if split_factor1 == 0:
-            split_factor1 = 1
+        split_factor1 = math.prod(factors[:shard_idx1]) // mesh.size(1)
 
         input_placement0 = Replicate()
         input_placement1 = _StridedShard(flatten_start, split_factor=split_factor0)
@@ -2120,6 +2338,13 @@ class TestViewOps3D(DTensorTestBase):
 
         self.assertEqual(inps_viewed.placements, expected_placements)
         self.assertEqual(comm_mode.get_total_counts(), 0)
+        expected_local_tensor = distribute_tensor(
+            torch.arange(nelem).view(tensor_dims_unflatten),
+            mesh,
+            expected_placements,
+            src_data_rank=None,
+        )._local_tensor
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
 
     def _test_dtensor_unflatten_3d_rrs_factors(
         self,
@@ -2165,6 +2390,13 @@ class TestViewOps3D(DTensorTestBase):
 
         self.assertEqual(inps_viewed.placements, expected_placements)
         self.assertEqual(comm_mode.get_total_counts(), 0)
+        expected_local_tensor = distribute_tensor(
+            torch.arange(nelem).view(tensor_dims_unflatten),
+            mesh,
+            expected_placements,
+            src_data_rank=None,
+        )._local_tensor
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
 
 
 # TestViewOpsWithLocalTensor = create_local_tensor_test_class(
