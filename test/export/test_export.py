@@ -18389,6 +18389,132 @@ def forward(self, x, y):
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
 
+    def test_quantile_export(self):
+        class QuantilePair(torch.nn.Module):
+            def __init__(self, noise=0.1):
+                super().__init__()
+                self.noise = noise
+
+            def forward(self, x):
+                q = torch.tensor(
+                    [self.noise, 1.0 - self.noise], device=x.device, dtype=x.dtype
+                )
+                return torch.quantile(x, q, dim=-1, keepdim=True)
+
+        model = QuantilePair(noise=0.1).eval()
+        x = torch.randn(1, 3200, dtype=torch.float32)
+        ep = export(model, (x,))
+        self.assertEqual(ep.module()(x), model(x))
+        decomposed = ep.run_decompositions()
+        self.assertEqual(decomposed.module()(x), model(x))
+        self.assertExpectedInline(
+            decomposed.graph_module.code.strip(),
+            """\
+def forward(self, c_lifted_tensor_0, x):
+    clone = torch.ops.aten.clone.default(c_lifted_tensor_0);  c_lifted_tensor_0 = None
+    ge = torch.ops.aten.ge.Scalar(clone, 0)
+    le = torch.ops.aten.le.Scalar(clone, 1)
+    logical_and = torch.ops.aten.logical_and.default(ge, le);  ge = le = None
+    logical_not = torch.ops.aten.logical_not.default(logical_and);  logical_and = None
+    any_1 = torch.ops.aten.any.dims(logical_not);  logical_not = None
+    logical_not_1 = torch.ops.aten.logical_not.default(any_1);  any_1 = None
+    _assert_async = torch.ops.aten._assert_async.msg(logical_not_1, 'quantile() q values must be in the range [0, 1]');  logical_not_1 = _assert_async = None
+    sort = torch.ops.aten.sort.default(x);  x = None
+    getitem = sort[0];  sort = None
+    view = torch.ops.aten.view.default(getitem, [1, 1, 3200]);  getitem = None
+    view_1 = torch.ops.aten.view.default(clone, [-1]);  clone = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0);  view_1 = None
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(unsqueeze, 0);  unsqueeze = None
+    mul = torch.ops.aten.mul.Tensor(unsqueeze_1, 3199);  unsqueeze_1 = None
+    isnan = torch.ops.aten.isnan.default(view)
+    any_2 = torch.ops.aten.any.dim(isnan, -1, True);  isnan = None
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(3199.0, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+    where = torch.ops.aten.where.self(any_2, scalar_tensor, mul);  any_2 = scalar_tensor = mul = None
+    _to_copy = torch.ops.aten._to_copy.default(where, dtype = torch.int64)
+    clamp = torch.ops.aten.clamp.default(_to_copy, 0, 3199);  _to_copy = None
+    gather = torch.ops.aten.gather.default(view, -1, clamp)
+    _to_copy_1 = torch.ops.aten._to_copy.default(clamp, dtype = torch.float32);  clamp = None
+    sub = torch.ops.aten.sub.Tensor(where, _to_copy_1);  _to_copy_1 = None
+    ceil = torch.ops.aten.ceil.default(where);  where = None
+    _to_copy_2 = torch.ops.aten._to_copy.default(ceil, dtype = torch.int64);  ceil = None
+    clamp_1 = torch.ops.aten.clamp.default(_to_copy_2, 0, 3199);  _to_copy_2 = None
+    gather_1 = torch.ops.aten.gather.default(view, -1, clamp_1);  view = clamp_1 = None
+    abs_1 = torch.ops.aten.abs.default(sub)
+    ge_1 = torch.ops.aten.ge.Scalar(abs_1, 0.5);  abs_1 = None
+    sub_1 = torch.ops.aten.sub.Tensor(sub, 1)
+    where_1 = torch.ops.aten.where.self(ge_1, sub_1, sub);  sub_1 = sub = None
+    where_2 = torch.ops.aten.where.self(ge_1, gather_1, gather);  ge_1 = None
+    sub_2 = torch.ops.aten.sub.Tensor(gather_1, gather);  gather_1 = gather = None
+    mul_1 = torch.ops.aten.mul.Tensor(where_1, sub_2);  where_1 = sub_2 = None
+    add = torch.ops.aten.add.Tensor(mul_1, where_2);  mul_1 = where_2 = None
+    permute = torch.ops.aten.permute.default(add, [2, 0, 1]);  add = None
+    view_2 = torch.ops.aten.view.default(permute, [2, 1, 1]);  permute = None
+    return (view_2,)""",  # noqa: B950
+        )
+
+    def test_quantile_nan_correctness(self):
+        interpolations = ["linear", "lower", "higher", "nearest", "midpoint"]
+
+        class Quantile(torch.nn.Module):
+            def __init__(self, dim, keepdim, interpolation):
+                super().__init__()
+                self.dim = dim
+                self.keepdim = keepdim
+                self.interpolation = interpolation
+
+            def forward(self, x, q):
+                return torch.quantile(
+                    x,
+                    q,
+                    dim=self.dim,
+                    keepdim=self.keepdim,
+                    interpolation=self.interpolation,
+                )
+
+        class NanQuantile(torch.nn.Module):
+            def __init__(self, dim, keepdim, interpolation):
+                super().__init__()
+                self.dim = dim
+                self.keepdim = keepdim
+                self.interpolation = interpolation
+
+            def forward(self, x, q):
+                return torch.nanquantile(
+                    x,
+                    q,
+                    dim=self.dim,
+                    keepdim=self.keepdim,
+                    interpolation=self.interpolation,
+                )
+
+        q = torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0])
+
+        x_sparse_nan = torch.randn(4, 5)
+        x_sparse_nan[0, 1] = float("nan")
+        x_sparse_nan[2, 3] = float("nan")
+
+        x_all_nan = torch.full((3,), float("nan"))
+
+        x_row_nan = torch.randn(3, 4)
+        x_row_nan[1, :] = float("nan")
+
+        test_cases = [
+            (x_sparse_nan, None, False),
+            (x_sparse_nan, 0, False),
+            (x_sparse_nan, 1, True),
+            (x_all_nan, None, False),
+            (x_row_nan, 1, True),
+        ]
+
+        for interp in interpolations:
+            for x, dim, keepdim in test_cases:
+                for cls in [Quantile, NanQuantile]:
+                    model = cls(dim, keepdim, interp).eval()
+                    ep = export(model, (x, q))
+                    expected = model(x, q)
+                    result = ep.module()(x, q)
+                    self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     run_tests()

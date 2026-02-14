@@ -75,7 +75,7 @@ void boxed_sgd_out_of_place(StableIValue* stack, uint64_t num_args, uint64_t num
     torch::stable::detail::to<double>(stack[3]),
     torch::stable::detail::to<bool>(stack[4]));
 
-  stack[0] = from(res);
+  stack[0] = torch::stable::detail::from(res);
 }
 
 STABLE_TORCH_LIBRARY(STABLE_LIB_NAME, m) {
@@ -253,6 +253,10 @@ Tensor my_narrow(Tensor t, int64_t dim, int64_t start, int64_t length) {
   return narrow(t, dim, start, length);
 }
 
+Tensor my_narrow_symint(Tensor t, int64_t dim, int64_t start, int64_t length) {
+  return clone(narrow(t, dim, start, length));
+}
+
 Tensor my_new_empty_dtype_variant(Tensor t) {
   // Still using a std::vector below even though people can just pass in an
   // initializer list (which will be implicitly converted to an HeaderOnlyArrayRef)
@@ -283,6 +287,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("fill_infinity(Tensor(a!) t) -> Tensor(a!)");
   m.def("my_pad(Tensor t) -> Tensor");
   m.def("my_narrow(Tensor t, int dim, int start, int length) -> Tensor");
+  m.def("my_narrow_symint(Tensor t, int dim, SymInt start, SymInt length) -> Tensor");
   m.def("my_new_empty_dtype_variant(Tensor t) -> Tensor");
   m.def("my_new_zeros_dtype_variant(Tensor t) -> Tensor");
   m.def("my_copy_(Tensor dst, Tensor src, bool non_blocking) -> Tensor");
@@ -303,6 +308,10 @@ STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeImplicitAutograd, m) {
   m.impl("my_pad", TORCH_BOX(&my_pad));
   m.impl("my_narrow", TORCH_BOX(&my_narrow));
+}
+
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CPU, m) {
+  m.impl("my_narrow_symint", TORCH_BOX(&my_narrow_symint));
 }
 
 Tensor my_zero_(Tensor t) {
@@ -513,11 +522,20 @@ Tensor my_matmul(const Tensor& self, const Tensor& other) {
   return torch::stable::matmul(self, other);
 }
 
+// Putting my_layout in libtorch_agn_2_9 because it can target 2.9
+// for runtime, but it can only be compiled against 2.11 cuz of
+// the layout API.
+using torch::headeronly::Layout;
+bool my_layout(const Tensor& t, Layout layout) {
+  return t.layout() == layout;
+}
+
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_unsqueeze(Tensor t, int dim) -> Tensor");
   m.def("my_squeeze(Tensor t, int dim) -> Tensor");
   m.def("my_select(Tensor t, int dim, int index) -> Tensor");
   m.def("my_matmul(Tensor self, Tensor other) -> Tensor");
+  m.def("my_layout(Tensor t, Layout layout) -> bool");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
@@ -525,4 +543,5 @@ STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_squeeze", TORCH_BOX(&my_squeeze));
   m.impl("my_select", TORCH_BOX(&my_select));
   m.impl("my_matmul", TORCH_BOX(&my_matmul));
+  m.impl("my_layout", TORCH_BOX(&my_layout));
 }

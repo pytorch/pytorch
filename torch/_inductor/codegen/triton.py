@@ -835,19 +835,31 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
         return f"tl.sqrt_rn(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
-        )
+        # pyrefly: ignore [missing-attribute]
+        base = self._print(expr.args[0])
+        # pyrefly: ignore [missing-attribute]
+        exp = self._print(expr.args[1])
+        # libdevice.pow requires both arguments to have the same type.
+        # Always cast to float64 for consistency. This is scalar shape math,
+        # not tensor ops, so the performance impact is negligible.
+        return f"libdevice.pow(({base}).to(tl.float64), ({exp}).to(tl.float64))"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
         if expr.args[0].is_Integer:
+            base = f"tl.full([], {float(expr.args[0])}, tl.float64)"
+        else:
             # pyrefly: ignore [missing-attribute]
-            return f"libdevice.pow({float(expr.args[0])}, {self._print(expr.args[1])})"
-        return (
+            base = f"({self._print(expr.args[0])}).to(tl.float64)"
+        exp_val = expr.args[1]
+        if exp_val.is_Integer:
+            exp = f"tl.full([], {float(exp_val)}, tl.float64)"
+        else:
             # pyrefly: ignore [missing-attribute]
-            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
-        )
+            exp = f"({self._print(exp_val)}).to(tl.float64)"
+        # libdevice.pow requires both arguments to have the same type.
+        # Always cast to float64 for consistency. This is scalar shape math,
+        # not tensor ops, so the performance impact is negligible.
+        return f"libdevice.pow({base}, {exp})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c = self.doprint(expr.args[0])
@@ -5567,6 +5579,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
         self.triton_meta = triton_meta
+        self.inductor_meta = inductor_meta
 
         self.codegen_prologue(self.body)
         self.codegen_body()
@@ -5644,7 +5657,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             val = int(rnumel)
             val = next_power_of_2(val)
         else:
-            val = 2
+            val = 1
             while not V.graph.sizevars.statically_known_leq(rnumel, val):
                 if val > 16 * 1024:
                     raise ValueError(f"Failed to find static RBLOCK for {rnumel}")
@@ -5753,6 +5766,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton=True,
             arg_types=arg_types,
             triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
         )
 
         if deallocate_ws:
@@ -5840,6 +5854,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return pid
 
     def needs_yz_grid_overflow(self, entry: IterationRangesRoot) -> bool:
+        # Combo kernels use flattened dispatch where y_pid_offset is computed
+        # from the flattened pid, so YZ overflow is not needed
+        if self.is_combo_kernel and config.combo_kernel_per_subkernel_blocks:
+            return False
         return (
             entry.grid_dim == 1
             and not entry.has_zdim
