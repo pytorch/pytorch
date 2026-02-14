@@ -891,14 +891,13 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void
 struct RegisterCUDASymmetricMemoryAllocator {
   RegisterCUDASymmetricMemoryAllocator() {
     auto allocator = c10::make_intrusive<CUDASymmetricMemoryAllocator>();
+    // Always register availability so `set_backend("CUDA")` can work
+    register_availability("CUDA", allocator);
     // Query backend used for CUDA tensor
     // "CUDA" backend stands for this implementation
     if (getSymmMemBackendCUDA() == "CUDA") {
       // Direct set (static registration)
       register_allocator(c10::DeviceType::CUDA, allocator);
-    } else {
-      // Register availability in case `set_backend` is called dynamically
-      register_availability("CUDA", allocator);
     }
   }
 };
