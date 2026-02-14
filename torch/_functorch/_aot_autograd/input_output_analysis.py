@@ -147,6 +147,7 @@ def create_synthetic_base_metadata(
 
     # given the requires_grad info on mutated inputs,
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
+    # pyrefly: ignore [implicit-any]
     input_infos = []
     for outer_indices in synthetic_base_to_indices.values():
         # leaf-ness should be all-or-nothing for aliased tensor.

@@ -94,6 +94,7 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
                 yield item
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if isinstance(self.source_datapipe, Sized):
             return len(self.source_datapipe) // self.num_of_instances + (
                 1

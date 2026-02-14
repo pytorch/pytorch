@@ -344,15 +344,15 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
-    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
-    funcs.update(_device_constructors())
     more: set[Callable[..., Any]] = {
+        torch.ones,
         torch.ones_like,
+        torch.zeros,
         torch.zeros_like,
-        torch.empty_like,
-        torch.full_like,
+        torch.empty,
+        torch.full,
     }
     funcs.update(more)
     return funcs
@@ -2776,16 +2776,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         wrapped_real_impl = wrap_impl_for_leaf_module_state(real_impl)
         wrapped_fake_impl = wrap_impl_for_leaf_module_state(fake_impl)
 
-        real_impl_spec = _LeafCallable(wrapped_real_impl)
-        fake_impl_spec = _LeafCallable(wrapped_fake_impl)
+        real_impl_callable = _LeafCallable(wrapped_real_impl)
+        fake_impl_callable = _LeafCallable(wrapped_fake_impl)
 
-        def make_spec_proxy(name: str, spec: Any) -> Any:
+        def make_callable_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)
             proxy.node.type = type(spec)
             return proxy
 
-        real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
-        fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        real_impl_proxy = make_callable_proxy("real_fn", real_impl_callable)
+        fake_impl_proxy = make_callable_proxy("fake_fn", fake_impl_callable)
 
         invoke_args = (
             real_impl_proxy,
