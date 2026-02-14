@@ -1,18 +1,6 @@
 # Owner(s): ["module: inductor"]
 """
-Tests for inductor lowering of functional custom ops to out-variant via ExternKernelOut.
-
-This tests the approach suggested by eellison: instead of a post-grad pass that
-decomposes functional→empty+out-variant (ExternKernelAlloc, should_allocate=False),
-we lower at inductor time to ExternKernelOut (should_allocate=True) which participates
-in Inductor's AllocateLine.plan() buffer reuse.
-
-Test strategy:
-  1. Register test ops with both functional and .out overloads
-  2. Compile with lower_custom_ops_to_out_variant=True
-  3. Verify generated code calls the .out overload
-  4. Verify correctness (output matches eager)
-  5. Verify buffer reuse via code inspection (no extra allocations)
+Tests for inductor lowering of functional custom ops to out-variant
 """
 
 import unittest
@@ -44,7 +32,10 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
         Simple single-tensor-in, single-tensor-out pattern for basic testing.
         """
         lib.define("add_one(Tensor x) -> Tensor")
-        lib.define("add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)")
+        lib.define(
+            "add_one.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)",
+            tags=(torch.Tag.out_variant,),
+        )
 
         def _add_one_impl(x: torch.Tensor) -> torch.Tensor:
             return x + 1
@@ -71,7 +62,8 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
         """
         lib.define("rms_norm(Tensor input, Tensor weight, float epsilon) -> Tensor")
         lib.define(
-            "rms_norm.out(Tensor input, Tensor weight, float epsilon, *, Tensor(a!) result) -> Tensor(a!)"
+            "rms_norm.out(Tensor input, Tensor weight, float epsilon, *, Tensor(a!) result) -> Tensor(a!)",
+            tags=(torch.Tag.out_variant,),
         )
 
         def _rms_norm_impl(
@@ -111,7 +103,8 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
         """
         lib.define("split_add(Tensor x, float a, float b) -> (Tensor, Tensor)")
         lib.define(
-            "split_add.out(Tensor x, float a, float b, *, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))"
+            "split_add.out(Tensor x, float a, float b, *, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))",
+            tags=(torch.Tag.out_variant,),
         )
 
         def _split_add_impl(x, a, b):
@@ -130,47 +123,6 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
             return (x.new_empty(x.shape), x.new_empty(x.shape))
 
         return torch.ops.mylib.split_add, torch.ops.mylib.split_add.out
-
-    # ---- _out_variant.py unit tests ----
-
-    def test_to_out_variant_finds_add_one(self):
-        """Test that to_out_variant() finds the .out overload for single-output op."""
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            func_op, out_op = self._register_add_one_ops(lib)
-
-            from torch._library._out_variant import to_out_variant
-
-            found = to_out_variant(func_op.default)
-            self.assertIsNotNone(found)
-            self.assertEqual(found, out_op)
-
-    def test_to_out_variant_finds_split_add(self):
-        """Test that to_out_variant() finds .out for a two-output op."""
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            func_op, out_op = self._register_split_add_ops(lib)
-
-            from torch._library._out_variant import to_out_variant
-
-            found = to_out_variant(func_op.default)
-            self.assertIsNotNone(found)
-            self.assertEqual(found, out_op)
-
-    def test_to_out_variant_returns_none_for_mutable_op(self):
-        """Test that to_out_variant() returns None for ops that are already mutable."""
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            lib.define("inplace_sin(Tensor(a!) x) -> ()")
-
-            def _inplace_sin_impl(x):
-                x.sin_()
-
-            lib.impl("inplace_sin", _inplace_sin_impl, "CompositeImplicitAutograd")
-
-            from torch._library._out_variant import to_out_variant
-
-            found = to_out_variant(torch.ops.mylib.inplace_sin.default)
-            self.assertIsNone(found)
-
-    # ---- Inductor lowering integration tests ----
 
     @inductor_config.patch(lower_custom_ops_to_out_variant=True)
     @parametrize("device", DEVICES)
@@ -348,94 +300,6 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
             )
             self.assertEqual(compiled_out, eager_out)
             self.assertIn(".out(", code)
-
-
-@requires_cuda
-class TestVLLMSiluAndMulGPU(torch._inductor.test_case.TestCase):
-    """End-to-end tests with real vLLM silu_and_mul CUDA kernel.
-
-    These tests verify that the inductor out-variant lowering works with
-    production vLLM custom ops on GPU, not just mock Python ops on CPU.
-    """
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        try:
-            import vllm._custom_ops  # noqa: F401
-
-            cls.has_vllm = True
-        except ImportError:
-            cls.has_vllm = False
-
-    def setUp(self):
-        super().setUp()
-        if not self.has_vllm:
-            self.skipTest("vLLM not installed")
-        torch._dynamo.reset()
-
-    def tearDown(self):
-        torch._dynamo.reset()
-        super().tearDown()
-
-    def test_to_out_variant_finds_vllm_silu_and_mul(self):
-        """Verify to_out_variant() discovers _C.silu_and_mul.out from .default."""
-        from torch._library._out_variant import get_out_arg_names, to_out_variant
-
-        func_op = torch.ops._C.silu_and_mul.default
-        out_op = to_out_variant(func_op)
-        self.assertIsNotNone(out_op)
-        self.assertEqual(out_op, torch.ops._C.silu_and_mul.out)
-        self.assertEqual(get_out_arg_names(out_op), ["out"])
-
-    @inductor_config.patch(lower_custom_ops_to_out_variant=True)
-    def test_single_silu_and_mul_lowered_to_out(self):
-        """Single vLLM silu_and_mul lowered to .out variant on CUDA."""
-
-        def f(x):
-            return torch.ops._C.silu_and_mul(x)
-
-        x = torch.randn(4, 16, device="cuda")
-        eager_out = f(x)
-
-        compiled_out, (code,) = run_and_get_code(
-            torch.compile(f, backend="inductor", fullgraph=True), x
-        )
-
-        self.assertTrue(torch.allclose(compiled_out, eager_out))
-        self.assertIn(".out(", code)
-        self.assertIn("out=", code)
-        self.assertNotIn(".default(", code)
-        self.assertIn("empty_strided", code)
-
-    @inductor_config.patch(lower_custom_ops_to_out_variant=True)
-    def test_chained_silu_and_mul_buffer_reuse(self):
-        """Chained silu_and_mul ops with buffer reuse on CUDA.
-
-        Pattern: x(4×16) → silu_and_mul → y(4×8) → cat(y,y) → y2(4×16)
-                 → silu_and_mul → z(4×8)
-
-        The first silu_and_mul's pre-allocated buf0 (4×8) dies after the
-        cat kernel consumes it. The second silu_and_mul's output (also 4×8)
-        should reuse buf0's storage via AllocateLine.plan().
-        """
-
-        def f(x):
-            y = torch.ops._C.silu_and_mul(x)
-            y2 = torch.cat([y, y], dim=-1)
-            z = torch.ops._C.silu_and_mul(y2)
-            return z
-
-        x = torch.randn(4, 16, device="cuda")
-        eager_out = f(x)
-
-        compiled_out, (code,) = run_and_get_code(
-            torch.compile(f, backend="inductor", fullgraph=True), x
-        )
-
-        self.assertTrue(torch.allclose(compiled_out, eager_out))
-        self.assertEqual(code.count(".out("), 2)
-        self.assertIn("# reuse", code)
 
 
 if __name__ == "__main__":

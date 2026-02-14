@@ -651,22 +651,14 @@ class DebugFormatter:
             try:
                 layout = node.get_output_spec()
                 if isinstance(layout, FixedLayout):
-                    offset = 0
-                    try:
-                        offset = int(layout.offset)
-                    except Exception:
-                        try:
-                            offset = V.graph.sizevars.size_hint(
-                                layout.offset, fallback=0
-                            )
-                        except Exception:
-                            pass
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=[*V.graph.sizevars.size_hints(layout.size)],
-                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
-                        offset=offset,
+                        size=V.graph.sizevars.optimization_hints(layout.size),
+                        stride=V.graph.sizevars.optimization_hints(layout.stride),
+                        offset=V.graph.sizevars.optimization_hint(
+                            layout.offset, fallback=0
+                        ),
                     )
                     node_info["layout"] = str(static_layout)
                 else:
@@ -683,16 +675,20 @@ class DebugFormatter:
                 pass
             try:
                 node_info["stride"] = str(
-                    V.graph.sizevars.size_hints(node.get_stride())
+                    V.graph.sizevars.optimization_hints(node.get_stride())
                 )
             except Exception:
                 pass
             try:
-                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
+                node_info["size"] = str(
+                    V.graph.sizevars.optimization_hints(node.get_size())
+                )  # type: ignore[arg-type]
             except Exception:
                 pass
             try:
-                node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
+                node_info["numel"] = str(
+                    V.graph.sizevars.optimization_hint(node.get_numel())
+                )
             except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
@@ -766,10 +762,10 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
     """Log per-op runtime estimates and output tensor metadata for TLParse."""
 
     try:
-        to_size_hints = V.graph.sizevars.size_hints
+        to_optimization_hints = V.graph.sizevars.optimization_hints
 
         def to_list(x: Optional[Sequence[Any]]) -> list[Any]:
-            return list(to_size_hints(x)) if x is not None else []
+            return list(to_optimization_hints(x)) if x is not None else []
 
         def dtype_to_str(dtype: Any) -> Optional[str]:
             if dtype is None:
