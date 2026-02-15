@@ -104,7 +104,10 @@ def _check_compile_any_backend_with_cudagraph(test_case, fn, args, backend):
     outputs.append(warmup_output)
 
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=side_stream), CUDAGraphCaptureControlFlowOpDispatchMode():
+    with (
+        torch.cuda.graph(graph, stream=side_stream),
+        CUDAGraphCaptureControlFlowOpDispatchMode(),
+    ):
         captured_output = compiled_fn(*args)
     with torch.cuda.stream(side_stream):
         eager_res = fn(*args)
@@ -5557,8 +5560,18 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         x = torch.randn(4).cuda()
 
         test_inputs = [
-            [x, torch.tensor(True).cuda(), torch.tensor(True).cuda(), torch.tensor(False).cuda()],
-            [x, torch.tensor(False).cuda(), torch.tensor(False).cuda(), torch.tensor(True).cuda()],
+            [
+                x,
+                torch.tensor(True).cuda(),
+                torch.tensor(True).cuda(),
+                torch.tensor(False).cuda(),
+            ],
+            [
+                x,
+                torch.tensor(False).cuda(),
+                torch.tensor(False).cuda(),
+                torch.tensor(True).cuda(),
+            ],
         ]
 
         for args in test_inputs:
@@ -9927,7 +9940,7 @@ class TestControlFlowNN(TestCase):
             grads = [p.grad for p in model.parameters()]
             return (output, loss, grads)
 
-        x = torch.randn(16,device="cuda")
+        x = torch.randn(16, device="cuda")
 
         _check_compile_many_backends_with_cudagraph(self, autograd_test, [x])
         _check_compile_cudagraph_backend(self, autograd_test, [x])
