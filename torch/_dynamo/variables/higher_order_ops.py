@@ -1108,6 +1108,58 @@ def validate_args_and_maybe_create_graph_inputs(
         return args
 
 
+def _make_noop_false_graph(true_graph: torch.fx.Graph) -> torch.fx.Graph:
+    """Build a false branch graph that returns empty_strided tensors matching
+    the true branch outputs, without tracing into true_fn."""
+    from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+    false_graph = torch.fx.Graph()
+    placeholders = [n for n in true_graph.nodes if n.op == "placeholder"]
+    false_phs = []
+    for ph in placeholders:
+        new_ph = false_graph.placeholder(ph.name)
+        new_ph.meta = ph.meta
+        false_phs.append(new_ph)
+
+    bound_symbols: dict = {}
+    for ph in false_phs:
+        ev = ph.meta.get("example_value")
+        if isinstance(ev, torch.SymInt):
+            bound_symbols[ev.node.expr] = ph
+
+    def resolve_shape(shape):
+        ret = []
+        for s in shape:
+            if isinstance(s, torch.SymInt):
+                ret.append(
+                    sympy_interp(PythonReferenceAnalysis, bound_symbols, s.node.expr)
+                )
+            else:
+                ret.append(s)
+        return ret
+
+    output_node = next(n for n in true_graph.nodes if n.op == "output")
+    true_output_nodes = output_node.args[0]
+    empty_outputs = []
+    for node in true_output_nodes:
+        fake_val = node.meta.get("example_value")
+        if isinstance(fake_val, torch.Tensor):
+            size = resolve_shape(fake_val.shape)
+            stride = resolve_shape(fake_val.stride())
+            es = false_graph.call_function(
+                torch.empty_strided,
+                args=(size, stride),
+                kwargs={"dtype": fake_val.dtype, "device": fake_val.device},
+            )
+            es.meta["example_value"] = fake_val
+            empty_outputs.append(es)
+        else:
+            empty_outputs.append(node)
+    false_graph.output(tuple(empty_outputs))
+    return false_graph
+
+
 # This helper function is used to make sure two graphs share the same input signature. For example,
 # in torch.cond, two branches might lift different set of tensors as inputs. This function helps to
 # dedup the inputs and modify the graphs to take the same set of inputs.
@@ -2263,7 +2315,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # branches
         _check_supported_callable_arg(tx, true_fn, "true_fn")
-        _check_supported_callable_arg(tx, false_fn, "false_fn")
+        false_fn_is_none = (
+            isinstance(false_fn, ConstantVariable)
+            and false_fn.as_python_constant() is None
+        )
+        if not false_fn_is_none:
+            _check_supported_callable_arg(tx, false_fn, "false_fn")
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,
@@ -2335,43 +2392,53 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         (true_r, true_spec, true_graph, true_lifted_freevars) = speculate_branch(True)
         true_nn_modules = dict(tx.output.nn_modules)
 
-        (
-            false_r,
-            false_spec,
-            false_graph,
-            false_lifted_freevars,
-        ) = speculate_branch(False)
-        false_nn_modules = dict(tx.output.nn_modules)
+        if false_fn_is_none:
+            unique_true: list[Proxy] = []
+            unique_false: list[Proxy] = []
+            move_lifted_freevars_phs_to_end(true_graph, true_lifted_freevars)
+            inner_to_outer = {v.node: k for k, v in true_lifted_freevars.items()}
+            true_phs = [n for n in true_graph.nodes if n.op == "placeholder"]
+            true_shared = [inner_to_outer[ph] for ph in true_phs]
+            false_graph = _make_noop_false_graph(true_graph)
+            false_nn_modules = dict(tx.output.nn_modules)
+        else:
+            (
+                _,
+                false_spec,
+                false_graph,
+                false_lifted_freevars,
+            ) = speculate_branch(False)
+            false_nn_modules = dict(tx.output.nn_modules)
 
-        same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
-            true_spec.treespec, false_spec.treespec
-        ).as_python_constant()
-        # 3.14: NotImplemented cannot be converted to bool
-        if same_spec is not NotImplemented and not same_spec:
-            unimplemented(
-                gb_type="torch.cond: differing branch outputs",
-                context=f"true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
-                explanation="Expected branches to return the same pytree structure.",
-                hints=[
-                    *graph_break_hints.USER_ERROR,
-                ],
+            same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+                true_spec.treespec, false_spec.treespec
+            ).as_python_constant()
+            # 3.14: NotImplemented cannot be converted to bool
+            if same_spec is not NotImplemented and not same_spec:
+                unimplemented(
+                    gb_type="torch.cond: differing branch outputs",
+                    context=f"true_spec: {true_spec.treespec}, false_spec: {false_spec.treespec}, same_spec: {same_spec}",
+                    explanation="Expected branches to return the same pytree structure.",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
+                )
+
+            (
+                true_graph,
+                false_graph,
+                true_shared,
+                _false_shared,
+                unique_true,
+                unique_false,
+            ) = _merge_graph_inputs(
+                true_graph,
+                true_lifted_freevars,
+                "true_branch",
+                false_graph,
+                false_lifted_freevars,
+                "false_branch",
             )
-
-        (
-            true_graph,
-            false_graph,
-            true_shared,
-            _false_shared,
-            unique_true,
-            unique_false,
-        ) = _merge_graph_inputs(
-            true_graph,
-            true_lifted_freevars,
-            "true_branch",
-            false_graph,
-            false_lifted_freevars,
-            "false_branch",
-        )
 
         true_name = tx.output.install_subgraph(
             "cond_true",

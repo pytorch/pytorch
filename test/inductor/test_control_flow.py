@@ -288,6 +288,20 @@ class CondModels:
 
             return torch.cond(p, true_fn, false_fn, [x])
 
+    class NoOpFalseBranch(torch.nn.Module):
+        def forward(self, p, a, b):
+            def true_fn(x, y):
+                return x + y
+
+            return torch.cond(p, true_fn, None, [a, b])
+
+    class NoOpFalseBranchMultipleOutputs(torch.nn.Module):
+        def forward(self, p, a, b, c):
+            def true_fn(x, y, z):
+                return x * y, z / 2.71, (y - x).sum(dim=1)
+
+            return torch.cond(p, true_fn, None, [a, b, c])
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -810,6 +824,43 @@ class CondTests(TestCase):
             device="cpu",  # device for predicate
             dynamic=True,
         )
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @parametrize("dynamic", [False, True])
+    def test_cond_noop_false_branch(self, backend, dynamic):
+        model = CondModels.NoOpFalseBranch()
+        inputs = [torch.randn(10, 20), torch.randn(10, 20)]
+        compiled_model = torch.compile(model, backend=backend, fullgraph=True)
+
+        result_eager = model(torch.tensor(True), *inputs)
+        result_compiled = compiled_model(torch.tensor(True), *inputs)
+        self.assertEqual(result_eager, result_compiled)
+
+        result_compiled_false = compiled_model(torch.tensor(False), *inputs)
+        self.assertEqual(result_compiled_false.shape, result_eager.shape)
+        self.assertEqual(result_compiled_false.dtype, result_eager.dtype)
+
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @parametrize("dynamic", [False, True])
+    def test_cond_noop_false_branch_multiple_outputs(self, backend, dynamic):
+        model = CondModels.NoOpFalseBranchMultipleOutputs()
+        inputs = [
+            torch.randn(10, 20),
+            torch.randn(10, 20),
+            torch.randn(30, 40),
+        ]
+        compiled_model = torch.compile(
+            model, backend=backend, fullgraph=True, dynamic=dynamic
+        )
+
+        result_eager = model(torch.tensor(True), *inputs)
+        result_compiled = compiled_model(torch.tensor(True), *inputs)
+        self.assertEqual(result_eager, result_compiled)
+
+        result_compiled_false = compiled_model(torch.tensor(False), *inputs)
+        for r_false, r_true in zip(result_compiled_false, result_eager):
+            self.assertEqual(r_false.shape, r_true.shape)
+            self.assertEqual(r_false.dtype, r_true.dtype)
 
 
 class WhileLoopModels:
