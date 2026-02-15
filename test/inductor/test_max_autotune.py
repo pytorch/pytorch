@@ -9,6 +9,7 @@ import os
 import random
 import re
 import tempfile
+import time
 import unittest
 from collections.abc import Callable
 from typing import Optional
@@ -32,6 +33,7 @@ from torch._inductor.autotune_process import (
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
+    use_pipelined_autotuning,
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
@@ -2477,6 +2479,57 @@ class TestMaxAutotune(TestCase):
         self.assertObjectIn(k, (15, 16))
         self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "force_pointwise_cat": True,
+        }
+    )
+    @parametrize("epilogue", (True, False))
+    def test_deferred_layout_constraint_cat_fusion(self, epilogue):
+        def mm_with_cat(a, b1, b2, d):
+            catted_b = torch.cat([b1, b2], dim=1)
+            catted_b_add = catted_b + 1.0
+
+            # Not padded at lowering time
+            catted_bf16 = catted_b_add.to(torch.bfloat16)
+
+            # bmm1 as output -> no padding occurs, however after fusion
+            # the buffer is padded, layout constraint violated
+            bmm1 = torch.bmm(a.to(torch.bfloat16), catted_bf16)
+            fused = catted_bf16 - d
+            if epilogue:
+                bmm1_fp32 = bmm1.to(torch.float32)
+                return bmm1, bmm1_fp32, fused
+
+            return bmm1, fused
+
+        batch = 32
+        m = 512
+        k1, k2 = 256, 256
+        n = 1490  # Would normally trigger padding (1490 -> 1536)
+
+        a = torch.randn(batch, m, k1 + k2, device=GPU_TYPE)
+        b1 = torch.randn(batch, k1, n, device=GPU_TYPE)
+        b2 = torch.randn(batch, k2, n, device=GPU_TYPE)
+        d = torch.cat([b1, b2], dim=1).to(torch.bfloat16)
+
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+        ):
+            compiled = torch.compile(mm_with_cat, mode="max-autotune-no-cudagraphs")
+            _, code = run_and_get_code(compiled, a, b1, b2, d)
+
+            # Despite Triton being 10x faster in benchmarks, the layout conflict
+            # should force fallback to extern_kernels.bmm
+            FileCheck().check_not("triton_tem").run(code[0])
+
 
 @instantiate_parametrized_tests
 class TestTemplateConfigPruning(TestCase):
@@ -2708,10 +2761,8 @@ class TestTemplateConfigPruning(TestCase):
             def mock_autotune(self, *args, **kwargs):
                 timings = original_autotune(self, *args, **kwargs)
                 nonlocal triton_compilation_fails
-                for caller, time in timings.items():
-                    if isinstance(caller, TritonTemplateCaller) and time != float(
-                        "inf"
-                    ):
+                for caller, t in timings.items():
+                    if isinstance(caller, TritonTemplateCaller) and t != float("inf"):
                         triton_compilation_fails = False
                 return timings
 
@@ -4219,6 +4270,10 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             mm_heuristic.mm_configs = original_mm_configs
 
 
+def simple_fn():
+    return 42
+
+
 class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAnalysis):
     """Tests for AsyncPipelinedAutotuning path."""
 
@@ -4304,6 +4359,75 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         self.assertEqual(
             cache_size, 4, "Cache should have 2 entries (one per unique input shape)"
         )
+
+    @patch(
+        "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
+        2,
+    )
+    def test_autotune_process_pool_inactivity_shutdown(self):
+        AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
+
+        pool_instance = AutotuneProcessPool.get_instance()
+        pool_instance.warm_up()
+
+        future = pool_instance.submit(simple_fn)
+        result = future.result()
+        self.assertEqual(result, 42)
+        self.assertIsNotNone(pool_instance._pool)
+
+        time.sleep(5)
+
+        self.assertIsNone(pool_instance._pool)
+        self.assertIsNone(pool_instance._timer)
+        self.assertTrue(AutotuneProcessPool._shutdown_for_inactivity)
+
+    @patch(
+        "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
+        2,
+    )
+    @config.patch(max_autotune=True)
+    def test_compilation_after_inactivity(self):
+        """Test that compilation after pool inactivity shutdown uses synchronous path."""
+
+        # Reset state
+        AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
+        AsyncAutotuner.choice_hash_to_future.clear()
+        torch._dynamo.reset()
+
+        # First compilation - should use pipelined path
+        self.assertTrue(use_pipelined_autotuning())
+
+        def matmul_fn(a, b):
+            return torch.mm(a, b)
+
+        a1 = torch.randn(64, 32, device=GPU_TYPE, dtype=torch.bfloat16)
+        b1 = torch.randn(32, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        a2 = torch.randn(128, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b2 = torch.randn(64, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        compiled_fn = torch.compile(matmul_fn)
+        compiled_fn(a1, b1)
+
+        # Verify pipelined path was used (cache should have entries)
+        cache_entries_after_first = len(AsyncAutotuner.choice_hash_to_future)
+        self.assertGreater(cache_entries_after_first, 0)
+
+        # Wait for inactivity shutdown
+        time.sleep(5)
+
+        self.assertTrue(AutotuneProcessPool._shutdown_for_inactivity)
+        self.assertFalse(use_pipelined_autotuning())
+
+        AsyncAutotuner.choice_hash_to_future.clear()
+        torch._dynamo.reset()
+
+        compiled_fn2 = torch.compile(matmul_fn)
+        compiled_fn2(a2, b2)
+
+        cache_entries_after_second = len(AsyncAutotuner.choice_hash_to_future)
+        self.assertEqual(cache_entries_after_second, 0)
 
 
 if __name__ == "__main__":
