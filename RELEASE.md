@@ -96,7 +96,7 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.7 | Mar 2025 | Apr 2025 | Jun 2025 | Not planned |
 | 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | Not planned |
 | 2.9 | Sept 2025 | Oct 2025 | (Nov 2025) | Not planned |
-| 2.10 | Dec 2025 | Jan 2026 | (Feb 2026) | Not planned |
+| 2.10 | Dec 2025 | Jan 2026 | Not planned | Not planned |
 | 2.11 | 16 Feb 2026 | 18 Mar 2026 | (Apr 2026) | Not planned |
 | 2.12 | 13 Apr 2026 | 13 May 2026 | (Jun 2026) | Not planned |
 | 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | Not planned |
