@@ -382,20 +382,15 @@ def _write_files_from_queue(
     use_fsync: bool,
     serialization_format: SerializationFormat,
 ) -> None:
-    custom_backend_name = torch._C._get_privateuse1_backend_name()
-    custom_device_mod = getattr(torch, custom_backend_name, None)
-
     # Create a dedicated device stream per thread so that
     # _OverlappingCpuLoader.stream.synchronize() in _drain() only waits
     # on this thread's in-flight copies, avoiding cross-thread stalls on
     # the shared default stream.
     device_mod = None
     dedicated_stream = None
-    if (
-        torch.cuda.is_available()
-        or (custom_device_mod and custom_device_mod.is_available())
-    ) and inflight_threshhold > 0:
-        device_mod = torch.cuda if torch.cuda.is_available() else custom_device_mod
+    device_type = _get_available_device_type()
+    if device_type is not None and inflight_threshhold > 0:
+        device_mod = _get_device_module(device_type)
         dedicated_stream = device_mod.Stream()
 
     try:
