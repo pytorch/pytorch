@@ -8628,10 +8628,13 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocmArch(MI300_ARCH)
     @tf32_on_and_off(0.001)
     @reduced_f32_on_and_off(0.001)
     def test_affine_2d_rotate90(self, device):
+        # hipBLASLt TF32 on MI300X has reduced accuracy for affine transforms.
+        # Force FP32 matmul on ROCm. Tracked in #169392.
+        if torch.version.hip:
+            torch.backends.cuda.matmul.allow_tf32 = False
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
         for input_size2dsq, output_size2dsq in \
@@ -8882,10 +8885,13 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocmArch(MI300_ARCH)
     @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_2d_rotateRandom(self, device):
+        # hipBLASLt TF32 on MI300X has reduced accuracy for affine transforms.
+        # Force FP32 matmul on ROCm. Tracked in #169392.
+        if torch.version.hip:
+            torch.backends.cuda.matmul.allow_tf32 = False
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
         for angle_rad, input_size2d, output_size2d in \
@@ -8935,10 +8941,13 @@ class TestNNDeviceType(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
-    @skipIfRocmArch(MI300_ARCH)
     @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.005)
     def test_affine_3d_rotateRandom(self, device):
+        # hipBLASLt TF32 on MI300X has reduced accuracy for affine transforms.
+        # Force FP32 matmul on ROCm. Tracked in #169392.
+        if torch.version.hip:
+            torch.backends.cuda.matmul.allow_tf32 = False
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
         for angle_rad, axis_vector, input_size3d, output_size3d in \
