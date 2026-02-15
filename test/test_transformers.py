@@ -25,8 +25,6 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     TEST_WITH_ROCM,
     skipIfRocm,
-    skipIfRocmArch,
-    MI300_ARCH,
     MI350_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
@@ -432,7 +430,6 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @skipIfRocmArch(MI300_ARCH)
     @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
@@ -442,6 +439,10 @@ class TestTransformers(NNTestCase):
         """
         Test TransformerEncoder fastpath output matches slowpath output
         """
+        # hipBLASLt TF32 on MI300X causes precision differences between
+        # fastpath and slowpath. Force FP32 on ROCm. Tracked in #169392.
+        if torch.version.hip:
+            torch.backends.cuda.matmul.allow_tf32 = False
         torch.manual_seed(1234)
         nhead = 4
         dim_feedforward = d_model
