@@ -17,6 +17,10 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed._functional_collectives import (
+    all_gather_tensor_autograd,
+    reduce_scatter_tensor_autograd,
+)
 from torch.distributed._local_tensor import (
     LocalIntNode,
     LocalTensor,
@@ -26,9 +30,11 @@ from torch.distributed._local_tensor import (
 )
 from torch.distributed.tensor import (
     DeviceMesh,
+    distribute_module,
     distribute_tensor,
     DTensor,
     init_device_mesh,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -38,6 +44,7 @@ from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
+    ParallelStyle,
     PrepareModuleInput,
     RowwiseParallel,
     SequenceParallel,
@@ -133,6 +140,7 @@ class ModelArgs:
     use_attn_mask: bool = True
     weight_tying: bool = True
     checkpoint_activations: bool = False
+    num_experts: int = 0
 
 
 class Attention(nn.Module):
@@ -188,19 +196,247 @@ class FeedForward(nn.Module):
         return self.resid_dropout(self.w2(self.gelu(self.w1(x))))
 
 
+class Experts(nn.Module):
+    def __init__(self, dim: int, hidden_dim: int, num_experts: int):
+        super().__init__()
+        self.num_experts = num_experts
+        self.w1 = nn.Parameter(torch.empty(num_experts, hidden_dim, dim))
+        self.w2 = nn.Parameter(torch.empty(num_experts, dim, hidden_dim))
+        self.reset_parameters()
+        self.gelu = nn.GELU()
+
+    def reset_parameters(self):
+        nn.init.normal_(self.w1, std=0.02)
+        nn.init.normal_(self.w2, std=0.02)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Weights are DTensors (sharded by EP/TP) but x is a plain tensor
+        # (dispatched by EP hooks), so extract local shards for bmm.
+        if isinstance(self.w1, DTensor):
+            w1, w2 = self.w1.to_local(), self.w2.to_local()
+        else:
+            w1, w2 = self.w1, self.w2
+        E = w1.shape[0]
+        x_exp = x.unsqueeze(0).expand(E, -1, -1)
+        h = self.gelu(torch.bmm(x_exp, w1.transpose(-2, -1)))
+        out = torch.bmm(h, w2.transpose(-2, -1))
+        return out.sum(dim=0)
+
+
+class ExpertLayer(nn.Module):
+    def __init__(self, num_experts: int, dim: int, hidden_dim: int):
+        super().__init__()
+        self.num_experts = num_experts
+        self.experts = Experts(dim=dim, hidden_dim=hidden_dim, num_experts=num_experts)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        bs, slen, dim = x.shape
+        x_flat = x.view(-1, dim)
+        expert_out = self.experts(x_flat)
+        expert_out = expert_out / self.num_experts
+        return expert_out.view(bs, slen, dim)
+
+
+class TensorParallelForExpert(ParallelStyle):
+    """TP for Experts: shard w1 colwise (Shard(1)), w2 rowwise (Shard(2)).
+
+    For seq parallel, set input_layouts=Shard(0) and output_layouts=Shard(0)
+    to all-gather tokens before computation and reduce-scatter after.
+    """
+
+    def __init__(self, *, input_layouts=None, output_layouts=None):
+        super().__init__()
+        self.input_layouts = input_layouts
+        self.output_layouts = output_layouts or Replicate()
+
+    def _partition_fn(self, name, mod, device_mesh):
+        for pn, p in mod.named_parameters(recurse=False):
+            if pn == "w1":
+                placement = [Shard(1)]
+            elif pn == "w2":
+                placement = [Shard(2)]
+            else:
+                continue
+            mod.register_parameter(
+                pn, nn.Parameter(distribute_tensor(p, device_mesh, placement))
+            )
+
+    def _input_fn(self, mod, inputs, device_mesh):
+        if self.input_layouts is not None:
+            x = inputs[0]
+            x = (
+                DTensor.from_local(x, device_mesh, [self.input_layouts])
+                .redistribute(device_mesh, [Replicate()])
+                .to_local()
+            )
+            return (x,)
+        return inputs
+
+    def _output_fn(self, mod, outputs, device_mesh):
+        return (
+            DTensor.from_local(outputs, device_mesh, [Partial()])
+            .redistribute(device_mesh, [self.output_layouts])
+            .to_local()
+        )
+
+    def _apply(self, module, device_mesh):
+        return distribute_module(
+            module,
+            device_mesh,
+            partition_fn=self._partition_fn,
+            input_fn=self._input_fn,
+            output_fn=self._output_fn,
+        )
+
+
+class ExpertParallel(ParallelStyle):
+    """Distributes experts across ranks with Shard(0) on the expert dimension.
+
+    Dispatch: all-gather tokens so every rank sees all tokens.
+    Combine: reduce-scatter (sum) expert outputs back to token owners.
+    """
+
+    def _partition_fn(self, name: str, mod: nn.Module, device_mesh: DeviceMesh) -> None:
+        for param_name, param in mod.named_parameters(recurse=False):
+            dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(0)]))
+            mod.register_parameter(param_name, dist_param)
+
+    def _token_dispatch(
+        self, mod: nn.Module, inputs: tuple, device_mesh: DeviceMesh
+    ) -> tuple[torch.Tensor]:
+        (x,) = inputs
+        x_gathered = all_gather_tensor_autograd(
+            x,
+            gather_dim=0,
+            group=device_mesh.get_group(),
+        )
+        x_gathered = torch.ops._c10d_functional.wait_tensor(x_gathered)
+        return (x_gathered,)
+
+    def _token_combine(
+        self, mod: nn.Module, output: torch.Tensor, device_mesh: DeviceMesh
+    ) -> torch.Tensor:
+        result = reduce_scatter_tensor_autograd(
+            output,
+            "sum",
+            scatter_dim=0,
+            group=device_mesh.get_group(),
+        )
+        result = torch.ops._c10d_functional.wait_tensor(result)
+        return result
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        return distribute_module(
+            module,
+            device_mesh,
+            partition_fn=self._partition_fn,
+            input_fn=self._token_dispatch,
+            output_fn=self._token_combine,
+        )
+
+
+class ExpertParallelWithTP(ParallelStyle):
+    """Combined EP + TP for experts.
+
+    Applied to ExpertLayer. Distributes expert params on a 2D (ep, tp) mesh
+    with [Shard(0), Shard(1/2)]. Token dispatch/combine hooks are registered
+    on ExpertLayer (outer), TP reduction hook on Experts (inner), so forward
+    execution is: EP dispatch -> TP input -> forward -> TP reduce -> EP combine.
+    """
+
+    def __init__(
+        self,
+        ep_mesh: DeviceMesh,
+        tp_mesh: DeviceMesh,
+    ):
+        super().__init__()
+        self.ep_mesh = ep_mesh
+        self.tp_mesh = tp_mesh
+        self.ep_tp_mesh = DeviceMesh._concatenate([ep_mesh, tp_mesh])
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        experts = module.experts  # type: ignore[attr-defined]
+
+        # Partition expert weights on 2D (ep, tp) mesh
+        for pn, p in experts.named_parameters(recurse=False):
+            if pn == "w1":
+                placements = [Shard(0), Shard(1)]
+            elif pn == "w2":
+                placements = [Shard(0), Shard(2)]
+            else:
+                continue
+            experts.register_parameter(
+                pn, nn.Parameter(distribute_tensor(p, self.ep_tp_mesh, placements))
+            )
+
+        # EP dispatch/combine hooks on ExpertLayer (outer module)
+        ep_mesh = self.ep_mesh
+
+        def ep_dispatch(mod, inputs):
+            (x,) = inputs
+            x = all_gather_tensor_autograd(x, gather_dim=0, group=ep_mesh.get_group())
+            return (torch.ops._c10d_functional.wait_tensor(x),)
+
+        def ep_combine(mod, inputs, output):
+            out = reduce_scatter_tensor_autograd(
+                output, "sum", scatter_dim=0, group=ep_mesh.get_group()
+            )
+            return torch.ops._c10d_functional.wait_tensor(out)
+
+        module.register_forward_pre_hook(ep_dispatch)
+        module.register_forward_hook(ep_combine)
+
+        # TP reduction hook on Experts (inner module)
+        tp_mesh = self.tp_mesh
+
+        def tp_allreduce_input_grad(mod, inputs):
+            (x,) = inputs
+            return (
+                DTensor.from_local(x, tp_mesh, [Replicate()]).to_local(
+                    grad_placements=[Partial()]
+                ),
+            )
+
+        experts.register_forward_pre_hook(tp_allreduce_input_grad)
+
+        def tp_reduce(mod, inputs, output):
+            return (
+                DTensor.from_local(output, tp_mesh, [Partial()])
+                .redistribute(tp_mesh, [Replicate()])
+                .to_local()
+            )
+
+        experts.register_forward_hook(tp_reduce)
+        return module
+
+
 class TransformerBlock(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
         self.attention_norm = nn.LayerNorm(args.dim)
         self.attention = Attention(args)
         self.ffn_norm = nn.LayerNorm(args.dim)
-        self.feed_forward = FeedForward(
-            args.dim, hidden_dim=4 * args.dim, dropout_p=args.dropout_p
-        )
+
+        self.has_experts = args.num_experts > 0
+        if self.has_experts:
+            self.expert_layer = ExpertLayer(
+                args.num_experts,
+                dim=args.dim,
+                hidden_dim=4 * args.dim,
+            )
+        else:
+            self.feed_forward = FeedForward(
+                args.dim,
+                hidden_dim=4 * args.dim,
+                dropout_p=args.dropout_p,
+            )
 
     def forward(self, x):
         h = x + self.attention(self.attention_norm(x))
-        out = h + self.feed_forward(self.ffn_norm(h))
+        if self.has_experts:
+            out = h + self.expert_layer(self.ffn_norm(h))
+        else:
+            out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
 
@@ -250,97 +486,130 @@ class Transformer(nn.Module):
     @staticmethod
     def parallelize(
         module: "Transformer",
-        device_mesh: DeviceMesh,
+        tp_mesh: DeviceMesh | None,
         use_seq_parallel: bool,
         local_output_for_attn: bool = False,
+        ep_mesh: DeviceMesh | None = None,
     ) -> nn.Module:
         if not isinstance(module, Transformer):
             raise AssertionError(f"Requires Transformer but got {module}")
-        # Parallelize the root submodules.
-        if use_seq_parallel:
-            root_plan = {
-                "tok_embeddings": RowwiseParallel(
-                    input_layouts=Replicate(), output_layouts=Shard(1)
-                ),
-                "pos_embeddings": RowwiseParallel(
-                    input_layouts=Replicate(), output_layouts=Shard(0)
-                ),
-                "norm": SequenceParallel(),
-            }
-        else:
-            root_plan = {
-                "tok_embeddings": RowwiseParallel(
-                    input_layouts=Replicate(), output_layouts=Replicate()
-                ),
-                "pos_embeddings": RowwiseParallel(
-                    input_layouts=Replicate(), output_layouts=Replicate()
-                ),
-            }
+        if tp_mesh is None and ep_mesh is None:
+            raise ValueError("At least one of tp_mesh or ep_mesh must be provided")
 
-        module_tp = parallelize_module(module, device_mesh, root_plan)
-        # Parallelize the attention and feed forward submodules.
-        for layer in module_tp.layers:
-            layer_parallelize_plan = {}
+        # Parallelize the root submodules with TP.
+        if tp_mesh is not None:
             if use_seq_parallel:
-                layer_parallelize_plan["attention"] = PrepareModuleInput(
+                root_plan = {
+                    "tok_embeddings": RowwiseParallel(
+                        input_layouts=Replicate(), output_layouts=Shard(1)
+                    ),
+                    "pos_embeddings": RowwiseParallel(
+                        input_layouts=Replicate(), output_layouts=Shard(0)
+                    ),
+                    "norm": SequenceParallel(),
+                }
+            else:
+                root_plan = {
+                    "tok_embeddings": RowwiseParallel(
+                        input_layouts=Replicate(), output_layouts=Replicate()
+                    ),
+                    "pos_embeddings": RowwiseParallel(
+                        input_layouts=Replicate(), output_layouts=Replicate()
+                    ),
+                }
+            parallelize_module(module, tp_mesh, root_plan)
+
+        # Parallelize the attention and feed forward submodules.
+        for layer in module.layers:
+            if tp_mesh is not None:
+                layer_parallelize_plan = {}
+                if use_seq_parallel:
+                    layer_parallelize_plan["attention"] = PrepareModuleInput(
+                        input_layouts=Shard(1),
+                        desired_input_layouts=Replicate(),
+                    )
+                    # shard the RMSNorms
+                    layer_parallelize_plan["attention_norm"] = SequenceParallel()
+                    layer_parallelize_plan["ffn_norm"] = SequenceParallel()
+                layer_parallelize_plan["attention.wq"] = ColwiseParallel(
+                    use_local_output=local_output_for_attn
+                )
+                layer_parallelize_plan["attention.wk"] = ColwiseParallel(
+                    use_local_output=local_output_for_attn
+                )
+                layer_parallelize_plan["attention.wv"] = ColwiseParallel(
+                    use_local_output=local_output_for_attn
+                )
+                layer_parallelize_plan["attention.wo"] = (
+                    RowwiseParallel(output_layouts=Shard(1))
+                    if use_seq_parallel
+                    else RowwiseParallel()
+                )
+
+                if not layer.has_experts:
+                    layer_parallelize_plan["feed_forward.w1"] = (
+                        ColwiseParallel(input_layouts=Shard(1))
+                        if use_seq_parallel
+                        else ColwiseParallel()
+                    )
+                    layer_parallelize_plan["feed_forward.w2"] = (
+                        RowwiseParallel(output_layouts=Shard(1))
+                        if use_seq_parallel
+                        else RowwiseParallel()
+                    )
+                elif ep_mesh is None:
+                    # No EP mesh provided, use TP for experts
+                    layer_parallelize_plan["expert_layer.experts"] = (
+                        TensorParallelForExpert(
+                            input_layouts=Shard(0),
+                            output_layouts=Shard(0),
+                        )
+                        if use_seq_parallel
+                        else TensorParallelForExpert()
+                    )
+
+                parallelize_module(layer, tp_mesh, layer_parallelize_plan)
+
+            # EP (+ optional TP) for experts
+            if ep_mesh is not None and layer.has_experts:
+                if tp_mesh is not None:
+                    parallelize_module(
+                        layer.expert_layer,
+                        ep_mesh,
+                        ExpertParallelWithTP(ep_mesh, tp_mesh),
+                    )
+                else:
+                    parallelize_module(
+                        layer.expert_layer.experts, ep_mesh, ExpertParallel()
+                    )
+
+        if tp_mesh is not None:
+            # Parallelize the output submodule. If weight tying is enabled,
+            # we need to make sure output.weight is sharded consistently as
+            # tok_embeddings.weight, at the cost of the all_reduce operation
+            # using RowwiseParallel.
+            output_parallelize_plan = (
+                ColwiseParallel(
                     input_layouts=Shard(1),
-                    desired_input_layouts=Replicate(),
+                    output_layouts=Replicate(),
                 )
-                # shard the RMSNorms
-                layer_parallelize_plan["attention_norm"] = SequenceParallel()
-                layer_parallelize_plan["ffn_norm"] = SequenceParallel()
-            layer_parallelize_plan["attention.wq"] = ColwiseParallel(
-                use_local_output=local_output_for_attn
-            )
-            layer_parallelize_plan["attention.wk"] = ColwiseParallel(
-                use_local_output=local_output_for_attn
-            )
-            layer_parallelize_plan["attention.wv"] = ColwiseParallel(
-                use_local_output=local_output_for_attn
-            )
-            layer_parallelize_plan["attention.wo"] = (
-                RowwiseParallel(output_layouts=Shard(1))
                 if use_seq_parallel
-                else RowwiseParallel()
+                else ColwiseParallel(output_layouts=Replicate())
             )
+            parallelize_module(module.output, tp_mesh, output_parallelize_plan)
 
-            layer_parallelize_plan["feed_forward.w1"] = (
-                ColwiseParallel(input_layouts=Shard(1))
-                if use_seq_parallel
-                else ColwiseParallel()
-            )
-            layer_parallelize_plan["feed_forward.w2"] = (
-                RowwiseParallel(output_layouts=Shard(1))
-                if use_seq_parallel
-                else RowwiseParallel()
-            )
+            if local_output_for_attn:
+                for layer in module.layers:
+                    layer.attention.n_heads = (
+                        module.model_args.n_heads // tp_mesh.size()
+                    )
 
-            parallelize_module(layer, device_mesh, layer_parallelize_plan)
+            # Manually set output.weight so that parameters and gradients
+            # are shared.
+            if module.model_args.weight_tying:
+                module.output.weight = module.tok_embeddings.weight
 
-        # Parallelize the output submodule. If weight tying is enabled, we need to
-        # make sure output.weight is sharded consistently as tok_embeddings.weight,
-        # at the cost of the all_reduce operation using RowwiseParallel.
-        output_parallelize_plan = (
-            ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Replicate(),
-            )
-            if use_seq_parallel
-            else ColwiseParallel(output_layouts=Replicate())
-        )
-        parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
-
-        if local_output_for_attn:
-            for layer in module_tp.layers:
-                layer.attention.n_heads = (
-                    module_tp.model_args.n_heads // device_mesh.size()
-                )
-
-        # Manually set output.weight so that parameters and gradients are shared.
-        if module_tp.model_args.weight_tying:
-            module_tp.output.weight = module_tp.tok_embeddings.weight
-
-        return module_tp
+        return module
 
 
 def skip_unless_torch_gpu(method: T) -> T:
