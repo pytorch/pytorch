@@ -10,7 +10,6 @@ from typing import Any, Optional
 
 import torch._inductor.config as config
 from torch._inductor.codecache import cutlass_key
-from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.codegen.cutlass import serialization, utils
 from torch._inductor.codegen.cutlass.serialization import (
     get_cutlass_operation_serializer,
@@ -73,9 +72,8 @@ def maybe_fetch_ops(device_type: str) -> Optional[list[Any]]:
         return None
 
     # setup
-    device_op_overrides = get_device_op_overrides(device_type)
-    arch: str = device_op_overrides.get_device_arch()
-    version: str = device_op_overrides.get_toolkit_version()
+    arch: str = utils.cutlass_arch(device_type)
+    version: str = utils.toolkit_version(device_type)
     if device_type == "cuda":
         # get_cuda_version might return "12.4.0" or "12.4"
         # but we want to use "12.4"
