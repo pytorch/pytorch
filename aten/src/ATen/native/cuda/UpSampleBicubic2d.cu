@@ -289,7 +289,7 @@ static void upsample_bicubic2d_out_cuda_template(
         // shapes (up to ~130x130 grids from 2048x2048 images) while
         // staying well below the crossover point where the original
         // kernel catches up (~65k+ output elements).
-        if (num_output_elements <= 18432) {
+        if (num_output_elements <= 18432 && input.size(0) * input.size(1) > 0) {
           int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
           int grid_z = std::min<int>(maxGridSize[2],
                                      input.size(0) * input.size(1));
