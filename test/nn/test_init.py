@@ -162,6 +162,36 @@ class TestNNInit(TestCase):
         if not self._is_trunc_normal(input_tensor, mean=0, std=1, a=0, b=1):
             raise AssertionError("Expected truncated normal distribution")
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
+    def test_trunc_normal_low_precision(self):
+        # Verify that trunc_normal_ produces correct distributions for
+        # bfloat16 and float16 tensors (gh-145498). Without upcasting to
+        # float32 internally, limited mantissa bits cause uniform_ samples
+        # near zero to flush, producing -inf after erfinv and clamping to
+        # the lower bound.
+        for dtype in [torch.bfloat16, torch.float16]:
+            input_tensor = torch.empty(10000, dtype=dtype)
+            init.trunc_normal_(input_tensor, mean=0, std=0.01, a=-2, b=2)
+            fp32_vals = input_tensor.float()
+
+            # No values should be clamped to exactly the lower bound.
+            self.assertEqual(
+                fp32_vals.eq(-2).sum().item(),
+                0,
+                msg=f"trunc_normal_ produced values clamped to lower bound for {dtype}",
+            )
+
+            # Mean should be close to 0 and std close to 0.01.
+            self.assertTrue(
+                abs(fp32_vals.mean().item()) < 0.005,
+                msg=f"trunc_normal_ mean too far from 0 for {dtype}: {fp32_vals.mean().item()}",
+            )
+            self.assertTrue(
+                abs(fp32_vals.std().item() - 0.01) < 0.005,
+                msg=f"trunc_normal_ std too far from 0.01 for {dtype}: {fp32_vals.std().item()}",
+            )
+
     def test_constant(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5)

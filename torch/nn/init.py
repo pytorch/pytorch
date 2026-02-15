@@ -110,20 +110,35 @@ def _no_grad_trunc_normal_(
         l = norm_cdf((a - mean) / std)
         u = norm_cdf((b - mean) / std)
 
+        # For low-precision dtypes (e.g. bfloat16, float16), the limited
+        # mantissa bits cause uniform_ samples near zero to flush to exactly
+        # zero, producing -inf after erfinv and skewing the distribution
+        # (see https://github.com/pytorch/pytorch/issues/145498).
+        # Work in float32 and cast back at the end.
+        needs_upcast = tensor.dtype in (torch.bfloat16, torch.float16)
+        if needs_upcast:
+            work_tensor = torch.empty_like(tensor, dtype=torch.float32)
+        else:
+            work_tensor = tensor
+
         # Uniformly fill tensor with values from [l, u], then translate to
         # [2l-1, 2u-1].
-        tensor.uniform_(2 * l - 1, 2 * u - 1, generator=generator)
+        work_tensor.uniform_(2 * l - 1, 2 * u - 1, generator=generator)
 
         # Use inverse cdf transform for normal distribution to get truncated
         # standard normal
-        tensor.erfinv_()
+        work_tensor.erfinv_()
 
         # Transform to proper mean, std
-        tensor.mul_(std * math.sqrt(2.0))
-        tensor.add_(mean)
+        work_tensor.mul_(std * math.sqrt(2.0))
+        work_tensor.add_(mean)
 
         # Clamp to ensure it's in the proper range
-        tensor.clamp_(min=a, max=b)
+        work_tensor.clamp_(min=a, max=b)
+
+        if needs_upcast:
+            tensor.copy_(work_tensor)
+
         return tensor
 
 
