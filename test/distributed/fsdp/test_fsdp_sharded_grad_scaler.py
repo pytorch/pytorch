@@ -24,7 +24,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     DummyProcessGroup,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     NestedWrappedModule,
     NonUniformReqGradNWM,
     subtest_name,
@@ -163,7 +163,7 @@ class TestShardGradScaler(TestCase):
         self.assertTrue(ret_val is None)
 
 
-class TestShardedGradScalerParityWithDDP(FSDPTest):
+class TestShardedGradScalerParityWithDDP(FSDPTestContinuous):
     def _get_init_modes_for_test(self, cpu_offload):
         modes = [DEVICEInitMode.DEVICE_AFTER, DEVICEInitMode.DEVICE_BEFORE]
         # Note that DEVICEInitMode.DEVICE_NEVER works currently only with CPU
