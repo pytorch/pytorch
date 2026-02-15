@@ -8,7 +8,7 @@ install_ubuntu() {
   echo "Downloading pre-built sccache ${SCCACHE_VERSION} for ${ARCH}"
   curl --retry 3 -sL \
     "https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/sccache-${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
-    | tar xz --strip-components=1 -C /opt/cache/bin/ --wildcards '*/sccache' '*/sccache-dist'
+    | tar xz --strip-components=1 -C /opt/cache/bin/ --wildcards '*/sccache'
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a

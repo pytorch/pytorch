@@ -400,7 +400,6 @@ fi
 
 # Build image
 docker buildx build \
-       --network=host \
        ${no_cache_flag} \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
@@ -439,9 +438,9 @@ docker buildx build \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
-       --build-arg "SCCACHE_BUCKET=${SCCACHE_BUCKET:-}" \
-       --build-arg "SCCACHE_REGION=${SCCACHE_REGION:-}" \
-       --build-arg "SCCACHE_S3_USE_SSL=${SCCACHE_S3_USE_SSL:-}" \
+       ${SCCACHE_BUCKET:+--build-arg "SCCACHE_BUCKET=${SCCACHE_BUCKET}"} \
+       ${SCCACHE_REGION:+--build-arg "SCCACHE_REGION=${SCCACHE_REGION}"} \
+       ${SCCACHE_S3_USE_SSL:+--build-arg "SCCACHE_S3_USE_SSL=${SCCACHE_S3_USE_SSL}"} \
        --build-arg "http_proxy=${http_proxy:-}" \
        --build-arg "https_proxy=${https_proxy:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
