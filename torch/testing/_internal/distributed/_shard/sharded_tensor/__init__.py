@@ -11,7 +11,6 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     tp_transports,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 TEST_GPU_NUM = 4

@@ -13,12 +13,14 @@ from torch.distributed.collective_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skip_if_lt_x_gpu,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
