@@ -372,13 +372,9 @@ return tmp_1, D""",
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen(self):
-        from torch._inductor.codegen.common import get_device_op_overrides
-        from torch._inductor.codegen.cutlass.utils import _normalize_cutlass_arch
+        from torch._inductor.codegen.cutlass.utils import cutlass_arch
 
-        device_op_overrides = get_device_op_overrides(GPU_TYPE)
-
-        arch = device_op_overrides.get_device_arch()  # type: ignore[arg-type]
-        arch = int(_normalize_cutlass_arch(arch, GPU_TYPE))
+        arch = int(cutlass_arch(GPU_TYPE))
         epilogue_functor = _trace(BIAS_CODE, EXAMPLE_TENSORS, arch)
         code = _render_argument_type(
             epilogue_functor,
@@ -438,13 +434,9 @@ return tmp_1, D""",
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_argument_codegen_return_accumulator(self):
-        from torch._inductor.codegen.common import get_device_op_overrides
-        from torch._inductor.codegen.cutlass.utils import _normalize_cutlass_arch
+        from torch._inductor.codegen.cutlass.utils import cutlass_arch
 
-        device_op_overrides = get_device_op_overrides(GPU_TYPE)
-
-        arch = device_op_overrides.get_device_arch()  # type: ignore[arg-type]
-        arch = int(_normalize_cutlass_arch(arch, GPU_TYPE))
+        arch = int(cutlass_arch(GPU_TYPE))
 
         code = """
 def fn(accum, bias):

@@ -21,7 +21,8 @@ from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
-from ..common import get_device_op_overrides
+from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
+from ..xpu.xpu_env import get_xpu_arch, get_xpu_version
 
 
 log = logging.getLogger(__name__)
@@ -174,14 +175,6 @@ def try_import_cutlass() -> bool:
     return False
 
 
-@functools.lru_cache(8)
-def _normalize_cutlass_arch(arch: str, device_type: str) -> str:
-    if device_type == "xpu":
-        return _normalize_xpu_arch(arch)
-    else:
-        return _normalize_cuda_arch(arch)
-
-
 def _normalize_xpu_arch(arch: str) -> str:
     if arch.startswith("Xe"):
         return arch[2:]
@@ -219,6 +212,24 @@ def _normalize_cuda_arch(arch: str) -> str:
     raise NotImplementedError(f"Unsupported cuda arch: {arch}")
 
 
+@functools.lru_cache(8)
+def cutlass_arch(device_type: str) -> str:
+    if device_type == "xpu":
+        arch = get_xpu_arch()
+        return _normalize_xpu_arch(arch)
+    else:
+        arch = get_cuda_arch()
+        return _normalize_cuda_arch(arch)
+
+
+@functools.lru_cache(1)
+def toolkit_version(device_type: str) -> str:
+    if device_type == "xpu":
+        return get_xpu_version()
+    else:
+        return get_cuda_version()
+
+
 @dataclass
 class CUTLASSArgs:
     """
@@ -249,9 +260,6 @@ class CUTLASSArgs:
             raise RuntimeError(
                 f"{self.architectures=} or {self.toolkit_version=} is None!"
             )
-        self.architectures = _normalize_cutlass_arch(
-            self.architectures, device_type=self.device_type
-        )
 
 
 @clear_on_fresh_cache
@@ -273,7 +281,7 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
             version,
         )
         return {}
-    arch = _normalize_cutlass_arch(arch, device_type)
+
     gen_arch = (
         "100" if arch == "103" else arch
     )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
@@ -324,9 +332,8 @@ def gen_ops(device_type: str) -> dict[Any, Any]:
     Generates all supported CUTLASS operations.
     """
     with dynamo_timed("cutlass_utils.gen_ops"):
-        device_op_overrides = get_device_op_overrides(device_type)
-        arch = device_op_overrides.get_device_arch()
-        version = device_op_overrides.get_toolkit_version()
+        arch = cutlass_arch(device_type)
+        version = toolkit_version(device_type)
         return _gen_ops_cached(arch, version, device_type)
 
 
