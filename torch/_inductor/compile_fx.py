@@ -844,7 +844,9 @@ def _compile_fx_inner(
     """
     aot_mode: bool = V.aot_compilation
 
-    if config.pipeline_max_autotune_gemm:
+    from torch._inductor.autotune_process import use_pipelined_autotuning
+
+    if use_pipelined_autotuning():
         # Warm up max-autotune process pool asap
         from torch._inductor.autotune_process import AutotuneProcessPool
 

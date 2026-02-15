@@ -19,6 +19,7 @@ _R = TypeVar("_R")
 
 OpType: TypeAlias = OpOverloadPacket | OpOverload
 
+# pyrefly: ignore [implicit-any]
 TableType: TypeAlias = dict[OpType, Callable]
 
 # Mapping from ops to implementations

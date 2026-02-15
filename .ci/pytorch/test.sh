@@ -184,6 +184,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
   # disable timeout due to shard not balance for xpu
   export NO_TEST_TIMEOUT=True
+elif [[ "$BUILD_ENVIRONMENT" == *pallas-tpu* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="tpu"
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -344,6 +346,7 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100/B200
+  time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
@@ -413,6 +416,15 @@ test_lazy_tensor_meta_reference_disabled() {
 test_dynamo_core() {
   time python test/run_test.py \
     --include-dynamo-core-tests \
+    --verbose \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_dynamo_cpython() {
+  time python test/run_test.py \
+    --include-cpython-tests \
+    --dynamo \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -879,12 +891,6 @@ test_inductor_halide() {
 }
 
 test_inductor_pallas() {
-  # Set TPU target for TPU tests
-  if [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
-    export PALLAS_TARGET_TPU=1
-    # Check if TPU backend is available
-    python -c "import jax; devices = jax.devices('tpu'); print(f'Found {len(devices)} TPU device(s)'); assert len(devices) > 0, 'No TPU devices found'"
-  fi
   python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
@@ -1931,6 +1937,12 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
+  TIMM_PIN="$(< .ci/docker/ci_commit_pins/timm.txt)"
+  export HF_HOME="${HF_HOME}/timm_${TIMM_PIN}"
+  if [[ "${TRANSFORMERS_OFFLINE:-1}" == "0" ]]; then
+    python benchmarks/dynamo/timm_models.py --download-only \
+      && touch "${HF_HOME}/.timm_cache_complete"
+  fi
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
@@ -1980,6 +1992,8 @@ elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then
   test_dynamo_core
+elif [[ "${TEST_CONFIG}" == *dynamo_cpython* ]]; then
+  test_dynamo_cpython
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"
