@@ -1,11 +1,21 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <torch/custom_class.h>
+
 #include <atomic>
 
 namespace {
 
 using namespace c10d::symmetric_memory;
+
+// Register SymmetricMemory as a TorchBind custom class so that dispatcher
+// schemas can accept/return it via
+// __torch__.torch.classes.c10d.SymmetricMemory. Note: SymmetricMemory is
+// abstract; instances are produced by backend rendezvous and may be of a
+// derived type stored behind an intrusive_ptr.
+static auto symm_mem_torchbind_class =
+    torch::class_<SymmetricMemory>("c10d", "SymmetricMemory");
 
 static bool is_finalizing_ = false;
 
@@ -540,6 +550,41 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "tile_reduce(Tensor in_tile, Tensor(a!) out_tile, int root, str group_name, str reduce_op='sum') -> ()");
   m.def(
       "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
+
+  // Dispatcher-visible (TorchBind) SymmetricMemory API.
+  // For now, `_rendezvous` and `_barrier` are for testing dispatcher support
+  // only. Please do not use them in production code.
+  m.def(
+      "_rendezvous(Tensor tensor, str? group_name=None) -> __torch__.torch.classes.c10d.SymmetricMemory");
+  m.def("_barrier(__torch__.torch.classes.c10d.SymmetricMemory symm) -> ()");
+
+  // One-sided communication APIs.
+  // The op defined here is backend-specific. Backend dispatching is handled in
+  // torch/distributed/_symmetric_memory/__init__.py by looking at runtime
+  // backend setting.
+  m.def(
+      "nccl_put_signal(Tensor src, __torch__.torch.classes.c10d.SymmetricMemory hdl, int peer) -> ()");
+  m.def(
+      "nccl_wait_signal(__torch__.torch.classes.c10d.SymmetricMemory hdl, int peer) -> ()");
+}
+
+c10::intrusive_ptr<SymmetricMemory> rendezvous_op(
+    const at::Tensor& tensor,
+    std::optional<std::string> group_name) {
+  return c10d::symmetric_memory::rendezvous(tensor, group_name);
+}
+
+void barrier_op(const c10::intrusive_ptr<SymmetricMemory>& symm) {
+  // Keep the dispatcher signature minimal for now; use the common default
+  // semantics (channel=0, timeout_ms=0).
+  symm->barrier(/*channel=*/0, /*timeout_ms=*/0);
+}
+
+TORCH_LIBRARY_IMPL(symm_mem, CompositeExplicitAutograd, m) {
+  // For now, `_rendezvous` and `_barrier` are for testing dispatcher support
+  // only. Please do not use them in production code.
+  m.impl("_rendezvous", rendezvous_op);
+  m.impl("_barrier", barrier_op);
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

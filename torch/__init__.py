@@ -326,6 +326,11 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
 
 def _preload_cuda_deps(err: OSError | None = None) -> None:
     cuda_libs: list[tuple[str, str]] = [
+        # NOTE: Order matters! We must preload libcublasLt BEFORE libcublas to prevent
+        # libcublas from loading a mismatched system-wide libcublasLt via its RUNPATH.
+        # Without this, if a different CUDA Toolkit version exists in the system PATH,
+        # libcublas may load the wrong libcublasLt, causing symbol errors or runtime failures.
+        ("cublas", "libcublasLt.so.*[0-9]"),
         ("cublas", "libcublas.so.*[0-9]"),
         ("cudnn", "libcudnn.so.*[0-9]"),
         ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
@@ -2977,12 +2982,14 @@ def _as_tensor_fullprec(t):
     """
     Like torch.as_tensor, but when given Python data types it will keep
     them in full precision.  Used for calling convention for Dynamo.
+    Python scalars (float, int) are always created on CPU to avoid being
+    affected by DeviceContext.
     """
     ty = type(t)
     if ty is builtins.float:
-        return torch.as_tensor(t, dtype=torch.float64)
+        return torch.as_tensor(t, dtype=torch.float64, device="cpu")
     elif ty is builtins.int:
-        return torch.as_tensor(t, dtype=torch.int64)
+        return torch.as_tensor(t, dtype=torch.int64, device="cpu")
     else:
         return torch.as_tensor(t)
 

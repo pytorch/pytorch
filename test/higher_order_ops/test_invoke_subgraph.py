@@ -2803,8 +2803,14 @@ class GraphModule(torch.nn.Module):
             def impl(x, y):
                 # Check that the input strides are preserved. This helps in
                 # testing that the HOP preserves the output strides.
-                assert x.stride() == (16, 4, 1, 2)
-                assert y.stride() == (16, 4, 2, 1)
+                if x.stride() != (16, 4, 1, 2):
+                    raise AssertionError(
+                        f"Expected x.stride() == (16, 4, 1, 2), got {x.stride()}"
+                    )
+                if y.stride() != (16, 4, 2, 1):
+                    raise AssertionError(
+                        f"Expected y.stride() == (16, 4, 2, 1), got {y.stride()}"
+                    )
                 out = y.clone()  # contiguous with strides (16, 4, 2, 1)
                 out.add_(x.transpose(-1, -2))
                 return out
@@ -3060,8 +3066,8 @@ class GraphModule(torch.nn.Module):
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, x):
-        _tree_leaf_0, = pytree.tree_leaves((x,))
-        L_x_, = self._in_shuffle_graph(_tree_leaf_0)
+        _fn_args = (x, )
+        L_x_, = self._dynamo_bytecode_flatten(*_fn_args)
         l_x_ = L_x_
 
         subgraph_0 = self.subgraph_0
@@ -3071,7 +3077,7 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_1
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', l_x_);  subgraph_1 = l_x_ = None
         getitem_4: "i64[1]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, b, getitem_4), self._out_spec)
+        return self._dynamo_bytecode_unflatten((b, getitem_4,), _fn_args)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[64, 1]"):
@@ -3094,14 +3100,6 @@ class GraphModule(torch.nn.Module):
                 getitem: "f32[1]" = max_1[0]
                 getitem_1: "i64[1]" = max_1[1];  max_1 = None
                 return (getitem, getitem_1)
-
-    class _in_shuffle_graph(torch.nn.Module):
-        def forward(self, arg0_1: "f32[s75, 1]"):
-            return (arg0_1,)
-
-    class _out_shuffle_graph(torch.nn.Module):
-        def forward(self, arg0_1: "f32[64, 1]", arg1_1: "i64[1]", arg2_1: "i64[1]"):
-            return [arg1_1, arg2_1]
 """,
             )
 
