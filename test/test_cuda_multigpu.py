@@ -1014,9 +1014,10 @@ class TestCudaMultiGPU(TestCase):
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
             t = torch.randn(1024 * 1024 * 8, device=device)  # noqa: F841
 
-            if IS_JETSON:
+            if IS_JETSON or torch.version.hip:
                 # w/o syncing, mem_get_info will run before memory allocated has actually increased.
-                # This race condition causes consistent failure
+                # On ROCm, hipMemGetInfo() has the same race condition as Jetson
+                # due to asynchronous memory management in the HIP runtime.
                 torch.cuda.synchronize()
             after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(device)
 
