@@ -3806,7 +3806,7 @@ def _force_inline() -> Iterator[None]:
     When active, check_verbose() will skip all inline/skip decision logic and
     always return SkipResult(False, ...), meaning functions will be inlined.
 
-    See _make_inlined() in higher_order_ops.py which uses this to ensure that
+    See _make_inlined() in utils.py which uses this to ensure that
     a python function is fully traced to produce the needed variable trackers.
     """
     global _force_inline_flag

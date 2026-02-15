@@ -2433,6 +2433,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
+        from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
             func_to_graphable,
@@ -2445,7 +2446,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         from .base import AsPythonConstantNotImplementedError
         from .builder import SourcelessBuilder, wrap_fx_proxy
-        from .higher_order_ops import _make_inlined
 
         # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
         #
@@ -2651,9 +2651,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         """
         import torch.utils._pytree as pytree
         from torch._dynamo.graph_bytecode_inputs import register_user_object
+        from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.invoke_leaf_function import LeafModuleState
 
-        from .higher_order_ops import _make_inlined
         from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
         def is_module_variable(
@@ -2721,11 +2721,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
+        from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 
         from .builder import wrap_fx_proxy
-        from .higher_order_ops import _make_inlined
 
         decorated_fn = self.value
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
