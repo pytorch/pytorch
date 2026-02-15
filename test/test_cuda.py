@@ -7824,7 +7824,12 @@ class TestCompileKernel(TestCase):
         )
 
         # Verify results
+        # Custom kernel does FP32 math. Ensure reference also uses FP32
+        # to avoid TF32 precision mismatch on MI300X (see #169392).
+        old_allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+        torch.backends.cuda.matmul.allow_tf32 = False
         expected = torch.matmul(A, B)
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32
         self.assertEqual(C, expected)
 
         # Test with different compute capability if specified
