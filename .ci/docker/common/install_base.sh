@@ -138,6 +138,10 @@ case "$ID" in
 esac
 
 # Install Valgrind separately since the apt-get version is too old.
+if command -v sccache &>/dev/null; then
+  export CC="sccache ${CC:-gcc}"
+  export CXX="sccache ${CXX:-g++}"
+fi
 mkdir valgrind_build && cd valgrind_build
 VALGRIND_VERSION=3.20.0
 wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2

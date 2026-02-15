@@ -9,8 +9,13 @@ OPENBLAS_VERSION=${OPENBLAS_VERSION:-"v0.3.30"}
 git clone https://github.com/OpenMathLib/OpenBLAS.git -b "${OPENBLAS_VERSION}" --depth 1 --shallow-submodules
 
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
+OPENBLAS_CC="gcc"
+if command -v sccache &>/dev/null; then
+  OPENBLAS_CC="sccache gcc"
+fi
+
 OPENBLAS_BUILD_FLAGS="
-CC=gcc
+CC=${OPENBLAS_CC}
 NUM_THREADS=128
 USE_OPENMP=1
 NO_SHARED=0

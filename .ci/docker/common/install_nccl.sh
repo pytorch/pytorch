@@ -23,7 +23,11 @@ if [[ -n "${NCCL_VERSION}" ]]; then
   # Follow build: https://github.com/NVIDIA/nccl/tree/master?tab=readme-ov-file#build
   git clone -b $NCCL_VERSION --depth 1 https://github.com/NVIDIA/nccl.git
   pushd nccl
-  make -j src.build
+  NCCL_MAKE_ARGS=(-j src.build)
+  if command -v sccache &>/dev/null; then
+    NCCL_MAKE_ARGS+=(NVCC="sccache nvcc")
+  fi
+  make "${NCCL_MAKE_ARGS[@]}"
   cp -a build/include/* /usr/local/cuda/include/
   cp -a build/lib/* /usr/local/cuda/lib64/
   popd

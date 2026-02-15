@@ -2,6 +2,11 @@
 # Script used only in CD pipeline
 set -uex -o pipefail
 
+if command -v sccache &>/dev/null; then
+  export CC="sccache ${CC:-gcc}"
+  export CXX="sccache ${CXX:-g++}"
+fi
+
 PYTHON_DOWNLOAD_URL=https://www.python.org/ftp/python
 GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
