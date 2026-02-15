@@ -73,9 +73,10 @@ def _check_compile_cudagraph_backend(test_case, fn, args):
     outputs = []
     for i in range(3):
         with check_cudagraphs_not_skipped(test_case):
+            torch.compiler.cudagraph_mark_step_begin()
             outputs.append(
                 pytree.tree_map(
-                    lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
+                    lambda x: x.detach().clone() if isinstance(x, torch.Tensor) else x,
                     cudagraphs_compiled_fn(*args),
                 )
             )
@@ -95,14 +96,18 @@ def _check_compile_any_backend_with_cudagraph(test_case, fn, args, backend):
     else:
         compiled_fn = torch.compile(fn, backend=backend)
     outputs = []
-    with ControlFlowOpWarmupDispatchMode():
+
+    side_stream = torch.cuda.Stream()
+
+    with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
         warmup_output = compiled_fn(*args)
     outputs.append(warmup_output)
 
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph), CUDAGraphCaptureControlFlowOpDispatchMode():
+    with torch.cuda.graph(graph, stream=side_stream), CUDAGraphCaptureControlFlowOpDispatchMode():
         captured_output = compiled_fn(*args)
-    eager_res = fn(*args)
+    with torch.cuda.stream(side_stream):
+        eager_res = fn(*args)
     graph.replay()
     outputs.append(
         pytree.tree_map(
@@ -5523,6 +5528,72 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
             [x, false_pred],
         )
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_triply_nested_cudagraphs(self):
+        def level3_true(x):
+            return x.sin()
+
+        def level3_false(x):
+            return x.cos()
+
+        def level2_true(x, p2):
+            return cond(p2, level3_true, level3_false, [x])
+
+        def level2_false(x, p2):
+            return cond(p2, lambda x: x + 1, lambda x: x - 1, [x])
+
+        def level1_true(x, p1, p2):
+            return cond(p1, level2_true, level2_false, [x, p2])
+
+        def level1_false(x, p1, p2):
+            return cond(p1, level2_false, level2_true, [x, p2])
+
+        def f(x, p0, p1, p2):
+            return cond(p0, level1_true, level1_false, [x, p1, p2])
+
+        x = torch.randn(4).cuda()
+
+        test_inputs = [
+            [x, torch.tensor(True).cuda(), torch.tensor(True).cuda(), torch.tensor(False).cuda()],
+            [x, torch.tensor(False).cuda(), torch.tensor(False).cuda(), torch.tensor(True).cuda()],
+        ]
+
+        for args in test_inputs:
+            _check_compile_cudagraph_backend(self, f, args)
+            _check_compile_many_backends_with_cudagraph(self, f, args)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_record_stream_reuse(self):
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        try:
+            predicate = torch.tensor(True, device="cuda")
+
+            def true_fn():
+                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
+
+            def false_fn():
+                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
+
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "graph_capture_record_stream_reuse:True",
+            ):
+                with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                    torch.cond(predicate, true_fn, false_fn, [])
+        finally:
+            torch.cuda.memory._set_allocator_settings(
+                "graph_capture_record_stream_reuse:False"
+            )
+
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
@@ -9831,7 +9902,7 @@ class DynamicCondModel(torch.nn.Module):
             x = self.fc1_1(x)
             return self.fc1_2(x)
 
-        pred = torch.tensor(x.sum() > 0, device="cuda")
+        pred = x.sum() > 0
         x = cond(pred, true_fn, false_fn, [x])
 
         x = self.relu(x)
@@ -9848,9 +9919,18 @@ class TestControlFlowNN(TestCase):
     def test_cond_in_NN(self):
         model = DynamicCondModel().cuda()
 
-        x = torch.randn(16, device="cuda")
-        _check_compile_cudagraph_backend(self, model, [x])
-        _check_compile_many_backends_with_cudagraph(self, model, [x])
+        def autograd_test(x):
+            model.zero_grad(set_to_none=True)
+            output = model(x)
+            loss = output.sum()
+            loss.backward()
+            grads = [p.grad for p in model.parameters()]
+            return (output, loss, grads)
+
+        x = torch.randn(16,device="cuda")
+
+        _check_compile_many_backends_with_cudagraph(self, autograd_test, [x])
+        _check_compile_cudagraph_backend(self, autograd_test, [x])
 
 
 @unittest.skipIf(

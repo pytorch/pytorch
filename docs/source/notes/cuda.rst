@@ -1765,10 +1765,11 @@ is implemented using torch.cond(). If your function uses this
 function, compiling it with the "cudagraphs" backend will enable
 control flow in the resulting cuda graph via `conditional nodes`_.
 
-Unfortunately, eager mode execution does not work due to reasons
-described in `issue 144787`_. Support for inductor backend to
-torch.compile is not available yet, but there is no fundamental
-blocker.
+Doing cuda graph capture of eager mode code using torch.cond() will
+also work.
+
+Support for inductor backend to torch.compile is not available yet,
+but there is no fundamental blocker.
 
 An example of using the cudagraphs backend to torch.compile on code
 using torch.cond is demonstrated below::
