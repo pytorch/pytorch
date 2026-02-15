@@ -209,10 +209,10 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 //     bound), and recursively call `ApplyOpN` with `remaining_steps - 1`.
 //  3. At `remaining_steps = 0`,
 //       if `step = 1`, call `op(tensor1_val, tensor2_val, ...)`;
-//       if `step > 1`, call `op(n, tensor1_val1, tensor1_val2, ..., tesor1_valstep,
-//                                  tensor2_val1, tensor2_val2, ..., tesor2_valstep,
+//       if `step > 1`, call `op(n, tensor1_val1, tensor1_val2, ..., tensor1_valstep,
+//                                  tensor2_val1, tensor2_val2, ..., tensor2_valstep,
 //                                       ...
-//                                  tensorN_val1, tensorN_val2, ..., tesorN_valstep);`
+//                                  tensorN_val1, tensorN_val2, ..., tensorN_valstep);`
 //
 // See NOTE [ CUDA_tensor_applyN helpers ] above for how Op may look like.
 
