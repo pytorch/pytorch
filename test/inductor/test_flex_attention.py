@@ -30,6 +30,7 @@ from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
     _apply_kernel_options,
+    _compute_dq_write_order_from_block_mask,
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
@@ -6298,6 +6299,45 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             cpu_mask = block_mask.to("cpu")
             self.assertEqual(cpu_mask.kv_num_blocks.device.type, "cpu")
             self.assertIsNone(cpu_mask.q_indices)
+
+    @supported_platform
+    def test_compute_dq_write_order_with_expanded_kv_indices(self, device):
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(
+            causal_mask, B=1, H=1, Q_LEN=256, KV_LEN=256, BLOCK_SIZE=128, device=device
+        )
+        expanded_kv_block_mask = BlockMask(
+            seq_lengths=block_mask.seq_lengths,
+            kv_num_blocks=block_mask.kv_num_blocks.expand(2, 1, -1),
+            kv_indices=block_mask.kv_indices.expand(2, 1, -1, -1),
+            full_kv_num_blocks=(
+                block_mask.full_kv_num_blocks.expand(2, 1, -1)
+                if block_mask.full_kv_num_blocks is not None
+                else None
+            ),
+            full_kv_indices=(
+                block_mask.full_kv_indices.expand(2, 1, -1, -1)
+                if block_mask.full_kv_indices is not None
+                else None
+            ),
+            q_num_blocks=block_mask.q_num_blocks,
+            q_indices=block_mask.q_indices,
+            full_q_num_blocks=block_mask.full_q_num_blocks,
+            full_q_indices=block_mask.full_q_indices,
+            BLOCK_SIZE=block_mask.BLOCK_SIZE,
+            mask_mod=block_mask.mask_mod,
+        )
+        dq_write_order, dq_write_order_full = _compute_dq_write_order_from_block_mask(
+            expanded_kv_block_mask
+        )
+
+        self.assertEqual(dq_write_order.shape[:2], (2, 1))
+        self.assertEqual(dq_write_order[0], dq_write_order[1])
+        if dq_write_order_full is not None:
+            self.assertEqual(dq_write_order_full.shape[:2], (2, 1))
+            self.assertEqual(dq_write_order_full[0], dq_write_order_full[1])
 
     @supported_platform
     @skip_on_cpu

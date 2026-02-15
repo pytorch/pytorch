@@ -369,9 +369,9 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
-def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
+def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor, num_cols: int):
     num_rows = col_indices.shape[-2]
-    num_cols = col_indices.shape[-1]
+    max_entries = col_indices.shape[-1]
     batch_dims = num_blocks_in_row.shape[:-1]
     device = num_blocks_in_row.device
 
@@ -381,7 +381,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
         row_indices = torch.arange(num_rows, dtype=torch.int, device=device).unsqueeze(
             -1
         )
-        col_range = torch.arange(num_cols, dtype=torch.int, device=device)
+        col_range = torch.arange(max_entries, dtype=torch.int, device=device)
         index_mask = col_range < kv_num_blocks.unsqueeze(-1)
 
         # We write to one spot "out of bounds"
@@ -410,7 +410,7 @@ def _dense_to_ordered(dense_mask) -> tuple[Tensor, Tensor]:
 
 
 def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
-    dense = _ordered_to_dense(num_blocks_in_row, col_indices)
+    dense = _ordered_to_dense(num_blocks_in_row, col_indices, col_indices.shape[-1])
     return _dense_to_ordered(dense.transpose(-2, -1))
 
 
@@ -545,6 +545,9 @@ class BlockMask:
     q_indices: Tensor | None
     full_q_num_blocks: Tensor | None
     full_q_indices: Tensor | None
+    dq_write_order: Tensor | None
+    dq_write_order_full: Tensor | None
+    dq_write_order_spt: bool | None
     BLOCK_SIZE: tuple[int, int]
     mask_mod: _mask_mod_signature
 
@@ -558,10 +561,13 @@ class BlockMask:
         "q_indices",
         "full_q_num_blocks",
         "full_q_indices",
+        "dq_write_order",
+        "dq_write_order_full",
     ]
 
     _CONTEXT_ATTRS = [
         "seq_lengths",
+        "dq_write_order_spt",
         "BLOCK_SIZE",
         "mask_mod",
     ]
@@ -577,8 +583,14 @@ class BlockMask:
         q_indices: Tensor | None,
         full_q_num_blocks: Tensor | None,
         full_q_indices: Tensor | None,
-        BLOCK_SIZE: tuple[int, int],
-        mask_mod: _mask_mod_signature,
+        dq_write_order: Tensor | None = None,
+        dq_write_order_full: Tensor | None = None,
+        dq_write_order_spt: bool | None = None,
+        BLOCK_SIZE: tuple[int, int] = (
+            _DEFAULT_SPARSE_BLOCK_SIZE,
+            _DEFAULT_SPARSE_BLOCK_SIZE,
+        ),
+        mask_mod: _mask_mod_signature = noop_mask,
     ) -> None:
         if kv_indices.dim() < 2:
             raise RuntimeError("BlockMask must have at least 2 dimensions")
@@ -604,6 +616,9 @@ class BlockMask:
         self.q_indices = q_indices
         self.full_q_num_blocks = full_q_num_blocks
         self.full_q_indices = full_q_indices
+        self.dq_write_order = dq_write_order
+        self.dq_write_order_full = dq_write_order_full
+        self.dq_write_order_spt = dq_write_order_spt
         self.BLOCK_SIZE = BLOCK_SIZE
         self.mask_mod = mask_mod
 
@@ -708,6 +723,9 @@ class BlockMask:
             self.q_indices,
             self.full_q_num_blocks,
             self.full_q_indices,
+            self.dq_write_order,
+            self.dq_write_order_full,
+            self.dq_write_order_spt,
             *block_size,
             self.mask_mod,
         )
@@ -869,13 +887,17 @@ class BlockMask:
 
     def to_dense(self) -> Tensor:
         """Returns a dense block that is equivalent to the block mask."""
-        partial_dense = _ordered_to_dense(self.kv_num_blocks, self.kv_indices)
+        partial_dense = _ordered_to_dense(
+            self.kv_num_blocks, self.kv_indices, self.kv_indices.shape[-1]
+        )
         if self.full_kv_num_blocks is not None:
             if self.full_kv_indices is None:
                 raise AssertionError("full_kv_indices must not be None")
             # pyrefly: ignore [bad-return]
             return partial_dense | _ordered_to_dense(
-                self.full_kv_num_blocks, self.full_kv_indices
+                self.full_kv_num_blocks,
+                self.full_kv_indices,
+                self.full_kv_indices.shape[-1],
             )
         return partial_dense
 
@@ -1204,6 +1226,100 @@ def create_mask(
             raise AssertionError
 
 
+def _compute_dq_write_order_from_block_mask(
+    block_mask: BlockMask,
+    spt: bool = False,
+) -> tuple[Tensor, Tensor | None]:
+    """Compute dQ write-order metadata for deterministic block-sparse backward.
+
+    Algorithm (per batch/head):
+    1. Convert the partial and full `kv` block lists into a dense `m_block -> n_block`
+       contributor mask and merge them.
+    2. Prefix-sum along `n_block` to build a rank table where each present `n_block`
+       stores how many contributors come before it for that `m_block`.
+    3. Gather ranks using backward `q_indices` order to produce semaphore values used
+       by deterministic dQ accumulation.
+    4. If `spt=True`, flip the rank direction so larger `n_block` values are written first.
+    """
+    kv_num_blocks = block_mask.kv_num_blocks
+    kv_indices = block_mask.kv_indices
+    full_kv_num_blocks = block_mask.full_kv_num_blocks
+    full_kv_indices = block_mask.full_kv_indices
+    q_num_blocks = block_mask.q_num_blocks
+    q_indices = block_mask.q_indices
+    full_q_num_blocks = block_mask.full_q_num_blocks
+    full_q_indices = block_mask.full_q_indices
+
+    if q_num_blocks is None or q_indices is None:
+        raise ValueError(
+            "BlockMask must have q_num_blocks and q_indices to compute dq_write_order"
+        )
+
+    device = kv_indices.device
+
+    def _expand_bh(tensor: Tensor, target_b: int, target_h: int) -> Tensor:
+        return tensor.expand(target_b, target_h, *tensor.shape[2:])
+
+    broadcast_shapes = [
+        kv_indices.shape[:2],
+        q_indices.shape[:2],
+    ]
+    if full_kv_indices is not None:
+        broadcast_shapes.append(full_kv_indices.shape[:2])
+    if full_q_indices is not None:
+        broadcast_shapes.append(full_q_indices.shape[:2])
+
+    B, H = torch.broadcast_shapes(*broadcast_shapes)
+    kv_num_blocks = _expand_bh(kv_num_blocks, B, H)
+    kv_indices = _expand_bh(kv_indices, B, H)
+    if full_kv_num_blocks is not None:
+        full_kv_num_blocks = _expand_bh(full_kv_num_blocks, B, H)
+    if full_kv_indices is not None:
+        full_kv_indices = _expand_bh(full_kv_indices, B, H)
+
+    _, _, num_m, max_kv_partial = kv_indices.shape
+    _, _, num_n, max_q_partial = q_indices.shape
+
+    has_full = full_kv_num_blocks is not None and full_kv_indices is not None
+
+    dense_partial = _ordered_to_dense(kv_num_blocks, kv_indices, num_n)
+    if has_full:
+        if full_kv_num_blocks is None or full_kv_indices is None:
+            raise AssertionError(
+                "full_kv_num_blocks and full_kv_indices must not be None"
+            )
+        dense_full = _ordered_to_dense(full_kv_num_blocks, full_kv_indices, num_n)
+        # nb: in flash we iterate partial then full, if we flipped order there we would need to flip here
+        dense = (dense_partial + dense_full).clamp(max=1)
+    else:
+        dense = dense_partial
+
+    cumsum = dense.cumsum(dim=-1)
+    # exclusive prefix sum along n_blocks
+    rank_table = (cumsum - dense).to(torch.int32)
+
+    if spt:
+        # flippity floppity
+        total_per_m = cumsum[:, :, :, -1:]
+        rank_table = (total_per_m - 1 - rank_table).to(torch.int32)
+
+    def _gather_write_order(bwd_idx: Tensor) -> Tensor:
+        b_i = torch.arange(B, device=device)[:, None, None, None]
+        h_i = torch.arange(H, device=device)[None, :, None, None]
+        n_i = torch.arange(bwd_idx.shape[2], device=device)[None, None, :, None]
+        m_vals = bwd_idx.long().clamp(0, num_m - 1)
+        # for each m_value and position N get the exclusive prefix sum from rank table and add use as semaphore val
+        return rank_table[b_i, h_i, m_vals, n_i].to(torch.int32)
+
+    dq_write_order = _gather_write_order(q_indices)
+
+    dq_write_order_full = None
+    if has_full and full_q_num_blocks is not None and full_q_indices is not None:
+        dq_write_order_full = _gather_write_order(full_q_indices)
+
+    return dq_write_order, dq_write_order_full
+
+
 def create_block_mask(
     mask_mod: _mask_mod_signature,
     B: int | None,
@@ -1213,6 +1329,8 @@ def create_block_mask(
     device: DeviceLikeType | None = None,
     BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
+    compute_dq_write_order: bool = False,
+    dq_write_order_spt: bool = False,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
 
@@ -1286,6 +1404,15 @@ def create_block_mask(
         Q_BLOCK_SIZE,
         KV_BLOCK_SIZE,
     )
+
+    if compute_dq_write_order:
+        dq_wo, dq_wo_full = _compute_dq_write_order_from_block_mask(
+            block_mask, spt=dq_write_order_spt
+        )
+        block_mask.dq_write_order = dq_wo
+        block_mask.dq_write_order_full = dq_wo_full
+        block_mask.dq_write_order_spt = dq_write_order_spt
+
     return block_mask
 
 
