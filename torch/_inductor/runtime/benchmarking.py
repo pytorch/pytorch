@@ -11,7 +11,7 @@ from typing_extensions import ParamSpec, Self, TypeVar
 import torch
 import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import counters, dynamo_timed
+from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
 
 
@@ -79,17 +79,20 @@ def may_ban_benchmarking() -> None:
 def time_and_count(
     fn: Callable[Concatenate[Any, P], T],
 ) -> Callable[Concatenate[Any, P], T]:
-    """Wraps `fn` with `dynamo_timed` context, and increments the appropriate dynamo
-    counters. It is expected that `fn` is a method of `Benchmarker` or one of its
-    subclasses; typing limitations prevent us from declaring this directly.
+    """
+    Wraps `fn` to increment the appropriate dynamo counters. It is expected that `fn`
+    is a method of `Benchmarker` or one of its subclasses; typing limitations prevent
+    us from declaring this directly.
+
+    NOTE: If you're tempted to add a dynamo_timed call here, this function can be
+    called enough that the dynamo_timed overhead is not negligible.
     """
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
-        with dynamo_timed(fn_qual_name, log_pt2_compile_event=False):
-            return fn(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
