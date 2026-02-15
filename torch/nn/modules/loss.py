@@ -1342,7 +1342,6 @@ class CrossEntropyLoss(_WeightedLoss):
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
-
         where:
 
         .. math::

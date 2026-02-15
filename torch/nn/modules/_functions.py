@@ -331,6 +331,13 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
     too small or chunking along the classes dimension that requires
     extra computations.
 
+    .. warning::
+      LinearCrossEntropyFunction chunking is not supported when
+      - reduction == "none"
+      - label_smoothing > 0
+      - target contains probabilities
+      - loss is K-dimensional
+
     In the following we'll provide an optimal chunking strategy to
     reduce the memory usage of the linear_cross_entropy forward and
     backward operations while maximizing the processing performance of
@@ -424,7 +431,7 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
     @staticmethod
     def optimal_chunking(
         options: dict,
-        num_batches: int,
+        num_batches: int | None,
         in_features: int,
         num_classes: int,
         input_requires_grad: bool,
@@ -437,8 +444,15 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
         :class:`LinearCrossEntropyFunction` for details.
         """
         opt_options = options.copy()
+
+        if num_batches is None:
+            num_batches = 1
+            has_batches = False
+        else:
+            has_batches = True
+
         if (
-            "batches_chunk_size" in options
+            ("batches_chunk_size" in options or not has_batches)
             and "features_chunk_size" in options
             and "classes_chunk_size" in options
         ):
@@ -568,6 +582,8 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
                     features_chunk_size=features_chunk_size,
                     batches_chunk_size=batches_chunk_size,
                 )
+                if not has_batches:
+                    opt_options.pop("batches_chunk_size")
                 return opt_options
 
         constraints = [f"{num_batches=}, {in_features=}, {num_classes=}"]
@@ -586,6 +602,8 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
             features_chunk_size=min_features_chunk_size,
             batches_chunk_size=min_batches_chunk_size,
         )
+        if not has_batches:
+            opt_options.pop("batches_chunk_size")
         return opt_options
 
     @staticmethod
@@ -597,6 +615,7 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
         target: torch.Tensor,
         weight: torch.Tensor,
         reduction: str,
+        label_smoothing: float,
         options: dict,
     ):
         device = input.device
@@ -638,6 +657,11 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
                 raise NotImplementedError(
                     f"LinearCrossEntropyFunction does not support {reduction=}"
                 )
+
+        if label_smoothing > 0.0:
+            raise NotImplementedError(
+                "LinearCrossEntropyFunction does not support label smoothing"
+            )
 
         # A chunk buffer used to hold logits, softmax of logits:
 
@@ -829,7 +853,7 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
-        result = [None] * 6
+        result = [None] * 7
 
         if ctx.needs_input_grad[0] or ctx.needs_input_grad[1]:
             saved = ctx.saved_tensors

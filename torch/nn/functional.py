@@ -3752,10 +3752,14 @@ def linear_cross_entropy(
         and reduction in {"mean", "sum"}
         and label_smoothing == 0.0
         and target.dtype == torch.int64
-        and input.dim() == 2
         and not out_features
     ):
-        num_batches = input.shape[0]
+        if input.dim() == 2:
+            num_batches = input.shape[0]
+            has_batches = True
+        else:
+            num_batches = 1
+            has_batches = False
         if weight is None:
             # optimization todo: support unspecified weight in LinearCrossEntropyFunction
             weight = torch.ones(
@@ -3778,9 +3782,15 @@ def linear_cross_entropy(
             input.dtype,
             target.dtype,
         )
-        return LinearCrossEntropyFunction.apply(
-            input, linear_weight, target, weight, reduction, options
+        if not has_batches:
+            input = input.unsqueeze(0)
+            target = target.unsqueeze(0)
+        result = LinearCrossEntropyFunction.apply(
+            input, linear_weight, target, weight, reduction, label_smoothing, options
         )
+        if not has_batches:
+            result = result.squeeze(0)
+        return result
 
     logits = linear(input, linear_weight)
     # recover logits shape that corresponds to the shape of specified
@@ -3788,8 +3798,11 @@ def linear_cross_entropy(
     if target.dtype.is_floating_point:
         logits_shape = target.shape
     elif target.shape:
-        num_batches = input.shape[0]
-        logits_shape = (num_batches, num_classes, *out_features)
+        if input.dim() == 1:
+            logits_shape = (num_classes, *out_features)
+        else:
+            num_batches = input.shape[0]
+            logits_shape = (num_batches, num_classes, *out_features)
     else:
         logits_shape = (num_classes,)
     logits = logits.reshape(logits_shape)
