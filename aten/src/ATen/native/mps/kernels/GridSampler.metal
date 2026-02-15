@@ -628,7 +628,7 @@ void grid_sampler_single_element(
 }
 
 template <typename T>
-kernel void grid_sampler(
+kernel void grid_sampler_3d(
     device T* output [[buffer(0)]],
     constant T* input [[buffer(1)]],
     constant T* grid [[buffer(2)]],
@@ -675,8 +675,8 @@ kernel void grid_sampler(
 }
 
 #define REGISTER_GRID_SAMPLER_OPS(DTYPE)                    \
-  template [[host_name("grid_sampler_" #DTYPE)]]            \
-  kernel void grid_sampler<DTYPE>(                          \
+  template [[host_name("grid_sampler_3d_" #DTYPE)]]          \
+  kernel void grid_sampler_3d<DTYPE>(                       \
       device DTYPE * output [[buffer(0)]],                  \
       constant DTYPE * input [[buffer(1)]],                 \
       constant DTYPE * grid [[buffer(2)]],                  \

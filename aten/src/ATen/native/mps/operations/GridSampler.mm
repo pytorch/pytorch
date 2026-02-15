@@ -180,7 +180,7 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc("grid_sampler_" + scalarToMetalTypeString(input));
+      auto pso = lib.getPipelineStateForFunc("grid_sampler_3d_" + scalarToMetalTypeString(input));
 
       getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid});
       [computeEncoder setComputePipelineState:pso];
