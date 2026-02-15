@@ -2691,6 +2691,7 @@ class PythonWrapperCodegen(CodeGen):
             compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
         inductor_meta["kernel_name"] = name
+        inductor_meta["user_defined_kernel"] = True
         triton_info_kernel_cls = self._get_triton_info_kernel_cls()
         inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 

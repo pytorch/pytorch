@@ -2668,6 +2668,51 @@ def forward(self, arg0_1, arg1_1):
         ).run(code[0])
 
     @requires_gpu
+    @unittest.skipIf(
+        not triton_version_uses_attrs_dict(),
+        "Test is only valid for new triton versions where attrs is represented by a raw dict",
+    )
+    def test_user_defined_kernel_constexpr_skipped_in_call(self):
+        """
+        Test that user-defined kernel args marked as constexpr in the signature
+        (but without tl.constexpr annotation) are correctly skipped in the call.
+        """
+
+        @triton.jit
+        def triton_(in_ptr, out_ptr, numel, add_amount, BLOCK_SIZE: tl.constexpr):
+            offsets = tl.arange(0, BLOCK_SIZE)
+            x = tl.load(in_ptr + offsets, mask=(offsets < numel))
+            output = x * x
+            if add_amount is not None:
+                output = output + add_amount
+            tl.store(out_ptr + offsets, output, mask=(offsets < numel))
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            grid = (1,)
+            # numel=1 and add_amount=None get marked as "constexpr" in signature
+            triton_[grid](x, y, x.numel(), None, BLOCK_SIZE)
+            return y
+
+        x = torch.full((1,), 2.5, device=GPU_TYPE)
+        expected = fn(x)
+
+        fn_c = torch.compile(fn)
+        res, code = run_and_get_code(fn_c, x)
+        self.assertEqual(expected, res)
+
+        # Verify the user_defined_kernel flag is set in inductor_meta
+        FileCheck().check("inductor_meta=").check("'user_defined_kernel': True").run(
+            code[0]
+        )
+
+        # The kernel call should only have 5 args: in_ptr, out_ptr, grid_0, grid_1, grid_2
+        # NOT 7 args including numel and add_amount
+        # Pattern: .run(arg0_1, buf0, 1, 1, 1, stream=stream0)
+        FileCheck().check(".run(").check_not(", -1,").check("stream=").run(code[0])
+
+    @requires_gpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_with_docstring(self, quotes):
