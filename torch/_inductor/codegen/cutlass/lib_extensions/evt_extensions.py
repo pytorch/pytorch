@@ -3,7 +3,6 @@ from typing import Any, Union
 
 from sympy import Expr
 
-from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.ir import (
     ComputedBuffer,
     InputBuffer,
@@ -11,11 +10,7 @@ from torch._inductor.ir import (
 )
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils import (
-    _normalize_cutlass_arch,
-    torch_dtype_to_cutlass_type,
-    try_import_cutlass,
-)
+from ..utils import cutlass_arch, torch_dtype_to_cutlass_type, try_import_cutlass
 
 
 EpilogueFunctor = Any  # EpilogueFunctor local class defined in _trace
@@ -127,9 +122,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         device_type: str = "cuda",
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str, EVTArgRenames]:
-        device_op_overrides = get_device_op_overrides(device_type)
-        arch = device_op_overrides.get_device_arch()
-        arch = int(_normalize_cutlass_arch(arch, device_type))
+        arch = int(cutlass_arch(device_type))
         assert device_type != "cuda" or arch >= 90, (
             "For CUDA, only SM90+ is supported for EVT"
         )
