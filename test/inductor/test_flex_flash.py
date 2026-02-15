@@ -890,7 +890,7 @@ class TestFlexFlash(InductorTestCase):
         with DeterministicGuard(True):
             with self.assertRaisesRegex(
                 BackendCompilerFailed,
-                "Deterministic backward for flex_attention with block_mask using the FLASH backend",
+                "Deterministic backward for flex_attention with block_mask and BACKEND='FLASH'",
             ):
                 out = compiled_fn(
                     q,
@@ -935,6 +935,40 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             )
             with self.assertRaises(ValueError):
+                out.sum().backward()
+
+    @dtypes(torch.bfloat16)
+    def test_flash_deterministic_block_mask_warn_only_runs_nondeterministic(
+        self, device, dtype
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 9:
+            self.skipTest("block sparse backward only supported on SM90+ for FLASH")
+
+        torch._dynamo.reset()
+        q, k, v = create_test_tensors(
+            seq_len=512,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        block_mask = _create_block_mask_for_device(
+            _causal_mask, 2, 4, 512, 512, device=device
+        )
+        compiled_fn = torch.compile(flex_attention)
+
+        with DeterministicGuard(True, warn_only=True):
+            with self.assertWarnsRegex(
+                UserWarning,
+                "does not have a deterministic implementation for this configuration",
+            ):
+                out = compiled_fn(
+                    q,
+                    k,
+                    v,
+                    block_mask=block_mask,
+                    kernel_options={"BACKEND": "FLASH"},
+                )
                 out.sum().backward()
 
     @dtypes(torch.bfloat16)
@@ -1128,17 +1162,40 @@ class TestFlexFlash(InductorTestCase):
         q, k, v = create_test_tensors(dim=128, dtype=dtype, device=device)
         q.requires_grad_(True)
 
+        torch._dynamo.reset()
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
-
-        def run_for_code():
-            return compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
-
-        _, code = run_fw_bw_and_get_code(run_for_code)
+        with DeterministicGuard(False):
+            _, code = run_fw_bw_and_get_code(
+                lambda: compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
+            )
         code_str = "\n".join(code)
         self.assertIn(
+            "deterministic=False",
+            code_str,
+            "Expected deterministic=False to be baked into flash backward codegen",
+        )
+        self.assertNotIn(
             "are_deterministic_algorithms_enabled()",
             code_str,
-            "Expected deterministic flag to be wired through flash backward",
+            "Expected flash backward deterministic setting to be compile-time baked",
+        )
+
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        with DeterministicGuard(True):
+            _, code = run_fw_bw_and_get_code(
+                lambda: compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
+            )
+        code_str = "\n".join(code)
+        self.assertIn(
+            "deterministic=True",
+            code_str,
+            "Expected deterministic=True to be baked into flash backward codegen",
+        )
+        self.assertNotIn(
+            "are_deterministic_algorithms_enabled()",
+            code_str,
+            "Expected flash backward deterministic setting to be compile-time baked",
         )
 
     @dtypes(torch.bfloat16)

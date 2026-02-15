@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import logging
 import math
-import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast, Optional, TYPE_CHECKING, Union
@@ -777,24 +776,6 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
-        if (
-            torch.are_deterministic_algorithms_enabled()
-            and not torch.is_deterministic_algorithms_warn_only_enabled()
-            and needs_block_mask
-        ):
-            major, _ = torch.cuda.get_device_capability(device)
-            if major < 10:
-                raise NotImplementedError(
-                    "Deterministic backward for flex_attention with block_mask using the FLASH backend "
-                    "requires SM100+ (compute capability >= 10.0). "
-                    "The TRITON backend supports deterministic backward on older architectures."
-                )
-        # todo i think we need structure the warning better
-        if torch.is_deterministic_algorithms_warn_only_enabled() and needs_block_mask:
-            warnings.warn(
-                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
-                "is not yet implemented. Running non-deterministic backward.",
-            )
         # TODO: Implement dLSE support in flash-attention backward by folding
         # grad_logsumexp into the dPsum preprocess step.
         if grad_logsumexp is not None:
