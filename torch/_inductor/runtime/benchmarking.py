@@ -377,7 +377,8 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         torch.cuda.synchronize()
 
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
-        buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
+        buffer_size_bytes = 256 * 1024 * 1024
+        buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device="cuda")
         buffer.zero_()
 
         # estimate the runtime of `_callable`
