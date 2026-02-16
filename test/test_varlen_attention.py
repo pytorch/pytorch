@@ -718,9 +718,6 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
-    )
     def test_kv_cache_requires_fa3(self, device):
         torch.manual_seed(42)
         dtype = torch.bfloat16
@@ -768,9 +765,6 @@ class TestVarlenAttention(NNTestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @unittest.skipIf(not SM90OrLater, "FA3 requires SM90+")
     @unittest.skipIf("FA3" not in list_flash_attention_impls(), "FA3 not available")
