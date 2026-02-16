@@ -15598,12 +15598,13 @@ class TestAutogradMultipleDispatch(TestCase):
     def test_trace_backward_nonsquare_171704(self):
         # https://github.com/pytorch/pytorch/issues/171704
         for shape in [(5, 2), (7, 3), (4, 1), (1, 5), (2, 5)]:
-            x = torch.randn(shape, dtype=torch.float64, requires_grad=True)
-            torch.trace(x).backward()
-            expected = torch.zeros(shape, dtype=torch.float64)
-            for i in range(min(shape)):
-                expected[i, i] = 1.0
-            self.assertEqual(x.grad, expected)
+            with self.subTest(shape=shape):
+                x = torch.randn(shape, dtype=torch.float64, requires_grad=True)
+                torch.trace(x).backward()
+                expected = torch.zeros(shape, dtype=torch.float64)
+                for i in range(min(shape)):
+                    expected[i, i] = 1.0
+                self.assertEqual(x.grad, expected)
 
 
 # Import test cases from below autograd/ here. These are found
