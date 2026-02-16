@@ -55,7 +55,7 @@ class InputData:
     values: Tensor
 
 
-torch.utils._pytree.register_dataclass(InputData)
+pytree.register_dataclass(InputData)
 
 
 @dataclass
@@ -73,7 +73,7 @@ class OutputData:
     result2: Tensor
 
 
-torch.utils._pytree.register_dataclass(OutputData)
+torch.utils.pytree.python.register_dataclass(OutputData)
 
 
 @dataclass
@@ -193,8 +193,8 @@ class GraphModule(torch.nn.Module):
 
         t: "f32[10]" = l_x_ + l_y_
 
-        trace_point_tensor_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_spec
-        trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
+        trace_point_tensor_spec : torch.utils.pytree.python.TreeSpec = self.trace_point_tensor_spec
+        trace_point_tensor_input_spec : torch.utils.pytree.python.TreeSpec = self.trace_point_tensor_input_spec
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_spec, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_spec = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
         res: "f32[10]" = flat_apply_capture[0];  flat_apply_capture = None
         return (res,)
@@ -269,8 +269,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[4, 4]" = torch.sin(l_i_values)
 
         # code: y, z_result1, z_result2 = gn(i.count, i.values)
-        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
-        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        gn_spec : torch.utils.pytree.python.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils.pytree.python.TreeSpec = self.gn_input_spec
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_spec, gn_input_spec, 5, l_i_values);  gn_spec = gn_input_spec = l_i_values = None
         y: "f32[4, 4]" = flat_apply_capture[0]
         z_result1: "f32[4, 4]" = flat_apply_capture[1]
@@ -322,8 +322,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[4, 4]" = torch.sin(l_i_values)
 
         # code: y, z_result1, z_result2 = gn(i)
-        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
-        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        gn_spec : torch.utils.pytree.python.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils.pytree.python.TreeSpec = self.gn_input_spec
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_spec, gn_input_spec, 5, l_i_values);  gn_spec = gn_input_spec = l_i_values = None
         y: "f32[4, 4]" = flat_apply_capture[0]
         z_result1: "f32[4, 4]" = flat_apply_capture[1]
@@ -404,8 +404,8 @@ class GraphModule(torch.nn.Module):
         x: "f32[4, 4]" = torch.sin(l_i_values)
 
         # code: y, z = gn(i.count, i.values)
-        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
-        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        gn_spec : torch.utils.pytree.python.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils.pytree.python.TreeSpec = self.gn_input_spec
         flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_spec, gn_input_spec, 5, l_i_values);  gn_spec = gn_input_spec = l_i_values = None
         y: "f32[4, 4]" = flat_apply_capture[0]
         value: "f32[4, 4]" = flat_apply_capture[1]
