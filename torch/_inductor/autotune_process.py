@@ -947,6 +947,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             self.DLL, self.hash_key, self.source_file = self.codecache_cls.load(
                 self.source_code, "so"
             )
+        self.DLL.open()
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:
