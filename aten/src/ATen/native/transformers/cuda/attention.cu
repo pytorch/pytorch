@@ -1179,15 +1179,16 @@ _flash_attention_forward(
     const std::optional<Tensor>& v_cache,
     const std::optional<Tensor>& cache_seqlens,
     const std::optional<Tensor>& cache_batch_idx,
-    const std::optional<Tensor>& page_table
+    const std::optional<Tensor>& page_table,
+    const std::optional<Tensor>& _out
     ) {
 #if defined(USE_FLASH_ATTENTION)
   // KV cache parameters require FA3
   TORCH_CHECK(
     !k_cache.has_value() && !v_cache.has_value() &&
     !cache_seqlens.has_value() && !cache_batch_idx.has_value() &&
-    !page_table.has_value(),
-    "KV cache parameters (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table) ",
+    !page_table.has_value() && !_out.has_value(),
+    "KV cache parameters (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table, out) ",
     "are not supported by the default Flash Attention 2 implementation. ",
     "Please install FA3 and activate using torch.nn.attention.activate_flash_attention_impl('FA3').");
   const auto softmax_scale =

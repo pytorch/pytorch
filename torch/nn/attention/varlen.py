@@ -51,6 +51,7 @@ def _varlen_attn(
     cu_seq_k: torch.Tensor,
     max_q: int,
     max_k: int,
+    out: torch.Tensor | None = None,
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
@@ -119,11 +120,22 @@ def _varlen_attn(
             cache_seqlens=cache_seqlens,
             cache_batch_idx=cache_batch_idx,
             page_table=page_table,
+            out=out,
         )
 
     rng_state_ = torch.zeros(
         (2,), dtype=torch.uint64, device=query.device
     )  # hardcoded since dropout is hardcoded to 0
+
+    # When out is provided, the kernel writes the output in-place
+    # but custom op framework forbids outputs that alias inputs.
+    # return a dummy instead
+    if out is not None:
+        return (
+            torch.empty(0, device=query.device, dtype=query.dtype),
+            softmax_lse,
+            rng_state_,
+        )
     return output, softmax_lse, rng_state_
 
 
@@ -136,6 +148,7 @@ def _varlen_attn_fake(
     cu_seq_k: torch.Tensor,
     max_q: int,
     max_k: int,
+    out: torch.Tensor | None = None,
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
@@ -183,6 +196,7 @@ def varlen_attn(
     max_q: int,
     max_k: int,
     *,
+    out: torch.Tensor | None = None,
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
@@ -222,11 +236,14 @@ def varlen_attn(
         max_q (int): Maximum query sequence length in the batch.
         max_k (int): Maximum key/value sequence length in the batch. When using KV cache,
             this is the maximum length of new tokens.
+        out (Tensor, optional): Pre-allocated output tensor; shape :math:`(T_q, H, D)`.
+            When provided, the attention kernel writes directly into this tensor,
+            avoiding a separate allocation and copy.
         return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
         scale (float, optional): Scaling factor for attention scores
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
-            or (W, 0) for causal attention with sliding window of size W.s
+            or (W, 0) for causal attention with sliding window of size W.
 
         k_cache (Tensor, optional): KV cache for keys. Shape is either:
             - ``(batch_size, max_cache_len, num_heads_k, head_dim)`` for contiguous cache
@@ -286,26 +303,48 @@ def varlen_attn(
         ... )
     """
     is_causal = window_size == (-1, 0)
-    out, lse, _ = torch.ops.torch_attn._varlen_attn(
-        query,
-        key,
-        value,
-        cu_seq_q,
-        cu_seq_k,
-        max_q,
-        max_k,
-        is_causal,
-        scale,
-        list(window_size),
-        k_cache,
-        v_cache,
-        cache_seqlens,
-        cache_batch_idx,
-        page_table,
-    )
+    if out is not None:
+        _, lse, _ = torch.ops.torch_attn._varlen_attn(
+            query,
+            key,
+            value,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            max_k,
+            out,
+            is_causal,
+            scale,
+            list(window_size),
+            k_cache,
+            v_cache,
+            cache_seqlens,
+            cache_batch_idx,
+            page_table,
+        )
+        output = out
+    else:
+        output, lse, _ = torch.ops.torch_attn._varlen_attn(
+            query,
+            key,
+            value,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            max_k,
+            None,
+            is_causal,
+            scale,
+            list(window_size),
+            k_cache,
+            v_cache,
+            cache_seqlens,
+            cache_batch_idx,
+            page_table,
+        )
     if return_aux is not None and return_aux.lse:
-        return out, lse
-    return out
+        return output, lse
+    return output
 
 
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
@@ -317,6 +356,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         cu_seq_k,
         max_q,
         max_k,
+        _out,
         is_causal,
         scale,
         window_size,
@@ -330,9 +370,11 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
 
     if any(
         p is not None
-        for p in (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table)
+        for p in (_out, k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table)
     ):
-        raise RuntimeError("KV cache mode does not support autograd")
+        raise RuntimeError(
+            "Inference-only parameters (out, k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table) do not support autograd"
+        )
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
@@ -468,9 +510,9 @@ def _backward(
         scale,
         window_size,
     )
-    # None for: cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size,
+    # None for: cu_seq_q, cu_seq_k, max_q, max_k, out, is_causal, scale, window_size,
     #           k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table
-    return (dq, dk, dv, *((None,) * 12))
+    return (dq, dk, dv, *((None,) * 13))
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
