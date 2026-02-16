@@ -4245,28 +4245,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
 
-    def test_class_reassignment_graph_break(self):
-        class BaseClass:
-            def __init__(self, x):
-                self.x = x
-
-        class DerivedClass(BaseClass):
-            def __init__(self, x):
-                super().__init__(x)
-                self.y = x * 2
-
-        def fn(x):
-            obj = BaseClass(5)
-            obj.__class__ = DerivedClass
-            is_derived = isinstance(obj, DerivedClass)
-            has_y = hasattr(obj, "y")
-            return x + 1, is_derived, has_y
-
-        x = torch.ones(1)
-        eager_result = fn(x)
-        compiled_result = torch.compile(fn, backend="eager")(x)
-        self.assertEqual(eager_result, compiled_result)
-
     def test_user_defined_class_python_type(self):
         class MyClass1:
             pass
@@ -12686,41 +12664,6 @@ fn
         self.assertEqual(result, 40)
         # signature_cache should have exactly 2 entries (one per unique method)
         self.assertEqual(unique_calls, 2)
-
-    def test_inspect_variable_redirect(self):
-        """Test that InspectVariable is used and redirects property accesses."""
-        import inspect
-        from unittest.mock import patch
-
-        from torch._dynamo.variables.user_defined import InspectVariable
-
-        redirected_attrs = []
-        original_var_getattr = InspectVariable.var_getattr
-
-        def tracking_var_getattr(self, tx, name):
-            redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
-            if name in redirects:
-                redirected_attrs.append(name)
-            return original_var_getattr(self, tx, name)
-
-        def fn(x, gn):
-            sig = inspect.signature(gn)
-            params = sig.parameters
-            param = params["a"]
-            return x + param.kind + len(param.name)
-
-        def gn(a: torch.Tensor, b: int) -> torch.Tensor:
-            return a + b
-
-        x = torch.randn(2, 3)
-        with patch.object(InspectVariable, "var_getattr", tracking_var_getattr):
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            result = opt_fn(x, gn)
-
-        self.assertEqual(result, fn(x, gn))
-        self.assertIn("parameters", redirected_attrs)
-        self.assertIn("kind", redirected_attrs)
-        self.assertIn("name", redirected_attrs)
 
     def test_grad_none(self):
         def fn(x, y):

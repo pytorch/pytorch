@@ -326,11 +326,9 @@ class TestFXGraphPasses(JitTestCase):
             partitioner.remove_bookend_non_compute_ops(partitions)
 
         partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        if len(partitions_name) != len(expected_partition):
-            raise AssertionError(f"partition count mismatch: {len(partitions_name)} != {len(expected_partition)}")
+        assert len(partitions_name) == len(expected_partition)
         for i in range(len(partitions_name)):
-            if set(partitions_name[i]) != set(expected_partition[i]):
-                raise AssertionError(f"partition {i} mismatch: {set(partitions_name[i])} != {set(expected_partition[i])}")
+            assert set(partitions_name[i]) == set(expected_partition[i])
 
         fused_graph = partitioner.fuse_partitions(partitions)
 
@@ -352,11 +350,9 @@ class TestFXGraphPasses(JitTestCase):
                                                  allows_single_node_partition=True)
         partitions = partitioner.propose_partitions()
         partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        if len(partitions_name) != len(expected_partition):
-            raise AssertionError(f"partition count mismatch: {len(partitions_name)} != {len(expected_partition)}")
+        assert len(partitions_name) == len(expected_partition)
         for i in range(len(partitions_name)):
-            if set(partitions_name[i]) != set(expected_partition[i]):
-                raise AssertionError(f"partition {i} mismatch: {set(partitions_name[i])} != {set(expected_partition[i])}")
+            assert set(partitions_name[i]) == set(expected_partition[i])
 
         fused_graph = partitioner.fuse_partitions(partitions)
 
@@ -948,8 +944,7 @@ class TestFXMatcherUtils(JitTestCase):
                                       remove_overlapping_matches=test_case.remove_overlapping_matches)
             matches = matcher.match(traced.graph)
 
-            if len(matches) != test_case.num_matches:
-                raise AssertionError(f"match count mismatch: {len(matches)} != {test_case.num_matches}")
+            assert len(matches) == test_case.num_matches
 
             for match in matches:
                 for node in pattern_traced.graph.nodes:
@@ -957,8 +952,7 @@ class TestFXMatcherUtils(JitTestCase):
                         continue
                     if not test_case.match_output and node.op == "output":
                         continue
-                    if node not in match.nodes_map:
-                        raise AssertionError(f"node {node} not in match.nodes_map")
+                    assert node in match.nodes_map
 
         tearDown = getattr(test_model, "tearDown", None)
         if callable(setup):

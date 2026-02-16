@@ -159,10 +159,7 @@ class TestFXNodeSource(TestCase):
         # node decomposed from same ancestor node should have same from_node info
         for node in decomposed_ep.graph.nodes:
             if node.op not in {"placeholder", "output"}:
-                if "from_node" not in node.meta:
-                    raise AssertionError(
-                        f"Expected 'from_node' in node.meta for node {node.name}"
-                    )
+                assert "from_node" in node.meta
 
         node_name_to_from_node = {
             node.name: node.meta["from_node"]

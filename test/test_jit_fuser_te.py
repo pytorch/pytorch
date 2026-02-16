@@ -2090,8 +2090,7 @@ class TestTEFuser(JitTestCase):
                 w = t1 - t2
                 h = t3 - t4
                 k = (w > t) & (h > t)
-                if k.dtype != torch.bool:
-                    raise AssertionError("k.dtype should be bool")
+                assert k.dtype == torch.bool
                 if t > 0.5:
                     # Putting a use of k in a never-executed conditional prevents
                     # profiling its type, which leaves it as "Tensor".  If we
@@ -3042,8 +3041,7 @@ class TestLoopnestRandomization(TestLoopnestRandomizationParent):
 
         ref = fn(x, y)
         res = traced_fn(x, y)
-        if not torch.allclose(ref, res):
-            raise AssertionError("traced function output does not match reference")
+        assert torch.allclose(ref, res)
 
 
 instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("cpu"))

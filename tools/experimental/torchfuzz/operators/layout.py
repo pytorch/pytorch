@@ -638,7 +638,6 @@ class CatOperator(LayoutOperatorBase):
                 )
             )
 
-        # pyrefly: ignore [bad-return]
         return input_specs
 
     def codegen(
@@ -729,7 +728,6 @@ class StackOperator(LayoutOperatorBase):
                 )
             )
 
-        # pyrefly: ignore [bad-return]
         return input_specs
 
     def codegen(

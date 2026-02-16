@@ -270,11 +270,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             )
 
             def inplace_add(input: torch.Tensor, output: torch.Tensor) -> None:
-                if input.device != output.device:
-                    raise AssertionError(
-                        f"Expected input.device == output.device, "
-                        f"got {input.device} vs {output.device}"
-                    )
+                assert input.device == output.device
                 output.add_(input)
 
             lib.impl("inplace_add", inplace_add, "CompositeExplicitAutograd")

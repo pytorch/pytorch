@@ -229,9 +229,6 @@ def map_placements_after_reduction(
 
 def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
     if isinstance(reduction_op, NormReduction):
-        if reduction_op.norm_type == 0:
-            # return P(sum) for easier reduction_linear handling.
-            return Partial("sum")
         return _NormPartial(norm_type=reduction_op.norm_type)
     return Partial(reduction_op)
 
@@ -405,14 +402,15 @@ def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
 def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
     """Get the reduction op for vector/foreach norm based on norm_type.
 
-    For inf/-inf norms, returns simple reduction ops ("max", "min").
-    For other norms (including 0), returns NormReduction which produces the
-    appropriate Partial placement via get_placement_from_reduction_op.
+    For inf/-inf/0 norms, returns simple reduction ops ("max", "min", "sum").
+    For other p-norms, returns NormReduction which produces _NormPartial.
     """
     if norm_type in (float("inf"), "inf"):
         return "max"
     elif norm_type in (float("-inf"), "-inf"):
         return "min"
+    elif norm_type == 0:
+        return "sum"
     else:
         assert isinstance(norm_type, (int, float))
         return NormReduction(norm_type)
@@ -438,6 +436,7 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
+        reduction_linear=True,
         reduction_op=_get_norm_reduction_op(norm_type),
     )
 
@@ -463,6 +462,7 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
+            reduction_linear=True,
             reduction_op=_get_norm_reduction_op(norm_type),
         )
         output_tuple_strategy_children.append(output_strategy)

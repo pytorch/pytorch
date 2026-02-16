@@ -34,11 +34,8 @@ __all__ = [
     # Top level API for graph mode quantization on TorchScript
     "quantize_jit",
     "quantize_dynamic_jit",
-    # pyrefly: ignore [bad-dunder-all]
     "_prepare_ondevice_dynamic_jit",
-    # pyrefly: ignore [bad-dunder-all]
     "_convert_ondevice_dynamic_jit",
-    # pyrefly: ignore [bad-dunder-all]
     "_quantize_ondevice_dynamic_jit",
     # Top level API for graph mode quantization on GraphModule(torch.fx)
     # 'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
@@ -60,7 +57,6 @@ __all__ = [
     "default_eval_fn",
     # Observers
     "ObserverBase",
-    # pyrefly: ignore [bad-dunder-all]
     "WeightObserver",
     "HistogramObserver",
     "observer",

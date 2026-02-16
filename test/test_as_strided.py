@@ -57,8 +57,7 @@ def enumerate_reachable_states(
         # 1. Unflatten: try factoring each dimension
         for dim in range(ndim):
             size = sizes[dim]
-            if size <= 1:
-                raise AssertionError(f"size must be > 1, got {size}")
+            assert size > 1
             # Try all factorizations x * y = size where both x, y >= 2
             # We only need to check x up to size // 2 since when x > size // 2,
             # y = size // x < 2, which we reject

@@ -860,26 +860,21 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0):
     if isinstance(in_dims, int):
         in_dims = (in_dims,) * len(inputs)
     bdim_sizes = [inp.size(dim) for inp, dim in zip(inputs, in_dims) if dim is not None]
-    if not all(bdim_size == bdim_sizes[0] for bdim_size in bdim_sizes):
-        raise AssertionError("all batch dimensions must have the same size")
+    assert all(bdim_size == bdim_sizes[0] for bdim_size in bdim_sizes)
     bdim_size = bdim_sizes[0]
     results = tuple(op(*slice_inputs(inputs, in_dims, i)) for i in range(bdim_size))
 
-    if len(results) == 0:
-        raise AssertionError("results must not be empty")
+    assert len(results) > 0
     op_has_single_return = not isinstance(results[0], tuple)
     if op_has_single_return:
-        if not all(isinstance(result, torch.Tensor) for result in results):
-            raise AssertionError("all results must be tensors")
+        assert all(isinstance(result, torch.Tensor) for result in results)
         if isinstance(out_dims, int):
             out_dims = (out_dims,) * 1
         return torch.stack(results, dim=out_dims[0])
 
-    if not all(isinstance(result, tuple) for result in results):
-        raise AssertionError("all results must be tuples")
+    assert all(isinstance(result, tuple) for result in results)
     num_returns = len(results[0])
-    if not all(len(result) == num_returns for result in results):
-        raise AssertionError("all results must have the same number of returns")
+    assert all(len(result) == num_returns for result in results)
     if isinstance(out_dims, int):
         out_dims = (out_dims,) * num_returns
     return tuple(
@@ -1428,8 +1423,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         x = torch.randn(B0, 2, 5, 7)
 
         def foo(x):
-            if x.stride() != (7 * 5, 7, 1):
-                raise AssertionError(f"stride mismatch: {x.stride()} != (35, 7, 1)")
+            assert x.stride() == (7 * 5, 7, 1)
             return x
 
         vmap(foo)(x)
@@ -1437,10 +1431,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         x = torch.randn(2, B0, 5, 7).movedim(1, 0)
 
         def bar(x):
-            if x.stride() != (7 * 5 * B0, 7, 1):
-                raise AssertionError(
-                    f"stride mismatch: {x.stride()} != ({7 * 5 * B0}, 7, 1)"
-                )
+            assert x.stride() == (7 * 5 * B0, 7, 1)
             return x
 
         vmap(bar)(x)
@@ -1779,8 +1770,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
         # is_contiguous on empty tensor is True
         def bar(x):
-            if not x.is_contiguous():
-                raise AssertionError("expected tensor to be contiguous")
+            assert x.is_contiguous()
             return x
 
         vmap(bar)(torch.randn(B0, 0, 3))
@@ -2621,8 +2611,7 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
                 allow_unused=True,
             )
             outputs = tuple(out for out in outputs if out is not None)
-            if len(outputs) == 0:
-                raise AssertionError("outputs must not be empty")
+            assert len(outputs) > 0
             return outputs
 
         self._vmap_test(

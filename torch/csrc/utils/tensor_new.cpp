@@ -878,8 +878,7 @@ Tensor indexing_tensor_from_data(
 class CheckSparseTensorInvariantsContext {
  public:
   CheckSparseTensorInvariantsContext()
-      : state{at::globalContext().checkSparseTensorInvariants(
-            /*warn_when_uninitialized=*/true)} {}
+      : state{at::globalContext().checkSparseTensorInvariants()} {}
   ~CheckSparseTensorInvariantsContext() {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
@@ -893,7 +892,7 @@ class CheckSparseTensorInvariantsContext {
       CheckSparseTensorInvariantsContext&&) = delete;
 
  private:
-  std::optional<bool> state;
+  bool state;
 };
 
 static Tensor sparse_compressed_tensor_ctor_worker(
@@ -956,6 +955,8 @@ static Tensor sparse_compressed_tensor_ctor_worker(
       : kInt;
   CheckSparseTensorInvariantsContext
       restores_check_sparse_tensor_invariants_global_state{};
+  bool default_check_invariants =
+      at::globalContext().checkSparseTensorInvariants();
 
   if (r.idx == 0) {
     const bool pin_memory = r.toBool(ARG_PIN_MEMORY);
@@ -968,10 +969,8 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     at::OptionalDeviceGuard device_guard(deviceOptional);
     // the global state of invariants check flag will be restored via
     // CheckSparseTensorInvariantsContext destructor
-    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS);
-        check_invariants.has_value()) {
-      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
-    }
+    at::globalContext().setCheckSparseTensorInvariants(
+        r.toBoolWithDefault(ARG_CHECK_INVARIANTS, default_check_invariants));
     Tensor values = internal_new_from_data(
         inferred_options,
         inferred_scalar_type,
@@ -1027,10 +1026,8 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     const bool pin_memory = r.toBool(ARG_PIN_MEMORY1);
     // the global state of invariants check flag will be restored via
     // CheckSparseTensorInvariantsContext destructor
-    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS1);
-        check_invariants.has_value()) {
-      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
-    }
+    at::globalContext().setCheckSparseTensorInvariants(
+        r.toBoolWithDefault(ARG_CHECK_INVARIANTS1, default_check_invariants));
     Tensor values = internal_new_from_data(
         inferred_options,
         inferred_scalar_type,
@@ -1188,6 +1185,9 @@ Tensor sparse_coo_tensor_ctor(
 
   CheckSparseTensorInvariantsContext
       restores_check_sparse_tensor_invariants_global_state{};
+  bool default_check_invariants =
+      at::globalContext().checkSparseTensorInvariants();
+
   if (r.idx == 0) {
     bool pin_memory = r.toBool(ARG_PIN_MEMORY);
     bool type_inference = r.isNone(ARG_TYPE);
@@ -1197,10 +1197,8 @@ Tensor sparse_coo_tensor_ctor(
         r.scalartypeWithDefault(ARG_TYPE, scalar_type);
     auto deviceOptional = r.deviceOptional(ARG_DEVICE);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS);
-        check_invariants.has_value()) {
-      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
-    }
+    at::globalContext().setCheckSparseTensorInvariants(
+        r.toBoolWithDefault(ARG_CHECK_INVARIANTS, default_check_invariants));
 
     // if no dtype provided, infer type based on value type.
     Tensor values = internal_new_from_data(
@@ -1235,10 +1233,8 @@ Tensor sparse_coo_tensor_ctor(
         r.scalartypeWithDefault(ARG_TYPE1, scalar_type);
     auto deviceOptional = r.deviceOptional(ARG_DEVICE1);
     at::OptionalDeviceGuard device_guard(deviceOptional);
-    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS1);
-        check_invariants.has_value()) {
-      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
-    }
+    at::globalContext().setCheckSparseTensorInvariants(
+        r.toBoolWithDefault(ARG_CHECK_INVARIANTS1, default_check_invariants));
 
     Tensor values = internal_new_from_data(
         inferred_options,
@@ -1270,10 +1266,9 @@ Tensor sparse_coo_tensor_ctor(
     const auto inferred_scalar_type =
         r.scalartypeWithDefault(ARG_TYPE2, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE2));
-    if (auto check_invariants = r.toBoolOptional(ARG_CHECK_INVARIANTS2);
-        check_invariants.has_value()) {
-      at::globalContext().setCheckSparseTensorInvariants(check_invariants);
-    }
+    at::globalContext().setCheckSparseTensorInvariants(
+        r.toBoolWithDefault(ARG_CHECK_INVARIANTS2, default_check_invariants));
+
     return at::sparse_coo_tensor(
                r.intlist(ARG_SIZE2),
                inferred_options.dtype(inferred_scalar_type).layout(at::kSparse))

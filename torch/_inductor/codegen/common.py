@@ -557,16 +557,6 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
-    if get_scheduling_for_device("tpu") is None:
-        tpu_backends = {
-            "pallas": PallasScheduling,
-        }
-        register_backend_for_device(
-            "tpu",
-            lambda scheduling: tpu_backends[config.tpu_backend](scheduling),
-            PythonWrapperCodegen,
-        )
-
     if get_scheduling_for_device("mps") is None:
         register_backend_for_device(
             "mps",
@@ -634,12 +624,6 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
         from .cuda import device_op_overrides  # noqa: F401
         from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
-
-    if device not in device_op_overrides_dict:
-        # For backends like TPU that only need no-op overrides (Pallas handles codegen)
-        from .cpu_device_op_overrides import CpuDeviceOpOverrides
-
-        register_device_op_overrides(device, CpuDeviceOpOverrides())
 
     return device_op_overrides_dict[device]
 
@@ -867,7 +851,6 @@ class PythonPrinter(_PythonPrinter):
         if isinstance(item, sympy.Mod):
             # use parenthesis to enforce precedence.
             # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
-            # pyrefly: ignore [missing-attribute]
             return f"({self._print(item)})"
         else:
             return super().parenthesize(item, level, strict)
@@ -2712,12 +2695,12 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
-        from .cutlass.kernel import CUTLASSTemplateKernel
+        from .cutlass.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
             return ValueRanges.unknown()
 
-        if isinstance(V.kernel, CUTLASSTemplateKernel):
+        if isinstance(V.kernel, CUDATemplateKernel):
             return ValueRanges.unknown()
 
         if isinstance(V.interpreter, NullHandler):

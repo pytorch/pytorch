@@ -430,8 +430,7 @@ def forward(self, x_1):
         def f(x):
             x = x.clone()
             x.unsqueeze_(-1)
-            if x.shape[-1] != 1:
-                raise AssertionError(f"expected x.shape[-1] == 1, got {x.shape[-1]}")
+            assert x.shape[-1] == 1
             return x
 
         self._test(f, [torch.randn(5)])
@@ -838,8 +837,7 @@ class TestRealProxyTensor(TestCase):
         def f():
             x = torch.randn([])
             y = torch.randn([])
-            if not torch.allclose(x * y, y * x):
-                raise AssertionError("x * y should equal y * x")
+            assert torch.allclose(x * y, y * x)
             z = float(x)
             z2 = float(y)
 
@@ -1124,8 +1122,7 @@ def forward(self, x_1, y_1):
 
     def test_unary(self):
         def f(x):
-            if x.shape[0] >= 20:
-                raise AssertionError(f"expected x.shape[0] < 20, got {x.shape[0]}")
+            assert x.shape[0] < 20
             return x.cos()
         test_inputs = []
         test_inputs.append([(2, 5)])
@@ -1291,8 +1288,7 @@ def forward(self, a_1, b_1):
         test_inputs.append([(1, 5), (3, 1)])
         test_inputs.append([(1, 4), (4, 1)])
         shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs).shape_env
-        if len(shape_env.guards) != 0:
-            raise AssertionError(f"expected no guards, got {len(shape_env.guards)}")
+        assert len(shape_env.guards) == 0
 
     def test_multiply_shape(self):
         def f(a):
@@ -1321,8 +1317,7 @@ def forward(self, a_1):
     def test_tensor_symfloat(self):
         def f(a):
             r = torch.tensor(a.size(0) ** 2.0)
-            if r.dtype is not torch.float:
-                raise AssertionError(f"expected dtype torch.float, got {r.dtype}")
+            assert r.dtype is torch.float
             return r
 
         gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2))
@@ -1635,8 +1630,7 @@ def forward(self, lengths_1, values_1):
             x = b.nonzero()
             x1 = b.nonzero()
             x2 = b.nonzero()
-            if x1.shape[0] != x2.shape[0]:
-                raise AssertionError("x1.shape[0] should equal x2.shape[0]")
+            assert x1.shape[0] == x2.shape[0]
             ok = True
             b.normal_()
             y = b.nonzero()
@@ -1655,14 +1649,12 @@ def forward(self, lengths_1, values_1):
             x = b.nonzero()
             x1 = b.nonzero()
             x2 = b.nonzero()
-            if x1.shape[0] != x2.shape[0]:
-                raise AssertionError("x1.shape[0] should equal x2.shape[0]")
+            assert x1.shape[0] == x2.shape[0]
             b.normal_()
             y = b.nonzero()
             # Because you're not actually going to generate exactly zero with
             # normal_ lol
-            if x1.shape[0] != y.shape[0]:
-                raise AssertionError("x1.shape[0] should equal y.shape[0]")
+            assert x1.shape[0] == y.shape[0]
 
         make_fx(f, tracing_mode="symbolic")(torch.randn(4))
 
@@ -1814,8 +1806,7 @@ def forward(self, x_1):
 
     def test_metadata_fresh(self):
         def f(x):
-            if x.shape[0] != 3:
-                raise AssertionError(f"expected x.shape[0] == 3, got {x.shape[0]}")
+            assert x.shape[0] == 3
             return x.cos()
 
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3))
@@ -1864,8 +1855,7 @@ def forward(self, x_1):
 
     def test_mega_guard(self):
         def f(a, b):
-            if a.shape[0] != b.shape[0] * 2:
-                raise AssertionError("a.shape[0] should equal b.shape[0] * 2")
+            assert a.shape[0] == b.shape[0] * 2
             return a.cos()
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
@@ -1880,26 +1870,22 @@ def forward(self, x_1):
 
     def test_guard_upperbound_range_refinement(self):
         def f(a):
-            if not (a.shape[0] > 5 and a.shape[0] > 12):
-                raise AssertionError("a.shape[0] should be > 12")
+            assert a.shape[0] > 5 and a.shape[0] > 12
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
         self.assertExpectedInline(show_guards(tensor), """13 <= L['a'].size()[0]""")
 
     def test_guard_lowerbound_range_refinement(self):
         def f(a):
-            if not (a.shape[0] < 20 and a.shape[0] < 30):
-                raise AssertionError("a.shape[0] should be < 20")
+            assert a.shape[0] < 20 and a.shape[0] < 30
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
         self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] <= 19""")
 
     def test_guard_upperbound_range_refinement_multivariate(self):
         def f(a):
-            if not (a.shape[0] > 5 and a.shape[0] > 12):
-                raise AssertionError("a.shape[0] should be > 12")
-            if not (a.shape[1] > 5 and a.shape[1] > a.shape[0]):
-                raise AssertionError("a.shape[1] should be > a.shape[0]")
+            assert a.shape[0] > 5 and a.shape[0] > 12
+            assert a.shape[1] > 5 and a.shape[1] > a.shape[0]
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
         self.assertExpectedInline(show_guards(tensor), """\
@@ -1909,10 +1895,8 @@ L['a'].size()[1] > L['a'].size()[0]
 
     def test_guard_lowerbound_range_refinement_multivariate(self):
         def f(a):
-            if not (a.shape[0] < 20 and a.shape[0] < 30):
-                raise AssertionError("a.shape[0] should be < 20")
-            if not (a.shape[1] < 30 and a.shape[1] < a.shape[0]):
-                raise AssertionError("a.shape[1] should be < a.shape[0]")
+            assert a.shape[0] < 20 and a.shape[0] < 30
+            assert a.shape[1] < 30 and a.shape[1] < a.shape[0]
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 5)))
         self.assertExpectedInline(
@@ -1932,10 +1916,8 @@ L['a'].size()[1] <= 18""")
         self.assertEqual(fx_g(*inp), f(*inp))
 
     def _assert_no_guards(self, fx_g, free_symbols):
-        if _get_free_symbols(fx_g.shape_env) != free_symbols:
-            raise AssertionError(f"free symbols mismatch: {fx_g.shape_env.backed_var_to_val}")
-        if len(fx_g.shape_env.get_nontrivial_guards()) != 0:
-            raise AssertionError(f"expected no guards: {fx_g.shape_env.format_guards()}")
+        assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.backed_var_to_val
+        assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
 
     def test_guards_equal(self):
         def f(a, b):
@@ -2000,8 +1982,7 @@ L['a'].size()[1] <= 18""")
     @torch.fx.experimental._config.patch(translation_validation=True)
     def test_constant_specialization(self):
         def f(t):
-            if t.shape[0] != 10:
-                raise AssertionError(f"expected t.shape[0] == 10, got {t.shape[0]}")
+            assert t.shape[0] == 10
             return t
 
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
@@ -2029,6 +2010,8 @@ make_fx_failures = {
     xfail('cov'),
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('corrcoef'),
+    xfail('quantile'),
+    xfail('nanquantile'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -2046,16 +2029,10 @@ make_fx_failures = {
 only_real_tensor_failures = {
     xfail('narrow'),
     xfail('tensor_split'),
-    # C++ CIA kernel calls aten::equal (data-dependent); Python decomposition only active with python dispatcher
-    xfail('quantile'),
-    xfail('nanquantile'),
 }
 
 only_fake_tensor_failures = {
     xfail('tensor_split'),
-    # C++ CIA kernel calls aten::equal (data-dependent); Python decomposition only active with python dispatcher
-    xfail('quantile'),
-    xfail('nanquantile'),
 }
 
 fake_tensor_failures = set()
@@ -2065,9 +2042,11 @@ symbolic_tensor_failures = {
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
+    xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
+    xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 }

@@ -304,25 +304,6 @@ class DistMatrixOpsTest(DTensorTestBase):
             test_placement_comb([spec[0]], [spec[1]])
 
     @with_comms
-    def test_aten_linear(self):
-        device_mesh = self.build_device_mesh()
-        x = distribute_tensor(
-            torch.randn(1, 47, 2048),
-            device_mesh,
-            [Replicate()],
-        )
-        w = distribute_tensor(
-            torch.randn(2048, 2048),
-            device_mesh,
-            [Shard(0)],
-        )
-
-        with torch.inference_mode():  # call aten::linear
-            out = torch.nn.functional.linear(x, w)
-
-        self.assertEqual(out.placements, (Shard(2),))
-
-    @with_comms
     def test_mm_single_dim_strategy(self):
         register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
         # unshardable input where some rank have empty _local_tensor

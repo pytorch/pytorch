@@ -34,7 +34,7 @@ import torch.version
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
+from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
 from torch._inductor.codegen.cutlass.utils import _gen_ops_cached, get_max_alignment
 from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
@@ -197,7 +197,7 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
             num_fusions,
         )
         torch.testing.assert_close(result, ref_result)
@@ -926,11 +926,11 @@ class TestCutlassBackend(TestCase):
                 "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
-            counters["inductor"]["cutlass_epilogue_fusion_counter"] = 0
+            counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
             assert mm is not None
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
-            actual_count = counters["inductor"]["cutlass_epilogue_fusion_counter"]
+            actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
             assert actual_count == expected_fuse_count, (
                 f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
             )
@@ -1213,7 +1213,7 @@ class TestCutlassBackend(TestCase):
                     assert op_name == "addmm"
                     cuda_template_count = 0
                     for choice in choices:
-                        if isinstance(choice, CUTLASSTemplateCaller):
+                        if isinstance(choice, CUDATemplateCaller):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
                             assert isinstance(op_conf_name, str)
@@ -1221,7 +1221,7 @@ class TestCutlassBackend(TestCase):
                                 "All pingpong Kernels should have been filtered"
                             )
                             cuda_template_count += 1
-                    assert cuda_template_count > 0, "No CUTLASSTemplateCaller choices"
+                    assert cuda_template_count > 0, "No CUDATemplateCaller choices"
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1258,7 +1258,7 @@ class TestCutlassBackend(TestCase):
                     assert op_name == "addmm"
                     cuda_template_count = 0
                     for choice in choices:
-                        if isinstance(choice, CUTLASSTemplateCaller):
+                        if isinstance(choice, CUDATemplateCaller):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
                             assert isinstance(op_conf_name, str)
@@ -1266,7 +1266,7 @@ class TestCutlassBackend(TestCase):
                                 "Only pingpong Kernels should have been allowed"
                             )
                             cuda_template_count += 1
-                    assert cuda_template_count > 0, "No CUTLASSTemplateCaller choices"
+                    assert cuda_template_count > 0, "No CUDATemplateCaller choices"
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1334,7 +1334,7 @@ class TestCutlassBackend(TestCase):
                         _, choices, _, _ = args
                         cuda_template_count = 0
                         for choice in choices:
-                            if isinstance(choice, CUTLASSTemplateCaller):
+                            if isinstance(choice, CUDATemplateCaller):
                                 choice_info = choice.info_dict()
                                 op_conf_name = choice_info.get("op_conf_name", "")
                                 assert isinstance(op_conf_name, str)
@@ -1347,9 +1347,7 @@ class TestCutlassBackend(TestCase):
                                         "fastaccum Kernels should have been filtered"
                                     )
                                 cuda_template_count += 1
-                        assert cuda_template_count > 0, (
-                            "No CUTLASSTemplateCaller choices"
-                        )
+                        assert cuda_template_count > 0, "No CUDATemplateCaller choices"
 
         run_test(True)
         run_test(False)
@@ -1415,7 +1413,7 @@ class TestCutlassBackend(TestCase):
                 assert op_name == "mm"
                 cuda_template_count = 0
                 for choice in choices:
-                    if isinstance(choice, CUTLASSTemplateCaller):
+                    if isinstance(choice, CUDATemplateCaller):
                         choice_info = choice.info_dict()
                         op_conf_name = choice_info.get("op_conf_name", "")
                         assert isinstance(op_conf_name, str)
@@ -1424,7 +1422,7 @@ class TestCutlassBackend(TestCase):
                 self.assertGreater(
                     cuda_template_count,
                     0,
-                    "No CUTLASSTemplateCaller choices found for matmul with shape "
+                    "No CUDATemplateCaller choices found for matmul with shape "
                     f"M={M}, N={N}, K={K}",
                 )
 
@@ -1507,7 +1505,7 @@ class TestCutlassBackend(TestCase):
         ):
             from tempfile import NamedTemporaryFile
 
-            from torch._inductor.codegen.cuda.compile_utils import (
+            from torch._inductor.codegen.cutlass.utils import (
                 cuda_standalone_runner_compile_command,
                 CUDACompileSourceCapturingContext,
             )
@@ -1863,8 +1861,7 @@ class TestCutlassBackend(TestCase):
             _ = torch.compile(model)(B)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
-            1,
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1958,8 +1955,7 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
-            1,
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
         )
         torch.testing.assert_close(result, ref_result)
 
@@ -1983,8 +1979,7 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
-            1,
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
         )
         torch.testing.assert_close(result, ref_result)
 
@@ -2015,15 +2010,14 @@ class TestCutlassBackend(TestCase):
             ref_result = torch.compile(model)(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
-            0,
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 0
         )
 
         torch._dynamo.reset()
         result = torch.compile(model)(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
             1,
         )
 
@@ -2081,7 +2075,7 @@ class TestCutlassBackend(TestCase):
 
             self.assertEqual(
                 torch._dynamo.utils.counters["inductor"][
-                    "cutlass_epilogue_fusion_counter"
+                    "cuda_epilogue_fusion_counter"
                 ],
                 2 * (i + 1),
             )
@@ -2108,8 +2102,7 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
-            1,
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
         )
         torch.testing.assert_close(result, ref_result)
 
