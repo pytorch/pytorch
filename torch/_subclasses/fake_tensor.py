@@ -1941,17 +1941,18 @@ class FakeTensorMode(TorchDispatchMode):
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            if not isinstance(output, tuple):
+            if not isinstance(output, tuple) and output is not None:
                 raise AssertionError(
                     f"Expected tuple output for HOP {func}, got {type(output)}"
                 )
-            non_cacheable = any(
-                isinstance(o, (torch.Tensor, torch.SymInt))
-                and has_free_unbacked_symbols(o)
-                for o in output
-            )
-            if non_cacheable:
-                raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
+            if output is not None:
+                non_cacheable = any(
+                    isinstance(o, (torch.Tensor, torch.SymInt))
+                    and has_free_unbacked_symbols(o)
+                    for o in output  # pyrefly: ignore[not-iterable]
+                )
+                if non_cacheable:
+                    raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
 
         if isinstance(output, (int, torch.SymInt, type(None))):
             output_info = _DispatchCacheEntryOutputInfo(
