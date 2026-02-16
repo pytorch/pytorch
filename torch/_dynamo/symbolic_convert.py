@@ -511,11 +511,7 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
     # expect to find POP_JUMP_[FORWARD_]IF_TRUE
-    begin_idx = next(
-        (i for i, inst in enumerate(insts) if inst.startswith("POP_JUMP")), None
-    )
-    if begin_idx is None or "RAISE_VARARGS" not in insts:
-        return ["<assert pattern unsupported>"]
+    begin_idx = next(i for i, inst in enumerate(insts) if inst.startswith("POP_JUMP"))
 
     end_idx = insts.index("RAISE_VARARGS")
 
@@ -777,6 +773,7 @@ def generic_jump(
         value: VariableTracker = self.pop()
         if (
             config.rewrite_assert_with_torch_assert
+            and sys.flags.optimize == 0
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
         ):
             error_msg: VariableTracker = self.pop()
