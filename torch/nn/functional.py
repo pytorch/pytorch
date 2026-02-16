@@ -48,6 +48,24 @@ except ModuleNotFoundError:
     np = None
 
 
+_SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED = False
+
+
+def _try_register_scaled_grouped_mm_cutedsl_kernels_once() -> None:
+    global _SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED
+    if _SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED:
+        return
+    try:
+        from torch._cutedsl import scaled_grouped_mm_mxfp8_register_kernels
+
+        scaled_grouped_mm_mxfp8_register_kernels()
+        _SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED = True
+    except Exception:
+        # CuTeDSL integration is optional; keep default behavior when
+        # registration is unavailable.
+        pass
+
+
 conv1d = _add_docstr(
     torch.conv1d,
     r"""
@@ -6878,43 +6896,19 @@ def scaled_grouped_mm(
     swizzle_a = expand_single_value(swizzle_a)
     swizzle_b = expand_single_value(swizzle_b)
 
-    # Symbolic FX tracing passes Proxy placeholders (not Tensor), so gate this
-    # dtype/device branch to real Tensor inputs only.
-    if isinstance(mat_a, Tensor) and mat_a.dtype == torch.float8_e4m3fn:
-        try:
-            major, _ = torch.cuda.get_device_capability(mat_a.device)
-        except Exception:
-            major = -1
-        if major == 10 and mat_a.dim() == 2 and mat_b.dim() == 3:
-            from torch._cutedsl import scaled_grouped_mm_mxfp8
-
-            # Temporary bridge until an inductor lowering exists: run the
-            # CuTeDSL path eagerly under torch.compile.
-            if torch.compiler.is_compiling():
-                import torch._dynamo as torch_dynamo
-
-                # TODO: remove this graph-break bridge once scaled_grouped_mm
-                # is fully CuTeDSL-backed and has a proper compile-time lowering
-                # (or custom op lowering) in the compiler stack.
-                cutedsl_call = torch_dynamo.disable(scaled_grouped_mm_mxfp8)
-            else:
-                cutedsl_call = scaled_grouped_mm_mxfp8
-
-            return cutedsl_call(
-                mat_a,
-                mat_b,
-                scale_a,
-                scale_b,
-                scale_recipe_a,
-                scale_recipe_b,
-                swizzle_a,
-                swizzle_b,
-                offs,
-                output_dtype,
-                contraction_dim,
-                use_fast_accum,
-                bias=bias,
-            )
+    # Register CuTeDSL override lazily on the first Python-call path through
+    # torch.nn.functional.scaled_grouped_mm.
+    #
+    # Note: direct callers of torch._scaled_grouped_mm_v2 bypass this function.
+    # They can enable the same override manually via:
+    #   torch._cutedsl.scaled_grouped_mm_mxfp8_register_kernels()
+    #
+    # If we later decide to make this automatic for *all* callsites (including
+    # direct torch._scaled_grouped_mm_v2), move the registration call to a
+    # process-global import path (e.g. torch/__init__.py) instead of this lazy
+    # functional.py hook.
+    if not _SCALED_GROUPED_MM_CUTEDSL_KERNELS_REGISTERED:
+        _try_register_scaled_grouped_mm_cutedsl_kernels_once()
 
     # native_functions has restrictions on what can be defined
     # & passed through - std::optional<ArrayRef<Tensor>> for instance

@@ -1,15 +1,19 @@
 import functools
 import importlib
 from collections.abc import Sequence
-from typing import NamedTuple, Optional
+from typing import Any, cast, NamedTuple, Optional, Protocol
 
 import torch
 from torch import Tensor
+from torch._C import (
+    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
+    _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
+)
 from torch._cutedsl._compile_with_safe_names import _compile_with_safe_names
 from torch._cutedsl.scaled_grouped_mm_prepare_metadata import (
     _compile_scaled_grouped_mm_prepare_metadata,
 )
-from torch.nn.functional import ScalingType, SwizzleType
+from torch.library import Library
 
 
 class _KernelConfig(NamedTuple):
@@ -806,4 +810,172 @@ def scaled_grouped_mm_mxfp8(
     return out
 
 
-__all__ = ["scaled_grouped_mm_mxfp8"]
+_NN_LIB: Library | None = None
+
+
+class _BoxedKernel(Protocol):
+    def call_boxed(self, keyset: Any, *args: Any, **kwargs: Any) -> Any: ...
+
+
+_ORIGINAL_SCALED_GROUPED_MM_V2_KERNEL: _BoxedKernel | None = None
+
+
+def _should_use_cutedsl_scaled_grouped_mm_mxfp8(
+    mat_a: object,
+    mat_b: object,
+    scale_recipe_a: object,
+    swizzle_a: object,
+    scale_recipe_b: object,
+    swizzle_b: object,
+    offs: object,
+    bias: object,
+    use_fast_accum: object,
+) -> bool:
+    if _cutedsl_unavailable_reason() is not None:
+        return False
+    if not isinstance(mat_a, Tensor) or not isinstance(mat_b, Tensor):
+        return False
+    if mat_a.dtype != torch.float8_e4m3fn:
+        return False
+    if mat_a.device.type != "cuda" or mat_b.device.type != "cuda":
+        return False
+    if mat_a.dim() != 2 or mat_b.dim() != 3:
+        return False
+    try:
+        major, _ = torch.cuda.get_device_capability(mat_a.device)
+    except Exception:
+        return False
+    if major != 10:
+        return False
+    if not isinstance(scale_recipe_a, list) or not isinstance(scale_recipe_b, list):
+        return False
+    if not isinstance(swizzle_a, list) or not isinstance(swizzle_b, list):
+        return False
+    if len(scale_recipe_a) != 1 or len(scale_recipe_b) != 1:
+        return False
+    if len(swizzle_a) != 1 or len(swizzle_b) != 1:
+        return False
+    if scale_recipe_a[0] != ScalingType.BlockWise1x32.value:
+        return False
+    if scale_recipe_b[0] != ScalingType.BlockWise1x32.value:
+        return False
+    if swizzle_a[0] != SwizzleType.SWIZZLE_32_4_4.value:
+        return False
+    if swizzle_b[0] != SwizzleType.SWIZZLE_32_4_4.value:
+        return False
+    if offs is None:
+        return False
+    if bias is not None:
+        return False
+    if bool(use_fast_accum):
+        return False
+    return True
+
+
+def _scaled_grouped_mm_v2_conditional_cuda_impl(dispatch_keys, *args, **kwargs):
+    kernel = _ORIGINAL_SCALED_GROUPED_MM_V2_KERNEL
+    if kernel is None:
+        raise RuntimeError(
+            "scaled_grouped_mm_mxfp8_register_kernels() must initialize "
+            "the original aten::_scaled_grouped_mm_v2 CUDA kernel first"
+        )
+    if kwargs:
+        return kernel.call_boxed(dispatch_keys, *args, **kwargs)
+    # Schema (13 args total) has trailing optional defaults:
+    # offs=None, bias=None, out_dtype=None, contraction_dim=[], use_fast_accum=False.
+    # Callers may omit some/all trailing optionals, so accept positional arity 8..13.
+    if len(args) < 8 or len(args) > 13:
+        return kernel.call_boxed(dispatch_keys, *args)
+    if len(args) < 13:
+        trailing_defaults = (None, None, None, [], False)
+        args = (*args, *trailing_defaults[len(args) - 8 :])
+
+    (
+        mat_a,
+        mat_b,
+        scale_a,
+        scale_recipe_a,
+        swizzle_a,
+        scale_b,
+        scale_recipe_b,
+        swizzle_b,
+        offs,
+        bias,
+        output_dtype,
+        contraction_dim,
+        use_fast_accum,
+    ) = args
+
+    if _should_use_cutedsl_scaled_grouped_mm_mxfp8(
+        mat_a,
+        mat_b,
+        scale_recipe_a,
+        swizzle_a,
+        scale_recipe_b,
+        swizzle_b,
+        offs,
+        bias,
+        use_fast_accum,
+    ):
+        mat_a_t = cast(Tensor, mat_a)
+        mat_b_t = cast(Tensor, mat_b)
+        scale_a_t = cast(list[Tensor], scale_a)
+        scale_b_t = cast(list[Tensor], scale_b)
+        scale_recipe_a_t = cast(list[int], scale_recipe_a)
+        scale_recipe_b_t = cast(list[int], scale_recipe_b)
+        swizzle_a_t = cast(list[int], swizzle_a)
+        swizzle_b_t = cast(list[int], swizzle_b)
+        offs_t = cast(Optional[Tensor], offs)
+        bias_t = cast(Optional[Tensor], bias)
+        output_dtype_t = cast(Optional[torch.dtype], output_dtype)
+        contraction_dim_t = cast(Sequence[int], contraction_dim)
+        use_fast_accum_t = cast(bool, use_fast_accum)
+
+        cutedsl_call = scaled_grouped_mm_mxfp8
+        if torch.compiler.is_compiling():
+            import torch._dynamo as torch_dynamo
+
+            cutedsl_call = torch_dynamo.disable(cutedsl_call)
+        return cutedsl_call(
+            mat_a_t,
+            mat_b_t,
+            scale_a_t,
+            scale_b_t,
+            [ScalingType(scale_recipe_a_t[0])],
+            [ScalingType(scale_recipe_b_t[0])],
+            [SwizzleType(swizzle_a_t[0])],
+            [SwizzleType(swizzle_b_t[0])],
+            offs_t,
+            output_dtype_t,
+            contraction_dim_t,
+            use_fast_accum_t,
+            bias=bias_t,
+        )
+
+    return kernel.call_boxed(dispatch_keys, *args)
+
+
+def scaled_grouped_mm_mxfp8_register_kernels() -> Library:
+    global _NN_LIB, _ORIGINAL_SCALED_GROUPED_MM_V2_KERNEL
+    if _NN_LIB is not None:
+        return _NN_LIB
+
+    # Capture original CUDA kernel before installing override.
+    if _ORIGINAL_SCALED_GROUPED_MM_V2_KERNEL is None:
+        _ORIGINAL_SCALED_GROUPED_MM_V2_KERNEL = torch._C._dispatch_get_computed_kernel_for_dispatch_key(  # pyrefly: ignore [missing-module-attribute]
+            "aten::_scaled_grouped_mm_v2",
+            "CUDA",
+        )
+
+    lib = Library("aten", "IMPL", "CUDA")
+    lib.impl(
+        "_scaled_grouped_mm_v2",
+        _scaled_grouped_mm_v2_conditional_cuda_impl,
+        "CUDA",
+        with_keyset=True,
+    )
+    _NN_LIB = lib
+    return lib
+
+
+__all__ = ["scaled_grouped_mm_mxfp8", "scaled_grouped_mm_mxfp8_register_kernels"]
