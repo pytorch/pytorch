@@ -1429,6 +1429,37 @@ def _make_node_magic(method, func):
                     self._optimized_summation,
                     other._optimized_summation,
                 )
+            elif method in ("eq", "ne", "ge", "gt", "le", "lt"):
+                import sympy
+
+                from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+                # Optimization: when one side is a single unbacked symbol
+                # and other is constant, use evaluate=False to skip expensive
+                # relational evaluation. We only do this for unbacked symbols
+                # because they have no assumptions (like positive=True) that
+                # sympy would use during evaluation.
+                lhs_is_unbacked = self.expr.is_symbol and symbol_is_type(
+                    self.expr, SymT.UNBACKED_INT
+                )
+                rhs_is_unbacked = other.expr.is_symbol and symbol_is_type(
+                    other.expr, SymT.UNBACKED_INT
+                )
+                if (lhs_is_unbacked and other.expr.is_number) or (
+                    rhs_is_unbacked and self.expr.is_number
+                ):
+                    rel_class = {
+                        "eq": sympy.Eq,
+                        "ne": sympy.Ne,
+                        "ge": sympy.Ge,
+                        "gt": sympy.Gt,
+                        "le": sympy.Le,
+                        "lt": sympy.Lt,
+                    }[method]
+                    out = rel_class(self.expr, other.expr, evaluate=False)
+                else:
+                    out = func(self.expr, other.expr)
+
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)
