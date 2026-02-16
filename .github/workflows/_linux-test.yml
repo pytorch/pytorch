@@ -391,6 +391,22 @@ jobs:
             export HF_DATASETS_OFFLINE=0
           fi
 
+          # For TIMM jobs, create a pin-specific cache directory and make it
+          # world-writable so the jenkins user inside docker can write to it.
+          # Only enable online mode if the cache hasn't been fully populated.
+          if [[ "${TEST_CONFIG}" == *timm* ]]; then
+            TIMM_PIN="$(< .ci/docker/ci_commit_pins/timm.txt)"
+            TIMM_CACHE_DIR="${HF_CACHE}/timm_${TIMM_PIN}"
+            if [[ ! -d "${TIMM_CACHE_DIR}" ]]; then
+              mkdir -p "${TIMM_CACHE_DIR}"
+              chmod -R a+rwX "${TIMM_CACHE_DIR}"
+            fi
+            if [[ ! -f "${TIMM_CACHE_DIR}/.timm_cache_complete" ]]; then
+              export TRANSFORMERS_OFFLINE=0
+              export HF_DATASETS_OFFLINE=0
+            fi
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG, SHM_OPTS, JENKINS_USER and DOCKER_SHELL_CMD since that doesn't play nice

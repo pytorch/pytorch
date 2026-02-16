@@ -303,9 +303,15 @@ class MixOrderReduction:
         if len(common_reads) == 0:
             return False
 
-        g1 = cls.get_numel_rnumel(node1)
-        nrow = sympy.Max(g1[0], g1[1])
-        ncol = sympy.Min(g1[0], g1[1])
+        if cls.is_contiguous_node(node1):
+            contiguous_node, other_node = node1, node2
+        elif cls.is_contiguous_node(node2):
+            contiguous_node, other_node = node2, node1
+        else:
+            return False
+
+        g1 = cls.get_numel_rnumel(contiguous_node)
+        nrow, ncol = g1
 
         # in non strict mode, we will skip the non-critical checks
         if not config.triton.mix_order_reduction_non_strict_mode:
@@ -331,33 +337,6 @@ class MixOrderReduction:
             # Mix order reduction is less beneficial.
             if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, 4096)):
                 return False
-
-        # Determine which node is contiguous. If we can't determine this
-        # statically (e.g., due to unbacked symbols), skip the fusion.
-        eq_expr = sympy.Eq(g1[1], ncol)
-        if V.graph.sizevars.guard_or_false(eq_expr):
-            contiguous_node, other_node = (node1, node2)
-        elif V.graph.sizevars.guard_or_false(sympy.Not(eq_expr)):
-            contiguous_node, other_node = (node2, node1)
-        else:
-            # Can't statically determine which node is contiguous, skip fusion
-            return False
-
-        # We previously only check the contiguous_node has contiguous
-        # access to common_reads. But that turns out to be not enough.
-        # The contiguous node may access a buffer that's node use by
-        # other_ndoe. If that ascess is non-contiugous, generating
-        # mix-order reduction can be inefficient especially when we
-        # force XBLOCK to be 1
-        # if not all(
-        #     cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
-        # ):
-        #     return False
-        if not all(
-            cls.is_contiguous_load(dep.name, contiguous_node)
-            for dep in contiguous_node.read_writes.reads
-        ):
-            return False
 
         # Make sure a persistent reduction will be generated
         if any(
@@ -395,6 +374,14 @@ class MixOrderReduction:
         cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return cls.can_fuse(node1, node2)
+
+    @classmethod
+    def is_contiguous_node(cls, node: BaseSchedulerNode) -> bool:
+        if not all(
+            cls.is_contiguous_load(dep.name, node) for dep in node.read_writes.reads
+        ):
+            return False
+        return True
 
     @classmethod
     def is_contiguous_load(cls, buf: str, parent_node: BaseSchedulerNode) -> bool:
@@ -2134,6 +2121,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
 class FusedMixOrderReductions(FusedSchedulerNode):
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
+        if not MixOrderReduction.is_contiguous_node(node1):
+            assert MixOrderReduction.is_contiguous_node(node2)
+            node1, node2 = node2, node1
+
         self.node1 = node1
         self.node2 = node2
         super().__init__(
