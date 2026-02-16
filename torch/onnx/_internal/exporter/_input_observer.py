@@ -726,10 +726,11 @@ class InputObserverInfo:
         return tuple(args), kwargs
 
     def _post_process_for_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """:func:`torch.export.export` requires to have dynamic shapes
-        and keyword arguments wrapped into `'kwargs': { 'param':  shape or tensor }`
-        if 'param' is not part of the signature but is caught through `**kwargs`.
-        This function ensures this is the case.
+        """:func:`torch.export.export` requires dynamic shapes and keyword arguments
+        that are not part of the explicit function signature but are collected via
+        ``**<kwargs_name>`` to be wrapped under the corresponding parameter name
+        (``self.kwargs_name``) as ``{<kwargs_name>: {'param': shape or tensor}}``.
+        This function ensures this wrapping is performed when ``self.kwargs_name`` is set.
         """
         if not self.kwargs_name:
             # Nothing to do here.
