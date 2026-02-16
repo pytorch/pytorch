@@ -812,8 +812,10 @@ __launch_bounds__(block_dim_x * block_dim_y)
       if (dg) {
         dg[thread_y * N + thread_x] = dg_sum;
       }
-      if (db && !rms_norm) {
-        db[thread_y * N + thread_x] = db_sum;
+      if constexpr (!rms_norm) {
+        if (db) {
+          db[thread_y * N + thread_x] = db_sum;
+        }
       }
     }
   } else {
@@ -858,8 +860,10 @@ __launch_bounds__(block_dim_x * block_dim_y)
         if (dg) {
           dg[out_index] = reg_dg;
         }
-        if (db && !rms_norm) {
-          db[out_index] = reg_db;
+        if constexpr (!rms_norm) {
+          if (db) {
+            db[out_index] = reg_db;
+          }
         }
       }
     }
@@ -983,10 +987,12 @@ void LaunchGammaBetaBackwardCUDAKernel(
       dgamma_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
       dgamma_blocks_ptr = dgamma_blocks.data_ptr<T>();
     }
-    if (dbeta->defined() && !rms_norm) {
-      auto options = dbeta->options();
-      dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
-      dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
+    if constexpr (!rms_norm) {
+      if (dbeta->defined()) {
+        auto options = dbeta->options();
+        dbeta_blocks = at::empty({blocks.y * threads.y, dgamma->size(-1)}, options);
+        dbeta_blocks_ptr = dbeta_blocks.data_ptr<T>();
+      }
     }
     LaunchAndCheckGammaBetaBackwardKernel<T, T_ACC, block_dim_x, block_dim_y, rows_per_block_y, true, rms_norm>(
       aligned_grid, blocks, threads, 0, cuda_stream, dY_data, X_data, mean_data, rstd_data, M, N, dgamma_blocks_ptr, dbeta_blocks_ptr);
