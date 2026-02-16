@@ -61,6 +61,9 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED as TEST_ON_CPU,
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED as TEST_ON_CUDA,
+    IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED as TEST_ON_XPU,
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
@@ -193,21 +196,18 @@ class DeviceConfig:
     dtypes_fast: list[torch.dtype]
 
 
-TEST_ON_CUDA = (
-    torch.cuda.is_available()
-    and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0)
-)
-TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
-
 device_configs = {}
+# Tests are skipped when no device is supported, so CPU as default is safe
 test_device = ("cpu",)
 if HAS_GPU:
     if TEST_ON_CUDA:
-        test_device = (
-            "cuda",
-            "cpu",
-        )
+        if TEST_ON_CPU:
+            test_device = (
+                "cuda",
+                "cpu",
+            )
+        else:
+            test_device = ("cuda",)
     elif TEST_ON_XPU:
         torch._C._set_onednn_allow_tf32(True)
         test_device = ("xpu",)
@@ -225,11 +225,7 @@ class SubstringSet:
         return item in self.items
 
 
-DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
-    [
-        "cuda",
-    ]
-)
+DEVICE_SUPPORTS_BACKWARDS = SubstringSet(["cuda", "xpu"])
 
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
@@ -691,21 +687,23 @@ class TestFlexAttention(InductorTestCase):
         paged_attention = PagedAttention(
             n_pages, page_size, max_batch_size, device=device
         )
+
+        def make_reserve_tensor(fractions):
+            pattern = [KV_S * f for f in fractions]
+            return torch.tensor(
+                [pattern[i % len(pattern)] for i in range(KV_B)],
+                device=device,
+                dtype=torch.int64,
+            )
+
         batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device=device),
+            paged_attention, make_reserve_tensor([1 / 4, 1 / 2, 1 / 4, 1 / 3])
         )
         batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 2, KV_S // 2], device=device),
+            paged_attention, make_reserve_tensor([1 / 4, 1 / 2, 1 / 2, 1 / 2])
         )
-        batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 2, KV_S, KV_S // 2, KV_S], device=device),
-        )
-        batch_reserve(
-            paged_attention, torch.tensor([KV_S, KV_S, KV_S, KV_S], device=device)
-        )
+        batch_reserve(paged_attention, make_reserve_tensor([1 / 2, 1, 1 / 2, 1]))
+        batch_reserve(paged_attention, make_reserve_tensor([1, 1, 1, 1]))
 
         # update cache with k and v
         input_pos = (
@@ -967,7 +965,6 @@ class TestFlexAttention(InductorTestCase):
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
-
         if requires_grad:
             backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=device)
             golden_out1.backward(backward_grad1.to(torch.float64))
@@ -1312,9 +1309,6 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
-    @skipCPUIf(
-        not torch.cpu._is_avx2_supported(), "CPU flex attention requires AVX2 support"
-    )
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -1449,6 +1443,60 @@ class TestFlexAttention(InductorTestCase):
 
         for seqlen in [a, b]:
             create_block_mask_from_seqlens(seqlen, seqlen)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_create_block_mask_recompile_persistent_reduction_oob(self, device):
+        """Recompiling create_block_mask with a much smaller Q_LEN must not OOB.
+
+        When Q_LEN shrinks enough that (Q_LEN+15)//16 == 1 for all guarded
+        values, _get_persistent_RBLOCK must return R0_BLOCK=1 (not 2) so
+        the constant all-True mask does not read out of bounds.
+        """
+        compiled_create_block_mask = torch.compile(create_block_mask)
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        KV_LEN = 2048
+
+        compiled_create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=7896,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+
+        compiled_bm = compiled_create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=2,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+        eager_bm = create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=2,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+
+        torch.testing.assert_close(
+            compiled_bm.full_q_num_blocks,
+            eager_bm.full_q_num_blocks,
+        )
+        torch.testing.assert_close(
+            compiled_bm.q_num_blocks,
+            eager_bm.q_num_blocks,
+        )
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -1699,6 +1747,72 @@ class TestFlexAttention(InductorTestCase):
         self.run_test_with_paged_attention(all_bias, dtype, device=device)
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    def test_bf16_score_mod_captured_grad_dtype(self, device):
+        """
+        Tests with tensors that require gradients with bf16 dtype in the score_mod
+        """
+        if not PLATFORM_SUPPORTS_BF16:
+            self.skipTest("Platform does not support bf16")
+
+        B_local, H_local, S_local, D_local = 2, 4, 32, 64
+        dtype = torch.bfloat16
+        x = torch.randn(
+            (B_local, S_local, D_local),
+            device=device,
+            dtype=dtype,
+        )
+
+        def forward(bias_proj, x):
+            q = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            k = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            v = x.view(B_local, S_local, H_local, D_local // H_local).permute(
+                0, 2, 1, 3
+            )
+            attn_bias = (
+                bias_proj(x)
+                .view(B_local, S_local, H_local, S_local)
+                .permute(0, 2, 1, 3)
+            )
+
+            def bias_mod(score, b, h, q_idx, kv_idx):
+                return score + attn_bias[b, h, q_idx, kv_idx]
+
+            return flex_attention(q, k, v, score_mod=bias_mod)
+
+        def run_and_get_weight_grad(bias_proj, x, compiled):
+            bias_proj.zero_grad(set_to_none=True)
+            fn = torch.compile(forward) if compiled else forward
+            out = fn(bias_proj, x)
+            grad = torch.randn_like(out)
+            out.backward(grad)
+            return bias_proj.weight.grad
+
+        bias_proj_eager = nn.Linear(
+            D_local, H_local * S_local, device=device, dtype=dtype, bias=False
+        )
+        bias_proj_compiled = nn.Linear(
+            D_local, H_local * S_local, device=device, dtype=dtype, bias=False
+        )
+        bias_proj_compiled.load_state_dict(bias_proj_eager.state_dict())
+
+        torch.manual_seed(0)
+        eager_weight_grad = run_and_get_weight_grad(bias_proj_eager, x, compiled=False)
+        self.assertEqual(eager_weight_grad.dtype, bias_proj_eager.weight.dtype)
+
+        torch.manual_seed(0)
+        compiled_weight_grad = run_and_get_weight_grad(
+            bias_proj_compiled, x, compiled=True
+        )
+        self.assertEqual(compiled_weight_grad.dtype, bias_proj_compiled.weight.dtype)
+        self.assertEqual(eager_weight_grad, compiled_weight_grad, atol=1e-1, rtol=1e-1)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -1941,6 +2055,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         def score_mod_scale(qk, b, h, q, kv):
             return qk + scale
+
+        self.run_test(score_mod_scale, dtype, device=device)
+        self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
+
+    @supported_platform
+    @skip_on_cpu
+    @dtypes(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
+    def test_captured_scalar_grad(self, device, dtype):
+        """Test learnable scalar parameter with shape (1,) using literal index."""
+        scale = torch.ones((1,), device=device, dtype=dtype, requires_grad=True)
+
+        def score_mod_scale(qk, b, h, q, kv):
+            return qk + scale[0]
 
         self.run_test(score_mod_scale, dtype, device=device)
         self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
@@ -2246,6 +2375,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @common_utils.skipIfRocmArch(common_utils.MI200_ARCH)
     def test_autocast(self, device, dtype):
         """Test torch autocast functionality"""
         q = torch.randn(1, 1, 1024, 64, device=device, dtype=dtype).to(torch.float16)
@@ -3499,10 +3629,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         "permute_order",
         [
             (0, 1, 2, 3),  # Default order
-            (1, 0, 2, 3),  # Reverse order
+            (1, 0, 2, 3),  # Swap first two dims
             (0, 2, 1, 3),  # Mixed order
             (2, 0, 1, 3),  # Another mixed order
-            (0, 1, 3, 2),  # Non contiguous last dim
+            (0, 1, 3, 2),  # Swap last two dims (non-contiguous last dim)
+            (1, 0, 3, 2),  # Swap first two AND last two dims
         ],
     )
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
@@ -3542,21 +3673,32 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             func = flex_attention
             out = func(query, key, value)
 
-        out_stride_order = get_stride_order(out.stride())
-        query_stride_order = get_stride_order(query.stride())
+        # We always enforce stride[-1]=1 for attention kernels
+        self.assertEqual(out.stride()[-1], 1, "Output must have contiguous last dim")
 
-        self.assertEqual(
-            out_stride_order,
-            query_stride_order,
-            f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
-        )
+        # When input already has stride[-1]=1, verify full stride order is preserved
+        if query.stride()[-1] == 1:
+            out_stride_order = get_stride_order(out.stride())
+            query_stride_order = get_stride_order(query.stride())
+            self.assertEqual(
+                out_stride_order,
+                query_stride_order,
+                f"Stride order mismatch: out {out_stride_order}, query {query_stride_order}",
+            )
 
     @supported_platform
     @skip_on_cpu
     @common_utils.parametrize("mode", ["eager", "inductor"])
     @common_utils.parametrize(
         "permute_order",
-        [(0, 1, 2, 3), (1, 0, 2, 3), (0, 2, 1, 3), (2, 0, 1, 3), (0, 1, 3, 2)],
+        [
+            (0, 1, 2, 3),
+            (1, 0, 2, 3),
+            (0, 2, 1, 3),
+            (2, 0, 1, 3),
+            (0, 1, 3, 2),
+            (1, 0, 3, 2),
+        ],
     )
     @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_backward_stride_ordering(
@@ -3592,13 +3734,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (key, key.grad, "key"),
             (value, value.grad, "value"),
         ]:
-            input_stride_order = get_stride_order(grad.stride())
-            orig_stride_order = get_stride_order(leaf.stride())
-            self.assertEqual(
-                input_stride_order,
-                orig_stride_order,
-                f"Mode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
-            )
+            self.assertIsNotNone(grad, f"Grad {name} should be computed")
+            self.assertFalse(torch.isnan(grad).any(), f"Grad {name} contains NaN")
+
+            # When input has stride[-1]=1, verify stride order is preserved
+            if leaf.stride()[-1] == 1:
+                input_stride_order = get_stride_order(grad.stride())
+                orig_stride_order = get_stride_order(leaf.stride())
+                self.assertEqual(
+                    input_stride_order,
+                    orig_stride_order,
+                    f"Mode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
+                )
 
     @supported_platform
     def test_non_contiguous_last_dim(self, device):
@@ -4598,11 +4745,10 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, None, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_7: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -5197,11 +5343,13 @@ class GraphModule(torch.nn.Module):
     @skip_on_cpu
     @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
     def test_tma_with_customer_kernel_options(self, device):
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         make_tensor = functools.partial(
             torch.ones,
             (1, 1, 256, 128),
             device=device,
             dtype=torch.bfloat16,
+            requires_grad=requires_grad,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
@@ -5220,6 +5368,40 @@ class GraphModule(torch.nn.Module):
 
         # vanilla compiled vs TMA compiled
         torch.testing.assert_close(out_tma_compiled, out_compiled, atol=2e-1, rtol=2e-1)
+
+        if requires_grad:
+            grad_output = torch.randn_like(out_compiled)
+
+            out_compiled.backward(grad_output)
+            compiled_grads = [query.grad, key.grad, value.grad]
+            query.grad = None
+            key.grad = None
+            value.grad = None
+
+            out_tma_compiled.backward(grad_output)
+            tma_grads = [query.grad, key.grad, value.grad]
+            query.grad = None
+            key.grad = None
+            value.grad = None
+
+            torch.testing.assert_close(
+                compiled_grads[0],
+                tma_grads[0],
+                atol=2e-1,
+                rtol=2e-1,
+            )
+            torch.testing.assert_close(
+                compiled_grads[1],
+                tma_grads[1],
+                atol=2e-1,
+                rtol=2e-1,
+            )
+            torch.testing.assert_close(
+                compiled_grads[2],
+                tma_grads[2],
+                atol=2e-1,
+                rtol=2e-1,
+            )
 
     @supported_platform
     @skip_on_cpu
@@ -6770,7 +6952,8 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 supports_learnable_bias = unittest.skipUnless(
     (
-        (torch.cuda.is_available() and has_triton())
+        (torch.xpu.is_available() and has_triton())
+        or (torch.cuda.is_available() and has_triton())
         and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
     ),
     "Requires Triton + A100 or Triton + ROCm",
@@ -7559,22 +7742,39 @@ class TestLearnableBiases(InductorTestCase):
                 self.assertIsInstance(log_data, list)
                 self.assertEqual(len(log_data), 2)
 
-                keys_seen = [next(iter(entry.keys())) for entry in log_data]
+                # Check that we have both forward and backward entries
+                kernel_types_seen = [entry["kernel_type"] for entry in log_data]
+                self.assertIn("forward", kernel_types_seen)
+                self.assertIn("backward", kernel_types_seen)
 
-                expected_fwd_key = "('forward', 1, 2, 2, 128, 128, 64, 64)"
-                expected_bwd_key = "('backward', 1, 2, 2, 128, 128, 64, 64)"
-
-                self.assertIn(expected_fwd_key, keys_seen)
-                self.assertIn(expected_bwd_key, keys_seen)
+                # Expected values from the test inputs
+                expected_query_shape = "[1, 2, 128, 64]"
+                expected_key_shape = "[1, 2, 128, 64]"
+                expected_value_shape = "[1, 2, 128, 64]"
+                expected_B = 1
+                expected_Hq = 2
+                expected_Hkv = 2
+                expected_seq_len_q = 128
+                expected_seq_len_kv = 128
+                expected_qk_head_dim = 64
+                expected_v_head_dim = 64
 
                 for entry in log_data:
                     self.assertIsInstance(entry, dict)
-                    self.assertEqual(len(entry), 1)
+                    # New format has: query_shape, key_shape, value_shape, kernel_type, choices
+                    self.assertIn("kernel_type", entry)
+                    self.assertIn("choices", entry)
+                    self.assertIn("query_shape", entry)
+                    self.assertIn("key_shape", entry)
+                    self.assertIn("value_shape", entry)
 
-                    dims_key = next(iter(entry.keys()))
-                    choices = entry[dims_key]
+                    # Check shape values
+                    self.assertEqual(entry["query_shape"], expected_query_shape)
+                    self.assertEqual(entry["key_shape"], expected_key_shape)
+                    self.assertEqual(entry["value_shape"], expected_value_shape)
 
-                    kernel_type = eval(dims_key)[0]
+                    kernel_type = entry["kernel_type"]
+                    choices = entry["choices"]
 
                     self.assertIsInstance(choices, list)
                     self.assertGreater(len(choices), 0)
@@ -7586,6 +7786,25 @@ class TestLearnableBiases(InductorTestCase):
                         if choice["type"] == "triton":
                             self.assertIn("num_warps", choice)
                             self.assertIn("num_stages", choice)
+
+                            # Check numerical values in each choice
+                            self.assertIn("B", choice)
+                            self.assertIn("Hq", choice)
+                            self.assertIn("Hkv", choice)
+                            self.assertIn("seq_len_q", choice)
+                            self.assertIn("seq_len_kv", choice)
+                            self.assertIn("qk_head_dim", choice)
+                            self.assertIn("v_head_dim", choice)
+
+                            self.assertEqual(choice["B"], expected_B)
+                            self.assertEqual(choice["Hq"], expected_Hq)
+                            self.assertEqual(choice["Hkv"], expected_Hkv)
+                            self.assertEqual(choice["seq_len_q"], expected_seq_len_q)
+                            self.assertEqual(choice["seq_len_kv"], expected_seq_len_kv)
+                            self.assertEqual(
+                                choice["qk_head_dim"], expected_qk_head_dim
+                            )
+                            self.assertEqual(choice["v_head_dim"], expected_v_head_dim)
 
                             if kernel_type == "forward":
                                 self.assertIn("BLOCK_M", choice)

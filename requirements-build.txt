@@ -1,5 +1,5 @@
 # Build System requirements
-setuptools>=70.1.0
+setuptools>=70.1.0,<82
 cmake>=3.27
 ninja
 numpy
@@ -7,5 +7,5 @@ packaging
 pyyaml
 requests
 six  # dependency chain: NNPACK -> PeachPy -> six
-typing-extensions>=4.10.0
+typing-extensions>=4.15.0
 pip  # not technically needed, but this makes setup.py invocation work

@@ -292,7 +292,12 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
   // Very likely, we could be more clever here, e.g. learning (or generalizing and reusing) from SoftMax.cu...
-  constexpr int max_threads = std::is_same_v<scalar_t, float> ? 1024 : 768; // we need 72 or so 32 bit registers for double
+  constexpr int max_threads_ = std::is_same_v<scalar_t, float> ? 1024 : 768; // we need 72 or so 32 bit registers for double
+  int max_threads = max_threads_;
+  // Launch bounds for sm120, sm121
+  if (at::cuda::getCurrentDeviceProperties()->major >= 12) {
+    max_threads = 640; // magic number, tuned to be below resource limit
+  }
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;

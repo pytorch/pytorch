@@ -13,7 +13,7 @@ from typing_extensions import deprecated
 
 import torch
 from torch import _C
-from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type, _Snapshot
+from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type
 
 from . import (
     _get_amdsmi_device_index,
@@ -602,17 +602,30 @@ def max_memory_cached(device: "Device" = None) -> int:
     return max_memory_reserved(device=device)
 
 
-def memory_snapshot(mempool_id=None):
+def memory_snapshot(mempool_id=None, include_traces=True):
     r"""Return a snapshot of the CUDA memory allocator state across all devices.
 
     Interpreting the output of this function requires familiarity with the
     memory allocator internals.
 
+    Args:
+        mempool_id: Optional memory pool ID to get snapshot for a specific pool
+        include_traces: Whether to include trace entries in the snapshot.
+            If True (default), all trace entries are included.
+            If False, no trace entries are included (lightweight/fast snapshot).
+
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot(mempool_id)["segments"]
+    if mempool_id is None:
+        # pyrefly: ignore [bad-argument-type]
+        return torch._C._cuda_memorySnapshot((0, 0, include_traces))["segments"]
+    else:
+        return torch._C._cuda_memorySnapshot(
+            # pyrefly: ignore [bad-argument-type]
+            (mempool_id[0], mempool_id[1], include_traces)
+        )["segments"]
 
 
 def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
@@ -710,6 +723,7 @@ def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
                 freed_prefval = freed
 
             lines.append(
+                # pyrefly: ignore [bad-argument-type]
                 f" {submetric_name:<21} | {formatter(current, current_prefval)} | {formatter(peak, peak_prefval)} | "
                 f"{formatter(allocated, allocated_prefval)} | {formatter(freed, freed_prefval)} ",
             )
@@ -730,6 +744,7 @@ def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
         freed = stats[prefix + "freed"]
 
         lines.append(
+            # pyrefly: ignore [bad-argument-type]
             f" {metric_name:<21} | {formatter(current, current)} | {formatter(peak, peak)} | "
             f"{formatter(allocated, allocated)} | {formatter(freed, freed)} ",
         )
@@ -974,7 +989,7 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapshot:
+def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """Save a snapshot of CUDA memory state at the time it was called.
 
     The state is represented as a dictionary with the following structure.
@@ -1069,7 +1084,6 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapsho
     s = _C._cuda_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
-    # pyrefly: ignore [bad-return]
     return s
 
 
@@ -1193,8 +1207,10 @@ class CUDAPluggableAllocator(_CUDAAllocator):
         allocator = ctypes.CDLL(path_to_so_file)
         alloc_fn = ctypes.cast(getattr(allocator, alloc_fn_name), ctypes.c_void_p).value
         free_fn = ctypes.cast(getattr(allocator, free_fn_name), ctypes.c_void_p).value
-        assert alloc_fn is not None
-        assert free_fn is not None
+        if alloc_fn is None:
+            raise AssertionError(f"alloc_fn '{alloc_fn_name}' is None")
+        if free_fn is None:
+            raise AssertionError(f"free_fn '{free_fn_name}' is None")
         self._allocator = torch._C._cuda_customAllocator(alloc_fn, free_fn)
 
 
@@ -1252,27 +1268,27 @@ class MemPool(_MemPool):
         r"""Returns the ID of this pool as a tuple of two ints."""
         return super().id
 
-    @property
-    def allocator(self) -> _cuda_CUDAAllocator | None:
-        r"""Returns the allocator this MemPool routes allocations to."""
-        return super().allocator
-
     def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
         r"""Returns the reference count of this pool."""
         return super().use_count()
 
-    def snapshot(self):
+    def snapshot(self, include_traces=True):
         r"""Return a snapshot of the CUDA memory allocator pool state across all
         devices.
 
         Interpreting the output of this function requires familiarity with the
         memory allocator internals.
 
+        Args:
+            include_traces: Whether to include trace entries in the snapshot.
+                If True (default), all trace entries are included.
+                If False, no trace entries are included (lightweight/fast snapshot).
+
         .. note::
             See :ref:`cuda-memory-management` for more details about GPU memory
             management.
         """
-        snapshot = torch.cuda.memory_snapshot(self.id)
+        snapshot = torch.cuda.memory_snapshot(self.id, include_traces=include_traces)
         return snapshot
 
 
