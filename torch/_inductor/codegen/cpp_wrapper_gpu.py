@@ -521,6 +521,14 @@ class CppWrapperGpu(CppWrapperCpu):
                 PythonWrapperCodegen._define_kernel_helper(
                     self, kernel_name, kernel_body, metadata, gpu, cpp_definition
                 )
+            # In JIT cpp_wrapper mode, CUTLASS kernel definitions need to be
+            # emitted as executable Python (async_compile.cuda calls) in the
+            # generated wrapper so the .so can be loaded at runtime.
+            if not V.graph.aot_mode and kernel_name in self.initialized_kernels:
+                body = PythonWrapperCodegen._format_kernel_definition(
+                    kernel_name, kernel_body, metadata
+                )
+                self.cuda_kernel_defs.splice(body)
         else:
             return CppWrapperCpu._define_kernel_helper(
                 self, kernel_name, kernel_body, metadata, gpu, cpp_definition
@@ -862,7 +870,10 @@ class CppWrapperGpu(CppWrapperCpu):
                 # pyrefly: ignore [bad-argument-type]
                 casted.append(f"({arg_type}){cexpr(new_arg)}")
             call_args_str = ", ".join(casted)
-            self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
+            if V.graph.aot_mode:
+                self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")
+            else:
+                self.writeline(f"{kernel_name}({call_args_str}, {stream});")
 
     @staticmethod
     def prepare_triton_wrapper_args(

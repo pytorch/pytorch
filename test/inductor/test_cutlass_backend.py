@@ -257,6 +257,54 @@ class TestCutlassBackend(TestCase):
         import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
         import cutlass_library  # noqa: F401
 
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_cpp_wrapper_jit(self):
+        seqlen = 512
+        hidden = 1024
+
+        def fn(x, w_rms, w):
+            xf = x.to(torch.float32)
+            rstd = torch.rsqrt(xf.pow(2).mean(dim=-1, keepdim=True) + 1e-5)
+            y = (xf * rstd) * w_rms
+            y = y.to(torch.bfloat16)
+            y2 = y.view(seqlen, hidden)
+            wt = w.permute(1, 0)
+            return y2 @ wt
+
+        x = torch.randn((1, seqlen, hidden), device="cuda", dtype=torch.bfloat16)
+        w_rms = torch.randn((hidden,), device="cuda", dtype=torch.bfloat16)
+        w = torch.randn((hidden, hidden), device="cuda", dtype=torch.bfloat16)
+        eager = fn(x, w_rms, w)
+
+        with config.patch(
+            {
+                "cpp_wrapper": True,
+                "triton.cudagraphs": False,
+                "max_autotune": False,
+                "max_autotune_gemm": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cutlass.cutlass_epilogue_fusion_enabled": True,
+                "cutlass.cutlass_dir": str(
+                    Path(__file__).resolve().parents[2] / "third_party" / "cutlass"
+                ),
+            }
+        ):
+            compiled = torch.compile(fn, dynamic=False)
+            try:
+                actual = compiled(x, w_rms, w)
+            except Exception as e:
+                msg = str(e)
+                if "NoValidChoicesError" in msg:
+                    self.skipTest("CUTLASS choices are unavailable on this system")
+                if "kernels" in msg and "not declared" in msg:
+                    self.fail(
+                        "CUTLASS + cpp_wrapper JIT emitted undeclared 'kernels' symbol"
+                    )
+                raise
+
+        torch.testing.assert_close(eager, actual, atol=1e-2, rtol=1e-2)
+
     def test_cutlass_key(self):
         from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 

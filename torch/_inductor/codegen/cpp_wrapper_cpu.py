@@ -92,6 +92,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.custom_op_wrapper_loaded = False
         # For GEMM kernels that must be initialized and are resolved at linking.
         self.initialized_kernels: dict[str, Kernel] = {}
+        # Buffer for CUTLASS kernel definitions (async_compile.cuda calls) that
+        # must be emitted as Python code outside the C++ string literal in JIT mode.
+        self.cuda_kernel_defs = IndentedBuffer()
         self.device_codegen = get_device_op_overrides(self.device)
         # only need to include each header once
         self.include_extra_header = functools.lru_cache(None)(  # type: ignore[method-assign]
@@ -1062,6 +1065,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
         for memory_format in self.used_cached_memory_formats:
             cache_decls.writeline(f"CACHE_TORCH_MEMORY_FORMAT({memory_format});")
 
+        # In JIT mode, emit extern "C" forward declarations for CUTLASS kernels
+        # so the generated C++ wrapper can call them directly (without the AOT
+        # `kernels.` prefix). The symbols are resolved at dlopen time because
+        # we pre-load CUTLASS .so files with RTLD_GLOBAL.
+        if not V.graph.aot_mode and self.initialized_kernels:
+            for kernel in self.initialized_kernels.values():
+                assert hasattr(kernel, "get_signature"), (
+                    f"{kernel} must have get_signature implemented"
+                )
+                signature = kernel.get_signature()
+                self.prefix.writeline(f'extern "C" {signature};')
+
         self.prefix.splice(aot_mode_decls)
         self.prefix.splice(prior)
 
@@ -1076,6 +1091,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if cpp_definition is not None:
             self.header.splice(cpp_definition)
             self.kernel_declarations.splice(f"\n{kernel_body}\n")
+        elif not V.graph.aot_mode and kernel_name in self.initialized_kernels:
+            # In JIT cpp_wrapper mode, CUTLASS kernel definitions
+            # (async_compile.cuda calls) must go into a separate Python buffer
+            # rather than self.header, because self.header transitions into a
+            # C++ string literal (cpp_wrapper_src = r'''...''').
+            self.cuda_kernel_defs.splice(f"\n{kernel_body}\n")
         else:
             self.header.splice(f"\n{kernel_body}\n")
 
@@ -1193,6 +1214,36 @@ class CppWrapperCpu(PythonWrapperCodegen):
             result.splice("'''\n)")
 
         kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
+
+        # In JIT cpp_wrapper mode, CUTLASS kernel definitions
+        # (async_compile.cuda(...) calls) are buffered in self.cuda_kernel_defs
+        # to keep them outside the C++ string literal. Emit them here as
+        # executable Python code, together with async_compile import/wait and
+        # RTLD_GLOBAL pre-loading so the C++ wrapper can resolve extern "C"
+        # CUTLASS symbols at dlopen time.
+        cuda_kernel_defs_code = self.cuda_kernel_defs.getvalue()
+        if cuda_kernel_defs_code:
+            result.splice(
+                """
+                from torch._inductor.async_compile import AsyncCompile
+                async_compile = AsyncCompile()
+                """
+            )
+            result.splice(cuda_kernel_defs_code)
+            result.splice(
+                """
+                async_compile.wait(globals())
+                del async_compile
+                import ctypes as _ctypes
+                """
+            )
+            for kernel_name in self.initialized_kernels:
+                result.splice(
+                    f"""
+                    _ctypes.CDLL({kernel_name}.lib_path, mode=_ctypes.RTLD_GLOBAL)
+                    """
+                )
+
         # Cpp entry function for JIT with cpp wrapper
         result.splice(
             f"""
@@ -2538,18 +2589,31 @@ if (!custom_op_wrapper) {
                 )
 
         lines = []
-        if isinstance(arg_type, torch.ListType):
+
+        def handle_sequence_arg(raw_arg, list_type):
             assert isinstance(raw_arg, (list, tuple)), str(raw_arg) + " is not a list"
             lines.append(
                 f"PyObject* {py_args_var}_{idx} = PyList_New({len(raw_arg)});\n"
             )
             for i, elem in enumerate(raw_arg):
                 lines.append(
-                    f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(lines, elem, arg_type.getElementType())});\n"
+                    f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(lines, elem, list_type.getElementType())});\n"
                 )
             lines.append(
                 f"PyTuple_SetItem({py_args_var}, {idx}, {py_args_var}_{idx});\n"
             )
+
+        if isinstance(arg_type, torch.ListType):
+            handle_sequence_arg(raw_arg, arg_type)
+        elif isinstance(arg_type, torch.OptionalType) and isinstance(
+            arg_type.getElementType(), torch.ListType
+        ):
+            if raw_arg is None:
+                lines.append(
+                    f"PyTuple_SetItem({py_args_var}, {idx}, Py_NewRef(Py_None));\n"
+                )
+            else:
+                handle_sequence_arg(raw_arg, arg_type.getElementType())
         else:
             lines.append(
                 f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(lines, raw_arg, arg_type)});\n"

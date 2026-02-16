@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: cpu inductor"]
 import sys
 import unittest
-from typing import NamedTuple
+from typing import List, NamedTuple, Optional
 
 import torch
 from torch._inductor import config
@@ -54,6 +54,43 @@ class CppWrapperTemplate:
 
 class TestCppWrapper(InductorTestCase):
     device = "cpu"
+
+    def test_custom_op_optional_list_int(self):
+        @torch.library.custom_op(
+            "inductor_test_cpp_wrapper::add_optional_list_int", mutates_args=()
+        )
+        def add_optional_list_int(
+            x: torch.Tensor, addends: Optional[List[int]] = None
+        ) -> torch.Tensor:
+            if addends is None:
+                return x.clone()
+            return x + torch.tensor(addends, device=x.device, dtype=x.dtype)
+
+        @torch.library.register_fake("inductor_test_cpp_wrapper::add_optional_list_int")
+        def add_optional_list_int_fake(
+            x: torch.Tensor, addends: Optional[List[int]] = None
+        ) -> torch.Tensor:
+            return x.clone()
+
+        class MWithList(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.inductor_test_cpp_wrapper.add_optional_list_int(
+                    x, [10, 20]
+                )
+
+        class MWithNone(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.inductor_test_cpp_wrapper.add_optional_list_int(
+                    x, None
+                )
+
+        x = torch.tensor([1, 2], dtype=torch.int64)
+        with config.patch(cpp_wrapper=True):
+            out_with_list = torch.compile(MWithList(), backend="inductor")(x)
+            out_with_none = torch.compile(MWithNone(), backend="inductor")(x)
+
+        self.assertEqual(out_with_list, torch.tensor([11, 22], dtype=torch.int64))
+        self.assertEqual(out_with_none, torch.tensor([1, 2], dtype=torch.int64))
 
 
 class DynamicShapesCppWrapperCpuTests(InductorTestCase):

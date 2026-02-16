@@ -720,7 +720,7 @@ class CompiledFxGraph(OutputCode):
                         "boxed_forward_device_index", None
                     )
 
-                if config.graph_partition:
+                if self.partition_maps is not None and len(self.partition_maps) > 0:
                     # with graph_partition=True, we skip some cudagraph checks if it's supported
                     # with partition. So we have to use cudagraph_partition_post_compile.
                     cudagraph_partition_post_compile(
