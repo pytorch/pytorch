@@ -1570,12 +1570,16 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_check_sparse_tensor_invariants expects a bool, "
-      "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
+  if (arg == Py_None) {
+    at::globalContext().setCheckSparseTensorInvariants(std::nullopt);
+  } else {
+    TORCH_CHECK(
+        PyBool_Check(arg),
+        "set_check_sparse_tensor_invariants expects a bool or None, "
+        "but got ",
+        THPUtils_typename(arg));
+    at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1583,7 +1587,7 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
 static PyObject* THPModule_checkSparseTensorInvariants(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().checkSparseTensorInvariants())
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false))
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -2109,6 +2113,7 @@ PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
 void THXPEvent_init(PyObject* module);
 void THXPMemPool_init(PyObject* module);
+void THXPGraph_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
@@ -2298,7 +2303,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-#if defined(USE_CUDA) && !defined(USE_ROCM)
+#if defined(USE_CUDA)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)
@@ -2335,6 +2340,7 @@ PyObject* initModule() {
   THXPStream_init(module);
   THXPEvent_init(module);
   THXPMemPool_init(module);
+  THXPGraph_init(module);
 #endif
 
   torch::distributed::initPlacementBindings(module);

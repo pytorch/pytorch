@@ -1079,5 +1079,69 @@ class TestExpandToFullMeshOpStrategy(TestCase):
         self.assertEqual(input_specs[1].tensor_meta.shape, torch.Size([5, 20]))
 
 
+# Define a dummy op for testing unsupported DTensor ops
+@torch.library.custom_op("testlib::unsupported_add", mutates_args=())
+def unsupported_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """A dummy op that has no DTensor sharding strategy registered."""
+    return x + y
+
+
+@unsupported_add.register_fake
+def _unsupported_add_fake(x, y):
+    return torch.empty_like(x)
+
+
+# Define a dummy op similar to torch.cat that takes a list of tensors
+@torch.library.custom_op("testlib::unsupported_cat", mutates_args=())
+def unsupported_cat(tensors: list[torch.Tensor], dim: int = 0) -> torch.Tensor:
+    """A dummy cat-like op that has no DTensor sharding strategy registered."""
+    return torch.cat(tensors, dim=dim)
+
+
+@unsupported_cat.register_fake
+def _unsupported_cat_fake(tensors, dim=0):
+    # Return a tensor with concatenated shape
+    if len(tensors) == 0:
+        raise ValueError("Expected at least one tensor")
+    first = tensors[0]
+    shape = list(first.shape)
+    shape[dim] = sum(t.shape[dim] for t in tensors)
+    return torch.empty(shape, dtype=first.dtype, device=first.device)
+
+
+class TestUnsupportedDTensorOp(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 4
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def test_unsupported_op_error(self):
+        """Test that running an unsupported op on DTensor raises NotImplementedError with appropriate message."""
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = torch.randn(8, 16)
+        y = torch.randn(8, 16)
+        x_dt = distribute_tensor(x, mesh, [Shard(0)])
+        y_dt = distribute_tensor(y, mesh, [Shard(0)])
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Operator.*testlib\.unsupported_add.*does not have a sharding strategy registered",
+        ):
+            _ = torch.ops.testlib.unsupported_add(x_dt, y_dt)
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Operator.*testlib\.unsupported_cat.*does not have a sharding strategy registered",
+        ):
+            _ = torch.ops.testlib.unsupported_cat([x_dt, y_dt], dim=0)
+
+
 if __name__ == "__main__":
     run_tests()
