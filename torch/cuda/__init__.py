@@ -52,6 +52,7 @@ _queued_calls: list[
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 
 _HAS_PYNVML = False
+_HAS_AMDSMI = False
 _PYNVML_ERR = None
 try:
     from torch import version as _version
@@ -106,6 +107,7 @@ try:
 
             with _amdsmi_cdll_hook():
                 import amdsmi  # type: ignore[import]
+            _HAS_AMDSMI = True
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
@@ -879,7 +881,7 @@ def _parse_visible_devices() -> list[int] | list[str]:
 
 
 def _raw_device_count_amdsmi() -> int:
-    if not _HAS_PYNVML:  # If amdsmi is not available
+    if not _HAS_AMDSMI:
         return -1
     try:
         amdsmi.amdsmi_init()
@@ -913,7 +915,7 @@ def _raw_device_count_nvml() -> int:
 def _raw_device_uuid_amdsmi() -> list[str] | None:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
-    if not _HAS_PYNVML:  # If amdsmi is not available
+    if not _HAS_AMDSMI:
         return None
     try:
         amdsmi.amdsmi_init()
@@ -1296,11 +1298,10 @@ def _get_pynvml_handler(device: Device = None):
 
 
 def _get_amdsmi_handler(device: Device = None):
-    if not _HAS_PYNVML:
+    if not _HAS_AMDSMI:
         raise ModuleNotFoundError(
             "amdsmi does not seem to be installed or it can't be imported."
-            # pyrefly: ignore [invalid-inheritance]
-        ) from _PYNVML_ERR
+        )
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
