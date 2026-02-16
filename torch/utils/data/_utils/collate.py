@@ -12,7 +12,6 @@ import collections
 import contextlib
 import copy
 import re
-import warnings
 from collections.abc import Callable
 
 import torch
@@ -286,15 +285,19 @@ def collate_numpy_array_fn(
     if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
         raise TypeError(default_collate_err_msg_format.format(elem.dtype))
 
-    # Suppress the non-writable warning because the data will be copied
-    # during collation (e.g., by torch.stack in collate_tensor_fn).
-    # The final batched tensor does not alias the original numpy arrays.
+    # Convert numpy arrays to tensors. For non-writeable arrays, use torch.tensor()
+    # to copy and avoid the warning. For writeable arrays, use torch.as_tensor() to alias.
+    tensors = []
+    for b in batch:
+        if not b.flags.writeable:
+            tensors.append(torch.tensor(b))
+        else:
+            tensors.append(torch.as_tensor(b))
+
     actual_map = (
         collate_fn_map if collate_fn_map is not None else default_collate_fn_map
     )
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message=".*not writable.*")
-        return collate([torch.as_tensor(b) for b in batch], collate_fn_map=actual_map)
+    return collate(tensors, collate_fn_map=actual_map)
 
 
 def collate_numpy_scalar_fn(
