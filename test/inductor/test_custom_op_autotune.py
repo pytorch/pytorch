@@ -224,9 +224,17 @@ class TestCustomOpAutoTune(TestCase):
         """
         # Ensure k is divisible by all k_splits values: [2, 32, 64, 128, 256]
         k = ((k + 255) // 256) * 256  # Round up to nearest multiple of 256
-        norm_sd = k ** 0.25  # SD re-scaling such that reductions approach N(0, 1) in distribution
-        a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False) / norm_sd
-        b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False) / norm_sd
+        norm_sd = (
+            k**0.25
+        )  # SD re-scaling such that reductions approach N(0, 1) in distribution
+        a = (
+            torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
+            / norm_sd
+        )
+        b = (
+            torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
+            / norm_sd
+        )
         bias = (
             torch.randn(n, device=self.device, dtype=self.dtype, requires_grad=False)
             * 0.1
