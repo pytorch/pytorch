@@ -1,4 +1,5 @@
 #include <dlfcn.h>
+#include <vector>
 #include <ATen/ceil_div.h>
 #include <c10/cuda/CUDAGuard.h>
 
@@ -214,6 +215,93 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
   return block_aggregate;
 }
 
+static int get_a2a_nblocks(size_t size, int world_size, bool intra_node) {
+  // Check user setting first
+  int num_blocks = c10d::symmetric_memory::getenv_nblocks();
+  if (num_blocks > 0) {  // set by user
+    return num_blocks;
+  }
+  // 16B per thread, 8 loops
+  constexpr size_t chunk_size = 16 * THREADS_PER_BLOCK * 8;
+  num_blocks = at::ceil_div(size, chunk_size);
+  // Allow kernel to target even number of blocks per peer
+  num_blocks = at::round_up(num_blocks, world_size);
+  const int max_blocks = intra_node ? 64 : 16;
+  return ::min(num_blocks, max_blocks);
+}
+
+#if defined(USE_ROCM)
+// ROCm: team is host-allocated and cannot be dereferenced on device. Use
+// (mype, npes, global_ranks) instead; barrier is done on host after kernel.
+__global__ void exchangeSplitAndOffset(
+    int64_t* input_splits,
+    int64_t* out_splits_offsets,
+    int mype,
+    int npes,
+    const int* global_ranks) {
+  auto output_splits = out_splits_offsets;
+  auto source_offsets = out_splits_offsets + npes;
+  int tid = threadIdx.x;
+
+  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
+
+  prefixSum(peer_offsets, input_splits, npes);
+  __syncthreads();
+
+  if (tid < npes) {
+    int peer_global = global_ranks[tid];
+    rocshmem_int64_p(
+        source_offsets + mype,
+        peer_offsets[tid],
+        peer_global);
+    rocshmem_int64_p(
+        output_splits + mype,
+        input_splits[tid],
+        peer_global);
+  }
+}
+
+__global__ void allToAllV(
+    void* send_data,
+    void* recv_data,
+    int64_t* out_splits_offsets,
+    size_t stride,
+    int mype,
+    int npes,
+    const int* global_ranks) {
+  auto output_splits = out_splits_offsets;
+  auto source_offsets = out_splits_offsets + npes;
+  int bid = blockIdx.x;
+  int tid = threadIdx.x;
+  int blocks_per_peer = max(gridDim.x / npes, 1);
+
+  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
+  prefixSum(peer_offsets, output_splits, npes);
+  __syncthreads();
+
+  for (int i = bid / blocks_per_peer; i < npes; i += gridDim.x / blocks_per_peer) {
+    int peer = (mype + i) % npes;
+    int peer_global = global_ranks[peer];
+    auto peer_size = output_splits[peer] * stride;
+    auto block_size = peer_size / blocks_per_peer;
+    CUDA_KERNEL_ASSERT(block_size * blocks_per_peer == peer_size);
+    auto block_offset = block_size * (bid % blocks_per_peer);
+    auto source_offset = source_offsets[peer] * stride + block_offset;
+    auto write_offset = peer_offsets[peer] * stride + block_offset;
+    rocshmem_getmem_nbi(
+        (char*)recv_data + write_offset,
+        (char*)send_data + source_offset,
+        block_size,
+        peer_global);
+  }
+  if (bid == 0 && tid < npes) {
+    source_offsets[tid] = peer_offsets[tid];
+  }
+  rocshmem_quiet();
+}
+#else
 // This kernel is used to exchange output splits and source offsets between peers.
 // `in_out_splits` is of size (3, npes) and contains:
 // - input splits (IN)
@@ -299,21 +387,7 @@ __global__ void allToAllV(void *send_data, void *recv_data, int64_t* out_splits_
   nvshmem_quiet();
 #endif
 }
-
-static int get_a2a_nblocks(size_t size, int world_size, bool intra_node) {
-  // Check user setting first
-  int num_blocks = c10d::symmetric_memory::getenv_nblocks();
-  if (num_blocks > 0) {  // set by user
-    return num_blocks;
-  }
-  // 16B per thread, 8 loops
-  constexpr size_t chunk_size = 16 * THREADS_PER_BLOCK * 8;
-  num_blocks = at::ceil_div(size, chunk_size);
-  // Allow kernel to target even number of blocks per peer
-  num_blocks = at::round_up(num_blocks, world_size);
-  const int max_blocks = intra_node ? 64 : 16;
-  return std::min(num_blocks, max_blocks);
-}
+#endif // defined(USE_ROCM)
 
 void all_to_all_vdev(
     at::Tensor& input,
@@ -321,20 +395,26 @@ void all_to_all_vdev(
     at::Tensor& in_splits,
     at::Tensor& out_splits_offsets,
     std::string group_name) {
-  /* Perform AllToAllv operation using NVSHMEM, with split information provided on device.
+  /* Perform AllToAllv operation using NVSHMEM/rocSHMEM, with split information on device.
+   * Step 1: Rendezvous tensors so all ranks have symmetric (device) pointers.
+   * Step 2: Launch exchangeSplitAndOffset kernel to exchange per-rank split counts
+   *         and compute source offsets (prefix sum); uses team barrier.
+   * Step 3: Launch allToAllV kernel to copy data between peers according to
+   *         the exchanged splits/offsets.
    * Arguments:
-   *  - `input` is the input tensor
-   *  - `out` is the output tensor
-   *  - `in_splits` is a 1D tensor of size (npes), containing the input splits
-   *  - `out_splits_offsets` is a 2D tensor of size (2, npes). The rows are (in order):
-        output splits and output offsets.
-  */
+   *  - input: send buffer; out: receive buffer
+   *  - in_splits: 1D [npes], number of elements this rank sends to each peer
+   *  - out_splits_offsets: 2D (2, npes); row0 = output splits, row1 = output offsets
+   */
   auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
   auto out_hdl = c10d::symmetric_memory::rendezvous(out, group_name);
   auto in_splits_hdl = c10d::symmetric_memory::rendezvous(in_splits, group_name);
   auto out_splits_offsets_hdl = c10d::symmetric_memory::rendezvous(out_splits_offsets, group_name);
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
+
+  std::cerr << "[all_to_all_vdev] rank=" << rank << " world_size=" << world_size
+            << " group=" << group_name << std::endl;
 
   void* input_ptr = input.data_ptr();
   void* output_ptr = out.mutable_data_ptr();
@@ -348,13 +428,30 @@ void all_to_all_vdev(
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   auto stream = at::cuda::getCurrentCUDAStream(device.index());
 
+  std::cerr << "[all_to_all_vdev] rank=" << rank << " team=" << (void*)team
+            << " in_splits_ptr=" << (void*)in_splits_ptr
+            << " out_splits_offsets_ptr=" << (void*)out_splits_offsets_ptr << std::endl;
+
   // Exchange output splits and source offsets
-  // Use collective launch because kernel involves nvshmem barrier
 #if defined(USE_ROCM)
+  // Team is host-allocated; device kernel cannot dereference it (HSA 0x1016).
+  // Use ROCm-only kernels that take (mype, npes, global_ranks); barrier on host.
+  const auto& global_ranks = input_hdl->get_rank_to_global_rank();
+  auto global_ranks_t = at::from_blob(
+      const_cast<int*>(global_ranks.data()),
+      {world_size},
+      at::kInt).clone().to(device);
+  const int* global_ranks_ptr = global_ranks_t.const_data_ptr<int>();
+
+  std::cerr << "[all_to_all_vdev] rank=" << rank << " launching exchangeSplitAndOffset"
+            << " (1 block, " << THREADS_PER_BLOCK << " threads)" << std::endl;
   exchangeSplitAndOffset<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
-      in_splits_ptr, out_splits_offsets_ptr, team);
+      in_splits_ptr, out_splits_offsets_ptr, rank, world_size, global_ranks_ptr);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+  rocshmem::rocshmem_barrier_all();
+  std::cerr << "[all_to_all_vdev] rank=" << rank << " exchangeSplitAndOffset OK, barrier done" << std::endl;
 #else
+  // Use collective launch because kernel involves nvshmem barrier
   void* args0[] = {
       &in_splits_ptr,
       &out_splits_offsets_ptr,
@@ -377,12 +474,18 @@ void all_to_all_vdev(
   // Stride at dim 0 (assuming input is contiguous, TODO)
   size_t stride_bytes = input.stride(0) * input.element_size();
 
+  std::cerr << "[all_to_all_vdev] rank=" << rank << " num_blocks=" << num_blocks
+            << " stride_bytes=" << stride_bytes << " input_size=" << input_size << std::endl;
+
   // All to all data exchange
 #if defined(USE_ROCM)
+  std::cerr << "[all_to_all_vdev] rank=" << rank << " launching allToAllV" << std::endl;
   allToAllV<<<dim3(num_blocks), dim3(THREADS_PER_BLOCK), 0, stream>>>(
       input_ptr, output_ptr, out_splits_offsets_ptr,
-      stride_bytes, team);
+      stride_bytes, rank, world_size, global_ranks_ptr);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_CHECK(hipStreamSynchronize(stream));
+  std::cerr << "[all_to_all_vdev] rank=" << rank << " allToAllV launch OK" << std::endl;
 #else
   void* args1[] = {
       &input_ptr,
