@@ -27,7 +27,7 @@ def _flatten_unflatten_for_dynamic_shapes(
 
     Args:
         obj: Object from a custom class.
-        change_function: If not empty, this function is called to modify the tensors
+        change_function: If not None, this function is called to modify the tensors
             in the structure itself, like replace them by a shape.
 
     Returns:
