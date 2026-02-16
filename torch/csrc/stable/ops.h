@@ -771,10 +771,8 @@ inline torch::stable::Tensor from_blob(
 
 /// Creates a tensor from an existing data blob with a generic callable deleter.
 ///
-/// This overload accepts any callable (including capturing lambdas) as the
-/// deleter. The callable is heap-allocated and passed through the C ABI as a
-/// void* context pointer, then invoked and deleted when the tensor's storage
-/// is deallocated.
+/// This overload accepts any callable as the deleter, including capturing
+/// lambdas, which the from_blob above doesn't.
 ///
 /// Minimum compatible version: PyTorch 2.11.
 ///
@@ -790,6 +788,9 @@ inline torch::stable::Tensor from_blob(
 /// @return A tensor backed by the provided data.
 template <
     class F,
+    // The enable_if_t part below ensures that the other, simpler from_blob is
+    // called if the deleter is compatible with it (i.e. if it can be converted
+    // to DeleterFnPtr)
     std::enable_if_t<!std::is_convertible_v<F, DeleterFnPtr>, int> = 0>
 inline torch::stable::Tensor from_blob(
     void* data,
@@ -807,9 +808,26 @@ inline torch::stable::Tensor from_blob(
   auto shim_layout =
       torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout));
 
-  F* ctx = new F(std::move(deleter));
-  auto callback = [](void* data, void* raw_ctx) {
-    F* func = static_cast<F*>(raw_ctx);
+  // The deleter we receive may be a capturing lambda, which is typically
+  // allocated on the stack. It needs to outlive the from_blob call and other
+  // stack frames, so we have to copy it into a heap object.
+  // This is a similar pattern that is used in InefficientStdFunctionContext.
+  F* heap_allocated_deleter = new F(std::move(deleter));
+
+  // Also, since F may be a capturing lambda, it cannot be passed to the C layer
+  // directly. We have to do type erasure and hide it behind two separate things
+  // that C understands:
+  // - a C-like callback (deleter_callback), which will eventually be called
+  //   within at::from_blob. Note that deleter_callback is also a lambda, but C
+  //   understands it because it can be implicitly cast to
+  //   void (*)(void*, void*).
+  // - a context associated to the callback. Here, the context is literally the
+  //   heap_allocated_deleter, which is called within the callback.
+  //
+  // Note that all of heap_allocated_deleter, deleter_ctx and func are all the
+  // exact same thing: the heap-allocated deleter.
+  auto deleter_callback = [](void* data, void* deleter_ctx) {
+    F* func = static_cast<F*>(deleter_ctx);
     (*func)(data);
     delete func;
   };
@@ -828,8 +846,8 @@ inline torch::stable::Tensor from_blob(
       shim_layout,
       nullptr,
       0,
-      callback,
-      static_cast<void*>(ctx)));
+      deleter_callback,
+      static_cast<void*>(heap_allocated_deleter)));
   return torch::stable::Tensor(ath);
 }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
