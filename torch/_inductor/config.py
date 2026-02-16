@@ -817,10 +817,10 @@ benchmark_epilogue_fusion = (
 max_epilogue_benchmarked_choices = 1
 
 # how many nodes to allow into a single fusion
-max_fusion_size = 64
+max_fusion_size = 32
 
 # how many nodes to attempt pairwise fusion with in a buffer group
-max_fusion_buffer_group_pairwise_attempts = 64
+max_fusion_buffer_group_pairwise_attempts = 32
 
 # maximum number of unique input/output buffers allowed in fused kernels.
 # The check is disabled if set to None.
