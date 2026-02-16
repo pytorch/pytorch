@@ -82,7 +82,7 @@ class CUTLASSTemplate(KernelTemplate):
         return KernelTemplate._template_from_string(source)
 
     @staticmethod
-    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+    def supports_epilogue_fusion(op: GemmOperation, device_type: str) -> bool:
         return False
 
     def make_key(self, name: str, input_key: str, layout_repr: str) -> str:
@@ -221,7 +221,9 @@ class CUTLASSTemplate(KernelTemplate):
             supports_epilogue_fusion = False
         else:
             # epilogue fusion is only supported for TMA kernels
-            supports_epilogue_fusion = self.supports_epilogue_fusion(op)
+            supports_epilogue_fusion = self.supports_epilogue_fusion(
+                op, self.device_type
+            )
 
         def make_kernel_render(
             template_node: CUTLASSTemplateBuffer,
