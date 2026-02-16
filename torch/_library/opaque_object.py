@@ -39,9 +39,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, NewType, Optional
+from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
 
 from .fake_class_registry import register_fake_class
 
@@ -84,6 +86,7 @@ class _OpaqueTypeInfo:
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
+    hoist: bool
 
 
 # Mapping of type -> (string name, reference/value type)
@@ -117,6 +120,7 @@ def register_opaque_type(
     cls: Any,
     *,
     typ: str,
+    hoist=False,
     guard_fn: Any = None,
     members: dict[str, MemberType] | None = None,
 ) -> None:
@@ -131,6 +135,13 @@ def register_opaque_type(
         cls (type): The class to register as an opaque type.
         typ (str): Either "reference" or "value". See Note [Opaque Objects] for
             more details.
+        hoist (bool): Only applies to value types. A hoist=True value type
+            object is lifted as an input to the torch.compile'd graph, instead
+            of being a constant baked into the graph. This is useful to
+            improve compilation times in hierarchical compilation
+            (e.g., change your custom ops to use hoisted strings to avoid
+            baking the string into the Dynamo/AOTAutograd/FX graphs).
+            This flag does nothing for reference types.
         guard_fn (callable | None): A function that takes an instance of the opaque
             object and returns a list of values to guard on. These values will be compared
             for equality on each function call, triggering recompilation if they change.
@@ -158,9 +169,19 @@ def register_opaque_type(
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
-    assert typ in ["reference", "value"], (
-        "Opaque type must be either 'reference' or 'value'"
-    )
+    if not isinstance(cls, OpaqueBaseMeta):
+        raise TypeError(
+            f"Opaque type {cls} must subclass torch._opaque_base.OpaqueBase "
+            "or 'metaclass=torch._opaque_base.OpaqueBaseMeta'. "
+            "This is required so that FakeScriptObject can be registered "
+            "as a virtual subclass, allowing isinstance() checks to work "
+            "during torch.compile tracing. "
+        )
+
+    if typ not in ["reference", "value"]:
+        raise AssertionError(
+            f"Opaque type must be either 'reference' or 'value', got {typ!r}"
+        )
 
     if typ == "value":
         if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
@@ -200,11 +221,27 @@ def register_opaque_type(
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {})
+    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {}, hoist)
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
     torch._C._register_opaque_type(name)
+
+
+def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
+    return is_opaque_type(type(value))
+
+
+def should_hoist(cls: Any) -> bool:
+    if cls not in _OPAQUE_TYPES:
+        return False
+    return _OPAQUE_TYPES[cls].hoist
+
+
+def has_members(cls: Any) -> bool:
+    if cls not in _OPAQUE_TYPES:
+        return False
+    return len(_OPAQUE_TYPES[cls].members) > 0
 
 
 def is_opaque_type(cls: Any) -> bool:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import itertools
 import math
 import typing_extensions
 from typing import Any, Optional, TYPE_CHECKING, Union
@@ -9,7 +11,6 @@ import sympy  # noqa: TC002
 
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pallas import has_tpu_pallas
 from torch.utils._sympy.functions import ModularIndexing
 
 from .. import config
@@ -194,7 +195,7 @@ class PallasKernelOverrides(OpOverrides):
 
     @staticmethod
     def rsqrt(x: str) -> str:
-        return f"(1.0 / jnp.sqrt({x}))"
+        return f"jax.lax.rsqrt({x})"
 
     @staticmethod
     def abs(x: str) -> str:
@@ -222,7 +223,7 @@ class PallasKernelOverrides(OpOverrides):
 
     @staticmethod
     def sigmoid(x: str) -> str:
-        return f"(1.0 / (1.0 + jnp.exp(-{x})))"
+        return f"jax.nn.sigmoid({x})"
 
     @staticmethod
     def relu(x: str) -> str:
@@ -287,6 +288,9 @@ class PallasKernelOverrides(OpOverrides):
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
         """Convert a sympy expression to a JAX array indexing expression."""
         from ..utils import get_bounds_index_expr
+
+        # Track which iteration variables are used
+        V.kernel.used_iter_vars.update(V.kernel._get_used_iter_vars(expr))
 
         # Prepare and rename indexing to register size symbols as kernel args
         prepared = V.kernel.prepare_indexing(expr)
@@ -422,9 +426,7 @@ class PallasKernelOverrides(OpOverrides):
     def clamp(x: str, min_val: str, max_val: str) -> str:
         return f"jnp.clip({x}, {min_val}, {max_val})"
 
-    @staticmethod
-    def clip(x: str, min_val: str, max_val: str) -> str:
-        return f"jnp.clip({x}, {min_val}, {max_val})"
+    clip = clamp
 
     # Sign operations
     @staticmethod
@@ -498,20 +500,14 @@ class PallasKernelOverrides(OpOverrides):
         # Handle x=0: j_0(0) = 1
         return f"jnp.where({x} == 0.0, 1.0, jnp.sin({x}) / {x})"
 
-    @staticmethod
-    def i0(x: str) -> str:
-        # Modified Bessel function I_0 (same as modified_bessel_i0)
-        return f"jax.lax.bessel_i0e({x}) * jnp.exp(jnp.abs({x}))"
+    i0 = modified_bessel_i0
 
     @staticmethod
     def i0e(x: str) -> str:
         # Exponentially scaled modified Bessel function I_0
         return f"jax.lax.bessel_i0e({x})"
 
-    @staticmethod
-    def i1(x: str) -> str:
-        # Modified Bessel function I_1 (same as modified_bessel_i1)
-        return f"jax.lax.bessel_i1e({x}) * jnp.exp(jnp.abs({x}))"
+    i1 = modified_bessel_i1
 
     @staticmethod
     def i1e(x: str) -> str:
@@ -529,15 +525,9 @@ class PallasKernelOverrides(OpOverrides):
         # Regularized upper incomplete gamma function Q(a, x)
         return f"jax.scipy.special.gammaincc({x}, {y})"
 
-    @staticmethod
-    def igamma(x: str, y: str) -> str:
-        # Regularized lower incomplete gamma function (alias for gammainc)
-        return f"jax.scipy.special.gammainc({x}, {y})"
+    igamma = gammainc
 
-    @staticmethod
-    def igammac(x: str, y: str) -> str:
-        # Regularized upper incomplete gamma function (alias for gammaincc)
-        return f"jax.scipy.special.gammaincc({x}, {y})"
+    igammac = gammaincc
 
     @staticmethod
     def polygamma(x: str, y: str) -> str:
@@ -634,63 +624,19 @@ class PallasKernelOverrides(OpOverrides):
 
     @staticmethod
     def shifted_chebyshev_polynomial_t(x: str, n: str) -> str:
-        # Shifted Chebyshev polynomial of the first kind T*_n(x) = T_n(2x - 1)
-        # T_n(y) where y = 2x - 1
-        # Use same formula as chebyshev_polynomial_t
-        y = f"(2 * {x} - 1)"
-        return (
-            f"jnp.where(jnp.abs({y}) <= 1, "
-            f"jnp.cos({n} * jnp.arccos(jnp.clip({y}, -1, 1))), "
-            f"jnp.where({y} > 1, "
-            f"jnp.cosh({n} * jnp.arccosh(jnp.maximum({y}, 1.0))), "
-            f"((-1.0) ** {n}) * jnp.cosh({n} * jnp.arccosh(jnp.maximum(-{y}, 1.0)))))"
-        )
+        return PallasKernelOverrides.chebyshev_polynomial_t(f"(2 * {x} - 1)", n)
 
     @staticmethod
     def shifted_chebyshev_polynomial_u(x: str, n: str) -> str:
-        # Shifted Chebyshev polynomial of the second kind U*_n(x) = U_n(2x - 1)
-        # Use same formula as chebyshev_polynomial_u
-        y = f"(2 * {x} - 1)"
-        return (
-            f"jnp.where(jnp.abs({y}) < 1, "
-            f"jnp.sin(({n} + 1) * jnp.arccos(jnp.clip({y}, -1, 1))) / "
-            f"jnp.sqrt(jnp.maximum(1 - ({y})**2, 1e-10)), "
-            f"jnp.where({y} >= 1, "
-            f"jnp.where({y} == 1, {n} + 1.0, "
-            f"jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum({y}, 1.0))) / "
-            f"jnp.sqrt(jnp.maximum({y}**2 - 1, 1e-10))), "
-            f"jnp.where({y} == -1, ((-1.0) ** {n}) * ({n} + 1.0), "
-            f"((-1.0) ** {n}) * jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum(-{y}, 1.0))) / "
-            f"jnp.sqrt(jnp.maximum({y}**2 - 1, 1e-10)))))"
-        )
+        return PallasKernelOverrides.chebyshev_polynomial_u(f"(2 * {x} - 1)", n)
 
     @staticmethod
     def shifted_chebyshev_polynomial_v(x: str, n: str) -> str:
-        # Shifted Chebyshev polynomial of the third kind V*_n(x) = V_n(2x - 1)
-        y = f"(2 * {x} - 1)"  # shifted variable
-        return (
-            f"jnp.where({n} == 0, jnp.ones_like({x}), "
-            f"jnp.where({n} == 1, 2*{y} - 1, "
-            f"jnp.where({n} == 2, 4*{y}**2 - 2*{y} - 1, "
-            f"jnp.where({n} == 3, 8*{y}**3 - 4*{y}**2 - 4*{y} + 1, "
-            f"jnp.where({n} == 4, 16*{y}**4 - 8*{y}**3 - 12*{y}**2 + 4*{y} + 1, "
-            f"jnp.where({n} == 5, 32*{y}**5 - 16*{y}**4 - 32*{y}**3 + 12*{y}**2 + 6*{y} - 1, "
-            f"jnp.zeros_like({x})))))))"
-        )
+        return PallasKernelOverrides.chebyshev_polynomial_v(f"(2 * {x} - 1)", n)
 
     @staticmethod
     def shifted_chebyshev_polynomial_w(x: str, n: str) -> str:
-        # Shifted Chebyshev polynomial of the fourth kind W*_n(x) = W_n(2x - 1)
-        y = f"(2 * {x} - 1)"  # shifted variable
-        return (
-            f"jnp.where({n} == 0, jnp.ones_like({x}), "
-            f"jnp.where({n} == 1, 2*{y} + 1, "
-            f"jnp.where({n} == 2, 4*{y}**2 + 2*{y} - 1, "
-            f"jnp.where({n} == 3, 8*{y}**3 + 4*{y}**2 - 4*{y} - 1, "
-            f"jnp.where({n} == 4, 16*{y}**4 + 8*{y}**3 - 12*{y}**2 - 4*{y} + 1, "
-            f"jnp.where({n} == 5, 32*{y}**5 + 16*{y}**4 - 32*{y}**3 - 12*{y}**2 + 6*{y} + 1, "
-            f"jnp.zeros_like({x})))))))"
-        )
+        return PallasKernelOverrides.chebyshev_polynomial_w(f"(2 * {x} - 1)", n)
 
     @staticmethod
     def hermite_polynomial_h(x: str, n: str) -> str:
@@ -866,6 +812,29 @@ class PallasKernelOverrides(OpOverrides):
         )
 
 
+@dataclasses.dataclass
+class _CodegenContext:
+    """Bundles local state shared across codegen_kernel helper methods."""
+
+    code: IndentedBuffer
+    kernel_name: str
+    is_tpu: bool
+    interpret_is_cpu: bool
+    interpret_literal: str
+    kernel_params: list[str]
+    pure_out_params: list[str]
+    output_params: list[str]
+    size_var_params: list[str]
+    output_buffer_lookup: dict[str, str]
+    aliasable_flags: dict[str, bool]
+    alias_params: list[str]
+    pointer_tail: list[str]
+    kernel_input_params: list[str]
+    full_kernel_params: list[str]
+    non_alias_out_set: OrderedSet[str]
+    copy_output_indices: list[int]
+
+
 class PallasKernel(SIMDKernel):
     """
     Pallas kernel for elementwise operations with support for strided/scatter access.
@@ -878,7 +847,8 @@ class PallasKernel(SIMDKernel):
     - Use async_compile.pallas path to compile and load Python code.
 
     For GPU (Mosaic backend):
-    - Use masked loads/stores with power-of-2 block sizes to handle non-power-of-2 shapes
+    - Use TMA (Tensor Memory Accelerator) for automatic OOB masking
+    - Falls back to legacy padding approach for reductions, broadcasting, non-contiguous tensors
     """
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
@@ -889,11 +859,12 @@ class PallasKernel(SIMDKernel):
         # Determine device type once at initialization
         device = V.graph.get_current_device_or_throw()
         self.is_gpu = device.type == "cuda"
-        self.use_masked_ops: bool | None = None
-        # Enable warpgroup padding for GPU to handle non-aligned tensor sizes
-        # Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE)
-        self.use_warpgroup_padding = self.is_gpu
-        self.tensor_masks = {}  # Map tensor name to mask variable name
+        # Use TMA (Tensor Memory Accelerator) for GPU to handle non-aligned tensor sizes
+        # TMA automatically masks OOB accesses, eliminating the need for explicit
+        # padding to multiples of 128. Uses lax.fori_loop with direct TMA primitives.
+        self.use_emit_pipeline = self.is_gpu  # Enable TMA approach for GPU
+        # Legacy: warpgroup padding (enabled when TMA approach is disabled)
+        self.use_warpgroup_padding = self.is_gpu and not self.use_emit_pipeline
         # Track which output param each store uses: list of (out_ptr_name, store_line)
         self.store_with_output: list[tuple[str, str]] = []
         # Track load index expressions for argmax/argmin axis detection
@@ -903,6 +874,8 @@ class PallasKernel(SIMDKernel):
         # Track if any load in this kernel used transpose
         # Used to avoid double transpose (load + store)
         self.has_transposed_load = False
+        # Track which iteration variables are actually used in the kernel
+        self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -967,6 +940,8 @@ class PallasKernel(SIMDKernel):
         # Check for ModularIndexing - this is NOT contiguous access
         # ModularIndexing is used for roll/wrap-around operations
         if index.has(ModularIndexing):
+            # Track which iteration variables are used before returning
+            self.used_iter_vars.update(self._get_used_iter_vars(index))
             # Generate actual index expression - iteration variables are already
             # defined as jnp.arange arrays, so we just convert to JAX code
             return self.kexpr(index)
@@ -975,6 +950,9 @@ class PallasKernel(SIMDKernel):
         index = V.graph.sizevars.simplify(index)
         # Find which iteration variable(s) are used
         used_vars = self._get_used_iter_vars(index)
+
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_vars)
 
         if len(used_vars) == 0:
             # No iteration variables, this is a constant index
@@ -1061,19 +1039,15 @@ class PallasKernel(SIMDKernel):
                 f"Pallas backend does not yet support mixed index pattern: {index}"
             )
 
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_vars)
+
         # Convert sympy expression to Python/JAX code string
         # The iteration variables are already defined as jnp.arange arrays
         index_str = self.kexpr(index)
 
         # Mark this as requiring flatten access
         return index_str
-
-    def _generate_index_array(self, index: sympy.Expr) -> str:
-        """
-        Generate JAX code to compute an index array for complex indexing patterns.
-        Delegates to _generate_strided_index.
-        """
-        return self._generate_strided_index(index)
 
     def _get_iter_vars(self) -> OrderedSet:
         """Get the set of iteration variable symbols."""
@@ -1127,22 +1101,14 @@ class PallasKernel(SIMDKernel):
         2. Square buffers: index coefficient pattern indicates transposed access
            (first iteration var has larger coefficient than second)
         """
-        buf_obj = V.graph.get_buffer(name)
-        if buf_obj is None:
+        info = self._get_buffer_info(name)
+        if info is None:
             return False
 
-        buf_size = buf_obj.get_size()
+        _, buf_size, _, actual_strides, _ = info
 
         # Only handle 2D buffers
-        if len(buf_size) != 2:
-            return False
-
-        layout = getattr(buf_obj, "get_layout", lambda: None)()
-        if layout is None:
-            return False
-
-        buf_stride = getattr(layout, "stride", None)
-        if buf_stride is None or len(buf_stride) != 2:
+        if len(buf_size) != 2 or len(actual_strides) != 2:
             return False
 
         size0 = self._safe_int(buf_size[0])
@@ -1150,9 +1116,8 @@ class PallasKernel(SIMDKernel):
         if size0 is None or size1 is None or size0 <= 1 or size1 <= 1:
             return False
 
-        # Get buffer strides
-        s0 = self._safe_int(buf_stride[0])
-        s1 = self._safe_int(buf_stride[1])
+        s0 = actual_strides[0]
+        s1 = actual_strides[1]
         if s0 is None or s1 is None:
             return False
 
@@ -1171,31 +1136,10 @@ class PallasKernel(SIMDKernel):
         outer_var = var_items[1][0]
         index = V.graph.sizevars.simplify(index)
 
-        def get_coefficient(expr, var):
-            """Extract coefficient of var from expression."""
-            if expr == var:
-                return 1
-            if expr.is_Add:
-                for term in expr.args:
-                    coeff = get_coefficient(term, var)
-                    if coeff is not None:
-                        return coeff
-            if expr.is_Mul:
-                coeff = 1
-                has_var = False
-                for factor in expr.args:
-                    if factor == var:
-                        has_var = True
-                    elif factor.is_number:
-                        coeff *= int(factor)
-                if has_var:
-                    return coeff
-            return None
+        inner_coeff = self._get_index_coefficient(index, inner_var)
+        outer_coeff = self._get_index_coefficient(index, outer_var)
 
-        inner_coeff = get_coefficient(index, inner_var)
-        outer_coeff = get_coefficient(index, outer_var)
-
-        if inner_coeff is not None and outer_coeff is not None:
+        if inner_coeff != 0 and outer_coeff != 0:
             # Only transpose for standard row-major buffers (stride[0] = size[1], stride[1] = 1)
             is_standard_row_major = s0 == size1 and s1 == 1
             if not is_standard_row_major:
@@ -1216,25 +1160,16 @@ class PallasKernel(SIMDKernel):
     def _has_column_major_output(self) -> bool:
         """Check if any output buffer has column-major stride layout."""
         output_buffers = getattr(self.args, "output_buffers", {})
-        for buf_name in output_buffers:
+        # Check both explicit output buffers and graph buffers (which may not
+        # be populated during load).
+        buf_names = itertools.chain(output_buffers, V.graph.name_to_buffer)
+        for buf_name in buf_names:
             out_buf = V.graph.get_buffer(buf_name)
             if out_buf is None:
                 continue
-            layout = getattr(out_buf, "get_layout", lambda: None)()
-            if layout is None:
-                continue
-            out_stride = getattr(layout, "stride", None)
-            if out_stride is None or len(out_stride) < 2:
-                continue
-            out_s0 = self._safe_int(out_stride[0])
-            out_s1 = self._safe_int(out_stride[1])
-            if out_s0 is not None and out_s1 is not None and out_s0 < out_s1:
-                return True
-
-        # Also check graph buffers (output_buffers may not be populated during load)
-        for buf_name in V.graph.name_to_buffer:
-            out_buf = V.graph.get_buffer(buf_name)
-            if out_buf is None or not isinstance(out_buf, ComputedBuffer):
+            if buf_name not in output_buffers and not isinstance(
+                out_buf, ComputedBuffer
+            ):
                 continue
             layout = getattr(out_buf, "get_layout", lambda: None)()
             if layout is None:
@@ -1271,100 +1206,6 @@ class PallasKernel(SIMDKernel):
                     needs_flatten = True
             return index_str, needs_flatten
 
-    def _determine_masked_ops_for_kernel(self) -> bool:
-        """
-        Determine if we should use masked ops for this entire kernel.
-
-        Masked ops with pl.ds(block_size) flatten tensors to 1D, which works when:
-        1. We're on GPU (CUDA backend uses Mosaic which requires power-of-2 sizes)
-        2. All tensors are already 1D (so flattening doesn't change dimensionality)
-        3. All tensors have the same size (so broadcasting works correctly)
-
-        With per-tensor masks, each tensor gets its own mask based on its size.
-
-        This should be called once in codegen_kernel() before generating the kernel body.
-        """
-        # Mosaic GPU backend doesn't support jnp.arange inside kernels,
-        # so we can't use masked ops which require creating mask arrays.
-        # CPU doesn't need masked ops either.
-        # TODO: Re-enable masked ops when Mosaic supports the required operations
-        return False
-
-        # Get all buffer sizes
-        # We need ALL buffers - inputs, outputs, and intermediates
-        all_buffer_names = OrderedSet()
-
-        # Get input buffers from args
-        all_buffer_names.update(self.args.input_buffers.keys())
-        # Get output buffers from args
-        all_buffer_names.update(self.args.output_buffers.keys())
-        # Also get any intermediate buffers from the graph
-        all_buffer_names.update(V.graph.name_to_buffer.keys())
-
-        # Get shapes and sizes for all buffers
-        # Use try/except to handle special layouts (MultiOutputLayout, NoneLayout, etc.)
-        # that don't support get_size()
-        buf_info = []
-        for buf_name in all_buffer_names:
-            try:
-                buf = V.graph.get_buffer(buf_name)
-                if buf is None:
-                    continue
-                size = buf.get_size()
-                shape = tuple(self._safe_int(s) or s for s in size)
-                # Calculate flattened size
-                total_size = 1
-                for s in size:
-                    int_s = self._safe_int(s)
-                    total_size *= int_s if int_s is not None else s
-                buf_info.append((buf_name, shape, total_size))
-            except Exception:
-                pass
-
-        # Use masked ops when:
-        # 1. We're on GPU (Mosaic requires power-of-2 sizes)
-        # 2. All buffers have the same flattened size (for correct broadcasting)
-        # 3. Any dimension has non-power-of-2 size
-        #
-        # For multi-D tensors, we flatten to 1D and use masked loads/stores.
-        # The mask handles out-of-bounds elements when padding to power-of-2.
-        if buf_info and len(buf_info) > 0:
-            # Check if all have the same flattened size
-            first_size = buf_info[0][2]
-            all_same_size = all(size == first_size for _, _, size in buf_info)
-            if not all_same_size:
-                return False
-
-            # Check if any dimension is non-power-of-2
-            def is_power_of_2(n):
-                return n > 0 and (n & (n - 1)) == 0
-
-            has_non_pow2 = False
-            for _, shape, _ in buf_info:
-                for dim in shape:
-                    if isinstance(dim, int) and not is_power_of_2(dim):
-                        has_non_pow2 = True
-                        break
-                if has_non_pow2:
-                    break
-
-            # Use masked ops if any dimension is non-power-of-2
-            return has_non_pow2
-
-        return False
-
-    def _get_or_create_mask(self, buf_name: str) -> str:
-        """Get or create a unique mask variable for a buffer."""
-        if buf_name not in self.tensor_masks:
-            mask_var = f"mask_{buf_name}"
-            self.tensor_masks[buf_name] = mask_var
-        return self.tensor_masks[buf_name]
-
-    def _ensure_masked_ops_initialized(self) -> None:
-        """Initialize masked ops strategy on first load/store if not yet determined."""
-        if self.use_masked_ops is None:
-            self.use_masked_ops = self._determine_masked_ops_for_kernel()
-
     @staticmethod
     def _safe_int(val: Any) -> Optional[int]:
         """Convert value to int, returning None on failure."""
@@ -1395,9 +1236,78 @@ class PallasKernel(SIMDKernel):
                 result *= numel
         return result
 
-    def _get_buffer_info(self, name: str) -> tuple[Any, Any, Any, list, bool]:
-        """Get buffer metadata (buf_obj, buf_size, buf_numel, actual_strides, is_contiguous)."""
+    def _can_use_tma_approach(self) -> bool:
+        """
+        Check if TMA (Tensor Memory Accelerator) approach can be used.
+        TMA works for simple element-wise ops but not for:
+        - Reductions (need different accumulation patterns)
+          TODO: TMA supports float64 for loading but not for reductions
+        - Broadcasting (inputs have different shapes or output differs)
+        - Non-contiguous tensors (strided, transposed)
+        """
+        # Check for reductions
+        reduction_numel = self._compute_reduction_numel()
+        if reduction_numel is not None and reduction_numel > 1:
+            return False
+
+        # Check all input buffers for contiguity, dtype, and shape consistency
+        input_shapes: list[tuple] = []
+        for name in self.args.input_buffers:
+            info = self._get_buffer_info(name)
+            if info is None:
+                return False
+            buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = info
+            if not is_contiguous:
+                return False
+
+            # Check for unsupported dtypes
+            # TODO: TMA supports float64 for loading but current JAX Mosaic GPU
+            # implementation doesn't support it yet. Re-enable when JAX adds support.
+            buf_dtype = getattr(buf_obj, "get_dtype", lambda: None)()
+            if buf_dtype is not None:
+                import torch
+
+                if buf_dtype == torch.float64:
+                    return False
+
+            # Collect shape as tuple for comparison
+            shape_tuple = tuple(self._safe_int(s) for s in buf_size)
+            if None in shape_tuple:
+                return False  # Dynamic shapes not supported
+            input_shapes.append(shape_tuple)
+
+        # Check if all input shapes are identical (no broadcasting)
+        if input_shapes and len(OrderedSet(input_shapes)) > 1:
+            return False
+
+        # Check that output numel matches input numel (no broadcasting expansion)
+        if input_shapes:
+            input_numel = 1
+            for s in input_shapes[0]:
+                input_numel *= s
+
+            # Compute output numel from pointwise range trees (non-reduction)
+            output_numel = 1
+            for tree in self.range_trees:
+                if not tree.is_reduction:
+                    numel = self._safe_int(tree.numel)
+                    if numel is None:
+                        return False  # Dynamic shapes not supported
+                    output_numel *= numel
+
+            if output_numel != input_numel:
+                return False
+
+        return True
+
+    def _get_buffer_info(self, name: str) -> Optional[tuple[Any, Any, Any, list, bool]]:
+        """Get buffer metadata (buf_obj, buf_size, buf_numel, actual_strides, is_contiguous).
+
+        Returns None if the buffer doesn't exist.
+        """
         buf_obj = V.graph.get_buffer(name)
+        if buf_obj is None:
+            return None
         buf_size = buf_obj.get_size()
         buf_numel = 1
         for s in buf_size:
@@ -1524,13 +1434,11 @@ class PallasKernel(SIMDKernel):
         if index_str != "..." or needs_flatten:
             return index_str, needs_flatten
 
-        buf = V.graph.get_buffer(name)
-        if buf is None:
+        info = self._get_buffer_info(name)
+        if info is None:
             return index_str, needs_flatten
 
-        buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = (
-            self._get_buffer_info(name)
-        )
+        buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = info
         output_numel, used_vars = self._compute_output_numel_from_index(index)
         all_iter_vars = self._get_iter_vars()
         coefficients = self._get_index_coefficients(index, used_vars)
@@ -1550,7 +1458,7 @@ class PallasKernel(SIMDKernel):
         )
 
         # Check various conditions for skipping strided indexing
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
         is_known_non_contiguous = not is_contiguous and all(
             s is not None for s in actual_strides
         )
@@ -1609,6 +1517,81 @@ class PallasKernel(SIMDKernel):
 
         return index_str, needs_flatten
 
+    def _try_multidim_slice(
+        self,
+        name: str,
+        index: sympy.Expr,
+        index_str: str,
+        needs_flatten: bool,
+    ) -> tuple[str, bool]:
+        """
+        Try to emit multi-dim slice notation instead of flatten + gather.
+
+        For a buffer with shape (d0, ..., dk) and index `stride * var + offset`,
+        emit `buf[:, ..., :, offset::stride]` when stride divides dk.
+        """
+        if not needs_flatten:
+            return index_str, needs_flatten
+
+        buf_obj = V.graph.get_buffer(name)
+        if buf_obj is None:
+            return index_str, needs_flatten
+
+        buf_size = buf_obj.get_size()
+        ndim = len(buf_size)
+        if ndim < 2:
+            return index_str, needs_flatten
+
+        # Need a single iteration variable with an affine index
+        used_vars = self._get_used_iter_vars(index)
+        if len(used_vars) != 1:
+            return index_str, needs_flatten
+
+        var = next(iter(used_vars))
+        var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(index, var)
+        stride = self._safe_int(
+            BlockPatternMatcher.match_affine_block_expr(var_expr, var)
+        )
+        if stride is None or stride <= 1:
+            return index_str, needs_flatten
+
+        offset = V.graph.sizevars.simplify(index - var_expr)
+        try:
+            offset_val = int(offset)
+        except (TypeError, ValueError):
+            return index_str, needs_flatten
+
+        if offset_val < 0 or offset_val >= stride:
+            return index_str, needs_flatten
+
+        last_dim = self._safe_int(buf_size[-1])
+        if last_dim is None or last_dim % stride != 0:
+            return index_str, needs_flatten
+
+        # Verify the iteration variable covers all buffer elements at the
+        # given stride: var_length * stride == buf_numel. This ensures
+        # the flattened stride-access 0, stride, 2*stride, ... maps exactly
+        # to buf[:, ..., :, offset::stride].
+        entry = self.range_tree_nodes.get(var)
+        if entry is None:
+            return index_str, needs_flatten
+        var_length = self._safe_int(entry.length)
+        buf_numel = 1
+        for s in buf_size:
+            d = self._safe_int(s)
+            if d is None:
+                return index_str, needs_flatten
+            buf_numel *= d
+        if var_length is None or var_length * stride != buf_numel:
+            return index_str, needs_flatten
+
+        prefix = ":, " * (ndim - 1)
+        if offset_val == 0:
+            slice_str = f"{prefix}::{stride}"
+        else:
+            slice_str = f"{prefix}{offset_val}::{stride}"
+        return slice_str, False
+
     def _build_load_expr(
         self,
         buf: str,
@@ -1616,25 +1599,15 @@ class PallasKernel(SIMDKernel):
         index: sympy.Expr,
         index_str: str,
         needs_flatten: bool,
-        use_masked: bool,
     ) -> str:
         """
         Build the load expression based on indexing mode.
         """
-        if use_masked:
-            # GPU masked load: flatten tensor and apply per-tensor mask
-            mask_var = self._get_or_create_mask(name)
-            return f"pltriton.load({buf}.at[pl.ds(block_size)], mask={mask_var})"
-        elif needs_flatten:
+        if needs_flatten:
             # Flatten then index for non-contiguous access (gather operation)
-            if self.is_gpu:
-                # GPU: use pltriton.load with explicit offsets
-                return f"pltriton.load({buf}.at[{index_str}])"
-            else:
-                # CPU: use JAX array indexing
-                has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
-                idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
-                return f"{buf}[...].flatten()[{idx}]"
+            has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
+            idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
+            return f"{buf}[...].flatten()[{idx}]"
         else:
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
@@ -1851,26 +1824,18 @@ class PallasKernel(SIMDKernel):
         if self.has_transposed_load:
             return False
 
-        buf = V.graph.get_buffer(name)
-        if buf is None:
+        info = self._get_buffer_info(name)
+        if info is None:
             return False
 
-        layout = getattr(buf, "get_layout", lambda: None)()
-        if layout is None:
-            return False
-
-        buf_stride = getattr(layout, "stride", None)
-        if buf_stride is None:
-            return False
-
-        buf_size = buf.get_size()
-        if len(buf_stride) != 2 or len(buf_size) != 2:
+        _, buf_size, _, actual_strides, _ = info
+        if len(actual_strides) != 2 or len(buf_size) != 2:
             return False
 
         size0 = self._safe_int(buf_size[0])
         size1 = self._safe_int(buf_size[1])
-        s0 = self._safe_int(buf_stride[0])
-        s1 = self._safe_int(buf_stride[1])
+        s0 = actual_strides[0]
+        s1 = actual_strides[1]
 
         # Check if output is column-major with valid dimensions
         if not (
@@ -1886,17 +1851,14 @@ class PallasKernel(SIMDKernel):
 
         # Check if any input is column-major (if so, no transpose needed)
         for inp_name in self.args.input_buffers:
-            inp_buf = V.graph.get_buffer(inp_name)
-            if inp_buf is None:
+            inp_info = self._get_buffer_info(inp_name)
+            if inp_info is None:
                 continue
-            inp_layout = getattr(inp_buf, "get_layout", lambda: None)()
-            if inp_layout is None:
+            _, _, _, inp_strides, _ = inp_info
+            if len(inp_strides) != 2:
                 continue
-            inp_stride = getattr(inp_layout, "stride", None)
-            if inp_stride is None or len(inp_stride) != 2:
-                continue
-            inp_s0 = self._safe_int(inp_stride[0])
-            inp_s1 = self._safe_int(inp_stride[1])
+            inp_s0 = inp_strides[0]
+            inp_s1 = inp_strides[1]
             if inp_s0 is not None and inp_s1 is not None and inp_s0 < inp_s1:
                 return False  # Input is also column-major
 
@@ -1904,26 +1866,28 @@ class PallasKernel(SIMDKernel):
 
     def _build_full_array_store_expr(
         self, out: str, value: CSEVariable, needs_transpose: bool
-    ) -> str:
+    ) -> list[str]:
         """
         Build store expression for full array assignment.
 
         Handles scalar broadcast, shape matching, and optional transpose.
+        Returns a list of lines to emit (variable assignment + store).
         """
+        lines = [f"_val = jnp.asarray({value})"]
         if needs_transpose:
-            return (
-                f"{out}[...] = ("
-                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
-                f"else jnp.transpose(jnp.asarray({value})))"
+            lines.append(
+                f"{out}[...] = "
+                f"jnp.full({out}.shape, _val) if _val.ndim == 0 "
+                f"else jnp.transpose(_val)"
             )
         else:
-            return (
-                f"{out}[...] = ("
-                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
-                f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
-                f"if jnp.asarray({value}).size != {out}.size "
-                f"else jnp.asarray({value}).reshape({out}.shape)))"
+            lines.append(
+                f"{out}[...] = "
+                f"jnp.full({out}.shape, _val) if _val.ndim == 0 "
+                f"else (_val.reshape({out}.shape) if _val.size == {out}.size "
+                f"else jnp.broadcast_to(_val, {out}.shape))"
             )
+        return lines
 
     def _build_store_expr(
         self,
@@ -1933,20 +1897,13 @@ class PallasKernel(SIMDKernel):
         value: CSEVariable,
         index_str: str,
         needs_flatten: bool,
-        use_masked: bool,
         mode: Any = None,
-    ) -> str:
+    ) -> list[str]:
         """
         Build the store expression based on indexing mode.
         mode can be None (set) or "atomic_add" (accumulate).
+        Returns a list of lines to emit.
         """
-        if use_masked:
-            # GPU masked store: flatten tensor and apply per-tensor mask
-            mask_var = self._get_or_create_mask(name)
-            return (
-                f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
-            )
-
         if index_str == "...":
             # Full array store with shape matching
             needs_transpose = self._check_store_needs_transpose(name)
@@ -1955,13 +1912,10 @@ class PallasKernel(SIMDKernel):
         if needs_flatten:
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
-            if self.is_gpu:
-                return f"pltriton.store({out}.at[{index_str}], jnp.asarray({value}))"
-            else:
-                return (
-                    f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
-                    f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
-                )
+            return [
+                f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
+                f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
+            ]
 
         # Direct indexed assignment
         has_indirect = self._has_indirect_vars(index)
@@ -1976,22 +1930,23 @@ class PallasKernel(SIMDKernel):
         if has_indirect:
             # Indirect indexed store (scatter): use .add() for atomic_add, .set() otherwise
             scatter_op = "add" if mode == "atomic_add" else "set"
+            lines = [f"_val = jnp.asarray({value})"]
             value_expr = (
-                f"(jnp.full({index_str}.shape, {value}) "
-                f"if jnp.asarray({value}).ndim == 0 else {value})"
+                f"(jnp.full({index_str}.shape, _val) if _val.ndim == 0 else {value})"
             )
             if mode == "atomic_add":
                 # For atomic_add, mark output as needing to be readable (for aliasing)
                 self.outputs_need_read.add(out)
                 alias_param = f"{out}_alias"
-                return (
+                lines.append(
                     f"{out}[...] = {alias_param}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
                     f"{value_expr}.flatten()).reshape({out}.shape)"
                 )
             else:
-                return f"{out}[{index_str}] = {value_expr}"
+                lines.append(f"{out}[{index_str}] = {value_expr}")
+            return lines
 
-        return f"{out}[{index_str}] = {value}"
+        return [f"{out}[{index_str}] = {value}"]
 
     def _build_scatter_store_expr(
         self,
@@ -2081,8 +2036,6 @@ class PallasKernel(SIMDKernel):
         # Track the load index expression for argmax/argmin axis detection
         self.load_index_exprs[name] = index
 
-        self._ensure_masked_ops_initialized()
-
         # Get base index expression
         index_str, needs_flatten = self._get_index_expr(index)
 
@@ -2096,15 +2049,13 @@ class PallasKernel(SIMDKernel):
             name, index, index_str, needs_flatten
         )
 
-        # Determine if masked operations should be used
-        use_masked = (
-            index_str == "..." and not needs_flatten and self.use_masked_ops is True
+        # Try to emit multi-dim slice instead of flatten + gather
+        index_str, needs_flatten = self._try_multidim_slice(
+            name, index, index_str, needs_flatten
         )
 
         # Build the load expression
-        load_expr = self._build_load_expr(
-            buf, name, index, index_str, needs_flatten, use_masked
-        )
+        load_expr = self._build_load_expr(buf, name, index, index_str, needs_flatten)
 
         # Handle intermediate buffer squeezing for correct broadcasting
         if not needs_flatten and index_str == "...":
@@ -2139,26 +2090,20 @@ class PallasKernel(SIMDKernel):
         """
         used_iter_vars_set = self._get_used_iter_vars(index)
 
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_iter_vars_set)
+
         if len(used_iter_vars_set) == 0:
             return self.kexpr(index)
 
         # Sort iteration variables by their coefficient (stride) in the index expression.
         # Variables with larger strides correspond to earlier output dimensions.
-        def get_coefficient(var):
-            """Extract the coefficient of a variable in the index expression."""
-            coeff = index.coeff(var)
-            if coeff == 0:
-                # Variable appears in a more complex form, try differentiation
-                coeff = sympy.diff(index, var)
-            # Convert to int if possible for sorting
-            try:
-                return int(coeff)
-            except (TypeError, ValueError):
-                # Symbolic coefficient - treat as outer dimension
-                return float("inf")
+        # Use inf default so symbolic coefficients sort as outermost dimensions.
+        def _coeff(var):
+            return self._get_index_coefficient(index, var, default=float("inf"))
 
-        used_iter_vars = sorted(used_iter_vars_set, key=get_coefficient, reverse=True)
-        iter_coeffs = [get_coefficient(var) for var in used_iter_vars]
+        used_iter_vars = sorted(used_iter_vars_set, key=_coeff, reverse=True)
+        iter_coeffs = [_coeff(var) for var in used_iter_vars]
 
         # Rename symbolic sizes to kernel parameter names
         index_str = self.kexpr(self.rename_indexing(index))
@@ -2166,7 +2111,7 @@ class PallasKernel(SIMDKernel):
         indirect_vars = [str(sym) for sym in indirect_var_syms]
 
         # Get coefficients for indirect vars to determine output ordering
-        indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
+        indirect_coeffs = {str(s): _coeff(s) for s in indirect_var_syms}
 
         # Special case: reduction var + single indirect var = element-wise gather
         # Reduction vars (r prefix) iterate over the reduction dimension, and when paired
@@ -2252,9 +2197,9 @@ class PallasKernel(SIMDKernel):
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
         all_components = []
         for var in used_iter_vars:
-            all_components.append((get_coefficient(var), "iter", var))
+            all_components.append((_coeff(var), "iter", var))
         for sym in indirect_var_syms:
-            all_components.append((get_coefficient(sym), "indirect", sym))
+            all_components.append((_coeff(sym), "indirect", sym))
         all_components.sort(key=lambda x: x[0], reverse=True)
 
         # Calculate trailing dims needed for each component
@@ -2271,7 +2216,7 @@ class PallasKernel(SIMDKernel):
                 range_size = range_entry.length
                 # Rename to use kernel parameter names for symbolic sizes
                 renamed_size = self.rename_indexing(range_size)
-                var_coeff = get_coefficient(var)
+                var_coeff = _coeff(var)
 
                 arange_expr = f"jnp.arange({self.kexpr(renamed_size)})"
 
@@ -2328,27 +2273,25 @@ class PallasKernel(SIMDKernel):
         out = self.args.output(name)
         self.store_buffer_names.add(name)
 
-        self._ensure_masked_ops_initialized()
-
         # Check if this is a scalar output (reduction to scalar)
         buf = V.graph.get_buffer(name)
         is_scalar = buf is not None and len(buf.get_size()) == 0
 
         if is_scalar:
-            # For scalar outputs, use jnp.full to handle shape mismatch
-            store_expr = (
-                f"{out}[...] = ("
-                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
-                f"else jnp.asarray({value}).reshape({out}.shape))"
-            )
+            store_lines = [
+                f"_val = jnp.asarray({value})",
+                f"{out}[...] = jnp.full({out}.shape, _val) if _val.ndim == 0 else _val.reshape({out}.shape)",
+            ]
         else:
             # Check for scatter pattern (indirect indexing for stores)
             scatter_info = self._detect_scatter_pattern(index, name)
 
             if scatter_info is not None:
-                store_expr = self._build_scatter_store_expr(
-                    out, value, scatter_info, name, mode
-                )
+                # Track iteration variables used in scatter index
+                self.used_iter_vars.update(self._get_used_iter_vars(index))
+                store_lines = [
+                    self._build_scatter_store_expr(out, value, scatter_info, name, mode)
+                ]
             else:
                 # Get base index expression
                 index_str, needs_flatten = self._get_index_expr(index)
@@ -2358,23 +2301,20 @@ class PallasKernel(SIMDKernel):
                     index, index_str, needs_flatten
                 )
 
-                # Determine if masked operations should be used
-                use_masked = (
-                    index_str == "..."
-                    and not needs_flatten
-                    and self.use_masked_ops is True
-                )
-
                 # Build the store expression
-                store_expr = self._build_store_expr(
-                    out, name, index, value, index_str, needs_flatten, use_masked, mode
+                store_lines = self._build_store_expr(
+                    out, name, index, value, index_str, needs_flatten, mode
                 )
 
-        self.stores.writeline(store_expr)
-        # Track which output param this store uses for filtering in codegen_kernel
-        self.store_with_output.append((out, store_expr))
+        for line in store_lines:
+            self.stores.writeline(line)
+            # Track which output param this store uses for filtering in codegen_kernel
+            self.store_with_output.append((out, line))
 
-    def _get_index_coefficient(self, index: sympy.Expr, var: sympy.Symbol) -> int:
+    @staticmethod
+    def _get_index_coefficient(
+        index: sympy.Expr, var: sympy.Symbol, default: int | float = 0
+    ) -> int | float:
         """Get integer coefficient of a variable in an index expression."""
         coeff = index.coeff(var)
         if coeff == 0:
@@ -2382,7 +2322,7 @@ class PallasKernel(SIMDKernel):
         try:
             return int(coeff)
         except (TypeError, ValueError):
-            return 0
+            return default
 
     def _detect_scatter_pattern(
         self, index: sympy.Expr, output_name: str = ""
@@ -2394,7 +2334,7 @@ class PallasKernel(SIMDKernel):
 
         indirect_sym = indirect_syms[0]
         indirect_var = str(indirect_sym)
-        indirect_coeff = self._get_index_coefficient(index, indirect_sym)
+        indirect_coeff: int = int(self._get_index_coefficient(index, indirect_sym))
         if indirect_coeff == 0:
             return None
 
@@ -2445,9 +2385,9 @@ class PallasKernel(SIMDKernel):
         used_iter_vars = self._get_used_iter_vars(index)
 
         # Collect (var_name, coefficient, length) for each variable
-        all_vars = []
+        all_vars: list[tuple[str, int, int]] = []
         for var in used_iter_vars:
-            coeff = self._get_index_coefficient(index, var)
+            coeff = int(self._get_index_coefficient(index, var))
             if coeff > 0 and var in self.range_tree_nodes:
                 length = self._safe_int(self.range_tree_nodes[var].length)
                 if length is None:
@@ -2620,7 +2560,7 @@ class PallasKernel(SIMDKernel):
                 # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
-                reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             elif is_symbolic_partial:
                 # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
                 reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
@@ -2687,75 +2627,13 @@ class PallasKernel(SIMDKernel):
         }
 
         kernel_name = name or "<KERNEL_NAME>"
+        is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
-        if is_tpu:
-            if not torch._inductor.config.pallas_take_first_jax_device_only:
-                raise RuntimeError(
-                    "Pallas backend currently only supports using the first JAX device."
-                )
-            if not has_tpu_pallas():
-                raise RuntimeError(
-                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                    "Please make sure that you have a TPU available and that JAX is configured correctly."
-                )
         interpret_literal = "True" if interpret_is_cpu else "False"
-
-        # For GPU (Mosaic backend), import plgpu for masked loads/stores
-        # Import math for masked ops and symbolic expressions (e.g., math.floor, math.log2)
-        imports = """
-import functools
-import math
-import torch
-import jax
-import jax.numpy as jnp
-from jax.experimental import pallas as pl
-from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
-def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
-    # Helper for partial reductions: reorders axes and reduces
-    # Returns result with keepdims-style shape for proper in-kernel broadcasting
-    shape = tuple(v.shape)
-    # Find contiguous axes whose product = red_numel (search from right)
-    red_axes = None
-    for i in range(len(shape) - 1, -1, -1):
-        prod = 1
-        for j in range(i, -1, -1):
-            prod *= shape[j]
-            if prod == red_numel:
-                red_axes = list(range(j, i + 1))
-                break
-        if red_axes is not None:
-            break
-    if red_axes is None:
-        red_axes = [len(shape) - 1]
-    # Build output shape with 1s for reduced dimensions (keepdims style)
-    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
-    # Move pointwise axes to front, reduction axes to back
-    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
-    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
-    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
-    return result.reshape(out_shape)
-""" + (
-            "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
-            if not interpret_is_cpu
-            else ""
-        )
-        code.splice(imports, strip=True)
 
         aliasable_flags: dict[str, bool] = {}
         for param in pure_out_params:
-            buffer_name = output_buffer_lookup.get(param)
-            is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
-                buffer_name
-            )
-            # Enable aliasing if:
-            # 1. Not on CPU and buffer is contiguous (normal case), OR
-            # 2. Output needs to be readable (for scatter operations)
-            # outputs_need_read contains output parameter names (e.g., out_ptr0)
-            needs_read = param in self.outputs_need_read
-            aliasable_flags[param] = (
-                (not interpret_is_cpu) and is_contiguous
-            ) or needs_read
+            aliasable_flags[param] = True
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
         ]
@@ -2767,12 +2645,11 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         non_alias_out_set = OrderedSet(
             [name for name, flag in aliasable_flags.items() if not flag]
         )
-        # On CPU (interpret=True), we need to copy back even aliased outputs
-        # because pallas_call returns a new array (doesn't mutate in-place)
-        # For outputs that need read access (scatter), we enable aliasing to read
-        # current values, but still need to copy back the result
-        if interpret_is_cpu:
-            # Copy back all outputs on CPU
+        # On CPU (interpret=True) and TPU, pallas_call returns new arrays so
+        # we must copy back every output.  On CUDA, aliased outputs are
+        # mutated in-place by the donated-buffer mechanism so only
+        # non-aliased outputs need an explicit copy.
+        if interpret_is_cpu or is_tpu:
             copy_output_indices = list(range(len(output_params)))
         else:
             copy_output_indices = [
@@ -2780,200 +2657,37 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                 for idx, name in enumerate(output_params)
                 if name in non_alias_out_set
             ]
+
+        ctx = _CodegenContext(
+            code=code,
+            kernel_name=kernel_name,
+            is_tpu=is_tpu,
+            interpret_is_cpu=interpret_is_cpu,
+            interpret_literal=interpret_literal,
+            kernel_params=kernel_params,
+            pure_out_params=pure_out_params,
+            output_params=output_params,
+            size_var_params=size_var_params,
+            output_buffer_lookup=output_buffer_lookup,
+            aliasable_flags=aliasable_flags,
+            alias_params=alias_params,
+            pointer_tail=pointer_tail,
+            kernel_input_params=kernel_input_params,
+            full_kernel_params=full_kernel_params,
+            non_alias_out_set=non_alias_out_set,
+            copy_output_indices=copy_output_indices,
+        )
         self.aliasable_out_ptrs = aliasable_flags
+
+        self._codegen_imports(ctx)
 
         # Generate kernel body into a separate buffer first.
         # This allows us to discover all size variables (registered via rename_indexing)
         # before generating the kernel signature.
         kernel_body = IndentedBuffer()
         with kernel_body.indent():
-            # For masked ops on GPU, generate per-tensor masks at the start
-            if self.use_masked_ops and self.tensor_masks:
-                # Create a mapping from buffer name to parameter name
-                buf_to_param = {}
-                for outer, inner in self.args.input_buffers.items():
-                    buf_to_param[outer] = inner if isinstance(inner, str) else outer
-                for outer, inner in self.args.output_buffers.items():
-                    buf_to_param[outer] = inner if isinstance(inner, str) else outer
+            self._codegen_iteration_vars(kernel_body, ctx)
 
-                # Generate a mask for each tensor that was accessed
-                for buf_name, mask_var in sorted(self.tensor_masks.items()):
-                    param_name = buf_to_param.get(buf_name, buf_name)
-                    # Find the corresponding parameter in kernel_params
-                    matching_param = None
-                    for p in kernel_params:
-                        # Check if this parameter corresponds to the buffer
-                        if param_name == p or buf_name in str(p):
-                            matching_param = p
-                            break
-
-                    if matching_param:
-                        # Calculate flattened size for this tensor
-                        kernel_body.writeline(f"# Mask for {buf_name}")
-                        kernel_body.writeline(
-                            f"{mask_var}_size = {matching_param}.size"
-                        )
-                        kernel_body.writeline(
-                            f"{mask_var} = jnp.arange(block_size) < {mask_var}_size"
-                        )
-
-            # Generate iteration variables as jnp.arange arrays
-            # These are used by index_expr operations like torch.arange
-            # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
-            # Skip on GPU with masked ops - iteration vars would create non-power-of-2 arrays
-            if self.range_tree_nodes and not self.use_masked_ops and not self.is_gpu:
-                kernel_body.writeline("# Define iteration variables as JAX arrays")
-
-                # Find reshape target: N-D shape whose numel matches an iteration
-                # var. Try output first (repeat/upsample), then inputs (reductions).
-                iter_lengths = OrderedSet(
-                    [
-                        int(e.length)
-                        for e in self.range_tree_nodes.values()
-                        if isinstance(e.length, (int, sympy.Integer))
-                    ]
-                )
-
-                def _get_nd_shape_if_matches(buf_name):
-                    buf = V.graph.try_get_buffer(buf_name)
-                    if buf is None or len(buf.get_size()) <= 1:
-                        return None, None
-                    shape = tuple(
-                        int(s) if isinstance(s, (int, sympy.Integer)) else s
-                        for s in buf.get_size()
-                    )
-                    numel = math.prod(shape)
-                    return (shape, numel) if numel in iter_lengths else (None, None)
-
-                # Candidate buffers: output first, then inputs
-                candidate_buf_names = []
-                if output_params:
-                    buf_name = output_buffer_lookup.get(output_params[0])
-                    if buf_name:
-                        candidate_buf_names.append(buf_name)
-                candidate_buf_names.extend(self.args.input_buffers)
-
-                # Find first N-D buffer whose numel matches an iteration var
-                reshape_target_shape, reshape_target_numel = None, None
-                for name in candidate_buf_names:
-                    result = _get_nd_shape_if_matches(name)
-                    if result[0]:
-                        reshape_target_shape, reshape_target_numel = result
-                        break
-
-                # Collect all iteration variable info for broadcasting shape computation
-                var_items = list(self.range_tree_nodes.items())
-
-                # Count vars that are NOT the "total" var (which equals output numel)
-                # These are the actual iteration dimensions that need broadcasting
-                broadcast_vars = []
-                total_var_idx = None
-                for idx, (var_sym, entry) in enumerate(var_items):
-                    length_val = self._safe_int(entry.length)
-                    if length_val is not None and length_val == reshape_target_numel:
-                        total_var_idx = idx
-                    else:
-                        broadcast_vars.append((idx, var_sym, entry, length_val))
-
-                num_broadcast_dims = len(broadcast_vars)
-
-                for idx, (var_sym, entry) in enumerate(var_items):
-                    var_name = str(var_sym)
-                    length = entry.length
-                    # Rename symbolic lengths to use kernel parameter names
-                    renamed_length = self.rename_indexing(length)
-                    length_str = self.kexpr(renamed_length)
-                    length_val = self._safe_int(length)
-
-                    # For symbolic lengths, only reshape if we have a valid target shape
-                    # Without a target, we can't determine correct dimensions
-                    if length_val is None:
-                        if (
-                            reshape_target_shape
-                            and num_broadcast_dims > 1
-                            and idx != total_var_idx
-                        ):
-                            # Symbolic var in multi-broadcast case needs reshape
-                            broadcast_idx = next(
-                                (
-                                    i
-                                    for i, (vidx, _, _, _) in enumerate(broadcast_vars)
-                                    if vidx == idx
-                                ),
-                                None,
-                            )
-                            if broadcast_idx is not None:
-                                # Same logic as concrete case
-                                has_reduction_vars = any(
-                                    str(v).startswith("r")
-                                    for _, v, _, _ in broadcast_vars
-                                )
-                                has_pointwise_vars = any(
-                                    not str(v).startswith("r")
-                                    for _, v, _, _ in broadcast_vars
-                                )
-                                is_mixed = has_reduction_vars and has_pointwise_vars
-                                if is_mixed:
-                                    axis_idx = broadcast_idx
-                                else:
-                                    axis_idx = num_broadcast_dims - 1 - broadcast_idx
-                                shape_parts = ["1"] * num_broadcast_dims
-                                shape_parts[axis_idx] = length_str
-                                shape_str = ", ".join(shape_parts)
-                                arange = f"jnp.arange({length_str})"
-                                kernel_body.writeline(
-                                    f"{var_name} = {arange}.reshape({shape_str})"
-                                )
-                                continue
-                        kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
-                        continue
-
-                    if (
-                        reshape_target_shape
-                        and len(reshape_target_shape) > 1
-                        and length_val == reshape_target_numel
-                    ):
-                        # Reshape to match output/input shape for broadcasting
-                        shape_str = ", ".join(str(s) for s in reshape_target_shape)
-                        arange = f"jnp.arange({length_str})"
-                        kernel_body.writeline(
-                            f"{var_name} = {arange}.reshape({shape_str})"
-                        )
-                    elif num_broadcast_dims > 1 and idx != total_var_idx:
-                        # Find position of this var among broadcast vars
-                        broadcast_idx = next(
-                            i
-                            for i, (vidx, _, _, _) in enumerate(broadcast_vars)
-                            if vidx == idx
-                        )
-                        # Reshape for broadcasting with other iteration vars.
-                        # Axis placement depends on var types (reduction r* vs x*):
-                        # - Mixed: pointwise first, reduction last for output reshape
-                        # - Same-type: reverse order, first var innermost
-                        has_reduction_vars = any(
-                            str(v).startswith("r") for _, v, _, _ in broadcast_vars
-                        )
-                        has_pointwise_vars = any(
-                            not str(v).startswith("r") for _, v, _, _ in broadcast_vars
-                        )
-                        is_mixed = has_reduction_vars and has_pointwise_vars
-                        if is_mixed:
-                            # Mixed kernel: pointwise vars first, reduction vars last
-                            axis_idx = broadcast_idx
-                        else:
-                            # Same-type: reverse order (first var -> innermost)
-                            axis_idx = num_broadcast_dims - 1 - broadcast_idx
-                        shape_parts = ["1"] * num_broadcast_dims
-                        shape_parts[axis_idx] = length_str
-                        shape_str = ", ".join(shape_parts)
-                        arange = f"jnp.arange({length_str})"
-                        kernel_body.writeline(
-                            f"{var_name} = {arange}.reshape({shape_str})"
-                        )
-                    else:
-                        kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
-
-            # Emit compute (CSE) and store lines; they reference *_ptr[index] directly.
             for line in self.compute._lines:
                 kernel_body.writeline(str(line))
 
@@ -2984,448 +2698,680 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         arg_defs, call_args, _, _ = self.args.python_argdefs()
         kernel_params = [a.name for a in arg_defs]
         size_var_names = OrderedSet(self.args.sizevars.values())
-        size_var_params = [p for p in kernel_params if p in size_var_names]
-        pointer_tail = [
+        ctx.size_var_params = [p for p in kernel_params if p in size_var_names]
+        ctx.pointer_tail = [
             p for p in kernel_params if p.startswith(("in_out_ptr", "in_ptr"))
         ]
-        kernel_input_params = alias_params + pointer_tail
-        full_kernel_params = alias_params + kernel_params
+        ctx.kernel_input_params = alias_params + ctx.pointer_tail
+        ctx.full_kernel_params = alias_params + kernel_params
 
-        # Now emit the kernel function with the correct signature
-        # For GPU with masked ops, add block_size as keyword-only parameter
+        # Emit the kernel function with the correct signature
         kernel_signature = (
-            f"def {kernel_name}_kernel({', '.join(full_kernel_params)}"
-            + (", *, block_size" if self.use_masked_ops else "")
-            + "):"
+            f"def {kernel_name}_kernel({', '.join(ctx.full_kernel_params)}):"
         )
         code.writeline(kernel_signature)
 
         with code.indent():
             for line in kernel_body._lines:
                 if isinstance(line, str):
-                    # Remove any existing indentation and re-add with code's indentation
                     code.writeline(line.lstrip())
                 else:
                     code._lines.append(line)
 
-            # Add store lines (using recomputed full_kernel_params)
             # Filter stores to only emit those for outputs that are in kernel params.
-            # This handles cases where an intermediate value was stored but the buffer
-            # was later optimized away (not passed to the kernel).
             for out_ptr, store_line in self.store_with_output:
-                if out_ptr in full_kernel_params:
+                if out_ptr in ctx.full_kernel_params:
                     code.writeline(store_line)
 
+        code.writeline("")
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
-        # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
-        base_offset = 2 + len(size_var_params)
-        for idx, name in enumerate(kernel_input_params):
+        base_offset = 2 + len(ctx.size_var_params)
+        for idx, name in enumerate(ctx.kernel_input_params):
             if (name in alias_params) or name.startswith("in_out_ptr"):
                 donate_indices.append(idx + base_offset)
         if donate_indices:
             donate_literal = "(" + ", ".join(str(x) for x in donate_indices) + ",)"
         else:
             donate_literal = "()"
-        # Size variables are static args (after out_shapes and out_dtypes)
-        static_argnums = list(range(2 + len(size_var_params)))
+        static_argnums = list(range(2 + len(ctx.size_var_params)))
         static_argnums_literal = "(" + ", ".join(str(x) for x in static_argnums) + ",)"
         code.writeline(
             "@functools.partial("
             f"jax.jit, static_argnums={static_argnums_literal}, donate_argnums="
             f"{donate_literal})"
         )
-        # Include size_var_params in wrapper signature
         wrapper_params = (
-            ["out_shapes", "out_dtypes"] + size_var_params + kernel_input_params
+            ["out_shapes", "out_dtypes"] + ctx.size_var_params + ctx.kernel_input_params
         )
         code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
         with code.indent():
-            code.writeline("out_specs = tuple(")
+            code.writeline("out_shapes_pallas = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
             code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
             code.writeline(")")
-
-            # For masked ops, calculate block_size aligned to WARPGROUP_SIZE (128)
-            # Mosaic GPU runs with 128 threads (1 warpgroup), so data sizes should
-            # be at least 128 and aligned to 128 for efficient processing.
-            if self.use_masked_ops:
-                code.writeline(
-                    "# Calculate block_size aligned to warpgroup size (128) for Mosaic GPU"
-                )
-                code.writeline("# Find maximum flattened size across all tensors")
-                code.writeline("max_size = 0")
-                # Calculate size for all input tensors
-                for param in kernel_input_params:
-                    code.writeline(f"max_size = max(max_size, {param}.size)")
-                # Also consider output shapes
-                code.writeline("for shape in out_shapes:")
-                code.writeline(
-                    "    tensor_size = shape[0] if len(shape) == 1 else math.prod(shape)"
-                )
-                code.writeline("    max_size = max(max_size, tensor_size)")
-                # Align to WARPGROUP_SIZE (128) and ensure at least 128
-                code.writeline(
-                    "# Align to warpgroup size (128) for efficient GPU processing"
-                )
-                code.writeline("block_size = max(128, ((max_size + 127) // 128) * 128)")
+            code.writeline("indexer = lambda n: lambda i: [i] * n")
+            code.writeline("out_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+            code.writeline("    for i in [" + ", ".join(ctx.kernel_input_params) + "]")
+            code.writeline(")")
 
             alias_pairs: list[tuple[int, int]] = []
-            for out_idx, name in enumerate(output_params):
+            for out_idx, name in enumerate(ctx.output_params):
                 if name.startswith("out_ptr"):
                     if aliasable_flags.get(name, False):
                         alias_name = f"{name}_alias"
-                        input_idx = kernel_input_params.index(alias_name)
+                        input_idx = ctx.kernel_input_params.index(alias_name)
                         alias_pairs.append((input_idx, out_idx))
                 else:
-                    input_idx = kernel_input_params.index(name)
+                    input_idx = ctx.kernel_input_params.index(name)
                     alias_pairs.append((input_idx, out_idx))
             alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
 
-            # Wrap kernel with functools.partial to pass scalar arguments
-            # (size variables and block_size for masked ops)
+            # Wrap kernel with functools.partial to pass scalar arguments (size variables)
             partial_args = []
-            for sv_param in size_var_params:
+            for sv_param in ctx.size_var_params:
                 partial_args.append(f"{sv_param}={sv_param}")
-            if self.use_masked_ops:
-                partial_args.append("block_size=block_size")
 
             if partial_args:
                 kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
             else:
                 kernel_arg = f"{kernel_name}_kernel,"
 
-            # Use plgpu.kernel for GPU (Mosaic), pl.pallas_call for CPU/TPU
-            if self.is_gpu:
-                # For GPU, pad inputs to align to WARPGROUP_SIZE (128)
-                # Mosaic GPU requires tensor sizes to be multiples of 128
-                # BUT: only apply padding when all tensors have the same size
-                # (no broadcasting). If inputs have different sizes, we need
-                # to preserve shapes for proper broadcasting semantics.
+            use_tma = (
+                self.is_gpu and self.use_emit_pipeline and self._can_use_tma_approach()
+            )
+            if use_tma:
+                self._codegen_jit_wrapper_tma(ctx, kernel_arg)
+            elif self.is_gpu:
+                self._codegen_jit_wrapper_legacy_gpu(ctx, kernel_arg)
+            else:
+                self._codegen_jit_wrapper_cpu_tpu(
+                    ctx, kernel_arg, alias_pairs, alias_map_literal
+                )
 
-                # First, check if all inputs and outputs have the same numel
-                code.writeline(
-                    "# Check if all tensors have same size (no broadcasting)"
+        self._codegen_main_entry(ctx, jit_wrapper_name)
+        return code.getvalue()
+
+    def _codegen_imports(self, ctx: _CodegenContext) -> None:
+        imports = """
+import functools
+import math
+import torch
+import jax
+import jax.numpy as jnp
+from jax.experimental import pallas as pl
+from torch._inductor.runtime.runtime_utils import (
+    pallas_gpu_align_output_specs, pallas_gpu_pad_inputs,
+    pallas_gpu_unpad_results, pallas_partial_reduce,
+    torch_dtype_to_jax_runtime,
+)
+"""
+        if ctx.is_tpu:
+            imports += "\nimport jax.export"
+            imports += "\nfrom torch_tpu._internal.pallas import tpu_torch_pallas"
+        elif not ctx.interpret_is_cpu:
+            imports += "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
+        ctx.code.splice(imports, strip=True)
+
+    def _codegen_iteration_vars(
+        self, kernel_body: IndentedBuffer, ctx: _CodegenContext
+    ) -> None:
+        # Generate iteration variables as jnp.arange arrays
+        # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
+        if not (self.range_tree_nodes and not self.is_gpu and self.used_iter_vars):
+            return
+
+        kernel_body.writeline("# Define iteration variables as JAX arrays")
+
+        # Find reshape target: N-D shape whose numel matches an iteration
+        # var. Try output first (repeat/upsample), then inputs (reductions).
+        iter_lengths = OrderedSet(
+            [
+                int(e.length)
+                for e in self.range_tree_nodes.values()
+                if isinstance(e.length, (int, sympy.Integer))
+            ]
+        )
+
+        def _get_nd_shape_if_matches(buf_name):
+            buf = V.graph.try_get_buffer(buf_name)
+            if buf is None or len(buf.get_size()) <= 1:
+                return None, None
+            shape = tuple(
+                int(s) if isinstance(s, (int, sympy.Integer)) else s
+                for s in buf.get_size()
+            )
+            numel = math.prod(shape)
+            return (shape, numel) if numel in iter_lengths else (None, None)
+
+        candidate_buf_names = []
+        if ctx.output_params:
+            buf_name = ctx.output_buffer_lookup.get(ctx.output_params[0])
+            if buf_name:
+                candidate_buf_names.append(buf_name)
+        candidate_buf_names.extend(self.args.input_buffers)
+
+        reshape_target_shape, reshape_target_numel = None, None
+        for buf_name in candidate_buf_names:
+            result = _get_nd_shape_if_matches(buf_name)
+            if result[0]:
+                reshape_target_shape, reshape_target_numel = result
+                break
+
+        var_items = list(self.range_tree_nodes.items())
+
+        broadcast_vars = []
+        total_var_idx = None
+        for idx, (var_sym, entry) in enumerate(var_items):
+            length_val = self._safe_int(entry.length)
+            if length_val is not None and length_val == reshape_target_numel:
+                total_var_idx = idx
+            else:
+                broadcast_vars.append((idx, var_sym, entry, length_val))
+
+        num_broadcast_dims = len(broadcast_vars)
+
+        for idx, (var_sym, entry) in enumerate(var_items):
+            if var_sym not in self.used_iter_vars:
+                continue
+            var_name = str(var_sym)
+            length = entry.length
+            renamed_length = self.rename_indexing(length)
+            length_str = self.kexpr(renamed_length)
+            length_val = self._safe_int(length)
+
+            if length_val is None:
+                if (
+                    reshape_target_shape
+                    and num_broadcast_dims > 1
+                    and idx != total_var_idx
+                ):
+                    broadcast_idx = next(
+                        (
+                            i
+                            for i, (vidx, _, _, _) in enumerate(broadcast_vars)
+                            if vidx == idx
+                        ),
+                        None,
+                    )
+                    if broadcast_idx is not None:
+                        axis_idx = self._broadcast_axis_idx(
+                            broadcast_vars, broadcast_idx, num_broadcast_dims
+                        )
+                        shape_parts = ["1"] * num_broadcast_dims
+                        shape_parts[axis_idx] = length_str
+                        shape_str = ", ".join(shape_parts)
+                        arange = f"jnp.arange({length_str})"
+                        kernel_body.writeline(
+                            f"{var_name} = {arange}.reshape({shape_str})"
+                        )
+                        continue
+                kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
+                continue
+
+            if (
+                reshape_target_shape
+                and len(reshape_target_shape) > 1
+                and length_val == reshape_target_numel
+            ):
+                shape_str = ", ".join(str(s) for s in reshape_target_shape)
+                arange = f"jnp.arange({length_str})"
+                kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
+            elif num_broadcast_dims > 1 and idx != total_var_idx:
+                broadcast_idx = next(
+                    i for i, (vidx, _, _, _) in enumerate(broadcast_vars) if vidx == idx
                 )
-                code.writeline("_all_sizes = []")
-                for i, param in enumerate(kernel_input_params):
-                    code.writeline(f"_all_sizes.append({param}.size)")
-                code.writeline("for shape in out_shapes:")
-                code.writeline("    _numel = 1")
-                code.writeline("    for s in shape:")
-                code.writeline("        _numel *= s")
-                code.writeline("    _all_sizes.append(_numel)")
-                code.writeline("_unique_sizes = set(_all_sizes)")
-                code.writeline(
-                    "_can_pad = len(_unique_sizes) == 1 and all(s > 1 for s in _unique_sizes)"
+                axis_idx = self._broadcast_axis_idx(
+                    broadcast_vars, broadcast_idx, num_broadcast_dims
                 )
+                shape_parts = ["1"] * num_broadcast_dims
+                shape_parts[axis_idx] = length_str
+                shape_str = ", ".join(shape_parts)
+                arange = f"jnp.arange({length_str})"
+                kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
+            else:
+                kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
+
+    @staticmethod
+    def _broadcast_axis_idx(
+        broadcast_vars: list[tuple[int, Any, Any, Any]],
+        broadcast_idx: int,
+        num_broadcast_dims: int,
+    ) -> int:
+        # Axis placement depends on var types (reduction r* vs x*):
+        # - Mixed: pointwise first, reduction last for output reshape
+        # - Same-type: reverse order, first var innermost
+        has_reduction_vars = any(
+            str(v).startswith("r") for _, v, _, _ in broadcast_vars
+        )
+        has_pointwise_vars = any(
+            not str(v).startswith("r") for _, v, _, _ in broadcast_vars
+        )
+        is_mixed = has_reduction_vars and has_pointwise_vars
+        if is_mixed:
+            return broadcast_idx
+        return num_broadcast_dims - 1 - broadcast_idx
+
+    def _codegen_jit_wrapper_tma(self, ctx: _CodegenContext, kernel_arg: str) -> None:
+        code = ctx.code
+        kernel_input_params = ctx.kernel_input_params
+        output_params = ctx.output_params
+
+        # TMA automatically handles out-of-bounds accesses
+        code.writeline("# Use lax.fori_loop with TMA for automatic OOB masking")
+        code.writeline("from jax import lax")
+        code.writeline("_tile_size = 128  # Warpgroup size")
+        code.writeline("_orig_out_shapes = out_shapes")
+
+        code.writeline("_max_numel = 0")
+        for param in kernel_input_params:
+            code.writeline(f"_max_numel = max(_max_numel, {param}.size)")
+        code.writeline("for shape in out_shapes:")
+        code.writeline("    _max_numel = max(_max_numel, math.prod(shape))")
+
+        code.writeline("_num_tiles = (_max_numel + _tile_size - 1) // _tile_size")
+
+        gmem_input_params = [f"{p}_gmem" for p in kernel_input_params]
+        gmem_output_params = [f"{p}_gmem" for p in output_params]
+        smem_input_params = [f"{p}_smem" for p in kernel_input_params]
+        smem_output_params = [f"{p}_smem" for p in output_params]
+
+        code.writeline("")
+        code.writeline("# Wrapper kernel using lax.fori_loop with direct TMA")
+
+        wrapper_kernel_params = gmem_input_params + gmem_output_params
+        all_smem_params = smem_input_params + smem_output_params
+        barrier_params = [f"_barrier_{i}" for i in range(len(kernel_input_params))]
+        scratch_params = ", ".join(all_smem_params + barrier_params)
+
+        code.writeline(
+            f"def _tma_kernel({', '.join(wrapper_kernel_params)}, *, {scratch_params}):"
+        )
+        with code.indent():
+            code.writeline("")
+            code.writeline("def _tile_body(_tile_idx, _):")
+            with code.indent():
+                code.writeline("_tile_start = _tile_idx * _tile_size")
+                code.writeline("")
+
+                code.writeline("# TMA load inputs from GMEM to SMEM (OOB auto-masked)")
+                for i, (gmem_in, smem_in) in enumerate(
+                    zip(gmem_input_params, smem_input_params)
+                ):
+                    code.writeline(
+                        f"plgpu.copy_gmem_to_smem({gmem_in}.at[pl.ds(_tile_start, _tile_size)], {smem_in}, _barrier_{i})"
+                    )
 
                 code.writeline("")
-                code.writeline("if _can_pad:")
-                code.writeline("    # All tensors same size - safe to flatten and pad")
-                code.writeline("    _orig_out_shapes = out_shapes")
-                code.writeline("    _padded_inputs = []")
-                for i, param in enumerate(kernel_input_params):
-                    code.writeline(f"    _orig_size_{i} = {param}.size")
-                    code.writeline(
-                        f"    _aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
-                    )
-                    code.writeline(f"    if _orig_size_{i} != _aligned_size_{i}:")
-                    code.writeline(f"        _flat_{i} = {param}.flatten()")
-                    code.writeline(
-                        f"        _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
-                    )
-                    code.writeline(f"        _padded_inputs.append(_padded_{i})")
-                    code.writeline("    else:")
-                    code.writeline(f"        _padded_inputs.append({param}.flatten())")
+                code.writeline("# Wait for TMA loads to complete")
+                for i, _ in enumerate(gmem_input_params):
+                    code.writeline(f"plgpu.barrier_wait(_barrier_{i})")
 
-                code.writeline("    # Align output shapes to warpgroup size (128)")
-                code.writeline("    _aligned_out_specs = []")
-                code.writeline("    _is_scalar_output = []")
-                code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes):")
-                code.writeline("        _numel = 1")
-                code.writeline("        for s in shape:")
-                code.writeline("            _numel *= s")
-                code.writeline("        if _numel <= 1:")
-                code.writeline(
-                    "            _aligned_out_specs.append(jax.ShapeDtypeStruct(shape, dtype))"
-                )
-                code.writeline("            _is_scalar_output.append(True)")
-                code.writeline("        else:")
-                code.writeline(
-                    "            _aligned_numel = ((_numel + 127) // 128) * 128"
-                )
-                code.writeline(
-                    "            _aligned_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
-                )
-                code.writeline("            _is_scalar_output.append(False)")
-                code.writeline("    _aligned_out_specs = tuple(_aligned_out_specs)")
+                code.writeline("")
+                code.writeline("# Compute on SMEM tiles")
+                kernel_call_args = smem_input_params + smem_output_params
+                kernel_fn = kernel_arg.rstrip(",").strip()
+                code.writeline(f"{kernel_fn}({', '.join(kernel_call_args)})")
 
-                code.writeline("    _result = plgpu.kernel(")
-                code.writeline("        " + kernel_arg)
-                code.writeline("        out_shape=_aligned_out_specs,")
-                code.writeline("    )(*_padded_inputs)")
+                code.writeline("")
+                code.writeline(
+                    "# TMA store outputs from SMEM to GMEM (OOB auto-masked)"
+                )
+                code.writeline("plgpu.commit_smem()")
+                for gmem_out, smem_out in zip(gmem_output_params, smem_output_params):
+                    code.writeline(
+                        f"plgpu.copy_smem_to_gmem({smem_out}, {gmem_out}.at[pl.ds(_tile_start, _tile_size)])"
+                    )
+                code.writeline("plgpu.wait_smem_to_gmem(0)")
+                code.writeline("")
+                code.writeline("return None")
 
-                code.writeline("    # Remove padding from results")
-                code.writeline("    if not isinstance(_result, tuple):")
-                code.writeline("        _result = (_result,)")
-                code.writeline("    _unpadded_results = []")
-                code.writeline(
-                    "    for _res, _shape, _is_scalar in zip(_result, _orig_out_shapes, _is_scalar_output):"
-                )
-                code.writeline("        if _is_scalar:")
-                code.writeline("            _unpadded_results.append(_res)")
-                code.writeline("        else:")
-                code.writeline("            _orig_numel = 1")
-                code.writeline("            for _s in _shape:")
-                code.writeline("                _orig_numel *= _s")
-                code.writeline(
-                    "            _unpadded = _res[:_orig_numel].reshape(_shape)"
-                )
-                code.writeline("            _unpadded_results.append(_unpadded)")
-                code.writeline(
-                    "    return _unpadded_results[0] if len(_unpadded_results) == 1 else tuple(_unpadded_results)"
-                )
+            code.writeline("")
+            code.writeline("# Iterate over all tiles")
+            code.writeline("lax.fori_loop(0, _num_tiles, _tile_body, None)")
 
-                code.writeline("else:")
-                code.writeline(
-                    "    # Different sizes - check if it's a reduction (scalar output)"
-                )
-                code.writeline("    _out_numel = 1")
-                code.writeline("    for s in out_shapes[0]:")
-                code.writeline("        _out_numel *= s")
-                code.writeline("    ")
-                code.writeline("    if _out_numel <= 1:")
-                code.writeline(
-                    "        # Scalar output (reduction) - pad inputs but keep scalar output"
-                )
-                code.writeline("        _orig_out_shapes = out_shapes")
-                code.writeline("        _padded_inputs = []")
-                for i, param in enumerate(kernel_input_params):
-                    code.writeline(f"        _orig_size_{i} = {param}.size")
-                    code.writeline(
-                        f"        _aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
-                    )
-                    code.writeline(f"        if _orig_size_{i} != _aligned_size_{i}:")
-                    code.writeline(f"            _flat_{i} = {param}.flatten()")
-                    code.writeline(
-                        f"            _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
-                    )
-                    code.writeline(f"            _padded_inputs.append(_padded_{i})")
-                    code.writeline("        else:")
-                    code.writeline(
-                        f"            _padded_inputs.append({param}.flatten())"
-                    )
-                code.writeline("        ")
-                code.writeline("        # Scalar output - don't pad")
-                code.writeline("        _aligned_out_specs = tuple(")
-                code.writeline("            jax.ShapeDtypeStruct(shape, dtype)")
-                code.writeline(
-                    "            for shape, dtype in zip(out_shapes, out_dtypes)"
-                )
-                code.writeline("        )")
-                code.writeline("        ")
-                code.writeline("        _result = plgpu.kernel(")
-                code.writeline("            " + kernel_arg)
-                code.writeline("            out_shape=_aligned_out_specs,")
-                code.writeline("        )(*_padded_inputs)")
-                code.writeline("        return _result")
-                code.writeline("    else:")
-                code.writeline(
-                    "        # Non-scalar output with broadcasting - broadcast inputs to output shape"
-                )
-                code.writeline("        _target_shape = out_shapes[0]")
-                code.writeline("        _target_numel = _out_numel")
-                code.writeline("        _orig_out_shapes = out_shapes")
-                code.writeline("        ")
-                code.writeline(
-                    "        # Broadcast and flatten all inputs to target shape"
-                )
-                code.writeline("        _padded_inputs = []")
-                for i, param in enumerate(kernel_input_params):
-                    code.writeline(
-                        f"        _broadcasted_{i} = jnp.broadcast_to({param}, _target_shape).flatten()"
-                    )
-                    code.writeline(
-                        f"        _aligned_size_{i} = ((_target_numel + 127) // 128) * 128"
-                    )
-                    code.writeline(f"        if _target_numel != _aligned_size_{i}:")
-                    code.writeline(
-                        f"            _padded_{i} = jnp.pad(_broadcasted_{i}, (0, _aligned_size_{i} - _target_numel))"
-                    )
-                    code.writeline(f"            _padded_inputs.append(_padded_{i})")
-                    code.writeline("        else:")
-                    code.writeline(
-                        f"            _padded_inputs.append(_broadcasted_{i})"
-                    )
-                code.writeline("        ")
-                code.writeline("        # Align output shapes to warpgroup size (128)")
-                code.writeline("        _aligned_out_specs = []")
-                code.writeline(
-                    "        for shape, dtype in zip(out_shapes, out_dtypes):"
-                )
-                code.writeline("            _numel = 1")
-                code.writeline("            for s in shape:")
-                code.writeline("                _numel *= s")
-                code.writeline(
-                    "            _aligned_numel = ((_numel + 127) // 128) * 128"
-                )
-                code.writeline(
-                    "            _aligned_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
-                )
-                code.writeline("        _aligned_out_specs = tuple(_aligned_out_specs)")
-                code.writeline("        ")
-                code.writeline("        _result = plgpu.kernel(")
-                code.writeline("            " + kernel_arg)
-                code.writeline("            out_shape=_aligned_out_specs,")
-                code.writeline("        )(*_padded_inputs)")
-                code.writeline("        ")
-                code.writeline("        # Remove padding from results")
-                code.writeline("        if not isinstance(_result, tuple):")
-                code.writeline("            _result = (_result,)")
-                code.writeline("        _unpadded_results = []")
-                code.writeline(
-                    "        for _res, _shape in zip(_result, _orig_out_shapes):"
-                )
-                code.writeline("            _orig_numel = 1")
-                code.writeline("            for _s in _shape:")
-                code.writeline("                _orig_numel *= _s")
-                code.writeline(
-                    "            _unpadded = _res[:_orig_numel].reshape(_shape)"
-                )
-                code.writeline("            _unpadded_results.append(_unpadded)")
-                code.writeline(
-                    "        return _unpadded_results[0] if len(_unpadded_results) == 1 else tuple(_unpadded_results)"
-                )
-            else:
-                code.writeline("return pl.pallas_call(")
-                code.writeline("    " + kernel_arg)
-                code.writeline("    out_shape=out_specs,")
-                code.writeline(f"    interpret={interpret_literal},")
-                code.writeline("    grid=(1,),")
-                code.writeline(
-                    f"    input_output_aliases={{ {alias_map_literal} }},"
-                    if alias_pairs
-                    else "    input_output_aliases={},"
-                )
-                code.writeline(")(")
-                if kernel_input_params:
-                    code.writeline(f"    {', '.join(kernel_input_params)},")
-                code.writeline(")")
-
-        main_name = f"{kernel_name}_main"
+        # Build scratch_shapes dict
+        code.writeline("")
         code.writeline(
-            f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
+            "# Build SMEM scratch shapes for inputs, outputs, and TMA barriers"
+        )
+        code.writeline("_scratch_shapes = {}")
+        for i, smem_param in enumerate(smem_input_params):
+            orig_param = kernel_input_params[i]
+            code.writeline(
+                f"_scratch_shapes['{smem_param}'] = plgpu.SMEM((_tile_size,), {orig_param}.dtype)"
+            )
+        for i, smem_param in enumerate(smem_output_params):
+            code.writeline(
+                f"_scratch_shapes['{smem_param}'] = plgpu.SMEM((_tile_size,), out_dtypes[{i}])"
+            )
+        for barrier_param in barrier_params:
+            code.writeline(
+                f"_scratch_shapes['{barrier_param}'] = plgpu.Barrier(num_arrivals=1)"
+            )
+
+        code.writeline("")
+        code.writeline("# Create flattened output specs aligned to tile size")
+        code.writeline(
+            "_flat_out_specs, _ = pallas_gpu_align_output_specs(out_shapes, out_dtypes, _tile_size)"
+        )
+
+        code.writeline("")
+        code.writeline("# Call plgpu.kernel with TMA kernel")
+        code.writeline("_result = plgpu.kernel(")
+        with code.indent():
+            code.writeline("_tma_kernel,")
+            code.writeline("out_shape=_flat_out_specs,")
+            code.writeline("scratch_shapes=_scratch_shapes,")
+        code.writeline(")(")
+        for param in kernel_input_params:
+            code.writeline(f"    {param}.flatten(),")
+        code.writeline(")")
+
+        code.writeline("")
+        code.writeline("# Reshape results to original shapes")
+        code.writeline("return pallas_gpu_unpad_results(_result, _orig_out_shapes)")
+
+    def _codegen_jit_wrapper_legacy_gpu(
+        self, ctx: _CodegenContext, kernel_arg: str
+    ) -> None:
+        code = ctx.code
+        kernel_input_params = ctx.kernel_input_params
+        input_list = f"[{', '.join(kernel_input_params)}]"
+
+        # Legacy GPU path with explicit padding (use_emit_pipeline=False)
+        # Mosaic GPU requires tensor sizes to be multiples of 128.
+        # Only apply padding when all tensors have the same size (no broadcasting).
+        code.writeline("# Check if all tensors have same size (no broadcasting)")
+        code.writeline("_all_sizes = []")
+        for param in kernel_input_params:
+            code.writeline(f"_all_sizes.append({param}.size)")
+        code.writeline("for shape in out_shapes:")
+        code.writeline("    _all_sizes.append(math.prod(shape))")
+        code.writeline("_unique_sizes = set(_all_sizes)")
+        code.writeline(
+            "_can_pad = len(_unique_sizes) == 1 and all(s > 1 for s in _unique_sizes)"
+        )
+
+        code.writeline("")
+        code.writeline("if _can_pad:")
+        code.writeline("    # All tensors same size - safe to flatten and pad")
+        code.writeline(f"    _padded_inputs = pallas_gpu_pad_inputs({input_list})")
+        code.writeline(
+            "    _aligned_out_specs, _is_scalar = pallas_gpu_align_output_specs(out_shapes, out_dtypes)"
+        )
+        code.writeline("    _result = plgpu.kernel(")
+        code.writeline("        " + kernel_arg)
+        code.writeline("        out_shape=_aligned_out_specs,")
+        code.writeline("    )(*_padded_inputs)")
+        code.writeline(
+            "    return pallas_gpu_unpad_results(_result, out_shapes, _is_scalar)"
+        )
+
+        code.writeline("else:")
+        code.writeline(
+            "    # Different sizes - check if it's a reduction (scalar output)"
+        )
+        code.writeline("    _out_numel = math.prod(out_shapes[0])")
+        code.writeline("    ")
+        code.writeline("    if _out_numel <= 1:")
+        code.writeline(
+            "        # Scalar output (reduction) - pad inputs but keep scalar output"
+        )
+        code.writeline(f"        _padded_inputs = pallas_gpu_pad_inputs({input_list})")
+        code.writeline("        _aligned_out_specs = tuple(")
+        code.writeline("            jax.ShapeDtypeStruct(shape, dtype)")
+        code.writeline("            for shape, dtype in zip(out_shapes, out_dtypes)")
+        code.writeline("        )")
+        code.writeline("        _result = plgpu.kernel(")
+        code.writeline("            " + kernel_arg)
+        code.writeline("            out_shape=_aligned_out_specs,")
+        code.writeline("        )(*_padded_inputs)")
+        code.writeline("        return _result")
+        code.writeline("    else:")
+        code.writeline(
+            "        # Non-scalar output with broadcasting - broadcast inputs to output shape"
+        )
+        code.writeline("        _target_shape = out_shapes[0]")
+        code.writeline("        _broadcasted = [")
+        code.writeline(
+            f"            jnp.broadcast_to(_inp, _target_shape) for _inp in {input_list}"
+        )
+        code.writeline("        ]")
+        code.writeline("        _padded_inputs = pallas_gpu_pad_inputs(_broadcasted)")
+        code.writeline(
+            "        _aligned_out_specs, _is_scalar = pallas_gpu_align_output_specs(out_shapes, out_dtypes)"
+        )
+        code.writeline("        _result = plgpu.kernel(")
+        code.writeline("            " + kernel_arg)
+        code.writeline("            out_shape=_aligned_out_specs,")
+        code.writeline("        )(*_padded_inputs)")
+        code.writeline(
+            "        return pallas_gpu_unpad_results(_result, out_shapes, _is_scalar)"
+        )
+
+    def _codegen_jit_wrapper_cpu_tpu(
+        self,
+        ctx: _CodegenContext,
+        kernel_arg: str,
+        alias_pairs: list[tuple[int, int]],
+        alias_map_literal: str,
+    ) -> None:
+        code = ctx.code
+        code.writeline("return pl.pallas_call(")
+        code.writeline("    " + kernel_arg)
+        code.writeline("    out_shape=out_shapes_pallas,")
+        code.writeline("    out_specs=out_specs_pallas,")
+        code.writeline("    in_specs=in_specs_pallas,")
+        code.writeline(f"    interpret={ctx.interpret_literal},")
+        code.writeline("    grid=(1,),")
+        code.writeline(
+            f"    input_output_aliases={{ {alias_map_literal} }},"
+            if alias_pairs
+            else "    input_output_aliases={},"
+        )
+        code.writeline(")(")
+        if ctx.kernel_input_params:
+            code.writeline(f"    {', '.join(ctx.kernel_input_params)},")
+        code.writeline(")")
+
+    def _codegen_main_entry(self, ctx: _CodegenContext, jit_wrapper_name: str) -> None:
+        if ctx.is_tpu:
+            self._codegen_main_entry_tpu(ctx, jit_wrapper_name)
+        else:
+            self._codegen_main_entry_default(ctx, jit_wrapper_name)
+
+    def _codegen_main_entry_tpu(
+        self, ctx: _CodegenContext, jit_wrapper_name: str
+    ) -> None:
+        code = ctx.code
+        code.writeline("")
+        main_name = f"{ctx.kernel_name}_main"
+        kernel_name_str = ctx.kernel_name
+        code.writeline(
+            f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
+        )
+        with code.indent():
+            code.writeline("jax.config.update('jax_enable_x64', True)")
+            code.writeline("jax.clear_caches()")
+
+            # Build JAX placeholders for all inputs
+            code.writeline("# Build JAX placeholders for export tracing")
+            all_jax_input_names = []
+            for alias_name in ctx.alias_params:
+                code.writeline(
+                    f"{alias_name}_placeholder = jax.ShapeDtypeStruct("
+                    f"{alias_name}.shape, torch_dtype_to_jax_runtime({alias_name}.dtype))"
+                )
+                all_jax_input_names.append(f"{alias_name}_placeholder")
+            for ptr in ctx.pointer_tail:
+                code.writeline(
+                    f"{ptr}_placeholder = jax.ShapeDtypeStruct("
+                    f"{ptr}.shape, torch_dtype_to_jax_runtime({ptr}.dtype))"
+                )
+                all_jax_input_names.append(f"{ptr}_placeholder")
+
+            # Prepare output metadata
+            code.writeline(
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in ctx.output_params])
+                + ",)"
+            )
+            dtype_exprs: list[str] = []
+            for name in ctx.output_params:
+                buf_name = ctx.output_buffer_lookup.get(name)
+                if buf_name is not None:
+                    dtype = V.graph.get_dtype(buf_name)
+                    if dtype is not None:
+                        dtype_exprs.append(torch_dtype_to_jax(dtype))
+                        continue
+                dtype_exprs.append(f"torch_dtype_to_jax_runtime({name}.dtype)")
+            code.writeline("out_dtypes = (" + ", ".join(dtype_exprs) + ",)")
+
+            # Export the jit_wrapper
+            wrapper_placeholder_args = ["out_shapes", "out_dtypes"]
+            wrapper_placeholder_args.extend(ctx.size_var_params)
+            wrapper_placeholder_args.extend(all_jax_input_names)
+            code.writeline(
+                f"exported = jax.export.export("
+                f"{jit_wrapper_name}, platforms=['tpu'])"
+                f"({', '.join(wrapper_placeholder_args)})"
+            )
+
+            # Register and call via tpu_torch_pallas
+            code.writeline(
+                f"kernel_key = '{kernel_name_str}_' + "
+                f"'_'.join(str(s) for s in {ctx.output_params[0]}.shape)"
+            )
+            code.writeline(
+                f"if not tpu_torch_pallas.lookup_custom_kernel('{kernel_name_str}', kernel_key):"
+            )
+            with code.indent():
+                code.writeline(
+                    f"tpu_torch_pallas.register_custom_kernel("
+                    f"'{kernel_name_str}', kernel_key, exported.mlir_module_serialized)"
+                )
+
+            # Build input tensor list (all non-size-var inputs)
+            input_tensor_names = list(ctx.alias_params) + list(ctx.pointer_tail)
+            code.writeline(f"input_tensors = [{', '.join(input_tensor_names)}]")
+
+            # Build output shapes list
+            code.writeline("output_shape_tensors = [")
+            with code.indent():
+                for name in ctx.output_params:
+                    buf_name = ctx.output_buffer_lookup.get(name)
+                    if buf_name is not None:
+                        dtype = V.graph.get_dtype(buf_name)
+                        if dtype is not None:
+                            code.writeline(
+                                f"torch.empty({name}.shape, dtype={dtype!r}, device='tpu'),"
+                            )
+                            continue
+                    code.writeline(
+                        f"torch.empty({name}.shape, dtype={name}.dtype, device='tpu'),"
+                    )
+            code.writeline("]")
+
+            code.writeline(
+                f"results = tpu_torch_pallas.call_custom_kernel("
+                f"input_tensors, output_shape_tensors, "
+                f"'{kernel_name_str}', kernel_key)"
+            )
+
+            # Copy results to output buffers
+            for idx in ctx.copy_output_indices:
+                out_name = ctx.output_params[idx]
+                code.writeline(f"{out_name}.copy_(results[{idx}])")
+
+    def _codegen_main_entry_default(
+        self, ctx: _CodegenContext, jit_wrapper_name: str
+    ) -> None:
+        code = ctx.code
+        code.writeline("")
+        main_name = f"{ctx.kernel_name}_main"
+        code.writeline(
+            f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
         )
         with code.indent():
             code.writeline("# Enable JAX x64 mode for float64/int64 support")
             code.writeline("jax.config.update('jax_enable_x64', True)")
-            # Clear JAX caches to avoid Mosaic GPU backend state issues
             code.writeline("jax.clear_caches()")
-            if alias_params:
+            if ctx.alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
-                for alias_name in alias_params:
-                    # TODO: The `jax.device_put` path is a temporary workaround for a Mosaic compiler bug
-                    # that occurs with DLPack. Once TorchTPU provides a direct method for placing a
-                    # `torch.Tensor` on a TPU device, this should be reverted to use the
-                    #  `jax.dlpack.from_dlpack` path.
-                    if is_tpu:
-                        code.writeline(
-                            f"{alias_name}_jax = jax.device_put({alias_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
-                        )
-                    else:
-                        code.writeline(
-                            f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name}.detach())"
-                        )
+                for alias_name in ctx.alias_params:
+                    # On CPU/TPU, alias outputs may be non-contiguous (e.g.
+                    # torch.cat slices) and JAX's from_dlpack rejects
+                    # non-trivially strided tensors.  Making them contiguous
+                    # is safe because CPU/TPU already copies all results back
+                    # via copy_output_indices.  On CUDA, the donated-buffer
+                    # mechanism requires the original buffer for in-place
+                    # mutation, so we cannot make a contiguous copy.
+                    self._emit_torch_to_jax(
+                        code,
+                        alias_name,
+                        ctx.is_tpu,
+                        contiguous=ctx.interpret_is_cpu,
+                    )
             code.writeline("# Convert Torch -> JAX for in-place tensors")
-            for ptr in pointer_tail:
+            for ptr in ctx.pointer_tail:
                 if ptr.startswith("in_out_ptr"):
-                    if is_tpu:
-                        code.writeline(
-                            f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
-                        )
-                    else:
-                        code.writeline(
-                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach())"
-                        )
+                    self._emit_torch_to_jax(code, ptr, ctx.is_tpu, contiguous=False)
             code.writeline("# Convert Torch -> JAX for inputs")
-            for ptr in pointer_tail:
+            for ptr in ctx.pointer_tail:
                 if ptr.startswith("in_ptr"):
-                    if is_tpu:
-                        code.writeline(
-                            f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
-                        )
-                    elif self.use_masked_ops:
-                        # For masked ops, flatten inputs to 1D for Mosaic compatibility
-                        code.writeline(
-                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach().contiguous().flatten())"
-                        )
-                    else:
-                        code.writeline(
-                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach().contiguous())"
-                        )
+                    self._emit_torch_to_jax(code, ptr, ctx.is_tpu, contiguous=True)
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            if self.use_masked_ops:
-                # For masked ops, flatten multi-D tensors to 1D for Mosaic compatibility
-                code.writeline(
-                    "out_shapes = ("
-                    + ", ".join(
-                        [f"(math.prod({name}.shape),)" for name in output_params]
-                    )
-                    + ",)"
-                )
-            else:
-                code.writeline(
-                    "out_shapes = ("
-                    + ", ".join([f"tuple({name}.shape)" for name in output_params])
-                    + ",)"
-                )
             code.writeline(
-                "out_dtypes = ("
-                + ", ".join(
-                    [
-                        f"torch_dtype_to_jax_runtime({name}.dtype)"
-                        for name in output_params
-                    ]
-                )
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in ctx.output_params])
                 + ",)"
             )
+            dtype_exprs: list[str] = []
+            for name in ctx.output_params:
+                buf_name = ctx.output_buffer_lookup.get(name)
+                if buf_name is not None:
+                    dtype = V.graph.get_dtype(buf_name)
+                    if dtype is not None:
+                        dtype_exprs.append(torch_dtype_to_jax(dtype))
+                        continue
+                dtype_exprs.append(f"torch_dtype_to_jax_runtime({name}.dtype)")
+            code.writeline("out_dtypes = (" + ", ".join(dtype_exprs) + ",)")
             arg_name_map: dict[str, str] = {}
-            for alias_name in alias_params:
+            for alias_name in ctx.alias_params:
                 arg_name_map[alias_name] = f"{alias_name}_jax"
-            for ptr in pointer_tail:
+            for ptr in ctx.pointer_tail:
                 arg_name_map[ptr] = f"{ptr}_jax"
 
-            # Build the jit_wrapper call with size vars and tensor args
             wrapper_call_args = ["out_shapes", "out_dtypes"]
-            # Add size variable params (they're already available as locals in main)
-            wrapper_call_args.extend(size_var_params)
-            # Add tensor args (with _jax suffix)
-            wrapper_call_args.extend(arg_name_map[name] for name in kernel_input_params)
+            wrapper_call_args.extend(ctx.size_var_params)
+            wrapper_call_args.extend(
+                arg_name_map[name] for name in ctx.kernel_input_params
+            )
             code.writeline(f"res = {jit_wrapper_name}({', '.join(wrapper_call_args)})")
-            if copy_output_indices:
+            code.writeline("jax.block_until_ready(res)")
+            if ctx.copy_output_indices:
                 code.writeline(
                     "result_values = res if isinstance(res, tuple) else (res,)"
                 )
-                for idx in copy_output_indices:
-                    name = output_params[idx]
-                    if is_tpu:
-                        code.writeline(
-                            f"res_cpu = jax.device_get(result_values[{idx}])"
-                        )
-                        code.writeline(f"{name}.copy_(torch.from_dlpack(res_cpu))")
-                    elif self.use_masked_ops:
-                        # For masked ops, result is flattened, reshape back to original shape
-                        code.writeline(
-                            f"{name}.copy_(torch.from_dlpack(result_values[{idx}]).reshape({name}.shape))"
-                        )
-                    else:
-                        code.writeline(
-                            f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
-                        )
+                for idx in ctx.copy_output_indices:
+                    out_name = ctx.output_params[idx]
+                    code.writeline(
+                        f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                    )
 
-        return code.getvalue()
+    @staticmethod
+    def _emit_torch_to_jax(
+        code: IndentedBuffer, var_name: str, is_tpu: bool, *, contiguous: bool
+    ) -> None:
+        suffix = ".detach().contiguous()" if contiguous else ".detach()"
+        code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})")
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""

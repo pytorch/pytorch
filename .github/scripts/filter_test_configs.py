@@ -651,6 +651,9 @@ def main() -> None:
     # quickly check it without the need to parse the JSON string
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
 
+    # Save the labels from the PR, so that we can use it later
+    set_output("labels", json.dumps(list(labels)))
+
 
 if __name__ == "__main__":
     main()

@@ -112,6 +112,7 @@
 #include <ATen/ops/linalg_tensorsolve_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/linalg_vector_norm_native.h>
+#include <ATen/ops/linalg__powsum_native.h>
 #include <ATen/ops/log2.h>
 #include <ATen/ops/logdet_native.h>
 #include <ATen/ops/matmul.h>
@@ -2879,6 +2880,87 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
 
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
   norm_stub(iter.device_type(), iter, ord);
+}
+
+// linalg__powsum: computes sum(|x|^ord) - the "power sum" without the final root
+// This is useful for distributed computing where we want to reduce partial
+// power sums across shards before taking the final root.
+Tensor linalg__powsum(
+    const Tensor& self,
+    const Scalar& scalar_ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  auto ord = scalar_ord.toDouble();
+  auto dim = opt_dim.value_or(IntArrayRef{});
+  auto size = self.sizes();
+  auto ndim = self.dim();
+
+  auto opt_dim_ = dim.vec();
+  maybe_wrap_dims(opt_dim_, ndim);
+
+  using Int = IntArrayRef::value_type;
+  std::vector<Int> all_dim(ndim);
+  std::iota(all_dim.begin(), all_dim.end(), 0);
+
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  auto reduce_dim = is_all_reduce ? all_dim : opt_dim_;
+
+  // Compute output dtype (same logic as vector_norm)
+  auto compute_dtype = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true);
+
+  // Create output tensor with the correct shape
+  auto result = create_reduction_result(self, opt_dim, keepdim, toRealValueType(compute_dtype));
+
+  if (result.numel() == 0) {
+    result.zero_();
+    return result;
+  }
+
+  // Check if reducing over dimensions that all have size 1
+  bool is_reduce_over_1D_vector = true;
+  for (auto i : reduce_dim) {
+    if (size[i] != 1) {
+      is_reduce_over_1D_vector = false;
+      break;
+    }
+  }
+
+  // Handle dtype conversion only when reducing over 1D
+  // (otherwise the kernel handles it via the result dtype)
+  Tensor self_;
+  if (is_reduce_over_1D_vector && opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = self;
+  }
+
+  auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());
+  powsum_stub(iter.device_type(), iter, ord);
+  return result;
+}
+
+// linalg__powsum_slow: fallback implementation for backends without optimized kernels
+// Computes sum(|x|^ord) using basic ops
+Tensor linalg__powsum_slow(
+    const Tensor& self,
+    const Scalar& scalar_ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  // Handle dtype conversion
+  Tensor self_;
+  if (opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true) != self.scalar_type()
+        ? self.to(at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true))
+        : self;
+  }
+
+  // Compute |x|^ord and sum
+  auto abs_pow = at::pow(at::abs(self_), scalar_ord);
+  return at::sum(abs_pow, opt_dim, keepdim, toRealValueType(abs_pow.scalar_type()));
 }
 
 static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, std::optional<ScalarType> opt_dtype, bool low_precision) {

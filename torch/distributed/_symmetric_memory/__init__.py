@@ -1879,6 +1879,26 @@ if TYPE_CHECKING:
     from torch.types import _device, _dtype, _int
 
 
+_use_implicit_mempool: bool | None = None  # type: ignore[assignment]
+
+
+def _should_use_implicit_mempool() -> bool:
+    r"""
+    Check if the implicit memory pool should be used for symmetric memory allocations.
+
+    Returns:
+        bool: True if the implicit memory pool should be used, False otherwise.
+
+    By default, use implicit memory pool for `symm_mem.empty`.  Users can
+    disable this by setting the environment variable `TORCH_SYMMMEM_IMPLICIT_POOL` to `0`.
+    """
+    global _use_implicit_mempool
+    if _use_implicit_mempool is None:
+        _use_implicit_mempool = os.getenv("TORCH_SYMMMEM_IMPLICIT_POOL", "1") == "1"
+
+    return _use_implicit_mempool
+
+
 @overload
 def empty(
     *size: _int, dtype: _dtype | None = None, device: _device | None = None
@@ -1927,13 +1947,20 @@ def empty(  # type: ignore[misc]
 
     if device is None:
         device = torch.get_default_device()
+    else:
+        device = torch.device(device)
 
-    return _SymmetricMemory.empty_strided_p2p(
-        size=size,
-        stride=torch._prims_common.make_contiguous_strides_for(size),
-        dtype=dtype,
-        device=torch.device(device),
-    )
+    stride = torch._prims_common.make_contiguous_strides_for(size)
+
+    if _should_use_implicit_mempool() and device.type == "cuda":
+        # Allocate tensor from an implicit memory pool
+        mempool = get_mem_pool(device)
+        # TODO: this path can be made device-agnostic if `use_mem_pool` is
+        # elevated from torch.cuda to torch accelerator.
+        with torch.cuda.use_mem_pool(mempool):
+            return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
+    else:
+        return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
 
 def rendezvous(
@@ -2109,6 +2136,50 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
         )
 
     return _symm_mem_pools[device]
+
+
+# One-sided communication APIs.
+def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
+    r"""
+    put_signal(src, hdl, peer) -> None
+
+    Put data to a peer's symmetric memory and signal the peer.
+
+    Args:
+        src (torch.Tensor): the source tensor to read data from.
+        hdl (SymmetricMemory): the symmetric memory to put data to.
+        peer (int): the peer to put data to.
+    """
+    backend = get_backend(src.device)
+    # `hdl` is a pybind `_SymmetricMemory` object. Dispatcher expects the
+    # TorchBind custom class type `__torch__.torch.classes.c10d.SymmetricMemory`.
+    # Convert via `.boxed()`.
+    hdl_boxed = hdl.boxed() if hasattr(hdl, "boxed") else hdl
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_put_signal(src, hdl_boxed, peer)
+    # TODO: other backends' dispatch goes here
+    else:
+        raise ValueError(f"put_signal: unsupported backend: {backend}")
+
+
+def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
+    r"""
+    wait_signal(hdl, peer) -> None
+
+    Wait for a signal from a peer.
+
+    Args:
+        hdl (SymmetricMemory): the symmetric memory handle on which to wait for a signal.
+        peer (int): the peer to wait for a signal from.
+    """
+    backend = get_backend(hdl.device)
+    # See note in `put_signal` about `_SymmetricMemory` vs TorchBind type.
+    hdl_boxed = hdl.boxed() if hasattr(hdl, "boxed") else hdl
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_wait_signal(hdl_boxed, peer)
+    # TODO: other backends' dispatch goes here
+    else:
+        raise ValueError(f"wait_signal: unsupported backend: {backend}")
 
 
 __all__ = [
