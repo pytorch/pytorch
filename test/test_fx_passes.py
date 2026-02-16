@@ -240,6 +240,52 @@ class TestPartitionFunctions:
         a0, a1 = torch.ops.aten.var_mean(a)
         return a0
 
+    @staticmethod
+    def forward19(a, b, c):
+        # multiple outputs at different depths; relu/sigmoid are unsupported
+        shallow = operator.add(a, 1)
+        blocked = b.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked, blocked_2)
+        # return the unsupported node too, to keep depth calculation honest
+        return shallow, blocked, deep
+
+    @staticmethod
+    def forward20(a, b, c):
+        # single-input variant: blocked node feeds both output and deeper user
+        shallow = operator.add(a, 1)
+        blocked = a.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked, blocked_2)
+        return shallow, blocked, deep
+
+    @staticmethod
+    def forward21(a, b, c):
+        # multi-input variant: shallow path is independent of blocked path depth
+        shallow = operator.add(a, 1)
+        blocked = b.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked_2, shallow)
+        return shallow, blocked, deep
+
+    @staticmethod
+    def forward22(a, b, c):
+        # single-input, two-output case with deeper unsupported fan-out
+        base = operator.add(a, a)
+        blocked = a.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked, blocked_2)
+        return base, deep
+
+    @staticmethod
+    def forward23(a, b, c):
+        # multi-input, two-output case mirroring residual-style skip + blocked path
+        base = operator.add(a, b)
+        blocked = c.relu()
+        blocked_2 = blocked.sigmoid()
+        deep = operator.add(blocked, blocked_2)
+        return base, deep
+
 @torch.fx.wrap
 def _nested_tuple_producer(x):
     """Returns a nested tuple structure: (x+1, (x+2, x+3))"""
@@ -308,6 +354,16 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward16, [['add_1', 'add', 'permute_1', 'view', 'permute_2', 'permute_3', 'permute']], False),
         # should be empty partition, not a partition with empty nodes
         (TestPartitionFunctions.forward18, [], False),
+        # multi-output graph where depth must account for the farthest user
+        (TestPartitionFunctions.forward19, [["add_1", "add"]], False),
+        # single-input multi-output with deeper unsupported fan-out
+        (TestPartitionFunctions.forward20, [["add_1", "add"]], False),
+        # multi-input multi-output combination
+        (TestPartitionFunctions.forward21, [["add_1", "add"]], False),
+        # single-input two-output combination
+        (TestPartitionFunctions.forward22, [["add_1", "add"]], False),
+        # multi-input two-output combination
+        (TestPartitionFunctions.forward23, [["add_1", "add"]], False),
     ])
     def test_partitioner(self, fn, expected_partition, bookend_non_compute_pass):
         traced = symbolic_trace(fn)
@@ -339,6 +395,29 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
+
+    def test_partitioner_skips_fast_stop_on_unrelated_deep_unsupporteds(self):
+        def fn(a, b):
+            base = operator.add(a, b)
+            blocked = base.relu()
+            blocked = blocked.relu()
+            blocked = blocked.relu()
+            _ = blocked.relu()
+            return operator.add(base, b)
+
+        gm = symbolic_trace(fn)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            gm,
+            supported_ops,
+            allows_single_node_partition=True,
+        )
+
+        partitions = partitioner.propose_partitions()
+        assert(len(partitions) == 1)
+        nodes_names = [node.name for node in list(partitions)[0].nodes]
+        assert nodes_names == ["add", "add_1"], f"Unexpected partition nodes: {nodes_names}"
 
     @parametrize("fn, expected_partition", [
         (TestPartitionFunctions.forward17, [['add', 'add_1', 'add_2']]),
