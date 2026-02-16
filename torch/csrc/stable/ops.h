@@ -786,12 +786,18 @@ inline torch::stable::Tensor from_blob(
 /// @param storage_offset The offset into the data buffer. Defaults to 0.
 /// @param layout The memory layout. Defaults to Strided.
 /// @return A tensor backed by the provided data.
+
+// The enable_if_t part below ensures that:
+// 1. The other, simpler from_blob is called if the deleter is compatible
+//    with it (i.e. if it can be converted to DeleterFnPtr).
+// 2. Non-callable types (like int) don't accidentally match this template
+//    when passed as storage_offset.
 template <
     class F,
-    // The enable_if_t part below ensures that the other, simpler from_blob is
-    // called if the deleter is compatible with it (i.e. if it can be converted
-    // to DeleterFnPtr)
-    std::enable_if_t<!std::is_convertible_v<F, DeleterFnPtr>, int> = 0>
+    std::enable_if_t<
+        !std::is_convertible_v<F, DeleterFnPtr> &&
+            std::is_invocable_v<F, void*>,
+        int> = 0>
 inline torch::stable::Tensor from_blob(
     void* data,
     torch::headeronly::IntHeaderOnlyArrayRef sizes,
