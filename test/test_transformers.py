@@ -2125,12 +2125,16 @@ class TestSDPA(NNTestCase):
             (0, 0, 0, 0),    # all zeros
         ]
         for b, h, s, d in zero_size_configs:
-            q = torch.zeros(b, h, s, d, dtype=dtype, device=device)
-            k = torch.zeros(b, h, s, d, dtype=dtype, device=device)
-            v = torch.zeros(b, h, s, 32, dtype=dtype, device=device)
+            q = torch.zeros(b, h, s, d, dtype=dtype, device=device, requires_grad=True)
+            k = torch.zeros(b, h, s, d, dtype=dtype, device=device, requires_grad=True)
+            v = torch.zeros(b, h, s, 32, dtype=dtype, device=device, requires_grad=True)
             out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
             self.assertEqual(out.shape, (b, h, s, 32))
             self.assertEqual(out, torch.zeros(b, h, s, 32, dtype=dtype, device=device))
+            out.sum().backward()
+            self.assertEqual(q.grad.shape, q.shape)
+            self.assertEqual(k.grad.shape, k.shape)
+            self.assertEqual(v.grad.shape, v.shape)
 
 
 class TestSDPACpuOnly(NNTestCase):
