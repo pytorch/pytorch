@@ -1881,6 +1881,47 @@ class TestViewOps(DTensorTestBase):
                         )
 
     @with_comms
+    def test_dtensor_unflatten_ss_and_s_same_dim(self):
+        """Test unflatten when _StridedShard and Shard both shard the same tensor dim.
+
+        Flattening [Shard(1), Shard(0)] produces [_StridedShard(0, F), Shard(0)]
+        where both mesh dims shard dim 0. Unflattening that dim should preserve
+        both placements on the same output dim.
+        """
+        mesh = init_device_mesh(self.device_type, (3, self.world_size // 3))
+
+        # [4, 6, 3] with [Shard(1), Shard(0)] on mesh (3, 2):
+        #   mesh_dim 0: Shard(1), dim 1 (6) / 3 = 2
+        #   mesh_dim 1: Shard(0), dim 0 (4) / 2 = 2
+        global_tensor = torch.arange(4 * 6 * 3).view(4, 6, 3)
+        inps = distribute_tensor(global_tensor, mesh, [Shard(1), Shard(0)])
+
+        # Flatten dims 0,1 → [24, 3] with [_StridedShard(0, 4), Shard(0)]
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            flattened = inps.flatten(0, 1)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(flattened.shape, (24, 3))
+        self.assertIsInstance(flattened.placements[0], _StridedShard)
+        self.assertEqual(flattened.placements[0].split_factor, 4)
+        self.assertIsInstance(flattened.placements[1], Shard)
+
+        # Unflatten dim 0 (24) → (12, 2): both mesh dims stay on output dim 0
+        expected_placements = (_StridedShard(0, split_factor=4), Shard(0))
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            unflattened = flattened.view(12, 2, 3)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(unflattened.placements, expected_placements)
+        expected_local = distribute_tensor(
+            torch.arange(4 * 6 * 3).view(12, 2, 3),
+            mesh,
+            expected_placements,
+            src_data_rank=None,
+        )._local_tensor
+        self.assertEqual(unflattened._local_tensor, expected_local)
+
+    @with_comms
     def test_view_redistribution(self):
         """
         This test is added to demonstrate "incorrect" view ops behavior if redistribution happens.
