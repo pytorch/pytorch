@@ -41,7 +41,7 @@ jobs:
   get-label-type:
     if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@release/2.11
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -433,7 +433,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -455,7 +454,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -463,7 +462,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -549,7 +548,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -571,7 +569,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -579,7 +577,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -654,9 +652,9 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@release/2.11
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.11
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -665,7 +663,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -676,7 +673,7 @@ jobs:
         working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -684,7 +681,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1100,7 +1097,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1122,7 +1118,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -1130,7 +1126,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1216,7 +1212,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1238,7 +1233,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -1246,7 +1241,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1321,9 +1316,9 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@release/2.11
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.11
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1332,7 +1327,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1343,7 +1337,7 @@ jobs:
         working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -1351,7 +1345,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1767,7 +1761,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1789,7 +1782,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -1797,7 +1790,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1883,7 +1876,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -1905,7 +1897,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -1913,7 +1905,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -1988,9 +1980,9 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@release/2.11
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.11
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1999,7 +1991,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -2010,7 +2001,7 @@ jobs:
         working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -2018,7 +2009,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -2434,7 +2425,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -2456,7 +2446,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -2464,7 +2454,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -2550,7 +2540,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -2572,7 +2561,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -2580,7 +2569,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -2655,9 +2644,9 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@release/2.11
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.11
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2666,7 +2655,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -2677,7 +2665,7 @@ jobs:
         working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -2685,7 +2673,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3101,7 +3089,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3123,7 +3110,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -3131,7 +3118,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3217,7 +3204,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3239,7 +3225,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -3247,7 +3233,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3322,9 +3308,9 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@release/2.11
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.11
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3333,7 +3319,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3344,7 +3329,7 @@ jobs:
         working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -3352,7 +3337,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3768,7 +3753,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3790,7 +3774,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -3798,7 +3782,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3884,7 +3868,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -3906,7 +3889,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -3914,7 +3897,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -3989,9 +3972,9 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@release/2.11
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.11
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4000,7 +3983,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -4011,7 +3993,7 @@ jobs:
         working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -4019,7 +4001,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -4435,7 +4417,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -4457,7 +4438,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -4465,7 +4446,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -4551,7 +4532,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -4573,7 +4553,7 @@ jobs:
           role-duration-seconds: 18000
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -4581,7 +4561,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
@@ -4656,9 +4636,9 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+        uses: pytorch/pytorch/.github/actions/setup-xpu@release/2.11
       - name: Login to ECR
-        uses: pytorch/pytorch/.github/actions/ecr-login@main
+        uses: pytorch/pytorch/.github/actions/ecr-login@release/2.11
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4667,7 +4647,6 @@ jobs:
       - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           show-progress: false
@@ -4678,7 +4657,7 @@ jobs:
         working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.11
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
           docker-image-name: manylinux2_28-builder
@@ -4686,7 +4665,7 @@ jobs:
           docker-build-dir: .ci/docker
           working-directory: pytorch
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.11
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
