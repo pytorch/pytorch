@@ -139,7 +139,9 @@ include_dir = [
     get_python_include_dir(),
     os.path.join(PYTORCH_ROOT, "third_party/pybind11/include"),
     PYTORCH_ROOT,
-] + clang_search_dirs()
+] + clang_search_dirs() + [
+    os.path.join(PYTORCH_ROOT, "tools/linter/clang_tidy/shims"),
+]
 for dir in include_dir:
     include_args += ["--extra-arg", f"-I{dir}"]
 
