@@ -2331,19 +2331,29 @@ def forward(self, arg0_1):
                 x_2d = torch.randn(2, 4, pin_memory=pin_memory)
 
                 # view_copy special case
-                result = functionalize(lambda t: t.view(-1), remove="mutations_and_views")(x)
+                result = functionalize(
+                    lambda t: t.view(-1), remove="mutations_and_views"
+                )(x)
                 self.assertEqual(result.is_pinned(), pin_memory)
 
                 # Single tensor return (squeeze_copy, transpose_copy)
-                result = functionalize(lambda t: t.squeeze(), remove="mutations_and_views")(x)
+                result = functionalize(
+                    lambda t: t.squeeze(), remove="mutations_and_views"
+                )(x)
                 self.assertEqual(result.is_pinned(), pin_memory)
-                result = functionalize(lambda t: t.transpose(0, 1), remove="mutations_and_views")(x_2d)
+                result = functionalize(
+                    lambda t: t.transpose(0, 1), remove="mutations_and_views"
+                )(x_2d)
                 self.assertEqual(result.is_pinned(), pin_memory)
 
                 # List of tensors return (split_copy, unbind_copy)
-                for r in functionalize(lambda t: t.split(2), remove="mutations_and_views")(x):
+                for r in functionalize(
+                    lambda t: t.split(2), remove="mutations_and_views"
+                )(x):
                     self.assertEqual(r.is_pinned(), pin_memory)
-                for r in functionalize(lambda t: t.unbind(0), remove="mutations_and_views")(x_2d):
+                for r in functionalize(
+                    lambda t: t.unbind(0), remove="mutations_and_views"
+                )(x_2d):
                     self.assertEqual(r.is_pinned(), pin_memory)
 
 
