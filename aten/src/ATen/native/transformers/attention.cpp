@@ -729,10 +729,11 @@ Tensor scaled_dot_product_attention(
   // NB: This op is CompositeImplicitAutograd — autograd traces through the
   // implementation rather than using an explicit backward formula. We must
   // return early here because the scale computation (1/sqrt(head_dim)) is
-  // undefined when head_dim is 0, and backends don't handle zero-element
-  // tensors. We use the sum()*0 trick (same pattern as _batch_norm_impl_index
-  // in Normalization.cpp) to make the output depend on all inputs so that
-  // backward() produces correctly-shaped zero gradients instead of None.
+  // undefined when head_dim is 0, and backends don't uniformly handle
+  // zero-element tensors. We use the sum()*0 trick (same pattern as
+  // _batch_norm_impl_index in Normalization.cpp) to make the output depend
+  // on all inputs so that backward() produces correctly-shaped zero
+  // gradients instead of None.
   if (query_.sym_numel() == 0 || key.sym_numel() == 0 || value.sym_numel() == 0) {
     auto output_shape = query_.sym_sizes().vec();
     output_shape[output_shape.size() - 1] = value.sym_size(-1);
