@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <type_traits>
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/csrc/stable/c/shim.h>
@@ -765,6 +766,70 @@ inline torch::stable::Tensor from_blob(
       nullptr,
       0,
       deleter));
+  return torch::stable::Tensor(ath);
+}
+
+/// Creates a tensor from an existing data blob with a generic callable deleter.
+///
+/// This overload accepts any callable (including capturing lambdas) as the
+/// deleter. The callable is heap-allocated and passed through the C ABI as a
+/// void* context pointer, then invoked and deleted when the tensor's storage
+/// is deallocated.
+///
+/// Minimum compatible version: PyTorch 2.11.
+///
+/// @tparam F The callable type. Must be invocable with (void*).
+/// @param data Pointer to the data buffer.
+/// @param sizes The size of each dimension of the tensor.
+/// @param strides The stride for each dimension.
+/// @param device The device where the data resides.
+/// @param dtype The scalar type of the data.
+/// @param deleter Callable to invoke when the tensor is deallocated.
+/// @param storage_offset The offset into the data buffer. Defaults to 0.
+/// @param layout The memory layout. Defaults to Strided.
+/// @return A tensor backed by the provided data.
+template <
+    class F,
+    std::enable_if_t<!std::is_convertible_v<F, DeleterFnPtr>, int> = 0>
+inline torch::stable::Tensor from_blob(
+    void* data,
+    torch::headeronly::IntHeaderOnlyArrayRef sizes,
+    torch::headeronly::IntHeaderOnlyArrayRef strides,
+    torch::stable::Device device,
+    torch::headeronly::ScalarType dtype,
+    F deleter,
+    int64_t storage_offset = 0,
+    torch::headeronly::Layout layout = torch::headeronly::Layout::Strided) {
+  auto shim_dtype =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(dtype));
+  auto shim_device_type = torch::stable::detail::to<int32_t>(
+      torch::stable::detail::from(device.type()));
+  auto shim_layout =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout));
+
+  F* ctx = new F(std::move(deleter));
+  auto callback = [](void* data, void* raw_ctx) {
+    F* func = static_cast<F*>(raw_ctx);
+    (*func)(data);
+    delete func;
+  };
+
+  AtenTensorHandle ath;
+  TORCH_ERROR_CODE_CHECK(torch_from_blob_v2(
+      data,
+      sizes.size(),
+      sizes.data(),
+      strides.data(),
+      storage_offset,
+      shim_dtype,
+      shim_device_type,
+      device.index(),
+      &ath,
+      shim_layout,
+      nullptr,
+      0,
+      callback,
+      static_cast<void*>(ctx)));
   return torch::stable::Tensor(ath);
 }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
