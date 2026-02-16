@@ -3415,6 +3415,7 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/CUDAEvent.h", "c10/hip/HIPEvent.h"),
     ("c10/cuda/impl/CUDAGuardImpl.h", "c10/hip/impl/HIPGuardImpl.h"),
     ("c10/cuda/impl/CUDATest.h", "c10/hip/impl/HIPTest.h"),
+    ("CUDATest.hpp", "HIPTest.hpp"),
     ("c10/cuda/impl/cuda_cmake_macros.h", "c10/hip/impl/hip_cmake_macros.h"),
     # TODO: Remove these. They were necessary for Meta-internal builds.
     ("c10::hip::c10_hip_check_implementation", "c10::cuda::c10_cuda_check_implementation"),
