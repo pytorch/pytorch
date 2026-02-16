@@ -220,7 +220,6 @@ from .functions import (
     TritonKernelVariable,
     TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
-    UserMethodVariable,
     WrapperUserFunctionVariable,
 )
 from .higher_order_ops import (
@@ -1462,31 +1461,6 @@ class VariableBuilder:
             )
             self.tx.output.side_effects.track_object_existing(value, result)
             return result
-        elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
-        ):
-            # don't let MethodTypes fall through to UserDefinedObject,
-            # which doesn't support 'CALL_FUNCTION'
-
-            # TODO(whc): Why do we limit this to methods on NNModules?
-            # I don't have a good reason for this, but it preserves the existing behavior
-            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
-            # I suspect we probably want to relax this check and dig deeper there.
-
-            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
-            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
-            # and then `__func__` gets wrapped inside UserMethodVariable.
-            self_obj = VariableBuilder(
-                self.tx, source=AttrSource(self.source, "__self__")
-            )(value.__self__)
-            assert self_obj and isinstance(self_obj, VariableTracker), (
-                "Failed to produce a valid self obj"
-            )
-            return UserMethodVariable(
-                value.__func__,
-                self_obj,
-                source=self.source,
-            )
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
