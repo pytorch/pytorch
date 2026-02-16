@@ -270,7 +270,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             )
 
             def inplace_add(input: torch.Tensor, output: torch.Tensor) -> None:
-                assert input.device == output.device
+                if input.device != output.device:
+                    raise AssertionError(
+                        f"Expected input.device == output.device, "
+                        f"got {input.device} vs {output.device}"
+                    )
                 output.add_(input)
 
             lib.impl("inplace_add", inplace_add, "CompositeExplicitAutograd")
@@ -1114,7 +1118,6 @@ def forward(self, tangents_1, tangents_token):
             )
 
     def test_with_effects_through_functional_tensor_mode(self):
-        """Test that with_effects can flow through FunctionalTensorMode."""
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
             FunctionalTensorMode,
