@@ -98,6 +98,22 @@ TEST(XPUStreamTest, StreamBehavior) {
   EXPECT_NE(stream.device_index(), c10::xpu::current_device());
 }
 
+TEST(XPUStreamTest, GenericStream) {
+  if (!has_xpu()) {
+    return;
+  }
+  c10::xpu::XPUStream xpu_stream = c10::xpu::getStreamFromPool();
+  c10::Stream generic_stream = xpu_stream.unwrap();
+  c10::xpu::XPUStream wrapped_stream = c10::xpu::XPUStream(generic_stream);
+  EXPECT_EQ(xpu_stream, wrapped_stream);
+  EXPECT_EQ(
+      (sycl::queue*)xpu_stream,
+      reinterpret_cast<sycl::queue*>(generic_stream.native_handle()));
+  EXPECT_EQ(
+      &(xpu_stream.queue()),
+      reinterpret_cast<sycl::queue*>(generic_stream.native_handle()));
+}
+
 static void thread_fun(std::optional<c10::xpu::XPUStream>& cur_thread_stream) {
   auto new_stream = c10::xpu::getStreamFromPool();
   c10::xpu::setCurrentXPUStream(new_stream);

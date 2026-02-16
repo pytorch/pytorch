@@ -102,11 +102,11 @@ mobilenet_v2_quantized_qat,eager_fail_to_run,0
 
 
 
-mobilenet_v3_large,pass,0
+mobilenet_v3_large,pass,7
 
 
 
-moco,pass,10
+moco,pass,13
 
 
 

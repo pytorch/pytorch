@@ -50,6 +50,7 @@ from .autotune_process import (
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
     TritonGPUBenchmarkRequest,
+    use_pipelined_autotuning,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
@@ -93,6 +94,7 @@ from .utils import (
     triton_type,
     triton_type_to_torch,
     unique,
+    use_aten_gemm_kernels,
 )
 from .virtualized import V
 
@@ -416,6 +418,7 @@ class TritonTemplateKernel(TritonKernel):
         workspace_arg: Optional[WorkspaceArg] = None,
         prologue_loads_all_inputs=False,
         hint_override: Optional[int] = None,
+        triton_meta: Optional[dict[str, object]] = None,
     ) -> None:
         if tma_store:
             pass
@@ -485,7 +488,7 @@ class TritonTemplateKernel(TritonKernel):
         # pyrefly: ignore [invalid-type-var]
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
-        self.triton_meta: Optional[dict[str, object]] = None
+        self.triton_meta: Optional[dict[str, object]] = triton_meta
         # For Templated Attention this can be a list of ir.Subgraph
         self.subgraphs: Optional[list[ir.ComputedBuffer]] = subgraphs
 
@@ -683,7 +686,10 @@ class TritonTemplateKernel(TritonKernel):
             if v := self.meta.get(k, None):
                 triton_meta[k] = v
 
-        self.triton_meta = triton_meta
+        if self.triton_meta is None:
+            self.triton_meta = triton_meta
+        else:
+            self.triton_meta.update(triton_meta)
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
@@ -702,7 +708,7 @@ class TritonTemplateKernel(TritonKernel):
         template_args = f"""
             num_stages={self.num_stages},
             num_warps={self.num_warps},
-            triton_meta={triton_meta!r},
+            triton_meta={self.triton_meta!r},
             inductor_meta={inductor_meta!r},
         """
 
@@ -1058,7 +1064,13 @@ class TritonTemplateKernel(TritonKernel):
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
-            output_index = input_node.make_indexer()(index_symbols)
+            if isinstance(input_node.layout, ir.FlexibleLayout):
+                # This will set a layout constraint on the template
+                self.get_stride_and_maybe_freeze_layout(input_node)
+                with patch.object(ir.FlexibleLayout, "allow_indexing", True):
+                    output_index = input_node.make_indexer()(index_symbols)
+            else:
+                output_index = input_node.make_indexer()(index_symbols)
 
             # in def_kernel above we define the inputs with the storage offset adjusted
             # creating the load in input_node.make_indexer() will also adjust by storage offset
@@ -1553,7 +1565,40 @@ class TritonTemplateKernel(TritonKernel):
         ]
 
     def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
-        node.data.freeze_layout()
+        """
+        Get the stride of an input node for template code generation, with deferred
+        layout freezing:
+        - If the layout is FlexibleLayout, compute speculative strides without freezing
+        - Record the expected layout (as FixedLayout) as a constraint for later validation
+        - Only freeze at finalization time after validating no conflicts exist
+
+        Scheduler falls back to aten if layout constraint violated. If no aten,
+        freeze right away.
+        """
+        # realizing for safety
+        ir.ExternKernel.realize_input(node)
+        layout = node.data.layout
+        node_name = node.get_name()
+
+        if isinstance(layout, ir.FlexibleLayout):
+            if not use_aten_gemm_kernels():
+                # No ExternKernel fallback available, freeze immediately
+                node.data.freeze_layout()
+            else:
+                # Compute what strides WOULD be if frozen, without actually freezing
+                fixed_layout_copy = layout.get_fixed_layout_without_freezing()
+                # Save to graph-level constraints instead of per-kernel
+                existing = V.graph.buffer_layout_constraints.get(node_name)
+                if existing is not None and existing != fixed_layout_copy:
+                    raise AssertionError(
+                        f"Layout constraint mismatch for {node_name}: "
+                        f"existing {existing} vs new {fixed_layout_copy}"
+                    )
+                else:
+                    V.graph.buffer_layout_constraints[node_name] = fixed_layout_copy
+
+                return list(fixed_layout_copy.stride)
+        # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
 
 
@@ -1623,6 +1668,7 @@ class GeneratedCodeCache:
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
         hint_override: Optional[int] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
     ) -> Optional[str]:
         def layout_key(layout: ir.Layout) -> str:
             assert not isinstance(layout, ir.FlexibleLayout)
@@ -1676,6 +1722,7 @@ class GeneratedCodeCache:
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
+                "triton_meta": triton_meta,
             }
         )
 
@@ -1790,6 +1837,7 @@ class TritonTemplate(KernelTemplate):
         hint_override: Optional[int] = None,
         tma_store: bool = False,
         transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
     ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -1816,6 +1864,8 @@ class TritonTemplate(KernelTemplate):
                 num_consumer_groups,
                 num_buffers_warp_spec,
                 kwargs,
+                hint_override,
+                triton_meta,
             )
 
         assert self.template, "requires jinja2"
@@ -1871,6 +1921,7 @@ class TritonTemplate(KernelTemplate):
                 hint_override=hint_override,
                 tma_store=tma_store,
                 transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+                triton_meta=triton_meta,
                 **kernel_options,
             )
 
@@ -1992,6 +2043,7 @@ class TritonTemplate(KernelTemplate):
         hint_override: Optional[int] = None,
         tma_store: bool = False,
         transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
+        triton_meta: Optional[dict[str, Any]] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -2039,6 +2091,7 @@ class TritonTemplate(KernelTemplate):
             hint_override=hint_override,
             tma_store=tma_store,
             transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+            triton_meta=triton_meta,
         )
 
         # May happen as result of dev by 0.
@@ -2114,6 +2167,7 @@ class TritonTemplate(KernelTemplate):
                 hint_override=hint_override,
                 tma_store=tma_store,
                 transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
+                triton_meta=triton_meta,
                 **options,
             )
             render = functools.partial(
@@ -2156,6 +2210,21 @@ class TritonTemplate(KernelTemplate):
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
+        # Convolution-specific parameters to include in logging
+        CONV_TUNABLE_KEYS = [
+            "KERNEL_H",
+            "KERNEL_W",
+            "KERNEL_D",
+            "STRIDE_H",
+            "STRIDE_W",
+            "STRIDE_D",
+            "PADDING_H",
+            "PADDING_W",
+            "PADDING_D",
+            "GROUPS",
+            "UNROLL",
+        ]
+
         return TritonTemplateCaller(
             kernel_hash_name,
             codegen_input_nodes,
@@ -2184,6 +2253,7 @@ class TritonTemplate(KernelTemplate):
                     for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
                     if k in kwargs
                 },
+                **{k: kwargs[k] for k in CONV_TUNABLE_KEYS if k in kwargs},
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
@@ -2545,6 +2615,15 @@ def get_flex_attention_log_filename() -> Optional[str]:
     return str(Path(flex_attention_file_name).with_suffix(".json"))
 
 
+@functools.cache
+def get_conv_log_filename() -> Optional[str]:
+    conv_file_name = os.environ.get("TORCHINDUCTOR_CONV_LOGGING_FILE", None)
+    if not conv_file_name:
+        return None
+
+    return str(Path(conv_file_name).with_suffix(".json"))
+
+
 def append_to_log(filename, data):
     lock_file = filename.replace(".json", ".lock")
     lock = FileLock(lock_file)
@@ -2746,6 +2825,102 @@ def filter_choices_by_desc_regex(choices: list[ChoiceCaller]) -> list[ChoiceCall
     return choices
 
 
+def _classify_kernel_operation(
+    name: str, choices: list[ChoiceCaller], input_nodes
+) -> str:
+    """
+    Classify the operation type for logging and filtering purposes.
+    Returns one of: "mm", "conv", "flex", or "other"
+
+    This is more robust than simple string matching as it:
+    1. Checks template types from choices
+    2. Uses input shape patterns
+    3. Falls back to exact name matching (not substring)
+    """
+    # First, try to classify from choice types
+    if choices:
+        for choice in choices:
+            if isinstance(choice, TritonTemplateCaller):
+                # Extract template name (e.g., "mm" from "mm_1", "convolution2d" from "convolution2d_3")
+                template_name = choice.name.rsplit("_", 1)[0]
+
+                # Check known template patterns
+                if template_name in (
+                    "mm",
+                    "bmm",
+                    "mm_persistent_tma",
+                    "grouped_mm",
+                    "scaled_grouped_mm",
+                    "mm_plus_mm",
+                    "blackwell_ws_persistent_device_tma",
+                    "scaled_mm_device_tma_main_loop_scaling",
+                ):
+                    return "mm"
+                elif template_name in ("convolution2d", "convolution3d"):
+                    return "conv"
+                elif template_name.startswith("flex_"):
+                    return "flex"
+
+            elif isinstance(choice, ExternKernelChoice):
+                # Check extern kernel names
+                choice_name = choice.name
+                if choice_name in (
+                    "mm",
+                    "bmm",
+                    "addmm",
+                    "baddbmm",
+                    "_int_mm",
+                    "_scaled_mm",
+                ):
+                    return "mm"
+                elif "conv" in choice_name:
+                    return "conv"
+
+    # Second, use input shape heuristics for additional validation
+    if len(input_nodes) >= 2:
+        try:
+            input_0_shape = input_nodes[0].get_size()
+            input_1_shape = input_nodes[1].get_size()
+
+            # Matrix multiplication patterns
+            if len(input_0_shape) == 2 and len(input_1_shape) == 2:
+                return "mm"
+            elif len(input_0_shape) == 3 and len(input_1_shape) == 3:
+                return "mm"  # bmm
+
+            # Convolution patterns: input NCHW/NCDHW, weight OIHW/OIDHW
+            elif len(input_0_shape) in (4, 5) and len(input_1_shape) in (4, 5):
+                # Could be conv or flex_attention, prefer template name if available
+                if len(input_0_shape) == 4 and len(input_1_shape) == 4:
+                    # Check if it looks like conv (channel dims match)
+                    # Conv: input[N,C,H,W] @ weight[O,C,kH,kW] where input[1] == weight[1]
+                    try:
+                        if input_0_shape[1] == input_1_shape[1]:
+                            return "conv"
+                    except (IndexError, TypeError):
+                        pass
+
+        except (ValueError, IndexError, AttributeError):
+            pass
+
+    # Last resort: exact name matching (not substring to avoid false positives)
+    name_lower = name.lower()
+    if name_lower in ("mm", "bmm", "addmm", "baddbmm"):
+        return "mm"
+    elif name_lower in (
+        "convolution",
+        "convolution2d",
+        "convolution3d",
+        "conv2d",
+        "conv3d",
+    ):
+        return "conv"
+    elif name_lower.startswith("flex_"):
+        return "flex"
+
+    return "other"
+
+
 class AlgorithmSelectorCache(PersistentCache):
     """
     A persistent cache for algorithm selection results used in autotuning of GEMMs
@@ -2835,7 +3010,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
     ):
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -2851,18 +3026,13 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO - assert that we have not mutating kernels here
 
-        if mm_file_name := get_mm_log_filename():
-            M, K = input_nodes[-2].get_size()[:2]
-            N = input_nodes[-1].get_size()[-1]
-            append_to_log(mm_file_name, {"invoke": str((M, K, N))})
-
         if len(choices) == 0:
             raise self.create_no_valid_choices(name, "No choices exist for backend.")
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
         if len(choices) == 1:
-            if not isinstance(choices[0], CUDATemplateCaller):
-                # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
+            if not isinstance(choices[0], CUTLASSTemplateCaller):
+                # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
                 return choices[0].output_node()
 
         if config.deterministic:
@@ -2882,7 +3052,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
-            if config.pipeline_max_autotune_gemm:
+            if use_pipelined_autotuning():
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
                 )
@@ -3136,7 +3306,7 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
-        if log.isEnabledFor(logging.DEBUG) and not config.pipeline_max_autotune_gemm:
+        if log.isEnabledFor(logging.DEBUG) and not use_pipelined_autotuning():
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
 
@@ -3161,7 +3331,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         precompile_start_ts = time.time()
 
-        if not config.pipeline_max_autotune_gemm:
+        if not use_pipelined_autotuning():
             with dynamo_timed(
                 f"{name}_template_precompiling",
                 log_pt2_compile_event=True,
@@ -3206,7 +3376,7 @@ class AlgorithmSelectorCache(PersistentCache):
             prescreening_elapse = time.time() - prescreening_start_ts
             log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
 
-        if config.pipeline_max_autotune_gemm:
+        if use_pipelined_autotuning():
             AsyncAutotuner.start(choices, inputs_key)
             return
 
@@ -3424,7 +3594,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     elapsed_seconds,
                 )
 
-        if config.pipeline_max_autotune_gemm:
+        if use_pipelined_autotuning():
             executor = PrecompileThreadPool.get_instance()
         else:
             executor = ThreadPoolExecutor(max_workers=num_workers)
@@ -3527,7 +3697,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if exceptions:
                 _log_autotune_exceptions(exceptions)
 
-            if not config.pipeline_max_autotune_gemm:
+            if not use_pipelined_autotuning():
                 # pyrefly: ignore [missing-attribute]
                 executor.shutdown(wait=True)
 
@@ -3838,9 +4008,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
-                if not isinstance(choice, CUDATemplateCaller):
+                if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
                     )
@@ -3849,7 +4019,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -3860,7 +4030,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     msg += "\n\nAn unrecoverable unspecified launch failure was caught during autotuning."
                     msg += "\nPlease try re-running with TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC=1.\n\n"
 
-                if isinstance(choice, CUDATemplateCaller):
+                if isinstance(choice, CUTLASSTemplateCaller):
                     log.debug(
                         "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
                         msg,
@@ -4012,7 +4182,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         candidates = []
         if (
@@ -4023,7 +4193,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 [
                     c
                     for c in choices
-                    if isinstance(c, CUDATemplateCaller)
+                    if isinstance(c, CUTLASSTemplateCaller)
                     # hardcoded to only look at swizzle=2
                     if c.info_dict().get("swizzle") == "2"
                 ]
@@ -4046,7 +4216,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 
@@ -4060,7 +4230,7 @@ class AlgorithmSelectorCache(PersistentCache):
             pruned_choices = [
                 choice
                 for choice in choices
-                if not isinstance(choice, CUDATemplateCaller)
+                if not isinstance(choice, CUTLASSTemplateCaller)
                 or choice.kernel_hash_key() in winner_kernel_hashes
             ]
             return pruned_choices
@@ -4106,7 +4276,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 candidates_to_prune.add(candidate.kernel_hash_key())
             else:
                 winner_hashes.add(candidate.hash_key())
-                if isinstance(candidate, CUDATemplateCaller):
+                if isinstance(candidate, CUTLASSTemplateCaller):
                     candidate.bmreq.ensure_dll_loaded()
 
         pruned_choices = [
@@ -4122,6 +4292,120 @@ class AlgorithmSelectorCache(PersistentCache):
             "After pruning using prescreening timings, %d choices", len(pruned_choices)
         )
         return pruned_choices
+
+    @staticmethod
+    def maybe_log_mm_results(
+        name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
+    ) -> None:
+        """Log matrix multiplication autotuning results."""
+        mm_filename = get_mm_log_filename()
+        if not mm_filename:
+            return
+
+        # Classify operation to ensure it's actually an MM operation
+        choices_list = list(timings.keys())
+        operation_type = _classify_kernel_operation(name, choices_list, input_nodes)
+        if operation_type != "mm":
+            return
+
+        if len(input_nodes) < 2:
+            return
+
+        M, K = input_nodes[-2].get_size()[:2]
+        N = input_nodes[-1].get_size()[-1]
+
+        def get_choice_info(choice):
+            if isinstance(choice, ExternKernelCaller):
+                return {"type": "cublas", "time": timings[choice]}
+
+            if isinstance(choice, TritonTemplateCaller):
+                info = choice.info_dict()
+                tile = info["tile_shape"]
+
+                tile_vals = eval(tile)  # type: ignore[arg-type]
+                BLOCK_M = tile_vals[0]
+                BLOCK_K = tile_vals[1]
+                BLOCK_N = tile_vals[2]
+
+                return {
+                    "type": "triton",
+                    "time": timings[choice],
+                    "BLOCK_M": BLOCK_M,
+                    "BLOCK_K": BLOCK_K,
+                    "BLOCK_N": BLOCK_N,
+                    "num_stages": info["num_stages"],
+                    "num_warps": info["num_warps"],
+                    "waves_per_eu": info.get("waves_per_eu", 0),
+                    "matrix_instr_nonkdim": info.get("matrix_instr_nonkdim", 0),
+                    "kpack": info.get("kpack", 2),
+                }
+            return None
+
+        out_dict = {
+            str((M, K, N)): [get_choice_info(choice) for choice in timings],
+            "kernel_type": name,
+        }
+
+        append_to_log(mm_filename, out_dict)
+
+    @staticmethod
+    def maybe_log_conv_results(
+        name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
+    ) -> None:
+        """Log convolution autotuning results."""
+        conv_filename = get_conv_log_filename()
+        if not conv_filename:
+            return
+
+        # Classify operation to ensure it's actually a conv operation
+        choices_list = list(timings.keys())
+        operation_type = _classify_kernel_operation(name, choices_list, input_nodes)
+        if operation_type != "conv":
+            return
+
+        if len(input_nodes) < 2:
+            return
+
+        x_size = input_nodes[0].get_size()
+        w_size = input_nodes[1].get_size()
+
+        def get_conv_choice_info(choice):
+            if choice not in timings:
+                return None
+            info = choice.info_dict()
+
+            # Start with timing and backend type
+            result = {
+                "time": timings[choice],
+                "backend": info.get("backend", "unknown"),
+            }
+
+            # Add all parameters from info_dict
+            for key, value in info.items():
+                if key != "backend":  # Already added
+                    # Convert non-serializable types to strings
+                    try:
+                        import json
+
+                        json.dumps(value)  # Test if serializable
+                        result[key] = value
+                    except (TypeError, ValueError):
+                        result[key] = str(value)
+
+            return result
+
+        out_dict = {
+            "input_shape": str(x_size),
+            "weight_shape": str(w_size),
+            "choices": [
+                get_conv_choice_info(choice)
+                for choice in timings
+                if get_conv_choice_info(choice) is not None
+            ],
+            "kernel_type": name,
+        }
+
+        append_to_log(conv_filename, out_dict)
 
     @staticmethod
     def get_flex_attention_choice_info(
@@ -4150,7 +4434,10 @@ class AlgorithmSelectorCache(PersistentCache):
         name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
     ) -> None:
         flex_attention_filename = get_flex_attention_log_filename()
-        if not flex_attention_filename or "flex_attention" not in name:
+        # Support both flex_attention and flex_decoding
+        if not flex_attention_filename or (
+            "flex_attention" not in name and "flex_decoding" not in name
+        ):
             return
 
         if len(input_nodes) < 3:
@@ -4160,34 +4447,65 @@ class AlgorithmSelectorCache(PersistentCache):
         key_size = input_nodes[1].get_size()
         value_size = input_nodes[2].get_size()
 
-        B = query_size[0]
-        Hq = query_size[1]
-        seq_len_q = query_size[2]
-        qk_head_dim = query_size[3]
-        Hkv = key_size[1]
-        seq_len_kv = key_size[2]
-        v_head_dim = value_size[3]
+        # Handle both 4D (forward/backward) and 5D (decode) tensor formats
+        # 4D: [B, H, seq_len, head_dim]
+        # 5D: [B, H, 1, 1, head_dim] (decode mode has extra dimension)
+        if len(query_size) == 5:
+            # Decode mode with 5D tensors
+            B = query_size[0]
+            Hq = query_size[1]
+            # query_size[2] and query_size[3] are both 1 for decode
+            seq_len_q = query_size[2]  # This will be 1
+            qk_head_dim = query_size[4]  # Head dim is at index 4 for 5D
+            Hkv = key_size[1]
+            seq_len_kv = key_size[2]
+            v_head_dim = value_size[4] if len(value_size) == 5 else value_size[3]
+        else:
+            # Forward/backward mode with 4D tensors
+            B = query_size[0]
+            Hq = query_size[1]
+            seq_len_q = query_size[2]
+            qk_head_dim = query_size[3]
+            Hkv = key_size[1]
+            seq_len_kv = key_size[2]
+            v_head_dim = value_size[3]
 
-        kernel_type = "backward" if "backward" in name else "forward"
-        dims_key = str(
-            (
-                kernel_type,
-                B,
-                Hq,
-                Hkv,
-                seq_len_q,
-                seq_len_kv,
-                qk_head_dim,
-                v_head_dim,
-            )
+        kernel_type = (
+            "backward"
+            if "backward" in name
+            else ("decode" if "decoding" in name else "forward")
         )
 
+        # Create shape info dictionary
+        shape_info = {
+            "kernel_type": kernel_type,
+            "B": int(B),
+            "Hq": int(Hq),
+            "Hkv": int(Hkv),
+            "seq_len_q": int(seq_len_q),
+            "seq_len_kv": int(seq_len_kv),
+            "qk_head_dim": int(qk_head_dim),
+            "v_head_dim": int(v_head_dim),
+        }
+
         sorted_choices = sorted(timings, key=timings.__getitem__)
+
+        # Include shape info in each choice
+        choices_with_shapes = []
+        for choice in sorted_choices:
+            choice_info = AlgorithmSelectorCache.get_flex_attention_choice_info(
+                choice, timings
+            )
+            # Merge shape info with choice info
+            choice_info.update(shape_info)
+            choices_with_shapes.append(choice_info)
+
         out_dict = {
-            dims_key: [
-                AlgorithmSelectorCache.get_flex_attention_choice_info(choice, timings)
-                for choice in sorted_choices
-            ]
+            "query_shape": str(query_size),
+            "key_shape": str(key_size),
+            "value_shape": str(value_size),
+            "kernel_type": kernel_type,
+            "choices": choices_with_shapes,
         }
         append_to_log(flex_attention_filename, out_dict)
 
@@ -4252,41 +4570,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         best = top_k[0]
 
-        def get_choice_info(choice):
-            if isinstance(choice, torch._inductor.select_algorithm.ExternKernelCaller):
-                return {"type": "cublas", "time": timings[choice]}
-
-            assert isinstance(
-                choice, torch._inductor.select_algorithm.TritonTemplateCaller
-            )
-
-            info = choice.info_dict()
-            tile = info["tile_shape"]
-
-            tile_vals = eval(tile)  # type: ignore[arg-type]
-            BLOCK_M = tile_vals[0]
-            BLOCK_K = tile_vals[1]
-            BLOCK_N = tile_vals[2]
-
-            return {
-                "type": "triton",
-                "time": timings[choice],
-                "BLOCK_M": BLOCK_M,
-                "BLOCK_K": BLOCK_K,
-                "BLOCK_N": BLOCK_N,
-                "num_stages": info["num_stages"],
-                "num_warps": info["num_warps"],
-            }
-
-        mm_filename = get_mm_log_filename()
-        if mm_filename and "mm" in name:
-            M, K = input_nodes[-2].get_size()[:2]
-            N = input_nodes[-1].get_size()[-1]
-
-            out_dict = {str((M, K, N)): [get_choice_info(choice) for choice in timings]}
-
-            append_to_log(mm_filename, out_dict)
-
+        # Log autotuning results for each operation type
+        AlgorithmSelectorCache.maybe_log_mm_results(name, input_nodes, timings)
+        AlgorithmSelectorCache.maybe_log_conv_results(name, input_nodes, timings)
         AlgorithmSelectorCache.maybe_log_flex_attention_results(
             name, input_nodes, timings
         )
@@ -4437,7 +4723,7 @@ def autotune_select_algorithm(*args, **kwargs):
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
-            or torch._inductor.config.pipeline_max_autotune_gemm
+            or use_pipelined_autotuning()
         )
 
     if "precompilation_timeout_seconds" not in kwargs:

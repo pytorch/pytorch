@@ -1040,6 +1040,89 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
 
+    def test_fullgraph_eval_frame_override(self):
+        # NOTE it is NOT enough to just call a torch.compile'd function in a compiled
+        # function returned by the backend - this is because we apply disable(recursive=True)
+        # to compiled functions and if we call a directly torch.compile'd function, that
+        # "overrides" the disable(recursive=True) - i.e. this behavior is intentional.
+
+        # Instead, we will patch symbolic_convert.InstructionTranslator.codegen_return_with_pops to
+        # append a bunch of additional bytecode that will run a function that is not disabled.
+        global inner
+
+        y = torch.ones(3)
+
+        def inner():
+            nonlocal y
+            y += 1
+
+        from torch._dynamo.bytecode_transformation import (
+            create_call_function,
+            create_instruction,
+            Instruction,
+        )
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        old_codegen_return = InstructionTranslatorBase.codegen_return_with_pops
+
+        def codegen_return_with_pops(self, *args) -> list[Instruction]:
+            insts = old_codegen_return(*args)
+            assert insts[-1].opname.startswith("RETURN")
+            # to prevent infinite recursion
+            if self.f_code.co_name != "inner":
+                insts[-1:-1] = [
+                    create_instruction("LOAD_GLOBAL", argval="inner"),
+                    *create_call_function(0, True),
+                    create_instruction("POP_TOP"),
+                ]
+            return insts
+
+        def fn(x):
+            return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        with mock.patch(
+            "torch._dynamo.symbolic_convert.InstructionTranslatorBase.codegen_return_with_pops",
+            codegen_return_with_pops,
+        ):
+            # fullgraph=False will result in inner being traced!
+            opt_fn_1 = torch.compile(fn, backend=cnts, fullgraph=False)
+
+            # inner compiled
+            opt_fn_1(torch.ones(3))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(y, torch.ones(3) + 1)
+
+            torch._dynamo.eval_frame.reset_code(inner.__code__)
+            cnts.clear()
+            # NOTE do not fully reset dynamo - to ensure eval frame override is applied for cache hits
+            opt_fn_2 = torch.compile(fn, backend=cnts, fullgraph=True)
+
+            with torch._dynamo.config.patch(
+                error_on_dynamo_callback_in_fullgraph_compiled_code=False
+            ):
+                # fullgraph=True will result in inner being skipped!
+                opt_fn_2(torch.ones(3))
+                self.assertEqual(cnts.frame_count, 0)
+                self.assertEqual(y, torch.ones(3) + 2)
+
+            with torch._dynamo.config.patch(
+                error_on_dynamo_callback_in_fullgraph_compiled_code=True
+            ):
+                # fullgraph=True will result in error when attempting to compile inner
+                with self.assertRaisesRegex(
+                    RuntimeError, "Dynamo: expected not to compile nested code"
+                ):
+                    opt_fn_2(torch.ones(3))
+
+            torch._dynamo.eval_frame.reset_code(inner.__code__)
+            cnts.clear()
+            # if we run fullgraph=False again, inner is compiled again (because we reset_code)
+            opt_fn_1(torch.ones(3))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(y, torch.ones(3) + 3)
+
     def test_substitute_in_graph(self):
         counters.clear()
 
@@ -1364,6 +1447,20 @@ class DecoratorTests(PytreeRegisteringTestCase):
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+
+    def test_justknobs_check(self):
+        def fn(x, y):
+            if torch._utils_internal.justknobs_check("test", True):
+                return x + y
+            else:
+                return x - y
+
+        x = torch.randn(2, 2, device="cpu")
+        y = torch.randn(2, 2, device="cpu")
+        eager_out = fn(x, y)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        compiled_out = compiled_fn(x, y)
+        self.assertEqual(eager_out, compiled_out)
 
     def test_set_stance_aot_eager_then_compile(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -2184,6 +2281,90 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             torch.compile(model)
             torch.compile(other_model)
 
+    def test_disable_class_and_instance_method(self):
+        # Test that decorating a method at class definition time and then
+        # re-decorating the instance method works correctly. This tests the
+        # fix in innermost_fn that stops unwrapping when hitting a bound method.
+        from torch._dynamo.eval_frame import innermost_fn
+
+        class Foo:
+            def run(self, a, b, c):
+                return self.work(a, b, c)
+
+            @torch._dynamo.disable
+            def work(self, a, b, c):
+                return a + b - c
+
+        foo = Foo()
+        # Re-decorate the instance method
+        foo.work = torch._dynamo.disable(foo.work)
+
+        a = torch.randint(0, 10, (10,))
+        b = torch.randint(0, 10, (10,))
+        c = torch.randint(0, 10, (10,))
+
+        # Should work without error - self should be correctly bound
+        result = foo.run(a, b, c)
+        self.assertEqual(result, a + b - c)
+
+        # Also test nested disable on instance methods
+        foo2 = Foo()
+        foo2.work = torch._dynamo.disable(torch._dynamo.disable(foo2.work))
+        result2 = foo2.run(a, b, c)
+        self.assertEqual(result2, a + b - c)
+
+        # Test innermost_fn shortcut behavior for unbound methods
+        # disable(disable(Foo.method)) should unwrap to the original function
+        class Bar:
+            def method(self, x):
+                return x + 1
+
+        bar = Bar()
+        bound_method = bar.method
+
+        original_method = Bar.method
+        disabled_once = torch._dynamo.disable(Bar.method)
+        disabled_twice = torch._dynamo.disable(disabled_once)
+        # innermost_fn should find the original unbound method
+        self.assertIs(innermost_fn(disabled_twice), original_method)
+        self.assertIs(innermost_fn(disabled_once), original_method)
+
+        # Test innermost_fn shortcut behavior for bound methods
+        # disable(disable(obj.method)) should stop at the bound method
+        # innermost_fn should return the bound method itself, not unwrap it
+        self.assertIs(innermost_fn(bound_method), bound_method)
+        # Wrapping a bound method should also preserve the binding
+        disabled_bound = torch._dynamo.disable(bound_method)
+        self.assertIs(innermost_fn(disabled_bound), bound_method)
+
+    def test_disable_functools_wraps(self):
+        # Test that functools.wraps copying _torchdynamo_orig_callable doesn't
+        # cause innermost_fn to bypass the outer wrapper. This tests the fix
+        # using _torchdynamo_wrapper_id to verify the attribute was set by our
+        # decorator, not copied by functools.wraps.
+        from torch._dynamo.eval_frame import innermost_fn
+
+        @torch._dynamo.disable
+        def inner_fn(x):
+            return x + 1
+
+        # Outer wrapper uses functools.wraps which copies _torchdynamo_orig_callable
+        @functools.wraps(inner_fn)
+        def outer_wrapper(x):
+            return inner_fn(x) * 2
+
+        # innermost_fn should NOT follow the copied _torchdynamo_orig_callable
+        # because _torchdynamo_wrapper_id won't match
+        self.assertIs(innermost_fn(outer_wrapper), outer_wrapper)
+
+        # Applying disable to outer_wrapper should wrap outer_wrapper, not inner_fn
+        disabled_outer = torch._dynamo.disable(outer_wrapper)
+
+        x = torch.tensor([1.0, 2.0, 3.0])
+        expected = outer_wrapper(x)  # (x+1)*2 = [4, 6, 8]
+        actual = disabled_outer(x)
+        self.assertEqual(expected, actual)
+
     def test_dynamo_disable_annotations(self):
         class SimpleModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -2384,26 +2565,29 @@ class GraphModule(torch.nn.Module):
             fw_graph_str,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", primals_3: "f32[3]"):
+    def forward(self, primals_1: "f32[0]", primals_2: "f32[3, 3]", primals_3: "f32[3, 3]", primals_4: "f32[3]"):
         _tree_spec_constant0 = self._tree_spec_constant0
         _tree_spec_constant1 = self._tree_spec_constant1
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, 0, primals_2, primals_3, primals_1);  _tree_spec_constant0 = _tree_spec_constant1 = primals_2 = primals_3 = primals_1 = None
-        getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
-        return (getitem,)
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, 0, primals_3, primals_4, primals_2);  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = primals_3 = primals_4 = primals_2 = None
+
+        getitem: "f32[0]" = with_effects[0]
+        getitem_1: "f32[3, 3]" = with_effects[1];  with_effects = None
+        return (getitem, getitem_1)
 """,  # noqa: B950
         )
         self.assertExpectedInline(
             bw_graph_str,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, tangents_1: "f32[3, 3]"):
+    def forward(self, tangents_1: "f32[3, 3]", tangents_token: "f32[0]"):
         _tree_spec_constant2 = self._tree_spec_constant2
         _tree_spec_constant3 = self._tree_spec_constant3
-        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant2, _tree_spec_constant3, tangents_1);  _tree_spec_constant2 = _tree_spec_constant3 = tangents_1 = None
-        getitem_2: "f32[3, 3]" = invoke_leaf_function_1[1]
-        getitem_3: "f32[3]" = invoke_leaf_function_1[2]
-        getitem_4: "f32[3, 3]" = invoke_leaf_function_1[3];  invoke_leaf_function_1 = None
-        return (getitem_4, getitem_2, getitem_3)
+        with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant2, _tree_spec_constant3, tangents_1);  tangents_token = _tree_spec_constant2 = _tree_spec_constant3 = tangents_1 = None
+        getitem_2: "f32[0]" = with_effects_1[0]
+        getitem_4: "f32[3, 3]" = with_effects_1[2]
+        getitem_5: "f32[3]" = with_effects_1[3]
+        getitem_6: "f32[3, 3]" = with_effects_1[4];  with_effects_1 = None
+        return (getitem_6, getitem_4, getitem_5, getitem_2)
 """,  # noqa: B950
         )
 
@@ -2632,27 +2816,30 @@ class GraphModule(torch.nn.Module):
             fw_graph_str,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3]", primals_3: "f32[3, 3]", primals_4: "f32[3]"):
+    def forward(self, primals_1: "f32[0]", primals_2: "f32[3, 3]", primals_3: "f32[3]", primals_4: "f32[3, 3]", primals_5: "f32[3]"):
         _tree_spec_constant0 = self._tree_spec_constant0
         _tree_spec_constant1 = self._tree_spec_constant1
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, 0, primals_2, primals_3, primals_4, primals_1);  _tree_spec_constant0 = _tree_spec_constant1 = primals_2 = primals_3 = primals_4 = primals_1 = None
-        getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
-        return (getitem,)
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, 0, primals_3, primals_4, primals_5, primals_2);  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = primals_3 = primals_4 = primals_5 = primals_2 = None
+
+        getitem: "f32[0]" = with_effects[0]
+        getitem_1: "f32[3, 3]" = with_effects[1];  with_effects = None
+        return (getitem, getitem_1)
 """,  # noqa: B950
         )
         self.assertExpectedInline(
             bw_graph_str,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, tangents_1: "f32[3, 3]"):
+    def forward(self, tangents_1: "f32[3, 3]", tangents_token: "f32[0]"):
         _tree_spec_constant2 = self._tree_spec_constant2
         _tree_spec_constant3 = self._tree_spec_constant3
-        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant2, _tree_spec_constant3, tangents_1);  _tree_spec_constant2 = _tree_spec_constant3 = tangents_1 = None
-        getitem_2: "f32[3]" = invoke_leaf_function_1[1]
-        getitem_3: "f32[3, 3]" = invoke_leaf_function_1[2]
-        getitem_4: "f32[3]" = invoke_leaf_function_1[3]
-        getitem_5: "f32[3, 3]" = invoke_leaf_function_1[4];  invoke_leaf_function_1 = None
-        return (getitem_5, getitem_2, getitem_3, getitem_4)
+        with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant2, _tree_spec_constant3, tangents_1);  tangents_token = _tree_spec_constant2 = _tree_spec_constant3 = tangents_1 = None
+        getitem_2: "f32[0]" = with_effects_1[0]
+        getitem_4: "f32[3]" = with_effects_1[2]
+        getitem_5: "f32[3, 3]" = with_effects_1[3]
+        getitem_6: "f32[3]" = with_effects_1[4]
+        getitem_7: "f32[3, 3]" = with_effects_1[5];  with_effects_1 = None
+        return (getitem_7, getitem_4, getitem_5, getitem_6, getitem_2)
 """,  # noqa: B950
         )
 
@@ -2755,28 +2942,31 @@ class GraphModule(torch.nn.Module):
             fw_graph_str,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", primals_3: "f32[3]", primals_4: "f32[3, 3]", primals_5: "f32[3]"):
+    def forward(self, primals_1: "f32[0]", primals_2: "f32[3, 3]", primals_3: "f32[3, 3]", primals_4: "f32[3]", primals_5: "f32[3, 3]", primals_6: "f32[3]"):
         _tree_spec_constant0 = self._tree_spec_constant0
         _tree_spec_constant1 = self._tree_spec_constant1
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, 0, primals_2, primals_3, primals_4, primals_5, primals_1);  _tree_spec_constant0 = _tree_spec_constant1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_1 = None
-        getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
-        return (getitem,)
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, 0, primals_3, primals_4, primals_5, primals_6, primals_2);  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = primals_3 = primals_4 = primals_5 = primals_6 = primals_2 = None
+
+        getitem: "f32[0]" = with_effects[0]
+        getitem_1: "f32[3, 3]" = with_effects[1];  with_effects = None
+        return (getitem, getitem_1)
 """,  # noqa: B950
         )
         self.assertExpectedInline(
             bw_graph_str,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, tangents_1: "f32[3, 3]"):
+    def forward(self, tangents_1: "f32[3, 3]", tangents_token: "f32[0]"):
         _tree_spec_constant2 = self._tree_spec_constant2
         _tree_spec_constant3 = self._tree_spec_constant3
-        invoke_leaf_function_1 = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant2, _tree_spec_constant3, tangents_1);  _tree_spec_constant2 = _tree_spec_constant3 = tangents_1 = None
-        getitem_2: "f32[3, 3]" = invoke_leaf_function_1[1]
-        getitem_3: "f32[3]" = invoke_leaf_function_1[2]
-        getitem_4: "f32[3, 3]" = invoke_leaf_function_1[3]
-        getitem_5: "f32[3]" = invoke_leaf_function_1[4]
-        getitem_6: "f32[3, 3]" = invoke_leaf_function_1[5];  invoke_leaf_function_1 = None
-        return (getitem_6, getitem_2, getitem_3, getitem_4, getitem_5)
+        with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant2, _tree_spec_constant3, tangents_1);  tangents_token = _tree_spec_constant2 = _tree_spec_constant3 = tangents_1 = None
+        getitem_2: "f32[0]" = with_effects_1[0]
+        getitem_4: "f32[3, 3]" = with_effects_1[2]
+        getitem_5: "f32[3]" = with_effects_1[3]
+        getitem_6: "f32[3, 3]" = with_effects_1[4]
+        getitem_7: "f32[3]" = with_effects_1[5]
+        getitem_8: "f32[3, 3]" = with_effects_1[6];  with_effects_1 = None
+        return (getitem_8, getitem_4, getitem_5, getitem_6, getitem_7, getitem_2)
 """,  # noqa: B950
         )
 
@@ -3416,6 +3606,88 @@ class GraphModule(torch.nn.Module):
             @leaf_function
             def bad_fn2(x):
                 return (x,)
+
+    def test_leaf_function_no_return_value(self):
+        printed = []
+
+        @leaf_function
+        def fn_no_return(x):
+            print("processing")
+
+        @fn_no_return.register_fake
+        def fn_no_return_fake(x):
+            pass
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                fn_no_return(x)
+                return (self.linear(x),)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out[0].sum()
+
+        with patch("builtins.print", lambda *args, **kwargs: printed.append(args)):
+            eager_graph, fw_graph, bw_graph = self._test_leaf_function_helper(
+                Mod, args_fn, loss_fn
+            )
+        self.assertTrue(any("processing" in p for p in printed))
+        self.assertExpectedInline(
+            eager_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3, 3]", L_self_modules_linear_parameters_weight_: "f32[3, 3]", L_self_modules_linear_parameters_bias_: "f32[3]"):
+        l_x_ = L_x_
+        l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
+        l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
+
+        real_fn : torch.utils._pytree.TreeSpec = self.real_fn
+        fake_fn : torch.utils._pytree.TreeSpec = self.fake_fn
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(real_fn, fake_fn, l_x_);  real_fn = fake_fn = invoke_leaf_function = None
+
+        linear: "f32[3, 3]" = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_);  l_x_ = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = None
+        return (linear,)
+""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            fw_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[0]", primals_2: "f32[3, 3]", primals_3: "f32[3, 3]", primals_4: "f32[3]"):
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, primals_2);  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = None
+
+        getitem: "f32[0]" = with_effects[0];  with_effects = None
+
+        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3)
+        addmm: "f32[3, 3]" = torch.ops.aten.addmm.default(primals_4, primals_2, t);  primals_4 = t = None
+        return (getitem, addmm, primals_2, primals_3)
+""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            bw_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3, 3]", tangents_1: "f32[3, 3]"):
+        t: "f32[3, 3]" = torch.ops.aten.t.default(primals_3);  primals_3 = None
+        t_1: "f32[3, 3]" = torch.ops.aten.t.default(t);  t = None
+        mm: "f32[3, 3]" = torch.ops.aten.mm.default(tangents_1, t_1);  t_1 = None
+        t_2: "f32[3, 3]" = torch.ops.aten.t.default(tangents_1)
+        mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t_2, primals_2);  t_2 = primals_2 = None
+        t_3: "f32[3, 3]" = torch.ops.aten.t.default(mm_1);  mm_1 = None
+        sum_1: "f32[1, 3]" = torch.ops.aten.sum.dim_IntList(tangents_1, [0], True);  tangents_1 = None
+        view: "f32[3]" = torch.ops.aten.view.default(sum_1, [3]);  sum_1 = None
+        t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
+        return (mm, t_4, view)
+""",  # noqa: B950
+        )
 
 
 instantiate_parametrized_tests(DecoratorTests)
