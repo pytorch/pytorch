@@ -2276,6 +2276,9 @@ class TestCutlassBackend(TestCase):
     @parametrize("arch", ("Xe12", "Xe20"))
     @parametrize("xpu_version", ("20250201", "20250301"))
     def test_gemm_operation_serialization_xpu(self, arch: str, xpu_version: str):
+        from torch._inductor.codegen.cutlass.utils import _normalize_xpu_arch
+
+        arch = _normalize_xpu_arch(arch)
         self._test_gemm_operation_serialization(arch, xpu_version, min_ops=40)
 
     @unittest.skipIf(
