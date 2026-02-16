@@ -379,6 +379,16 @@ class DistTensorOpsTest(DTensorTestBase):
             torch.stack([global_input, global_input], dim=1),
         )
 
+        # stack with negative dim: dim=-1 inserts at the last position of the
+        # output (ndim+1), so Shard(1) should stay Shard(1)
+        stack_neg_dim_dt = torch.stack([shard1_input, cloned_shard1_input], dim=-1)
+        self.assertEqual(stack_neg_dim_dt.placements, (Shard(1),))
+        self.assertEqual(stack_neg_dim_dt.shape, (8, 8, 2))
+        self.assertEqual(
+            stack_neg_dim_dt.full_tensor(),
+            torch.stack([global_input, global_input], dim=-1),
+        )
+
     @with_comms
     def test_stack_cache(self):
         device_mesh = self.build_device_mesh()
