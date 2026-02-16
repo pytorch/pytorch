@@ -140,6 +140,13 @@ class Sm100GroupedBlockScaledGemmKernel:
             barrier_id=4,
             num_threads=32 * len(self.tensormap_worker_warp_id),
         )
+        # Barrier used by producer-side warps to ensure descriptor
+        # updates for a new group do not begin until all producer-side
+        # warps have reached the same group boundary.
+        self.tensormap_pre_update_barrier = pipeline.NamedBarrier(
+            barrier_id=9,
+            num_threads=32 * len(self.tensormap_worker_warp_id),
+        )
         # Barrier used by scheduler and mainloop loader to order
         # descriptor fence (scheduler) before TMA loads (mainloop
         # loader).
@@ -1020,6 +1027,11 @@ class Sm100GroupedBlockScaledGemmKernel:
                         # wait tensormap initialization complete
                         self.tensormap_ab_init_barrier.arrive_and_wait()
                         tensormap_init_done = True
+
+                    # Prevent updater warps from overwriting descriptors
+                    # while mainloop load warp may still be issuing TMA
+                    # loads against the previous group descriptors.
+                    self.tensormap_pre_update_barrier.arrive_and_wait()
 
                     if warp_idx == self.tensormap_update_warp_id[0]:
                         real_tensor_a = self.make_tensor_abc_for_tensormap_update(
