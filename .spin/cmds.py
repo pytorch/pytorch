@@ -10,6 +10,10 @@ from tempfile import mktemp
 import click
 import spin
 
+CWD = Path(__file__).absolute().parent.parent
+sys.path.insert(0, str(CWD))  # this only affects the current process
+from tools.clean import clean as _clean
+
 
 def file_digest(file, algorithm: str):
     try:
@@ -411,6 +415,7 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     if write_json_output:
         Path(tee_file).write_text(json_output_all + json_output_changed)
     if lint_found:
+        click.secho("Lint failed!", fg="red")
         raise SystemExit(1)
 
 
@@ -446,21 +451,7 @@ def quickfix(ctx, *, lintrunner_args, **kwargs):
 @click.command()
 def clean():
     """Clean, that is remove all files in .gitignore except in the NOT-CLEAN-FILES section."""
-    ignores = Path(".gitignore").read_text(encoding="utf-8")
-    for wildcard in filter(None, ignores.splitlines()):
-        if wildcard.strip().startswith("#"):
-            if "BEGIN NOT-CLEAN-FILES" in wildcard:
-                # Marker is found and stop reading .gitignore.
-                break
-            # Ignore lines which begin with '#'.
-        else:
-            # Don't remove absolute paths from the system
-            wildcard = wildcard.lstrip("./")
-            for filename in glob.iglob(wildcard):
-                try:
-                    os.remove(filename)
-                except OSError:
-                    shutil.rmtree(filename, ignore_errors=True)
+    _clean()
 
 
 @click.command()

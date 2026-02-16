@@ -63,6 +63,54 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
+class PytreeTuple:
+    """
+    Tuple-like values that are treated as leaves of a PyTree.
+    """
+
+    def __init__(self, *values):
+        self._values = tuple(values)
+
+    def __repr__(self):
+        pr = repr(self._values)[1:-1]
+        return f"{type(self).__name__}({pr})"
+
+    def __getitem__(self, i):
+        return self._values[i]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, self.__class__):
+            return self._values == other._values
+        elif isinstance(other, tuple):
+            return self._values == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash(self._values)
+
+    def __add__(self, other):
+        if isinstance(other, (self.__class__, tuple)):
+            return self.__class__(*self, *other)
+        raise NotImplementedError(type(other))
+
+    def __radd__(self, other):
+        if isinstance(other, (self.__class__, tuple)):
+            return self.__class__(*other, *self)
+        raise NotImplementedError(type(other))
+
+    def index(self, value):
+        return self._values.index(value)
+
+    def count(self, value):
+        return self._values.count(value)
+
+
 class SimpleModel(nn.Module):
     def __init__(self, device):
         super().__init__()
@@ -528,32 +576,94 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dtensor_matmul_zero_size_shards(self):
         from torch.distributed.tensor import randn as d_randn
 
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-
         dist.destroy_process_group()
         dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
         device_mesh = init_device_mesh(self.device_type, (2, 2))
 
-        # create DTensors with unbacked outer/inner sizes
+        # Placements that shard on the contracting/output dims so that
+        # zero-size local shards can arise at runtime.
         px, py = (Replicate(), Shard(1)), (Replicate(), Shard(0))
-        x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=px)
-        y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=py)
-        for i in range(2):
-            torch._dynamo.decorators.mark_unbacked(x_dt, i)
-            torch._dynamo.decorators.mark_unbacked(y_dt, i)
+        # batched variants: shard the non-batch dims the same way
+        bpx, bpy = (Replicate(), Shard(2)), (Replicate(), Shard(1))
 
-        # full-graph capture
-        fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
-        fn(x_dt, y_dt)
+        def _run(torch_fn, make_args, unbacked_dims=None):
+            """Compile once on large tensors, then re-run on small/zero-size."""
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            fn = torch.compile(torch_fn, backend=cnt, fullgraph=True)
 
-        # check zero-size shards
-        for m in [3, 0]:  # n, k = 0 cause recompiles on strides
-            dx = d_randn(m, 1, device_mesh=device_mesh, placements=px)
-            dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
-            c_out, eager_out = fn(dx, dy), torch.mm(dx, dy)
-            self.assertEqual(tuple(c_out.shape), (m, 1))
-            self.assertEqual(cnt.frame_count, 1)
-            self.assertEqual(c_out.shape, eager_out.shape)
+            # initial compile with large shapes
+            args0 = make_args(64)
+            for arg_idx, a in enumerate(args0):
+                if unbacked_dims is not None:
+                    for i in unbacked_dims.get(arg_idx, []):
+                        torch._dynamo.decorators.mark_unbacked(a, i)
+                else:
+                    for i in range(a.dim()):
+                        torch._dynamo.decorators.mark_unbacked(a, i)
+            fn(*args0)
+
+            # re-run with m=3 which produces zero-size local shards
+            # (3 < world_size=4), verifying no recompilation
+            for m in [3]:
+                args = make_args(m)
+                c_out = fn(*args)
+                eager_out = torch_fn(*args)
+                self.assertEqual(c_out.shape, eager_out.shape)
+                self.assertEqual(cnt.frame_count, 1)
+
+        # mm: (m,k) @ (k,n) -> (m,n)
+        _run(
+            torch.mm,
+            lambda m: (
+                d_randn(m, 64, device_mesh=device_mesh, placements=px),
+                d_randn(64, 64, device_mesh=device_mesh, placements=py),
+            ),
+        )
+
+        # addmm: bias(n) + (m,k) @ (k,n) -> (m,n)
+        # Only mark mat1 dim 0 (m) as unbacked; bias dims must be backed
+        # because sharding prop checks bias_shape == 1 for broadcast.
+        _run(
+            torch.addmm,
+            lambda m: (
+                d_randn(
+                    64, device_mesh=device_mesh, placements=(Replicate(), Replicate())
+                ),
+                d_randn(m, 64, device_mesh=device_mesh, placements=px),
+                d_randn(64, 64, device_mesh=device_mesh, placements=py),
+            ),
+            unbacked_dims={1: [0]},
+        )
+
+        # bmm: (b,m,k) @ (b,k,n) -> (b,m,n)
+        _run(
+            torch.bmm,
+            lambda m: (
+                d_randn(2, m, 64, device_mesh=device_mesh, placements=bpx),
+                d_randn(2, 64, 64, device_mesh=device_mesh, placements=bpy),
+            ),
+            unbacked_dims={0: [1]},
+        )
+
+        # baddbmm: bias(b,1,n) + (b,m,k) @ (b,k,n) -> (b,m,n)
+        # Use bias with m=1 (broadcast) so the bias shape doesn't change
+        # across m values, avoiding recompilation and unbacked broadcast guards.
+        _run(
+            torch.baddbmm,
+            lambda m: (
+                d_randn(
+                    2,
+                    1,
+                    64,
+                    device_mesh=device_mesh,
+                    placements=(Replicate(), Replicate()),
+                ),
+                d_randn(2, m, 64, device_mesh=device_mesh, placements=bpx),
+                d_randn(2, 64, 64, device_mesh=device_mesh, placements=bpy),
+            ),
+            unbacked_dims={1: [1]},
+        )
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -855,7 +965,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_dt.to_local().sum().backward()
 
     def test_dynamo_to_local_grad_placements_sequence(self):
-        placements = [Shard(0)]
+        placements = PytreeTuple([Shard(0)])
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -874,7 +984,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
-            placements = [Shard(0)]
+            placements = PytreeTuple([Shard(0)])
             return dt.to_local(grad_placements=placements) + 2
 
         fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
@@ -888,7 +998,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = [Shard(0)]
+        placements = PytreeTuple(Shard(0))
 
         def fn(x):
             dt = DTensor.from_local(
@@ -909,7 +1019,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = [Shard(0)]
+        placements = PytreeTuple(Shard(0))
 
         def fn(x):
             dt = DTensor.from_local(
@@ -932,6 +1042,39 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         def fn(x):
             return dt.to_local(grad_placements=[Shard(0)]) + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+        dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+
+        out_ref = fn(dt)
+        out_test = fn_opt(dt)
+        self.assertEqual(out_ref, out_test)
+
+    def test_dynamo_to_local_custom_partial_placement(self):
+        """Test that to_local works with custom Partial subclasses in grad_placements.
+
+        This tests the fix for custom placement objects like _ScaledPartial that
+        cannot be converted to Python constants via as_python_constant().
+        """
+
+        # Define a custom Partial subclass similar to _ScaledPartial in torchtitan
+        class ScaledPartial(Partial):
+            def __init__(self, reduction_divide_factor: float):
+                self.reduction_divide_factor = reduction_divide_factor
+                super().__init__(reduce_op="sum")
+
+            def _reduce_value(
+                self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+            ) -> torch.Tensor:
+                tensor.div_(self.reduction_divide_factor)
+                return super()._reduce_value(tensor, mesh, mesh_dim)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        scaled_partial = ScaledPartial(reduction_divide_factor=2.0)
+
+        def fn(x):
+            return x.to_local(grad_placements=[scaled_partial]) + 2
 
         fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
         x = torch.ones(4)
@@ -1394,6 +1537,43 @@ class outer_fn(torch.nn.Module):
             1,
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
+
+    def test_compile_redistribute_flattened_mesh(self):
+        """
+        Test that redistribute works with pre-flattened meshes during compile.
+
+        When redistributing from [Shard, Shard, Replicate] to [Replicate, Replicate, Replicate]
+        on a 3D mesh, DTensor can optimize by using a single all-gather on the flattened
+        mesh instead of 2 sequential all-gathers. This requires the flattened mesh to be
+        pre-created before compile to avoid tracing issues.
+        """
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=8)
+
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("fsdp", "cp", "tp")
+        )
+        # Pre-create flattened mesh for fsdp+cp before compile
+        mesh["fsdp", "cp"]._flatten()
+
+        def redistribute_fn(x):
+            return x.redistribute(placements=[Replicate(), Replicate(), Replicate()])
+
+        input_dt = DTensor.from_local(
+            torch.randn(4, 8, device=self.device_type, requires_grad=True),
+            device_mesh=mesh,
+            placements=[Shard(0), Shard(0), Replicate()],
+            run_check=False,
+        )
+
+        compiled_fn = torch.compile(
+            redistribute_fn, fullgraph=True, backend="aot_eager"
+        )
+        result = compiled_fn(input_dt)
+        self.assertEqual(result.placements, (Replicate(), Replicate(), Replicate()))
+
+        # Test backward pass
+        result.sum().backward()
 
 
 @instantiate_parametrized_tests

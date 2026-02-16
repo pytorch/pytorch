@@ -66,7 +66,10 @@ class GroupedSetup:
 
     def __post_init__(self) -> None:
         for field in dataclasses.fields(self):
-            assert field.type is str
+            if field.type is not str:
+                raise AssertionError(
+                    f"Expected field {field.name} to be str, but got {field.type}"
+                )
             value: str = getattr(self, field.name)
             object.__setattr__(self, field.name, textwrap.dedent(value))
 
@@ -269,7 +272,10 @@ class GroupedBenchmark:
             cpp_block, Language.CPP
         )
 
-        assert not py_global_setup
+        if py_global_setup:
+            raise AssertionError(
+                f"py_global_setup should be empty, but got: {py_global_setup}"
+            )
         setup = GroupedSetup(
             py_setup=py_setup,
             cpp_setup=cpp_setup,
@@ -392,7 +398,8 @@ class GroupedBenchmark:
             )
 
         else:
-            assert runtime == RuntimeMode.JIT
+            if runtime != RuntimeMode.JIT:
+                raise AssertionError(f"Expected RuntimeMode.JIT, but got {runtime}")
             model_name = "jit_model"
             cpp_invocation = textwrap.dedent(
                 f"""\

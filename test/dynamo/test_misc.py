@@ -4245,6 +4245,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
 
+    def test_class_reassignment_graph_break(self):
+        class BaseClass:
+            def __init__(self, x):
+                self.x = x
+
+        class DerivedClass(BaseClass):
+            def __init__(self, x):
+                super().__init__(x)
+                self.y = x * 2
+
+        def fn(x):
+            obj = BaseClass(5)
+            obj.__class__ = DerivedClass
+            is_derived = isinstance(obj, DerivedClass)
+            has_y = hasattr(obj, "y")
+            return x + 1, is_derived, has_y
+
+        x = torch.ones(1)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(eager_result, compiled_result)
+
     def test_user_defined_class_python_type(self):
         class MyClass1:
             pass
@@ -12525,6 +12547,47 @@ fn
 
         self.assertEqual(bound0, bound1)
 
+    def test_sourceless_mapping_proxy(self):
+        # Test that Dynamo can handle a sourceless MappingProxyType.
+        # This occurs when type.__dict__['__dict__'].__get__ is called
+        # and returns a mappingproxy that was created during tracing.
+        _get_dunder_dict = type.__dict__["__dict__"].__get__
+
+        class MyClass:
+            a = 1
+            b = 2
+
+        def fn(x):
+            d = _get_dunder_dict(MyClass)
+            return x + len(d)
+
+        t = torch.randn(3)
+        ref = fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(t)
+        self.assertEqual(ref, res)
+
+    def test_sourceless_inspect_parameter(self):
+        import inspect
+
+        class MyClass:
+            param = inspect.Parameter(
+                "x", inspect.Parameter.POSITIONAL_OR_KEYWORD, default=42
+            )
+
+        _get_dunder_dict = type.__dict__["__dict__"].__get__
+
+        def fn(x):
+            d = _get_dunder_dict(MyClass)
+            p = d["param"]
+            return x + p.default
+
+        t = torch.randn(3)
+        ref = fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(t)
+        self.assertEqual(ref, res)
+
     def test_inspect_signature_parameters(self):
         import inspect
 
@@ -12541,6 +12604,123 @@ fn
         x = torch.randn(2, 3)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         self.assertEqual(fn(x, gn), opt_fn(x, gn))
+
+    def test_inspect_signature_caching(self):
+        """Test that inspect.signature results are cached for repeated calls."""
+        import inspect
+        from unittest.mock import patch
+
+        def target_func(a, b, c=3):
+            return a + b + c
+
+        def other_func(x, y):
+            return x * y
+
+        def fn():
+            results = []
+            for _ in range(10):
+                sig1 = inspect.signature(target_func)
+                sig2 = inspect.signature(other_func)
+                results.append(len(sig1.parameters))
+                results.append(len(sig2.parameters))
+            return sum(results)
+
+        from torch._dynamo.output_graph import OutputGraph
+
+        original_cleanup = OutputGraph.cleanup
+        unique_calls = 0
+
+        def capturing_cleanup(self):
+            nonlocal unique_calls
+            unique_calls = len(self.signature_cache)
+            return original_cleanup(self)
+
+        with patch.object(OutputGraph, "cleanup", capturing_cleanup):
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            result = compiled_fn()
+
+        # 10 iterations * (3 params from target_func + 2 params from other_func) = 50
+        self.assertEqual(result, 50)
+        # signature_cache should have exactly 2 entries (one per unique function)
+        self.assertEqual(unique_calls, 2)
+
+    def test_inspect_signature_caching_methods(self):
+        """Test that inspect.signature caching works for methods."""
+        import inspect
+        from unittest.mock import patch
+
+        class MyClass:
+            def method_a(self, x, y, z):
+                return x + y + z
+
+            def method_b(self, a):
+                return a * 2
+
+        obj = MyClass()
+
+        def fn():
+            results = []
+            for _ in range(10):
+                sig1 = inspect.signature(obj.method_a)
+                sig2 = inspect.signature(obj.method_b)
+                # Note: bound methods don't include 'self' in signature
+                results.append(len(sig1.parameters))
+                results.append(len(sig2.parameters))
+            return sum(results)
+
+        from torch._dynamo.output_graph import OutputGraph
+
+        original_cleanup = OutputGraph.cleanup
+        unique_calls = 0
+
+        def capturing_cleanup(self):
+            nonlocal unique_calls
+            unique_calls = len(self.signature_cache)
+            return original_cleanup(self)
+
+        with patch.object(OutputGraph, "cleanup", capturing_cleanup):
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            result = compiled_fn()
+
+        # 10 iterations * (3 params from method_a + 1 param from method_b) = 40
+        self.assertEqual(result, 40)
+        # signature_cache should have exactly 2 entries (one per unique method)
+        self.assertEqual(unique_calls, 2)
+
+    def test_inspect_variable_redirect(self):
+        """Test that InspectVariable is used and redirects property accesses."""
+        import inspect
+        from unittest.mock import patch
+
+        from torch._dynamo.variables.user_defined import InspectVariable
+
+        redirected_attrs = []
+        original_var_getattr = InspectVariable.var_getattr
+
+        def tracking_var_getattr(self, tx, name):
+            redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
+            if name in redirects:
+                redirected_attrs.append(name)
+            return original_var_getattr(self, tx, name)
+
+        def fn(x, gn):
+            sig = inspect.signature(gn)
+            params = sig.parameters
+            param = params["a"]
+            return x + param.kind + len(param.name)
+
+        def gn(a: torch.Tensor, b: int) -> torch.Tensor:
+            return a + b
+
+        x = torch.randn(2, 3)
+        with patch.object(InspectVariable, "var_getattr", tracking_var_getattr):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            result = opt_fn(x, gn)
+
+        self.assertEqual(result, fn(x, gn))
+        self.assertIn("parameters", redirected_attrs)
+        self.assertIn("kind", redirected_attrs)
+        self.assertIn("name", redirected_attrs)
 
     def test_grad_none(self):
         def fn(x, y):
@@ -13622,14 +13802,30 @@ fn
             x = torch.randn(10, 10)
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
             # Use error_on_custom_op_aliasing=False to emit warnings instead of errors
-            with torch._functorch.config.patch(
-                check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
+            with (
+                torch._functorch.config.patch(
+                    check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
+                ),
+                warnings.catch_warnings(record=True) as w,
             ):
-                with self.assertWarnsRegex(
-                    UserWarning,
-                    "The output of this custom operator \(1\) must not also be an input",
-                ):
-                    _ = compiled_fn(x)
+                warnings.simplefilter("always")
+                _ = compiled_fn(x)
+                aliasing_warnings = [
+                    x for x in w if "may not alias any inputs" in str(x.message)
+                ]
+                self.assertEqual(len(aliasing_warnings), 1)
+                msg = str(aliasing_warnings[0].message)
+                self.assertEqual(
+                    msg,
+                    "mylib::alias_op2 (with implementation in ???): "
+                    "The output of this custom operator (1) must not also be an input "
+                    "to this custom operator and (2) may not alias any inputs to this "
+                    "custom operator or other returns. The most common way to trigger "
+                    "this error is if we have y = custom_op(x) and y and x are the same "
+                    "Tensor. Please instead return a clone of the offending output "
+                    "tensor(s) (e.g. return x.clone()) or refactor the custom operator "
+                    "to not return y. This is deprecated and will become an error in PyTorch 2.12.",
+                )
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

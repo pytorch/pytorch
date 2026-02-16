@@ -2736,7 +2736,7 @@ def addr(
         )
         torch._check(
             is_weakly_lesser_type(type(alpha), int),
-            lambda: f"expected bool/int alpha but got {type(beta)}",
+            lambda: f"expected bool/int alpha but got {type(alpha)}",
         )
         if not beta:
             return torch.outer(vec1, vec2) if alpha else torch.full_like(self, False)
@@ -5016,12 +5016,14 @@ def empty(
     if memory_format == torch.contiguous_format:
         strides = utils.make_contiguous_strides_for(shape)
     elif memory_format == torch.channels_last_3d:
+        # pyrefly: ignore [bad-specialization]
         strides = utils.make_channels_last_3d_strides_for(shape)
     else:  # memory_format == torch.channels_last
         torch._check(
             memory_format == torch.channels_last,
             lambda: f"torch.empty: received an unknown memory format {memory_format}!",
         )
+        # pyrefly: ignore [bad-specialization]
         strides = utils.make_channels_last_2d_strides_for(shape)
 
     return torch.empty_strided(
@@ -5962,6 +5964,7 @@ def _uniform_helper(
     low: Union[bool, int, float] = 0.0,
     high: Union[bool, int, float] = 1.0,
     *,
+    stride: ShapeType,
     dtype: torch.dtype,
     device: DeviceLikeType,
 ) -> TensorLikeType:
@@ -5978,7 +5981,9 @@ def _uniform_helper(
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
     device = utils.canonicalize_device(device)
 
-    return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
+    return prims._uniform_helper(
+        shape, low=low, high=high, dtype=dtype, device=device, stride=stride
+    )
 
 
 @register_decomposition(aten.masked_fill)

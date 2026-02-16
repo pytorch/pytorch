@@ -410,6 +410,40 @@ class ActivationCheckpointingViaTagsTests(
         _ = torch.compile(fn, backend=backend)(x, y)
 
     @requires_cuda_and_triton
+    def test_tangent_placeholders_have_is_backward_tag(self, device):
+        """Test that tangent placeholders in the joint graph are tagged with is_backward."""
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        def partition_fn(joint_gm, *args, **kwargs):
+            # Check partitioner_tag on placeholder nodes
+            for node in joint_gm.graph.nodes:
+                if node.op == "placeholder":
+                    if "tangents" in str(node.target):
+                        self.assertTrue(
+                            "is_backward" in node.meta.get("partitioner_tag", "")
+                        )
+                    else:
+                        self.assertTrue(
+                            "is_forward" in node.meta.get("partitioner_tag", "")
+                        )
+            return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+        )
+        _ = torch.compile(fn, backend=backend)(x, y)
+
+    @requires_cuda_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -1778,40 +1812,25 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         opt_fn(*args1).sum().backward()
 
         fwd_graph = aot_graphs[0]
-        op1 = torch.ops.aten._scaled_dot_product_flash_attention.default
-        op2 = torch.ops.aten._scaled_dot_product_cudnn_attention.default
-        self.assertTrue(
-            count_ops(
-                fwd_graph,
-                [],
-                freq=1,
-                op=op1,
-            )
-            or count_ops(
-                fwd_graph,
-                [],
-                freq=1,
-                op=op2,
-            )
+        # Determine which fused attention backend is expected based on the
+        # prioritization logic in sdp_utils.cpp:check_prefer_cudnn_attention.
+        dprops = torch.cuda.get_device_properties(device)
+        cudnn_version = (
+            torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         )
+        prefer_cudnn = (
+            cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
+        )
+        if prefer_cudnn:
+            sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
+        else:
+            sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
+        self.assertTrue(count_ops(fwd_graph, [], freq=1, op=sdpa_op))
         bwd_graph = aot_graphs[1]
         # Check that sin is not recomputed in the backward graph - checks percolate tags
         self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
         # Check that the sdpa op is recomputed in the backward graph
-        self.assertTrue(
-            count_ops(
-                bwd_graph,
-                [],
-                freq=1,
-                op=op1,
-            )
-            or count_ops(
-                bwd_graph,
-                [],
-                freq=1,
-                op=op2,
-            )
-        )
+        self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
 
     @requires_distributed()
     @requires_cuda_and_triton
