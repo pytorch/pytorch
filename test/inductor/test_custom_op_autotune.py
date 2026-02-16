@@ -346,7 +346,7 @@ class TestCustomOpAutoTune(TestCase):
                 compiled_result = test_model(a, b, bias)
 
             def reference_model(a, b, bias):
-                affine = torch.addmm(bias, a, b)
+                affine = a @ b + bias
                 activation = torch.relu(affine)
                 scaled = activation * 2.0
                 return scaled
