@@ -351,7 +351,7 @@ class InputObserverInfo:
             if k not in kwargs:
                 kwargs[k] = v
 
-        # kwargs may come in a different ordeer teach.
+        # kwargs may come in a different order each time.
         # dictionaries are ordered and torch.export.export expects
         # dynamic shapes and kwargs to follow the same order.
 
