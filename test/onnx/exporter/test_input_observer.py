@@ -933,6 +933,8 @@ class TestInputObserver(common_utils.TestCase):
             "cache_position": {0: cst},
         }
         self.assertEqual(expected, shapes)
+        kwargs = observer.infer_dynamic_shapes()
+        self.assertEqual(list(expected), list(kwargs))
 
     def test_io_captured_kwargs_kwargs(self):
         class Model(torch.nn.Module):
