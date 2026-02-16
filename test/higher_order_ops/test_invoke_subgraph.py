@@ -3389,6 +3389,32 @@ class TestInvokeSubgraphDTensor(TestCase):
         res.to_local().sum().backward()
         self.assertEqual(local_tensor.grad, local_tensor_clone.grad)
 
+    @unittest.expectedFailure
+    def test_redistribute_in_nested_compile_region(self):
+        mesh = DeviceMesh("cpu", torch.arange(2))
+
+        @nested_compile_region
+        def gn(x):
+            # Redistribute from Shard(0) to Replicate inside the nested region
+            x = x.redistribute(mesh, [Replicate()])
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x)
+
+        local_tensor = torch.randn(4, 4, requires_grad=True)
+        x = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        ref = fn(x)
+
+        local_tensor_clone = local_tensor.clone().detach().requires_grad_(True)
+        x_clone = DTensor.from_local(
+            local_tensor_clone, mesh, [Shard(0)], run_check=False
+        )
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone)
+
+        self.assertEqual(ref.to_local(), res.to_local())
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphTwoTensor(TestCase):

@@ -63,12 +63,16 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
+    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.utils._triton import has_triton
 
 
-DEVICE_COUNT = 4  # default
+if TEST_WITH_ROCM:
+    DEVICE_COUNT = min(4, max(2, torch.cuda.device_count()))
+else:
+    DEVICE_COUNT = 4
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
