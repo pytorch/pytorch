@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from contextlib import contextmanager
 from unittest import skip
 from unittest.mock import patch
 
@@ -37,6 +38,11 @@ from torch._library import capture_triton
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.export import Dim, export
 from torch.export.pt2_archive._package import load_pt2
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    list_flash_attention_impls,
+    restore_flash_attention_impl,
+)
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
@@ -47,6 +53,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     requires_triton_ptxas_compat,
     SM80OrLater,
+    SM90OrLater,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -93,6 +100,15 @@ from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
 )
+
+
+@contextmanager
+def use_fa3():
+    try:
+        activate_flash_attention_impl("FA3")
+        yield
+    finally:
+        restore_flash_attention_impl()
 
 
 if HAS_GPU:
@@ -1650,6 +1666,75 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(not SM90OrLater, "FA3 requires SM90+")
+    @unittest.skipIf("FA3" not in list_flash_attention_impls(), "FA3 not available")
+    def test_varlen_attn_with_kv_cache(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.nn.attention.varlen import varlen_attn
+
+        batch_size, num_heads, head_dim, max_cache_len = 2, 4, 64, 128
+        cache_seqlen, new_seqlen = 32, 1
+
+        class Model(torch.nn.Module):
+            def forward(
+                self, q, k, v, cu_seq_q, cu_seq_k, k_cache, v_cache, cache_seqlens
+            ):
+                return varlen_attn(
+                    query=q,
+                    key=k,
+                    value=v,
+                    cu_seq_q=cu_seq_q,
+                    cu_seq_k=cu_seq_k,
+                    max_q=new_seqlen,
+                    max_k=new_seqlen,
+                    k_cache=k_cache,
+                    v_cache=v_cache,
+                    cache_seqlens=cache_seqlens,
+                )
+
+        total_new = new_seqlen * batch_size
+        example_inputs = (
+            torch.randn(
+                total_new, num_heads, head_dim, dtype=torch.bfloat16, device=self.device
+            ),  # query
+            torch.randn(
+                total_new, num_heads, head_dim, dtype=torch.bfloat16, device=self.device
+            ),  # key
+            torch.randn(
+                total_new, num_heads, head_dim, dtype=torch.bfloat16, device=self.device
+            ),  # value
+            torch.arange(
+                0, total_new + 1, new_seqlen, dtype=torch.int32, device=self.device
+            ),  # cu_seq_q
+            torch.arange(
+                0, total_new + 1, new_seqlen, dtype=torch.int32, device=self.device
+            ),  # cu_seq_k
+            torch.randn(
+                batch_size,
+                max_cache_len,
+                num_heads,
+                head_dim,
+                dtype=torch.bfloat16,
+                device=self.device,
+            ),  # k_cache
+            torch.randn(
+                batch_size,
+                max_cache_len,
+                num_heads,
+                head_dim,
+                dtype=torch.bfloat16,
+                device=self.device,
+            ),  # v_cache
+            torch.full(
+                (batch_size,), cache_seqlen, dtype=torch.int32, device=self.device
+            ),  # cache_seqlens
+        )
+
+        with use_fa3():
+            self.check_model(Model(), example_inputs)
 
     @skipIfNoFBGEMM
     def test_quantized_linear(self):
