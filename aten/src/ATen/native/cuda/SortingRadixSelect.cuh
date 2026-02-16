@@ -454,7 +454,10 @@ __device__ __forceinline__ void countRadixAggregateCounts(
     CountType* smem, // shared memory for inter-warp reduction of counts.
     int buffer_index){ // buffer index for smem.
 
-  constexpr uint MAX_WARPS = 1024/32; // maximum number of warps in a block
+  // Maximum number of warps per workgroup. HIP workgroups have at most 1024 threads.
+  // Warp size is at least 32 (can be 64 on some architectures), so we use 32 for safety.
+  // This sizes shared memory buffers to accommodate all possible warps: 1024/32 = 32.
+  constexpr uint MAX_WARPS = 1024/32;
   const int buffer_offset = buffer_index * MAX_WARPS * RadixSize; // offset of the buffer in smem.
   const uint WARP_BITS = __builtin_ctz(warpSize);
 
