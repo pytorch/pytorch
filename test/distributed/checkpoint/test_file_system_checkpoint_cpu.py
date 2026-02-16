@@ -566,6 +566,7 @@ instantiate_parametrized_tests(TestDistributedReshardOnLoad)
 
 _CUDA_THREAD_COUNTS = {1, 2, 4}
 
+
 @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
 class TestMultiThreadedCudaSave(TestCase):
     @parametrize("thread_count", _CUDA_THREAD_COUNTS)

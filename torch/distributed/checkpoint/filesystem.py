@@ -398,7 +398,7 @@ def _write_files_from_queue(
             file_name, storage_key, write_items = file_queue.get_nowait()
             loader: _TensorLoader
 
-            if dedicated_stream is not None:
+            if device_mod is not None and dedicated_stream is not None:
                 with device_mod.stream(dedicated_stream):
                     loader = _OverlappingCpuLoader(
                         planner.resolve_data,
