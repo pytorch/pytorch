@@ -781,10 +781,10 @@ class InputObserver:
     >>>     dynamic_shapes.input_observer.infer_dynamic_shapes(),
     >>> )
 
-    The last example consider a LLM taking images and text as inputs.
+    The last example considers an LLM taking images and text as inputs.
     The first call to the forward method which we try to export has `pixel_values`
     but no `past_key_values`. The next calls do not have `pixel_values` but
-    `past_key_values`. The observer understand `pixel_values` and `past_key_values`
+    `past_key_values`. The observer understands `pixel_values` and `past_key_values`
     are needed but they may not be both specified at the same time.
     Since `pixel_values` only appears in the first call, the observer cannot
     tell how to infer an empty tensor for this argument. That's what the argument
