@@ -184,6 +184,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
   # disable timeout due to shard not balance for xpu
   export NO_TEST_TIMEOUT=True
+elif [[ "$BUILD_ENVIRONMENT" == *pallas-tpu* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="tpu"
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -889,12 +891,6 @@ test_inductor_halide() {
 }
 
 test_inductor_pallas() {
-  # Set TPU target for TPU tests
-  if [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
-    export PALLAS_TARGET_TPU=1
-    # Check if TPU backend is available
-    python -c "import jax; devices = jax.devices('tpu'); print(f'Found {len(devices)} TPU device(s)'); assert len(devices) > 0, 'No TPU devices found'"
-  fi
   python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
