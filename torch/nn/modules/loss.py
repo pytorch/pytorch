@@ -6,6 +6,7 @@ from typing_extensions import deprecated
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
 
+from ._functions import LinearCrossEntropyOptions
 from .distance import PairwiseDistance
 from .linear import Linear
 from .module import Module
@@ -1483,11 +1484,12 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
             Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
-        options (dict, optional): Specify chunking strategy options,
-          see
+        options (LinearCrossEntropyOptions, optional): Specify
+          chunking strategy options, see
           :class:`~torch.nn.modules._functions.LinearCrossEntropyFunction`
           for more details. To enable reference implementation of
-          linear_cross_entropy with chunking disabled, use `options={}`.
+          linear_cross_entropy with chunking disabled, use
+          `options=None`.
     Shape:
         - Input: Shape :math:`(in_features)`, :math:`(N, in_features)`.
         - Target: If containing class indices, shape :math:`()`,
@@ -1521,7 +1523,7 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
     out_features: tuple[int, ...]
     ignore_index: int
     label_smoothing: float
-    options: dict | None
+    options: LinearCrossEntropyOptions | None
 
     def __init__(
         self,
@@ -1535,12 +1537,12 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
         weight: Tensor | None = None,
         ignore_index: int = -100,
         label_smoothing: float = 0.0,
-        options: dict | None = None,
+        options: LinearCrossEntropyOptions | None = None,
     ) -> None:
         bias = False  # linear_cross_entropy does not depend on bias
         super().__init__(
             in_features,
-            num_classes * math.prod(out_features),
+            math.prod(out_features, start=num_classes),
             bias,
             device,
             dtype,

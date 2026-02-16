@@ -58,6 +58,7 @@ from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_
 from torch.types import _TensorOrTensors
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing import make_tensor
+from torch.nn.modules._functions import LinearCrossEntropyOptions
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
@@ -7357,7 +7358,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
 
         def sizes_options_and_optimal_options():
-            max_memory_gb = 1.5e-6 * dtype.itemsize / torch.float32.itemsize
+            max_memory_gb = 1.4e-6 * dtype.itemsize / torch.float32.itemsize
             num_batches, in_features, num_classes = sizes = (8, 8, 8)
             # small sizes give maximal chunk sizes for best processing performance:
             yield sizes, dict(), dict(batches_chunk_size=num_batches,
@@ -7422,7 +7423,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         weight=w,
                         ignore_index=ii,
                         label_smoothing=ls,
-                        options=optimal_options
+                        options=LinearCrossEntropyOptions(optimal_options)
                     )
                     if not batch_dims and of:
                         # K-dimensional loss requires batches dimension

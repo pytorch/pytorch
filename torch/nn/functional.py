@@ -23,7 +23,10 @@ from torch._jit_internal import (
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
-from torch.nn.modules._functions import LinearCrossEntropyFunction
+from torch.nn.modules._functions import (
+    LinearCrossEntropyFunction,
+    LinearCrossEntropyOptions,
+)
 from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
 from torch.overrides import (
     handle_torch_function,
@@ -3654,7 +3657,7 @@ def linear_cross_entropy(
     reduction: str = "mean",
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
-    options: Optional[dict] = None,
+    options: Optional[LinearCrossEntropyOptions] = None,
 ) -> Tensor:
     r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
 
@@ -3694,13 +3697,13 @@ def linear_cross_entropy(
             Architecture for Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
-        options (dict, optional): Specify chunking strategy options,
-          see
+        options (LinearCrossEntropyOptions, optional): Specify
+          chunking strategy options, see
           :class:`~torch.nn.modules._functions.LinearCrossEntropyFunction`
           for more details. Enabling chunking will decrease the memory
           usage but also makes this function non-composite compliant.
-          To enable reference implementation of
-          linear_cross_entropy that ensures composite compliance, use
+          To enable reference implementation of ``linear_cross_entropy``
+          that ensures composite compliance, use
           `options=None`. Default: ``None``.
     Shape:
         - Input: :math:`(in_features)` or :math:`(N, in_features)`.
@@ -3745,7 +3748,7 @@ def linear_cross_entropy(
     in_features = input.shape[-1]
     if out_features:
         linear_weight = linear_weight.reshape(
-            (num_classes * math.prod(out_features), in_features)
+            (math.prod(out_features, start=num_classes), in_features)
         )
     if (
         options is not None

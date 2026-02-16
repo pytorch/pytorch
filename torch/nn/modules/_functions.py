@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
+from typing_extensions import NotRequired, TypedDict
 
 import torch
 import torch.distributed as dist
@@ -321,6 +322,56 @@ class BackwardHookFunction(torch.autograd.Function):
         return args
 
 
+class LinearCrossEntropyOptions(TypedDict):
+    """Options for controlling chunking strategy in linear cross
+    entropy operation.
+
+    Use :func:`~LinearCrossEntropyFunction.optimal_chunking` to
+    construct an optimal chunking strategy for the linear cross
+    entropy operation.
+    """
+
+    max_memory_gb: NotRequired[int]
+    """The upper bound to memory usage by an operation in GB.  Higher
+    values increase chunk sizes that is better for processing
+    performance but memory usage footprint will be larger that may
+    lead to OOM errors for large input sizes. The default value is 64
+    GB, or when on a CUDA device, 75 % of the GPU memory."""
+
+    min_chunk_size: NotRequired[int]
+    """The lower bound to a chunk size of any dimension under
+    chunking.  Higher values is better for processing performance but
+    may make the max_memory_gb constraint unachievable for large input
+    sizes."""
+
+    grad_inplace: NotRequired[bool]
+    """When True, backward will use inplace multiplication to compute
+    the gradients to save extra storage space but
+    torch.autograd.gradcheck may fail.  Default is False."""
+
+    batches_chunk_size: NotRequired[int]
+    """Chunk size along the batches dimension. By default, the optimal
+    chunk size is computed with constraints::
+
+      batches_chunk_size >= min(min_chunk_size, num_batches)
+      batches_chunk_size % min(min_chunk_size, num_batches) == 0
+    """
+
+    features_chunk_size: NotRequired[int]
+    """Chunk size along the in_features dimension. By default, the
+    optimal chunk size is computed with constraints::
+
+      features_chunk_size >= min(min_chunk_size, in_features)
+      features_chunk_size % min(min_chunk_size, in_features) == 0"""
+
+    classes_chunk_size: NotRequired[int]
+    """Chunk size along the classes dimension. By default, the
+    optimal chunk size is computed with constraints::
+
+      classes_chunk_size >= min(min_chunk_size, num_classes)
+      classes_chunk_size % min(min_chunk_size, num_classes) == 0"""
+
+
 class LinearCrossEntropyFunction(torch.autograd.Function):
     """Implements linear_cross_entropy operation with chunking along
     batches, features, and classes dimensions.
@@ -328,7 +379,7 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
     Chunking considerably reduces the memory usage in forward and
     backward computations. On the other hand, chunking may reduce
     processing performance, especially when the chunk sizes are set
-    too small or chunking along the classes dimension that requires
+    too small or chunking along the classes dimension that involves
     extra computations.
 
     .. warning::
@@ -338,41 +389,28 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
       - target contains probabilities
       - loss is K-dimensional
 
-    In the following we'll provide an optimal chunking strategy to
-    reduce the memory usage of the linear_cross_entropy forward and
-    backward operations while maximizing the processing performance of
-    the operation when using chunking.
+    In the following, we'll provide an optimal chunking strategy to
+    reduce the memory usage of the ``linear_cross_entropy`` forward
+    and backward operations while maximizing the processing
+    performance of the operation under chunking.
 
     A chunking strategy is defined by the following chunk sizes along
-    batches, features, and classes dimensions:
+    batches, features, and classes dimensions::
 
       batches_chunk_size
       features_chunk_size
       classes_chunk_size
 
-    that directly affect the performance of the linear_cross_entropy
-    operation: smaller chunk sizes reduce the memory consumption of
-    the operation while chunking along classes dimension requires
-    extra computations and therefore decreases processing
-    performance. We use a parameter, `max_memory_gb`, to find an
-    optimal chunking strategy:
+    respectively, that affect the performance of the
+    linear_cross_entropy operation: a smaller chunk size reduces the
+    memory consumption of the operation while chunking along classes
+    dimension involves additional computations and therefore decreases
+    the overall processing performance. We use a parameter,
+    `max_memory_gb`, to define an optimal chunking strategy:
 
       `max_memory_gb` is the upper bound to memory size that
       linear_cross_entropy should use for forward and backward
       computations.
-
-    In addition, a parameter `min_chunk_size` is used to restrict the
-    allowed chunk sizes to satisfy the following conditions::
-
-      batches_chunk_size >= min(min_chunk_size, num_batches)
-      batches_chunk_size % min_chunk_size == 0
-      features_chunk_size >= min(min_chunk_size, in_features)
-      features_chunk_size % min_chunk_size == 0
-      classes_chunk_size >= min(min_chunk_size, num_classes)
-      classes_chunk_size % min_chunk_size == 0
-
-    so that underlying, say, CUDA kernels could perform more
-    efficiently.
 
     To compute the optimal chunking strategy, use::
 
@@ -387,50 +425,27 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
           dtype,
       )
 
-    where `options` is a dictionary with the following keys:
+    where ``options`` is a dictionary of chunking options, see
+    :class:`LinearCrossEntropyOptions` for more information.
 
-      max_memory_gb (int, optional) - specifies the upper bound to
-        memory usage by the linear_cross_entropy in GB. On a CUDA
-        device, the default is 0.75 % of GPU memory, otherwise, 64 GB.
+    ``opt_options`` is a copy of ``options``, with computed optimal
+    values of ``batches_chunk_size``, ``features_chunk_size``, and
+    ``classes_chunk_size`` inserted. If `options` already contains
+    these keys, the corresponding items are kept constant. If
+    ``max_memory_gb`` is too small or ``min_chunk_size`` is too large,
+    the chunking strategy defined by
+    ``{batches,features,classes}_chunk_size`` will be smallest
+    possible under specified constraints and the constraint defined by
+    ``max_memory_gb`` may be not be satisfied.
 
-      min_chunk_size (int, optional) - specifies minimal chunk size in
-        chunking along batches, features, and classes
-        dimensions. Default is 1024.
-
-      grad_inplace (bool, optional) - when True, backward will use
-        inplace multiplication to compute the gradients to save extra
-        storage space. Warning: when True, torch.autograd.gradcheck
-        will fail.  Default is False.
-
-      batches_chunk_size (int, optional) - fix chunk size along
-        batches dimension. By default, optimal chunk size along
-        batches dimension is computed.
-
-      features_chunk_size (int, optional) - fix chunk size along
-        features dimension. By default, optimal chunk size along
-        features dimension is computed.
-
-      classes_chunk_size (int, optional) - fix chunk size along
-        classes dimension. Note that chunking along classes dimension
-        will involve extra computations and will affect processing
-        performance. By default, optimal chunk size along classes
-        dimension is computed.
-
-    `opt_options` is a copy of `options` dictionary, with computed
-    optimal values of batches_chunk_size, features_chunk_size, and
-    classes_chunk_size inserted. If `options` already contains these
-    keys, the corresponding items are kept constant. If
-    `max_memory_gb` is too small or `min_chunk_size` is too large, the
-    chunking strategy defined by
-    `{batches,features,classes}_chunk_size` will be smallest possible
-    under specified constraints except the constraint defined by
-    `max_memory_gb` may be not be satisfied.
-
+    ``opt_options`` can be used as an input to
+    :func:`~torch.nn.functional.linear_cross_entropy` and
+    :class:`~torch.nn.LinearCrossEntropyLoss`.
     """
 
     @staticmethod
     def optimal_chunking(
-        options: dict,
+        options: LinearCrossEntropyOptions,
         num_batches: int | None,
         in_features: int,
         num_classes: int,
@@ -439,11 +454,11 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
         device: torch.device,
         dtype: torch.dtype,
         target_dtype: torch.dtype,
-    ):
+    ) -> LinearCrossEntropyOptions:
         """Compute optimal chunking strategy. See
         :class:`LinearCrossEntropyFunction` for details.
         """
-        opt_options = options.copy()
+        opt_options = LinearCrossEntropyOptions(options)
 
         if num_batches is None:
             num_batches = 1
@@ -503,15 +518,18 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
                     count += batches_chunk_size
             return count
 
-        min_chunk_size: int = opt_options.get("min_chunk_size", 1024)
-        max_memory_gb = opt_options.get("max_memory_gb")
+        min_chunk_size: int = int(opt_options.get("min_chunk_size", 1024))
+        max_memory_gb: int | None = opt_options.get("max_memory_gb")
+        gb_to_bytes = 2**30
         if max_memory_gb is None:
             if device.type == "cuda":
-                max_memory_gb = int(torch.cuda.mem_get_info(device)[0] * 0.75 / 1e9)
+                max_memory_gb = int(
+                    torch.cuda.mem_get_info(device)[0] * 0.75 / gb_to_bytes
+                )
             else:
                 max_memory_gb = 64
 
-        max_total_numel = int(max_memory_gb * 1e9 / dtype.itemsize)
+        max_total_numel = int(max_memory_gb * gb_to_bytes / dtype.itemsize)
 
         min_classes_chunk_size: int = min(
             opt_options.get("classes_chunk_size", min_chunk_size), num_classes
@@ -542,7 +560,7 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
             range(min_classes_chunk_size, max_classes_chunk_size + 1, min_chunk_size)
         ):
             minimal_features_batches_nof_chunks: float | None = None
-            features_batches_chunk_sizes = None, None
+            features_batches_chunk_sizes = 0, 0
             for features_chunk_size in reversed(
                 range(
                     min_features_chunk_size, max_features_chunk_size + 1, min_chunk_size
@@ -577,13 +595,10 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
                             )
             if minimal_features_batches_nof_chunks is not None:
                 features_chunk_size, batches_chunk_size = features_batches_chunk_sizes
-                opt_options.update(
-                    classes_chunk_size=classes_chunk_size,
-                    features_chunk_size=features_chunk_size,
-                    batches_chunk_size=batches_chunk_size,
-                )
-                if not has_batches:
-                    opt_options.pop("batches_chunk_size")
+                opt_options["classes_chunk_size"] = int(classes_chunk_size)
+                opt_options["features_chunk_size"] = int(features_chunk_size)
+                if has_batches:
+                    opt_options["batches_chunk_size"] = int(batches_chunk_size)
                 return opt_options
 
         constraints = [f"{num_batches=}, {in_features=}, {num_classes=}"]
@@ -593,17 +608,15 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
         constraints = ", ".join(constraints)
         warnings.warn(
             "failed to find optimal chunking strategy for linear_cross_entropy: "
-            f"{max_memory_gb=} is too small or {min_chunk_size=} is too large. Constraints: {constraints}"
+            f"{max_memory_gb=} is too small or {min_chunk_size=} is too large. Constraints: {constraints}",
+            stacklevel=2,
         )
 
         # Return a strategy that corresponds to minimal chunking size:
-        opt_options.update(
-            classes_chunk_size=min_classes_chunk_size,
-            features_chunk_size=min_features_chunk_size,
-            batches_chunk_size=min_batches_chunk_size,
-        )
-        if not has_batches:
-            opt_options.pop("batches_chunk_size")
+        opt_options["classes_chunk_size"] = min_classes_chunk_size
+        opt_options["features_chunk_size"] = min_features_chunk_size
+        if has_batches:
+            opt_options["batches_chunk_size"] = min_batches_chunk_size
         return opt_options
 
     @staticmethod
@@ -616,7 +629,7 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
         weight: torch.Tensor,
         reduction: str,
         label_smoothing: float,
-        options: dict,
+        options: LinearCrossEntropyOptions,
     ):
         device = input.device
         dtype = input.dtype
