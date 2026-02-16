@@ -15,10 +15,6 @@ on:
       - .github/workflows/_binary-build-flash-attention-wheel-linux.yml
       - .ci/flash-attention/*.sh
 
-permissions:
-  id-token: write
-  contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -144,58 +140,3 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
-
-  upload-wheel:
-    name: "Upload FA3 ${{ matrix.build_cuda_short }} ${{ matrix.arch }}"
-    needs: build-wheel
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - build_cuda_short: "126"
-            upload_subfolders: "cu126 cu128 cu129"
-            arch: "x86_64"
-          - build_cuda_short: "130"
-            upload_subfolders: "cu130"
-            arch: "x86_64"
-          - build_cuda_short: "126"
-            upload_subfolders: "cu126 cu128 cu129"
-            arch: "aarch64"
-          - build_cuda_short: "130"
-            upload_subfolders: "cu130"
-            arch: "aarch64"
-    permissions:
-      id-token: write
-      contents: read
-    container:
-      image: continuumio/miniconda3:4.12.0
-    environment: pytorchbot-env
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Configure AWS credentials(PyTorch account) for test
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-        with:
-          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
-          aws-region: us-east-1
-
-      - name: Download Build Artifacts
-        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
-        with:
-          name: flash-attn-3-wheel-cu${{ matrix.build_cuda_short }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/artifacts
-
-      - name: Upload binaries to test index
-        env:
-          PACKAGE_TYPE: wheel
-          UPLOAD_CHANNEL: test
-          PKG_DIR: ${{ runner.temp }}/artifacts
-          DRY_RUN: disabled
-        shell: bash
-        run: |
-          set -ex
-          for subfolder in ${{ matrix.upload_subfolders }}; do
-            UPLOAD_SUBFOLDER="${subfolder}" bash .circleci/scripts/binary_upload.sh
-          done

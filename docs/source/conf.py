@@ -135,7 +135,6 @@ switcher_version = "main" if not RELEASE else version
 
 html_static_path = ["_static"]
 html_theme_options = {
-    "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://docs.pytorch.org/docs/stable/",
     "switcher": {
@@ -151,6 +150,7 @@ html_theme_options = {
         },
     ],
     "show_version_warning_banner": True,
+    "llm_disabled": False,
     "icon_links": [
         {
             "name": "X",
@@ -174,12 +174,16 @@ html_theme_options = {
         },
     ],
     "navbar_align": "left",
-    "navbar_start": ["version-switcher", "navbar-logo"],
+    "navbar_start": ["navbar-logo", "version-switcher"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
     "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
+    # RunLLM Widget Configuration (uncomment and set assistant_id to enable)
+    # Each repository should have its own unique assistant_id from RunLLM
+    "runllm_assistant_id": "834",
+    "runllm_name": "PyTorch Assistant",
     "pytorch_project": "docs",
 }
 
@@ -2499,11 +2503,9 @@ autodoc_default_options = {
 
 html_css_files = [
     "css/jit.css",
-    "css/custom.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
-html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 
