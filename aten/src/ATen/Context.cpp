@@ -247,6 +247,14 @@ void Context::setSDPUseFlash(bool e) {
   enabled_flashSDP = e;
 }
 
+bool Context::userEnabledFA3SDP() const {
+  return enabled_fa3SDP;
+}
+
+void Context::setSDPUseFA3(bool e) {
+  enabled_fa3SDP = e;
+}
+
 bool Context::userEnabledMemEfficientSDP() const {
   return enabled_mem_efficientSDP;
 }
@@ -410,7 +418,19 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   it->second = p;
 }
 
+static void _warn_once_magma_deprecation() {
+  TORCH_WARN_ONCE(
+    "The usage of MAGMA backend for linear algebra operations is deprecated "
+    "and will be removed in future releases. cuSOLVER stays as the default backend."
+    "If you see any error messages with cuSOLVER but not MAGMA, please, "
+    "file an issue on GitHub."
+  );
+}
+
 at::LinalgBackend Context::linalgPreferredBackend() const {
+  if (linalg_preferred_backend == at::LinalgBackend::Magma) {
+    _warn_once_magma_deprecation();
+  }
   return linalg_preferred_backend;
 }
 
@@ -426,6 +446,9 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
       "If you see any error or unexpected behavior when this flag is set "
       "please file an issue on GitHub."
     );
+  }
+  if (b == at::LinalgBackend::Magma) {
+    _warn_once_magma_deprecation();
   }
 }
 
@@ -728,11 +751,21 @@ bool Context::isXNNPACKAvailable() {
 #endif
 }
 
-void Context::setCheckSparseTensorInvariants(bool e) {
+void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {
   enable_sparse_tensor_invariant_checks = e;
 }
 
-bool Context::checkSparseTensorInvariants() const {
+std::optional<bool> Context::checkSparseTensorInvariants(bool warn_when_uninitialized) const {
+  if (warn_when_uninitialized && !enable_sparse_tensor_invariant_checks.has_value()) {
+    TORCH_WARN_ONCE(
+        "Sparse invariant checks are implicitly disabled. "
+        "Memory errors (e.g. SEGFAULT) will occur when "
+        "operating on a sparse tensor which violates the "
+        "invariants, but checks incur performance overhead. "
+        "To silence this warning, explicitly opt in or out. "
+        "See `torch.sparse.check_sparse_tensor_invariants.__doc__` "
+        "for guidance. ");
+  }
   return enable_sparse_tensor_invariant_checks;
 }
 

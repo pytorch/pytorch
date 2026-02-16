@@ -260,15 +260,8 @@ class IterationRangesRoot(IterationRanges):
             node.length. Returns `not length_is_one_hint` for ascending
             sort.
             """
-            divisor_hint = V.graph.sizevars.size_hint(
-                x.divisor, fallback=config.unbacked_symint_fallback
-            )
-            length_is_one_hint = (
-                V.graph.sizevars.size_hint(
-                    x.length, fallback=config.unbacked_symint_fallback
-                )
-                == 1
-            )
+            divisor_hint = V.graph.sizevars.optimization_hint(x.divisor)
+            length_is_one_hint = V.graph.sizevars.optimization_hint(x.length) == 1
             return (divisor_hint, not length_is_one_hint)
 
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
@@ -469,6 +462,24 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         self.rsplit_size = 0
         self.saved_partial_accumulate: list[PartialAccumulate] = []
+
+    def codegen_template_override(
+        self,
+        scheduling,
+        template_node,
+        epilogue_nodes,
+        prologue_nodes,
+        buf_name_to_prologue_group,
+        prologue_preserves_zero_mask_fn,
+        render,
+        only_gen_src_code: bool,
+    ) -> str | None:
+        """Override template codegen. Return None to use default flow.
+
+        External template handlers (e.g. Helion) can override this method
+        to implement custom code generation.
+        """
+        return None
 
     def _get_store_output_subgraph_name(self, i: int) -> str:
         return f"<STORE_OUTPUT_{i}>"
@@ -785,6 +796,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size2 = remaining[current_group + 1]
                     size3 = FloorDiv(size, size1 * size2)
                     return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
                         make_combined(
                             [size2, size3],
                             [
@@ -822,6 +834,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
                         make_combined(
                             [size2],
                             [
@@ -833,6 +846,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 else:
                     if current_group < len(remaining):
                         return_getters.append(
+                            # pyrefly: ignore [bad-argument-type]
                             operator.itemgetter(add_range(current_group, size))
                         )
             return_getters_groups.append(return_getters)
@@ -840,6 +854,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
             f"failed to set ranges {remaining} {lengths}"
         )
+        # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
     @classmethod
@@ -1140,9 +1155,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # for the "cat". However, I think it might be a bit overwhelming that
         # we add such complexity only for handling some particular cases for
         # benchmarking.
-        out_numel = V.graph.sizevars.size_hint(
-            sympy_product(self.numels.values()),
-            fallback=config.unbacked_symint_fallback,
+        out_numel = V.graph.sizevars.optimization_hint(
+            sympy_product(self.numels.values())
         )
         for i, arg in enumerate(call_args):
             # "buf" may be narrowed. In this case, the number of memory accesses
@@ -1154,9 +1168,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 nbytes.append(0)
                 continue
             arg_numel = V.graph.get_numel(arg)
-            buf_size = V.graph.sizevars.size_hint(
-                arg_numel, fallback=config.unbacked_symint_fallback
-            )
+            buf_size = V.graph.sizevars.optimization_hint(arg_numel)
             if buf_size > out_numel:
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
@@ -1633,9 +1645,6 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
-        if not V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel)):
-            return self._codegen_mix_order_reduction(node2, node1)
-
         def _pick_split_size():
             # the overridden has highest priority
             if config.triton.mix_order_reduction_split_size is not None:
@@ -1656,8 +1665,6 @@ class SIMDScheduling(BaseScheduling):
 
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
-
-        assert V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel))
 
         # split epilogue out of node2
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
@@ -2045,6 +2052,20 @@ class SIMDScheduling(BaseScheduling):
         # all prologue groups should have finalized with use in template
         assert len(prologue_group) == 0
 
+        # External template handlers (e.g. Helion) can override codegen
+        result = kernel.codegen_template_override(
+            self,
+            template_node,
+            epilogue_nodes,
+            prologue_nodes,
+            buf_name_to_prologue_group,
+            prologue_preserves_zero_mask,
+            render,
+            only_gen_src_code,
+        )
+        if result is not None:
+            return result
+
         with kernel:
             if not only_gen_src_code:
                 # prologue nodes can only be fused if their only use is in the template,
@@ -2108,7 +2129,7 @@ class SIMDScheduling(BaseScheduling):
                     partial_code.finalize_hook("<DEF_KERNEL>")
                 partial_code.finalize_hook("<ARGDEFS>", strict=False)
 
-            # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
 
             for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
@@ -2258,6 +2279,7 @@ class SIMDScheduling(BaseScheduling):
                         if size_hint is None
                         else self._make_shape_cache_key(template_node.node, size_hint)
                     )
+                    # pyrefly: ignore [unsupported-operation]
                     kernels[shape_cache_key] = kernel
 
             if only_gen_src_code:
@@ -2325,7 +2347,11 @@ class SIMDScheduling(BaseScheduling):
 
         Returns a list of (src_code, kernel, node_group) tuples.
         """
+        from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
+
+        # This is currently the only type supported by this method
+        assert issubclass(self.kernel_type, TritonKernel)
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         node_schedule_map: dict[Any, NodeInfo] = {}
@@ -2382,10 +2408,12 @@ class SIMDScheduling(BaseScheduling):
                     )
                     with V.set_kernel_handler(kernel):
                         src_code = kernel.codegen_kernel()
+                    # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
                 # Multi-node: create ComboKernel with combo subkernels
                 kernel = ComboKernel(
+                    triton_kernel_cls=self.kernel_type,
                     enable_autotune=enable_autotune,
                     mixed_sizes=mixed_sizes,
                 )
@@ -2395,6 +2423,7 @@ class SIMDScheduling(BaseScheduling):
                         node_info.tiling,
                         features=node_info.features,
                         optimize_mask=not mixed_sizes,
+                        triton_kernel_cls=self.kernel_type,
                     )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
@@ -2403,7 +2432,9 @@ class SIMDScheduling(BaseScheduling):
                     )
 
                 src_code = kernel.codegen_kernel()
+                # pyrefly: ignore [bad-argument-type]
                 kernel_code_list.append((src_code, kernel, node_group))
+        # pyrefly: ignore [bad-return]
         return kernel_code_list
 
     def codegen_combo_kernel(self, combo_kernel_node):
@@ -2749,9 +2780,7 @@ class SIMDScheduling(BaseScheduling):
         red_ranges = [ranges[v] for v in all_red_vars]
 
         # Sometimes dynamic shapes is unable to prove equality without hint
-        get_hint = functools.partial(
-            V.graph.sizevars.size_hint, fallback=config.unbacked_symint_fallback
-        )
+        get_hint = V.graph.sizevars.optimization_hint
         torch._check(
             get_hint(sympy_product(pw_ranges)) == get_hint(pointwise_numel),
             lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
@@ -2839,7 +2868,7 @@ class SIMDScheduling(BaseScheduling):
             # TODO: incorporate exact bitwidth, and read/write
             # coalesced write is 2x more important
             for i in range(len(splits)):
-                s = V.graph.sizevars.size_hint(splits[i], fallback=32)
+                s = V.graph.sizevars.optimization_hint(splits[i], fallback=32)
                 s = min(s, 8)
                 split_scores[i] = int(split_scores[i] * s / 8)
 
@@ -3188,7 +3217,7 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s, fallback=8192)
+        s = V.graph.sizevars.optimization_hint(s, fallback=8192)
         return s >= 32 and (s % 32 == 0)
 
 
