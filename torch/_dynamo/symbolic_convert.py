@@ -512,7 +512,6 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
 
     # expect to find POP_JUMP_[FORWARD_]IF_TRUE
     begin_idx = next(i for i, inst in enumerate(insts) if inst.startswith("POP_JUMP"))
-
     end_idx = insts.index("RAISE_VARARGS")
 
     return insts[begin_idx + 1 : end_idx + 1]
