@@ -1033,7 +1033,7 @@ class InputObserver:
             [str | bytes], ort.InferenceSession
         ] = _onnx_program._ort_session_initializer,
         skip_none: bool = True,
-    ) -> list[dict[str, str | int | float]]:
+    ) -> list[dict[str, str | int | float | bool]]:
         """Computes the discrepancies between the saved inputs and outputs
         with the saved onnx model.
 
