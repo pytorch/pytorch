@@ -238,6 +238,92 @@ class LoggingTests(LoggingTestCase):
             record_str,
         )
 
+    @make_logging_test(recompiles=True)
+    def test_recompiles_closure_variable_hint(self, records):
+        def make_cl(n1, n2):
+            def inner(x):
+                return x + n1 + n2
+
+            return inner
+
+        @torch.compile(backend="eager")
+        def fn(cl, x):
+            return cl(x)
+
+        fn(make_cl(0, 1), torch.ones(3))
+        fn(make_cl(0, 2), torch.ones(3))
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The recompilation log should include a hint explaining which closure variable
+        # the cell_contents refers to
+        self.assertIn('(HINT: guard on "n2")', record_str)
+
+    @make_logging_test(recompiles=True)
+    def test_recompiles_nested_closure_variable_hint(self, records):
+        # block_mask.mask_mod.__closure__[0].cell_contents.__closure__[0].cell_contents
+        def make_inner_fn(inner_val):
+            def inner(x):
+                return x + inner_val
+
+            return inner
+
+        def make_outer_fn(outer_val, inner_fn):
+            def outer(x):
+                return inner_fn(x) * outer_val
+
+            return outer
+
+        class BlockMask:
+            def __init__(self, mask_mod):
+                self.mask_mod = mask_mod
+
+        @torch.compile(backend="eager")
+        def fn(block_mask, x):
+            return block_mask.mask_mod(x)
+
+        # inner_fn captures inner_val, outer captures (outer_val, inner_fn)
+        # This creates: block_mask.mask_mod.__closure__[0].cell_contents.__closure__[0].cell_contents
+        bm1 = BlockMask(make_outer_fn(2, make_inner_fn(10)))
+        bm2 = BlockMask(make_outer_fn(2, make_inner_fn(20)))
+
+        fn(bm1, torch.ones(3))
+        fn(bm2, torch.ones(3))
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The recompilation log should show the hint for the first closure variable
+        self.assertIn('(HINT: guard on "inner_val")', record_str)
+        # Verify it shows the full nested path
+        self.assertIn("cell_contents.__closure__", record_str)
+
+    @make_logging_test(recompiles=True)
+    def test_recompiles_closure_variable_attribute_hint(self, records):
+        # Test when guard is on an attribute of the closure cell contents
+        # e.g., block_mask.mask_mod.__closure__[0].cell_contents.__code__
+        # The hint should still show which closure variable is involved
+        class Transform:
+            def __init__(self, scale):
+                self.scale = scale
+
+            def __call__(self, x):
+                return x * self.scale
+
+        def make_fn(transform):
+            def fn(x):
+                return transform(x)
+
+            return fn
+
+        @torch.compile(backend="eager")
+        def outer(inner_fn, x):
+            return inner_fn(x)
+
+        outer(make_fn(Transform(2)), torch.ones(3))
+        outer(make_fn(Transform(3)), torch.ones(3))  # transform.scale changes
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The hint should show the full path from closure var: "transform".scale
+        self.assertIn('(HINT: guard on "transform".scale)', record_str)
+
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
@@ -279,7 +365,13 @@ class LoggingTests(LoggingTestCase):
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
-torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
+torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
+  Explanation: Dynamo failed to run FX node with fake tensors: call_method add(*(FakeTensor(..., size=(1000, 1000), grad_fn=<MulBackward0>), FakeTensor(..., size=(10, 10))), **{}): got RuntimeError('Attempting to broadcast a dimension of length 10 at -1! Mismatching argument at index 1 had torch.Size([10, 10]); but expected shape should be broadcastable to [1000, 1000]')
+  Hint: Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance("force_eager")`.
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4315.html
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
@@ -326,7 +418,14 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
   target: aten.round.default
   args[0]: TensorBox(StorageBox(
     InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
-  ))""",
+  ))AssertionError:
+  target: aten.round.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='primals_1', layout=FixedLayout('cpu', torch.float32, size=[1000, 1000], stride=[1000, 1]))
+  ))
+Found from :
+   File "test_logging.py", line N, in inductor_error_fn
+    output = torch.round(a)""",
         )
 
         exitstack.close()
@@ -1404,6 +1503,7 @@ exclusions = {
     "annotation",
     "node_runtime_estimation",
     "caching",
+    "overlap_scheduling",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

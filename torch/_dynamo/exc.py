@@ -104,6 +104,13 @@ class SpeculationRestartAnalysis(RestartAnalysis):
     pass
 
 
+class AutogradGradRestartAnalysis(RestartAnalysis):
+    """Raised when autograd.grad consumed grad_fns that are returned.
+
+    On restart, autograd.grad will graph break instead of being traced.
+    """
+
+
 class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 
@@ -125,7 +132,14 @@ class SkipFrame(TorchDynamoException):
 
 
 class TorchRuntimeError(TorchDynamoException):
-    pass
+    def __init__(self, msg: str, real_stack: StackSummary | None = None) -> None:
+        super().__init__(msg)
+        self.msg = msg
+        self.real_stack = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class InvalidBackend(TorchDynamoException):
@@ -408,11 +422,15 @@ def raise_observed_exception(
     kwargs: Optional[dict[str, Any]] = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
-    from .variables import BuiltinVariable
+    from .variables.builder import SourcelessBuilder
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
+    exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
+        tx,  # pyrefly: ignore[bad-argument-type]
+        [SourcelessBuilder.create(tx, a) for a in args] if args else [],
+        kwargs or {},
+    )
     assert isinstance(exception_vt, ExceptionVals)
     tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
@@ -541,6 +559,7 @@ def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
             registry = json.load(f)
     except Exception:
         log.exception("Error accessing the registry file")
+        # pyrefly: ignore [implicit-any]
         registry = {}
 
     mapping = {}
