@@ -352,9 +352,8 @@ class InputObserverInfo:
                 # Validate that `missing` keys are compatible with the observed signature.
                 # If the function does not accept **kwargs, all missing keys must be
                 # present in the observed signature names.
-                if (
-                    k not in self.signature_names
-                    and not getattr(self, "kwargs_name", None)
+                if k not in self.signature_names and not getattr(
+                    self, "kwargs_name", None
                 ):
                     raise ValueError(
                         f"Unexpected keyword argument '{k}' provided as a missing input "
@@ -840,7 +839,9 @@ class InputObserver:
             },
         ]
         observer = InputObserver(
-            missing=dict(pixel_values=torch.empty((0, 3, 896, 896), dtype=torch.float16))
+            missing=dict(
+                pixel_values=torch.empty((0, 3, 896, 896), dtype=torch.float16)
+            )
         )
         with observer(pipe.model):
             pipe(text=messages, max_new_tokens=4)
