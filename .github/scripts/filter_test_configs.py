@@ -41,7 +41,7 @@ SUPPORTED_PERIODICAL_MODES: dict[str, Callable[[Optional[str]], bool]] = {
     "rerun_disabled_tests": lambda job_name: True,
 }
 
-# The link to the published list of disabled jobs
+# The link to the published list of disabled jobs.
 DISABLED_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/disabled-jobs.json?versionId=EdtXb8H1wC3KKKfSV9z7QtgG3FngDv3B"
 # and unstable jobs
 UNSTABLE_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/unstable-jobs.json?versionId=iafjJg17T2MK7wQiJ0qx32zIPMqqwZqv"
