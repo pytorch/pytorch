@@ -2116,6 +2116,23 @@ class TestSDPA(NNTestCase):
         y = torch.nn.functional.scaled_dot_product_attention(x, x, x)
         self.assertFalse(y.isnan().any().item())
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_sdpa_zero_sized_tensors(self, device, dtype):
+        zero_size_configs = [
+            (0, 4, 10, 64),  # zero batch
+            (2, 4, 0, 64),   # zero seq len
+            (2, 4, 10, 0),   # zero head dim
+            (0, 0, 0, 0),    # all zeros
+        ]
+        for b, h, s, d in zero_size_configs:
+            q = torch.zeros(b, h, s, d, dtype=dtype, device=device)
+            k = torch.zeros(b, h, s, d, dtype=dtype, device=device)
+            v = torch.zeros(b, h, s, 32, dtype=dtype, device=device)
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            self.assertEqual(out.shape, (b, h, s, 32))
+            self.assertEqual(out, torch.zeros(b, h, s, 32, dtype=dtype, device=device))
+
+
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
 
