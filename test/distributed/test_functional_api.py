@@ -421,7 +421,7 @@ class TestGradCollectives(MultiThreadedTestCase):
         y = torch.rand([4], requires_grad=True)
         out = ft_c.all_reduce(x, "sum", dist.group.WORLD)
         (out + y).sum().backward()
-        self.assertIsNone(x.grad)
+        self.assertIsNotNone(x.grad)
 
 
 class TestMakeFx(TestCase):
@@ -616,7 +616,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
                 return batch * 5
 
         compiled_func = torch.compile(func)
-        compiled_func(torch.ones((100,), device=device), self.process_group, self.rank)
+        compiled_func(torch.ones((100,), device=device), self.pg, self.rank)
         dist.barrier()
 
 

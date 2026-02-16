@@ -449,6 +449,7 @@ class AutogradCompilerInstance:
         pctx: Any,
         ctx: Any,
         maybe_backward_state_idx: Optional[int],
+        opaque_object_indices: list[int],
     ) -> Sequence[Any]:
         # The AOTBackward call consists of three things: the prologue, the
         # backward graph, and the epilogue.
@@ -462,6 +463,11 @@ class AutogradCompilerInstance:
         # into the CA graph and have Dynamo trace into it.
 
         psymints = [self.to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
+
+        popaque_objects = [
+            self.hooks_proxy[idx]  # type: ignore[index]
+            for idx in opaque_object_indices
+        ]
 
         # NOTE: we should only close over constants
         CompiledFunction = ctx._forward_cls
@@ -482,11 +488,13 @@ class AutogradCompilerInstance:
         def call_aot_bwd_prologue(
             ctx_saved_tensors: Sequence[torch.Tensor],
             ctx_symints: Sequence[IntLikeType],
+            ctx_opaque_objs: Sequence[Any],
             *flat_args: Sequence[Any],
         ) -> Any:
             out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
                 ctx_saved_tensors,
                 ctx_symints,
+                ctx_opaque_objs,
                 metadata,
                 maybe_subclass_metadata,
                 *flat_args,
@@ -499,6 +507,7 @@ class AutogradCompilerInstance:
             args=(
                 psaved_tensors,
                 psymints,
+                popaque_objects,
                 *pinputs,
             ),
             kwargs={},
@@ -538,6 +547,7 @@ class AutogradCompilerInstance:
             # run over all nodes of the aot_backward graph.
             # copy and paste them all into the compiled autograd graph.
             args_idx = 0
+            # pyrefly: ignore [implicit-any]
             value_remap = {}
             poutputs: Optional[list[torch.fx.Proxy]] = None
 
@@ -649,6 +659,7 @@ class AutogradCompilerInstance:
         backward_idx: int,
         ctx: torch.autograd.function.BackwardCFunction,
         maybe_backward_state_idx: Optional[int],
+        opaque_object_indices: list[int],
     ) -> tuple[Optional[torch.Tensor], ...]:
         assert self.hooks_proxy is not None
         pctx = self.hooks_proxy[backward_idx]  # type: ignore[index]
@@ -663,6 +674,7 @@ class AutogradCompilerInstance:
                 pctx,
                 ctx,
                 maybe_backward_state_idx,
+                opaque_object_indices,
             )
         else:
             proxies = self.fx_tracer.create_proxy(
@@ -1349,6 +1361,7 @@ class AutogradCompilerInstance:
             if len(output_nodes) > 0:
                 continue
 
+            # pyrefly: ignore [implicit-any]
             input_nodes_and_users = []
             input_nodes_and_users.extend(list(input_nodes))
             for input_node in input_nodes:

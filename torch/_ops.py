@@ -19,6 +19,12 @@ from torch._functorch.pyfunctorch import dispatch_functorch, TransformType
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+try:
+    from types import NotImplementedType  # Python 3.10+
+except ImportError:  # pragma: no cover
+    NotImplementedType = type(NotImplemented)  # type: ignore[misc]
+
+
 if TYPE_CHECKING:
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
@@ -174,7 +180,16 @@ class OperatorBase:
 
         def functionalize_dispatch_mode_fn(
             mode: FunctionalTensorMode | None, *args: _P.args, **kwargs: _P.kwargs
-        ) -> _T:
+        ) -> _T | NotImplementedType:
+            from torch._higher_order_ops.utils import has_user_subclass
+            from torch._subclasses import FakeTensor
+            from torch._subclasses.functional_tensor import FunctionalTensor
+
+            if has_user_subclass(
+                (args, kwargs),
+                allowed_subclasses=(FakeTensor, FunctionalTensor),
+            ):
+                return NotImplemented
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(
@@ -1112,12 +1127,23 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
         return handler(*args, **kwargs)
 
 
-def _must_dispatch_in_python(args, kwargs):
-    return pytree.tree_any(
-        lambda obj: isinstance(
-            obj, torch._library.fake_class_registry.FakeScriptObject
-        ),
-        (args, kwargs),
+def _contains_fake_script_object(obj) -> bool:
+    """Check if obj is or contains a FakeScriptObject.
+    This is load-bearing for TorchBindOpOverloads so we avoid pytree
+    since it's much slower.
+    """
+    if isinstance(obj, torch._library.fake_class_registry.FakeScriptObject):
+        return True
+    elif isinstance(obj, (list, tuple)):
+        return any(_contains_fake_script_object(item) for item in obj)
+    elif isinstance(obj, dict):
+        return any(_contains_fake_script_object(v) for v in obj.values())
+    return False
+
+
+def _must_dispatch_in_python(args, kwargs) -> bool:
+    return any(_contains_fake_script_object(arg) for arg in args) or (
+        bool(kwargs) and any(_contains_fake_script_object(v) for v in kwargs.values())
     )
 
 
