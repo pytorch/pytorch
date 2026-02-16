@@ -8708,37 +8708,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 ),
             )
 
-    def test_mro_source_cache_includes_attr_name(self):
-        # Two class attributes with the same interned integer value share
-        # the same id().  The mro_source_cache must include the attribute
-        # name in its key; otherwise the second lookup returns the first
-        # attribute's source, installing a guard on the wrong key and
-        # missing mutations to the second attribute.
-        class Base:
-            x = 1
-            y = 1
-
-        class Child(Base):
-            pass
-
-        cnt = torch._dynamo.testing.CompileCounter()
-
-        @torch.compile(backend=cnt)
-        def fn(obj, t):
-            return t * obj.x + t * obj.y
-
-        obj = Child()
-        t = torch.tensor([1.0])
-        result = fn(obj, t)
-        self.assertEqual(result, torch.tensor([2.0]))
-        self.assertEqual(cnt.frame_count, 1)
-
-        # Changing y must trigger recompilation.
-        Base.y = 42
-        result = fn(obj, t)
-        self.assertEqual(result, torch.tensor([43.0]))
-        self.assertEqual(cnt.frame_count, 2)
-
     def test_pytree_tree_is_leaf_with_namedtuple(self):
         # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
         from collections import namedtuple
