@@ -34,7 +34,7 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
@@ -4554,7 +4554,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if i.is_tensor():
                     bwd_args.append(i)
                 else:
-                    bwd_args.append(ConstantVariable.create(None))
+                    bwd_args.append(CONSTANT_VARIABLE_NONE)
 
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
 
