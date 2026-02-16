@@ -243,6 +243,7 @@ class CuteDSLOpOverrides(OpOverrides):
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.erf({x})")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def sigmoid(x: CuteDSLArg) -> CuteDSLArg:
         """Sigmoid with fp32 compute and cast-back to expected output dtype."""
         x_cse = CuteDSLOpOverrides._get_cse_var(x)
