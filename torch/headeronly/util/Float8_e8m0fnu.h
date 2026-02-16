@@ -41,6 +41,9 @@ struct alignas(1) Float8_e8m0fnu {
 
   constexpr C10_HOST_DEVICE Float8_e8m0fnu(uint8_t bits, from_bits_t /*unused*/)
       : x(bits) {}
+
+  C10_HOST_DEVICE uint8_t& bits() { return x; }
+ 
   inline C10_HOST_DEVICE Float8_e8m0fnu(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;

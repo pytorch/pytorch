@@ -33,8 +33,8 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
   float out[100];
 
   for (const auto i : c10::irange(100)) {
-    bfloats[i].x = c10::detail::bits_from_f32(in[i]);
-    out[i] = c10::detail::f32_from_bits(bfloats[i].x);
+    bfloats[i].bits() = c10::detail::bits_from_f32(in[i]);
+    out[i] = c10::detail::f32_from_bits(bfloats[i].bits());
 
     // The relative error should be less than 1/(2^7) since BFloat16
     // has 7 bits mantissa.
@@ -56,8 +56,8 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
   float out[100];
 
   for (const auto i : c10::irange(100)) {
-    bfloats[i].x = c10::detail::round_to_nearest_even(in[i]);
-    out[i] = c10::detail::f32_from_bits(bfloats[i].x);
+    bfloats[i].bits() = c10::detail::round_to_nearest_even(in[i]);
+    out[i] = c10::detail::f32_from_bits(bfloats[i].bits());
 
     // The relative error should be less than 1/(2^7) since BFloat16
     // has 7 bits mantissa.
@@ -70,7 +70,7 @@ TEST(BFloat16Conversion, NaN) {
   EXPECT_TRUE(std::isnan(inNaN));
 
   c10::BFloat16 a = c10::BFloat16(inNaN);
-  float out = c10::detail::f32_from_bits(a.x);
+  float out = c10::detail::f32_from_bits(a.bits());
 
   EXPECT_TRUE(std::isnan(out));
 }
@@ -80,7 +80,7 @@ TEST(BFloat16Conversion, Inf) {
   EXPECT_TRUE(std::isinf(inInf));
 
   c10::BFloat16 a = c10::BFloat16(inInf);
-  float out = c10::detail::f32_from_bits(a.x);
+  float out = c10::detail::f32_from_bits(a.bits());
 
   EXPECT_TRUE(std::isinf(out));
 }
@@ -89,7 +89,7 @@ TEST(BFloat16Conversion, SmallestDenormal) {
   float in = std::numeric_limits<float>::denorm_min(); // The smallest non-zero
                                                        // subnormal number
   c10::BFloat16 a = c10::BFloat16(in);
-  float out = c10::detail::f32_from_bits(a.x);
+  float out = c10::detail::f32_from_bits(a.bits());
 
   EXPECT_FLOAT_EQ(in, out);
 }
@@ -109,10 +109,10 @@ TEST(BFloat16Math, Addition) {
   float expected = float_from_bytes(0, 0, 0x40c80000);
 
   c10::BFloat16 b{};
-  b.x = c10::detail::bits_from_f32(input);
+  b.bits() = c10::detail::bits_from_f32(input);
   b = b + b;
 
-  float res = c10::detail::f32_from_bits(b.x);
+  float res = c10::detail::f32_from_bits(b.bits());
   EXPECT_EQ(res, expected);
 }
 
@@ -131,10 +131,10 @@ TEST(BFloat16Math, Subtraction) {
   float expected = float_from_bytes(0, 0, 0x40280000);
 
   c10::BFloat16 b{};
-  b.x = c10::detail::bits_from_f32(input);
+  b.bits() = c10::detail::bits_from_f32(input);
   b = b - 5;
 
-  float res = c10::detail::f32_from_bits(b.x);
+  float res = c10::detail::f32_from_bits(b.bits());
   EXPECT_EQ(res, expected);
 }
 
@@ -145,7 +145,7 @@ TEST(BFloat16Math, NextAfterZero) {
       [](c10::BFloat16 from, c10::BFloat16 to, c10::BFloat16 expected) {
         c10::BFloat16 actual = std::nextafter(from, to);
         // Check for bitwise equality!
-        ASSERT_EQ(actual.x ^ expected.x, uint16_t{0});
+        ASSERT_EQ(actual.bits() ^ expected.bits(), uint16_t{0});
       };
   check_nextafter(zero, zero, /*expected=*/zero);
   check_nextafter(zero, -zero, /*expected=*/-zero);

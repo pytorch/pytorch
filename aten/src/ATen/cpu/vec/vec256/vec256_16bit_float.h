@@ -198,7 +198,7 @@ class Vectorized16 {
   Vectorized16() {}
   Vectorized16(__m256i v) : values(v) {}
   Vectorized16(T val) {
-    value_type uw = val.x;
+    value_type uw = val.bits();
     values = _mm256_set1_epi16(uw);
   }
   Vectorized16(
@@ -219,22 +219,22 @@ class Vectorized16 {
       T val15,
       T val16) {
     values = _mm256_setr_epi16(
-        val1.x,
-        val2.x,
-        val3.x,
-        val4.x,
-        val5.x,
-        val6.x,
-        val7.x,
-        val8.x,
-        val9.x,
-        val10.x,
-        val11.x,
-        val12.x,
-        val13.x,
-        val14.x,
-        val15.x,
-        val16.x);
+        val1.bits(),
+        val2.bits(),
+        val3.bits(),
+        val4.bits(),
+        val5.bits(),
+        val6.bits(),
+        val7.bits(),
+        val8.bits(),
+        val9.bits(),
+        val10.bits(),
+        val11.bits(),
+        val12.bits(),
+        val13.bits(),
+        val14.bits(),
+        val15.bits(),
+        val16.bits());
   }
   operator __m256i() const {
     return values;

@@ -68,6 +68,8 @@ namespace c10 {
 struct alignas(2) Half {
   unsigned short x;
 
+  C10_HOST_DEVICE uint16_t& bits() { return x; }
+
   struct from_bits_t {};
   C10_HOST_DEVICE static constexpr from_bits_t from_bits() {
     return from_bits_t();

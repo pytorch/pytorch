@@ -143,7 +143,7 @@ struct TopKTypeConfig<at::BFloat16> {
   typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(at::BFloat16 v) {
-    RadixType x = v.x;
+    RadixType x = v.bits();
     RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
     return (v == v) ? (x ^ mask) : 0xffff;
   }
@@ -151,7 +151,7 @@ struct TopKTypeConfig<at::BFloat16> {
   static inline __device__ at::BFloat16 deconvert(RadixType v) {
     RadixType mask = (v & 0x00008000) ? 0x00008000 : 0x0000ffff;
     at::BFloat16 r;
-    r.x = (v ^ mask);
+    r.bits() = (v ^ mask);
     return r;
   }
 };

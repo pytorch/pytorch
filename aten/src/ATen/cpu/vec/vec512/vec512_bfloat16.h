@@ -197,7 +197,7 @@ class Vectorized16 {
   }
   Vectorized16(__m512i v) : values(v) {}
   Vectorized16(T val) {
-    value_type uw = val.x;
+    value_type uw = val.bits();
     values = _mm512_set1_epi16(uw);
   }
   Vectorized16(
@@ -234,38 +234,38 @@ class Vectorized16 {
       T val31,
       T val32) {
     values = _mm512_set_epi16(
-        val32.x,
-        val31.x,
-        val30.x,
-        val29.x,
-        val28.x,
-        val27.x,
-        val26.x,
-        val25.x,
-        val24.x,
-        val23.x,
-        val22.x,
-        val21.x,
-        val20.x,
-        val19.x,
-        val18.x,
-        val17.x,
-        val16.x,
-        val15.x,
-        val14.x,
-        val13.x,
-        val12.x,
-        val11.x,
-        val10.x,
-        val9.x,
-        val8.x,
-        val7.x,
-        val6.x,
-        val5.x,
-        val4.x,
-        val3.x,
-        val2.x,
-        val1.x);
+        val32.bits(),
+        val31.bits(),
+        val30.bits(),
+        val29.bits(),
+        val28.bits(),
+        val27.bits(),
+        val26.bits(),
+        val25.bits(),
+        val24.bits(),
+        val23.bits(),
+        val22.bits(),
+        val21.bits(),
+        val20.bits(),
+        val19.bits(),
+        val18.bits(),
+        val17.bits(),
+        val16.bits(),
+        val15.bits(),
+        val14.bits(),
+        val13.bits(),
+        val12.bits(),
+        val11.bits(),
+        val10.bits(),
+        val9.bits(),
+        val8.bits(),
+        val7.bits(),
+        val6.bits(),
+        val5.bits(),
+        val4.bits(),
+        val3.bits(),
+        val2.bits(),
+        val1.bits());
   }
   operator __m512i() const {
     return values;

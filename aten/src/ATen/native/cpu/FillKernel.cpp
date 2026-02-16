@@ -15,7 +15,7 @@ namespace {
 
 template <typename scalar_t>
 void fill_non_native_type(TensorIterator& iter, const Scalar& value_scalar) {
-  auto value = value_scalar.to<scalar_t>().x;
+  auto value = value_scalar.to<scalar_t>().bits();
   using H = typename std::make_signed_t<decltype(value)>;  // Signed type has more acceleration
   // Reserve the representation of value. static_cast<H>(value) is implementation defined.
   H val = *reinterpret_cast<H*>(std::addressof(value));

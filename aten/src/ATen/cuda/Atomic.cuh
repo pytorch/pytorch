@@ -47,13 +47,13 @@ struct AtomicFPOp<at::BFloat16> {
     at::BFloat16 bsum;
     do {
       assumed = old;
-      bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+      bsum.bits() = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
       bsum = func(bsum, val);
-      old = (size_t)address & 2 ? (old & 0xffff) | (bsum.x << 16) : (old & 0xffff0000) | bsum.x;
+      old = (size_t)address & 2 ? (old & 0xffff) | (bsum.bits() << 16) : (old & 0xffff0000) | bsum.bits();
       old = atomicCAS(address_as_ui, assumed, old);
     } while (assumed != old);
-    bsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    return bsum.x;
+    bsum.bits() = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
+    return bsum.bits();
   }
 };
 

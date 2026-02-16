@@ -19,9 +19,4 @@ inline c10::Half copysign(c10::Half a, c10::Half b) {
   return c10::Half((a.x & 0x7fff) | (b.x & 0x8000), c10::Half::from_bits());
 }
 
-inline c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-  return c10::BFloat16(
-      (a.x & 0x7fff) | (b.x & 0x8000), c10::BFloat16::from_bits());
-}
-
 } // namespace c10

@@ -122,7 +122,7 @@ inline bool IsZero(T v) {
 
 template <>
 inline bool IsZero(BFloat16 v) {
-  return v.x == 0;
+  return v.bits() == 0;
 }
 
 template <>
