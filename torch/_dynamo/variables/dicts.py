@@ -48,7 +48,7 @@ from ..utils import (
     specialize_symnode,
 )
 from .base import ValueMutationNew, VariableTracker
-from .constant import ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 
 
 if TYPE_CHECKING:
@@ -561,7 +561,7 @@ class ConstDictVariable(VariableTracker):
             )
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "__getitem__":
             # Key guarding - Nothing to do. LazyVT for value will take care.
             if len(args) != 1:
@@ -637,7 +637,7 @@ class ConstDictVariable(VariableTracker):
                 )
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "__delitem__" and self.is_mutable():
             arg_hashable = args and is_hashable(args[0])
             if arg_hashable:
@@ -645,7 +645,7 @@ class ConstDictVariable(VariableTracker):
                 self.should_reconstruct_all = True
                 tx.output.side_effects.mutation(self)
                 self.items.__delitem__(Hashable(args[0]))
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name == "get":
@@ -660,7 +660,7 @@ class ConstDictVariable(VariableTracker):
                 self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
                     # if default is not given, return None
-                    return ConstantVariable.create(None)
+                    return CONSTANT_VARIABLE_NONE
                 return args[1]
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
@@ -723,7 +723,7 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "update" and self.is_mutable():
             # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
             # Either `b` or the kwargs is omittable, but not both.
@@ -748,7 +748,7 @@ class ConstDictVariable(VariableTracker):
                         for k, v in kwargs.items()
                     }
                     self.items.update(kwargs_hashable)
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name == "__contains__":
@@ -793,7 +793,7 @@ class ConstDictVariable(VariableTracker):
                 return value
             else:
                 if len(args) == 1:
-                    x = ConstantVariable.create(None)
+                    x = CONSTANT_VARIABLE_NONE
                 else:
                     x = args[1]
                 tx.output.side_effects.mutation(self)
@@ -814,7 +814,7 @@ class ConstDictVariable(VariableTracker):
 
             key = Hashable(args[0])
             self.items.move_to_end(key, last=last)
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "__eq__" and istype(
             self, ConstDictVariable
         ):  # don't let Set use this function
@@ -1041,7 +1041,7 @@ class DefaultDictVariable(ConstDictVariable):
         super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         if default_factory is None:
-            default_factory = ConstantVariable.create(None)
+            default_factory = CONSTANT_VARIABLE_NONE
         self.default_factory = default_factory
 
     def is_python_constant(self) -> bool:
@@ -1102,7 +1102,7 @@ class DefaultDictVariable(ConstDictVariable):
             ) and self.is_supported_arg(args[1]):
                 tx.output.side_effects.mutation(self)
                 self.default_factory = args[1]
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
             return super().call_method(tx, name, args, kwargs)
         elif name == "__eq__":
             if len(args) != 1:
@@ -1201,7 +1201,7 @@ class SetVariable(ConstDictVariable):
     @staticmethod
     def _default_value() -> VariableTracker:
         # Variable to fill in he keys of the dictionary
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def as_proxy(self) -> Any:
         return {k.vt.as_proxy() for k in self.set_items}
@@ -1268,7 +1268,7 @@ class SetVariable(ConstDictVariable):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "add":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -1403,7 +1403,7 @@ class SetVariable(ConstDictVariable):
             if args[0] in self:
                 return super().call_method(tx, "pop", args, kwargs)
             else:
-                return ConstantVariable.create(value=None)
+                return CONSTANT_VARIABLE_NONE
         elif name in ("issubset", "issuperset"):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
@@ -1631,7 +1631,7 @@ class FrozensetVariable(SetVariable):
             #
             # In[3]: s
             # frozenset({1, 2})
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name in (
             "copy",
             "difference",
