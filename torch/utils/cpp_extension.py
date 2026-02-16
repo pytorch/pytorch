@@ -2632,15 +2632,17 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
                 has_gpu_rdc_flag = True
         if has_custom_flags:
             return [] if has_gpu_rdc_flag else ['-fno-gpu-rdc']
-    # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
+    # If not set, detect actual GPU architectures for visible devices.
     _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
     if not _archs:
-        archFlags = torch._C._cuda_getArchFlags()
-        if archFlags:
-            archs = archFlags.split()
-        else:
-            archs = []
+        archs = []
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            gcn_arch = props.gcnArchName.split(":")[0]
+            if gcn_arch and gcn_arch not in archs:
+                archs.append(gcn_arch)
+        if not archs:
             logger.warning(
                 "Failed to auto-detect ROCm architecture. Extensions will be compiled "
                 "without architecture-specific optimizations. Set PYTORCH_ROCM_ARCH "
