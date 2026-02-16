@@ -266,7 +266,8 @@ inline c10::cuda::CUDAStream getStreamFromPoolMasqueradingAsCUDA(
     DeviceIndex device = -1) {
   return c10::cuda::getStreamFromPool(priority, device);
 }
-inline auto& getStreamFromExternalMasqueradingAsCUDA = c10::cuda::getStreamFromExternal;
+inline auto& getStreamFromExternalMasqueradingAsCUDA =
+    c10::cuda::getStreamFromExternal;
 inline c10::cuda::CUDAStream getDefaultHIPStreamMasqueradingAsCUDA(
     DeviceIndex device_index = -1) {
   return c10::cuda::getDefaultCUDAStream(device_index);
@@ -275,7 +276,8 @@ inline c10::cuda::CUDAStream getCurrentHIPStreamMasqueradingAsCUDA(
     DeviceIndex device_index = -1) {
   return c10::cuda::getCurrentCUDAStream(device_index);
 }
-inline auto& setCurrentHIPStreamMasqueradingAsCUDA = c10::cuda::setCurrentCUDAStream;
+inline auto& setCurrentHIPStreamMasqueradingAsCUDA =
+    c10::cuda::setCurrentCUDAStream;
 } // namespace c10::hip
 #endif
 
