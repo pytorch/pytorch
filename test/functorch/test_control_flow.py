@@ -5535,6 +5535,47 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
         not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
         "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
     )
+    def test_cond_pin_memory_cudagraphs(self):
+        # Make sure that pinned host memory allocations get assigned
+        # to a private pool correctly during stream capture, even
+        # inside of conditional nodes.
+
+        # Ideally, we would call torch.Tensor.pin_memory() directly,
+        # but that is not allowed on fake tensors, so instead we call
+        # an op whose C++ implementation used pinned memory
+        # internally.
+        sizes = [3, 4, 3]
+
+        def true_fn(x):
+            return torch.split_with_sizes_copy(x, sizes)
+
+        def false_fn(x):
+            return torch.split_with_sizes_copy(2 * x, sizes)
+
+        def f(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        x = torch.randn(10).cuda()
+        true_pred = torch.tensor(True).cuda()
+        false_pred = torch.tensor(False).cuda()
+
+        _check_compile_cudagraph_backend(self, f, [x, true_pred])
+        _check_compile_cudagraph_backend(self, f, [x, false_pred])
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, true_pred],
+        )
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, false_pred],
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
     def test_cond_traced_triply_nested_cudagraphs(self):
         def level3_true(x):
             return x.sin()

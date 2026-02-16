@@ -742,12 +742,6 @@ struct CachingHostAllocatorImpl {
       std::function<bool(c10::Stream)> filter) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
     create_or_incref_pool_under_lock(pool_id);
-    for (auto it2 = captures_underway_.begin(); it2 != captures_underway_.end();
-         ++it2) {
-      TORCH_CHECK(
-          it2->first != pool_id,
-          "beginAllocateToPool: already recording to mempool_id");
-    }
     captures_underway_.emplace_back(pool_id, std::move(filter));
     captures_underway_empty_.store(false, std::memory_order_relaxed);
   }

@@ -145,17 +145,12 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
-  auto filter = [this](cudaStream_t stream) {
-    cudaStreamCaptureStatus status{};
-    CaptureId_t stream_capture_id = 0;
-    AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
-    return status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive && stream_capture_id == capture_id_;
-  };
-
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, create_allocate_filter());
+
+  auto filter = create_allocate_filter();
 
   at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
     return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
@@ -478,6 +473,11 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
   conditional_graph_capture_streams_ids_.push(0);
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       capture_dev_, mempool_id_, create_child_allocate_filter());
+  auto filter = create_child_allocate_filter();
+  at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
+    return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
+  });
+
   AT_CUDA_CHECK(cudaStreamBeginCaptureToGraph(
       *child_stream, if_node_child_graph, nullptr, nullptr, 0, capture_mode_));
 
