@@ -547,6 +547,7 @@ class AutogradCompilerInstance:
             # run over all nodes of the aot_backward graph.
             # copy and paste them all into the compiled autograd graph.
             args_idx = 0
+            # pyrefly: ignore [implicit-any]
             value_remap = {}
             poutputs: Optional[list[torch.fx.Proxy]] = None
 
@@ -1360,6 +1361,7 @@ class AutogradCompilerInstance:
             if len(output_nodes) > 0:
                 continue
 
+            # pyrefly: ignore [implicit-any]
             input_nodes_and_users = []
             input_nodes_and_users.extend(list(input_nodes))
             for input_node in input_nodes:
