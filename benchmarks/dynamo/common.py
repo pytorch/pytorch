@@ -475,6 +475,7 @@ def output_signpost(data, args, suite, error=None):
         "log_conv_args",
         "recompile_profiler",
         "find_batch_sizes",
+        "download_only",
         # Redundant
         "batch_size",
         "batch_size_file",
@@ -3682,8 +3683,13 @@ def parse_args(args=None):
         action="store_true",
         help="finds the largest batch size that could fit on GPUs",
     )
+    group.add_argument(
+        "--download-only",
+        action="store_true",
+        help="Download all models and exit without running benchmarks.",
+    )
 
-    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group = parser.add_mutually_exclusive_group(required=False)
     mode_group.add_argument(
         "--accuracy",
         action="store_true",
@@ -3697,7 +3703,7 @@ def parse_args(args=None):
         action="store_true",
         help="extracts the tolerance for each model with small batch size and eval mode",
     )
-    run_mode_group = parser.add_mutually_exclusive_group(required=True)
+    run_mode_group = parser.add_mutually_exclusive_group(required=False)
     run_mode_group.add_argument(
         "--training",
         action="store_true",
@@ -3706,7 +3712,13 @@ def parse_args(args=None):
     run_mode_group.add_argument(
         "--inference", action="store_true", help="Performs inference"
     )
-    return parser.parse_args(args)
+    args = parser.parse_args(args)
+    if not args.download_only:
+        if not any([args.accuracy, args.performance, args.tolerance]):
+            parser.error("one of --accuracy/--performance/--tolerance is required")
+        if not any([args.training, args.inference]):
+            parser.error("one of --training/--inference is required")
+    return args
 
 
 def process_caching_precompile():
@@ -4268,6 +4280,20 @@ def run(runner, args, original_dir=None):
             batch_size = runner.batch_size_finder(device, args.only)
             print(args.only, batch_size)
             write_outputs(output_filename, [], [args.only, batch_size])
+        return
+
+    if args.download_only:
+        model_names = list(runner.iter_model_names(args))
+        failed = []
+        for name in model_names:
+            try:
+                runner._download_model(name)
+                print(f"Downloaded: {name}")
+            except Exception as e:
+                print(f"Failed: {name}: {e}")
+                failed.append(name)
+        if failed:
+            sys.exit(1)
         return
 
     should_profile_details = args.profile_details
