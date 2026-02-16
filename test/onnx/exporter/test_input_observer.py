@@ -888,26 +888,26 @@ class TestInputObserver(common_utils.TestCase):
 
         inputs = [
             dict(
-                input_ids=torch.ones((1, 282), dtype=torch.int64),
-                pixel_values=torch.ones((1, 3, 896, 896), dtype=torch.int64),
-                attention_mask=torch.ones((1, 282), dtype=torch.int64),
-                position_ids=torch.ones((1, 282), dtype=torch.int64),
-                token_type_ids=torch.ones((1, 282), dtype=torch.int64),
-                cache_position=torch.ones((282,), dtype=torch.int64),
+                input_ids=torch.ones((1, 28), dtype=torch.int64),
+                pixel_values=torch.ones((1, 3, 112, 112), dtype=torch.int64),
+                attention_mask=torch.ones((1, 28), dtype=torch.int64),
+                position_ids=torch.ones((1, 28), dtype=torch.int64),
+                token_type_ids=torch.ones((1, 28), dtype=torch.int64),
+                cache_position=torch.ones((28,), dtype=torch.int64),
             ),
             dict(
                 input_ids=torch.ones((1, 1), dtype=torch.int64),
-                attention_mask=torch.ones((1, 283), dtype=torch.int64),
+                attention_mask=torch.ones((1, 29), dtype=torch.int64),
                 position_ids=torch.ones((1, 1), dtype=torch.int64),
-                past_key_values=torch.rand((1, 1, 282, 32)),
+                past_key_values=torch.rand((1, 1, 28, 32)),
                 token_type_ids=torch.ones((1, 1), dtype=torch.int64),
                 cache_position=torch.ones((1,), dtype=torch.int64),
             ),
             dict(
                 input_ids=torch.ones((1, 1), dtype=torch.int64),
-                attention_mask=torch.ones((1, 284), dtype=torch.int64),
+                attention_mask=torch.ones((1, 30), dtype=torch.int64),
                 position_ids=torch.ones((1, 1), dtype=torch.int64),
-                past_key_values=torch.rand((1, 1, 283, 32)),
+                past_key_values=torch.rand((1, 1, 29, 32)),
                 token_type_ids=torch.ones((1, 1), dtype=torch.int64),
                 cache_position=torch.ones((1,), dtype=torch.int64),
             ),
@@ -915,7 +915,7 @@ class TestInputObserver(common_utils.TestCase):
 
         model = Model()
         observer = InputObserver(
-            missing=dict(pixel_values=torch.empty((0, 3, 896, 896)))
+            missing=dict(pixel_values=torch.empty((0, 3, 112, 112)))
         )
         with observer(model):
             for kwargs in inputs:
@@ -933,7 +933,7 @@ class TestInputObserver(common_utils.TestCase):
             "cache_position": {0: cst},
         }
         self.assertEqual(expected, shapes)
-        kwargs = observer.infer_dynamic_shapes()
+        kwargs = observer.infer_arguments()
         self.assertEqual(list(expected), list(kwargs))
 
     def test_io_captured_kwargs_kwargs(self):

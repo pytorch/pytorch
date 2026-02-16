@@ -795,40 +795,43 @@ class InputObserver:
     are needed but they may not be both specified at the same time.
     Since `pixel_values` only appears in the first call, the observer cannot
     tell how to infer an empty tensor for this argument. That's what the argument
-    `missing` is for.
+    `missing` is for. The following example is more than a dummy example
+    but shows how to use it with ``transformers``.
 
-    >>> from transformers import pipeline
-    >>>
-    >>> model_id = "tiny-random/gemma-3"
-    >>> pipe = pipeline(
-    >>>     "image-text-to-text",
-    >>>     model=model_id,
-    >>>     device="cpu",
-    >>>     trust_remote_code=True,
-    >>>     max_new_tokens=3,
-    >>>     dtype=torch.float16,
-    >>> )
-    >>> messages = [
-    >>>     {
-    >>>         "role": "system",
-    >>>         "content": [{"type": "text", "text": "You are a helpful assistant."}],
-    >>>     },
-    >>>     {
-    >>>         "role": "user",
-    >>>         "content": [
-    >>>             {
-    >>>                 "type": "image",
-    >>>                 "url": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/p-blog/candy.JPG",
-    >>>             },
-    >>>             {"type": "text", "text": "What animal is on the candy?"},
-    >>>         ],
-    >>>     },
-    >>> ]
-    >>> observer = InputObserver(
-    >>>     missing=dict(pixel_values=torch.empty((0, 3, 896, 896), dtype=torch.float16))
-    >>> )
-    >>> with observer(pipe.model):
-    >>>     pipe(text=messages, max_new_tokens=4)
+    .. code-block:: python
+
+        from transformers import pipeline
+
+        model_id = "tiny-random/gemma-3"
+        pipe = pipeline(
+            "image-text-to-text",
+            model=model_id,
+            device="cpu",
+            trust_remote_code=True,
+            max_new_tokens=3,
+            dtype=torch.float16,
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": "You are a helpful assistant."}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "url": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/p-blog/candy.JPG",
+                    },
+                    {"type": "text", "text": "What animal is on the candy?"},
+                ],
+            },
+        ]
+        observer = InputObserver(
+            missing=dict(pixel_values=torch.empty((0, 3, 896, 896), dtype=torch.float16))
+        )
+        with observer(pipe.model):
+            pipe(text=messages, max_new_tokens=4)
 
     .. versionadded:: 2.11.0
     """
