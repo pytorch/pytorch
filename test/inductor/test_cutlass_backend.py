@@ -1569,7 +1569,7 @@ class TestCutlassBackend(TestCase):
             m4, 4, "Wrong max alignment. Should have been 4 (due to float32 dtype )."
         )
 
-    @skipXPUIf(True, "To be enabled.")
+    @skipXPUIf(not PLATFORM_SUPPORTS_SYCLTLA, "")
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_standalone_runner(self):
@@ -1588,14 +1588,14 @@ class TestCutlassBackend(TestCase):
         ):
             from tempfile import NamedTemporaryFile
 
-            from torch._inductor.codegen.cuda.compile_utils import (
-                cuda_standalone_runner_compile_command,
-                CUDACompileSourceCapturingContext,
+            from torch._inductor.codegen.cutlass.utils import (
+                cutlass_standalone_runner_compile_command,
+                CUTLASSCompileSourceCapturingContext,
             )
 
             # Run compilation, check results just in case, and save
             # CUTLASS-based generated code.
-            with CUDACompileSourceCapturingContext() as ctx:
+            with CUTLASSCompileSourceCapturingContext(GPU_TYPE) as ctx:
                 compiled = torch.compile(torch.mm, dynamic=False)
 
                 expected = torch.mm(a, b)
@@ -1620,8 +1620,8 @@ class TestCutlassBackend(TestCase):
 
             # Get command to compile .cu file, and run the
             # compilation.
-            command = cuda_standalone_runner_compile_command(
-                Path(cu_file.name), Path(exe_file.name)
+            command = cutlass_standalone_runner_compile_command(
+                GPU_TYPE, Path(cu_file.name), Path(exe_file.name)
             )
 
             if IS_FBCODE:

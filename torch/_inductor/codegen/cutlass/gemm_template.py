@@ -395,12 +395,17 @@ extern "C" int run_standalone(uint64_t seed, int repetitions) {
     for (int i=0; i<repetitions; i++) {
         {{test_call_statement}};
     }
+#if defined(CUTLASS_ENABLE_SYCL)
+    compat::wait();
+#else
+    cudaDeviceSynchronize();
     cudaError_t result = cudaDeviceSynchronize();
     if (result != cudaSuccess) {
       std::cerr << "Device synchronize failed with error "
         << cudaGetErrorString(result) << std::endl;
       return result;
     }
+#endif
     return 0;
 }
 
