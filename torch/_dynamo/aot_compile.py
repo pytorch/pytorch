@@ -86,6 +86,7 @@ class AOTCompilePickler(pickle.Pickler):
         return _.__closure__[0]
 
     @classmethod
+    # pyrefly: ignore [implicit-any]
     def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
         return types.MethodType(func, base)
 
@@ -356,6 +357,7 @@ def aot_compile_fullgraph(
             torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(
                 {
+                    "strict_autograd_cache": True,
                     "bypass_autograd_cache_key": True,
                     "bundled_autograd_cache": True,
                     "force_non_lazy_backward_lowering": True,
@@ -491,6 +493,7 @@ def aot_compile_module(
                 backend=backend,
             )
 
+    # pyrefly: ignore [implicit-any]
     compiled_results = []
     for model_input in inputs:
         log.info("Compiling input %s..", model_input)

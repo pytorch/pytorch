@@ -109,7 +109,8 @@ class OpSpec:
 
     # output_specs and input_specs are related: for this op, given these input_specs,
     # this is the way the output would look
-    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...]
+    # Note: output_specs can be None for ops that don't return tensors (e.g., _linalg_check_errors)
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...] | None
     input_specs: Sequence[DTensorSpec] | None = None
 
     """
@@ -161,6 +162,12 @@ class OpSpec:
             out_spec = self.output_specs[0]
             assert isinstance(out_spec, DTensorSpec)
             return out_spec.mesh
+        elif self.output_specs is None:
+            # For no-output ops, get mesh from input_specs
+            assert self.input_specs is not None and len(self.input_specs) > 0, (
+                "Cannot determine mesh: output_specs is None and input_specs is empty"
+            )
+            return self.input_specs[0].mesh
         else:
             raise ValueError(
                 f"function output_spec expects a single DTensorSpec or a tuple of DTensorSpec but got: {self.output_specs}"
@@ -183,11 +190,12 @@ class OpSpec:
         return f"{input_specs_str}{output_spec_str}"
 
     def __hash__(self) -> int:
-        output_hash = hash(
-            self.output_specs
-            if isinstance(self.output_specs, DTensorSpec)
-            else tuple(self.output_specs)
-        )
+        if self.output_specs is None:
+            output_hash = hash(None)
+        elif isinstance(self.output_specs, DTensorSpec):
+            output_hash = hash(self.output_specs)
+        else:
+            output_hash = hash(tuple(self.output_specs))
         input_hash = hash(tuple(self.input_specs)) if self.input_specs else 0
         return hash((output_hash, input_hash))
 
@@ -504,7 +512,9 @@ class OpSchema:
         return_types = self.op._schema.returns
         # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
         # return types, so this check is enough for tensor like types
-        return isinstance(return_types[0].type, torch.TensorType)
+        return len(return_types) > 0 and isinstance(
+            return_types[0].type, torch.TensorType
+        )
 
     def get_mesh_from_args(self, validate: bool = True) -> DeviceMesh:
         """

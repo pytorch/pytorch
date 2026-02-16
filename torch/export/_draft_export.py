@@ -476,7 +476,8 @@ def draft_export(
             else:
                 continue
 
-            assert failure_type is not None
+            if failure_type is None:
+                raise AssertionError("failure_type cannot be None at this point")
             failures.append(
                 FailureReport(
                     failure_type,

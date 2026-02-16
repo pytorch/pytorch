@@ -1,13 +1,17 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <ATen/core/TensorBody.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
+
+#include <torch/nativert/graph/Graph.h>
 
 namespace torch::nativert {
 
@@ -28,19 +32,58 @@ struct KernelInputParams {
   std::vector<int64_t> output_indices;
 };
 
-struct LaunchParams {
-  // CPU params
-  int num_cpu_threads = 0; // 0 means use all available threads
-  // GPU params
-  // TODO: Add more GPU autotuning parameters
-  int num_warps = 4;
-  int shared_memory_bytes = 0;
+// Helper to extract a value from an Attribute and assign to target.
+// Checks if attr.name matches the given name, then extracts VariantT from
+// the variant and assigns to target. Returns true if successful.
+// Optional validator function can be provided to validate the value before
+// assignment.
+template <typename VariantT, typename TargetT, typename Validator>
+bool set_from_variant(
+    TargetT& target,
+    const std::string& name,
+    const Attribute& attr,
+    Validator validator) {
+  if (attr.name == name) {
+    if (auto* ptr = std::get_if<VariantT>(&attr.value)) {
+      if (validator(*ptr)) {
+        target = *ptr;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Overload without validator - always assigns if name matches and type is
+// correct.
+template <typename VariantT, typename TargetT>
+bool set_from_variant(
+    TargetT& target,
+    const std::string& name,
+    const Attribute& attr) {
+  if (attr.name == name) {
+    if (auto* ptr = std::get_if<VariantT>(&attr.value)) {
+      target = *ptr;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Virtual base class for kernel launch parameters.
+// Target-specific implementations (CpuLaunchParams, CudaLaunchParams,
+// MtiaLaunchParams) inherit from this and add their own parameters.
+// The base class provides grid dimensions which are common to all kernels.
+class LaunchParams {
+ public:
+  LaunchParams() = default;
+  virtual ~LaunchParams() = default;
+
+  // Common to all kernels - grid dimensions
   GridDims grid_dims;
 
-  // MTIA params
-  std::optional<int> mtia_tile_width;
-  std::optional<int> mtia_tile_height;
-  std::optional<int> mtia_base_pe;
+  // Parse common attributes (grid) from node
+  void parseCommonAttributes(const Node* node);
 };
 
 class KernelInputs {
@@ -94,6 +137,13 @@ class TritonKernelManager {
       const KernelInputParams& /*params*/) const {
     return std::make_unique<KernelInputs>(num_args, num_attrs);
   }
+
+  // Create and parse launch parameters from the node.
+  // Each target-specific manager overrides this to create its own LaunchParams
+  // subclass with the appropriate parameters parsed from the node.
+  virtual std::unique_ptr<LaunchParams> createLaunchParams(
+      const Node* node) const;
+
   virtual void launch(const LaunchParams& launch_params, void** args) = 0;
 
  protected:

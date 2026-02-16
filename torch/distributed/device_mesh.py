@@ -41,6 +41,7 @@ if not is_available():
 
 else:
     from torch._C._distributed_c10d import Backend as C10dBackend
+    from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _resolve_process_group,
@@ -69,6 +70,26 @@ else:
 
     BackendConfig = tuple[str | None, C10dBackend.Options | None]
     torch.serialization.add_safe_globals([_MeshLayout])
+
+    def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup:
+        """
+        This method allows us to torch.compile through DeviceMesh and lift its
+        PGs a inputs to the graph since all PGs will have a source from the
+        DeviceMesh through the `_pg_registry`.
+        This will be moved to the DeviceMesh backend object once we separate
+        DeviceMesh into the frontend and backend.
+        """
+        if torch.compiler.is_compiling():
+            pg = mesh._pg_registry.get(name, None)
+            if pg is None:
+                raise RuntimeError(
+                    f"PG {name} was not found while torch.compile tracing "
+                    "This is probably because we pickle/unpickled a device mesh "
+                    "before the PGs were created."
+                )
+            return pg
+        else:
+            return _resolve_process_group(name)  # pyrefly: ignore[bad-argument-type]
 
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
@@ -183,6 +204,8 @@ else:
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
+        # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
+        _pg_registry: dict[str, ProcessGroup]
 
         def __init__(
             self,
@@ -266,6 +289,8 @@ else:
             self._thread_id = None
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
+            # Initialize process group registry
+            self._pg_registry = {}
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -281,6 +306,17 @@ else:
                         self._mesh_dim_names,
                         backend_override,
                     )
+                    # Populate the process group registry
+                    # If we have a root mesh, add to root's registry for lookups
+                    target_registry = (
+                        self._root_mesh._pg_registry
+                        if self._root_mesh is not None
+                        else self._pg_registry
+                    )
+                    for name in self._dim_group_names:
+                        pg = _resolve_process_group(name)
+                        if pg is not None:
+                            target_registry[name] = pg
 
                 if is_initialized() and get_backend() == "threaded":
                     # pyrefly: ignore [bad-assignment]
@@ -298,7 +334,7 @@ else:
         def _compute_coordinates_from_mesh(
             mesh_tensor: torch.Tensor,
             rank: int,
-        ) -> Optional[tuple[int, ...]]:
+        ) -> tuple[int, ...] | None:
             """
             Compute the coordinates of a rank within a mesh tensor.
 
@@ -327,6 +363,30 @@ else:
         def _compute_coordinate_on_dim(self) -> tuple[int, ...] | None:
             # calculate the coordinates of the current global rank on the mesh
             return self._compute_coordinates_from_mesh(self.mesh, self._rank)
+
+        def __getstate__(self) -> dict:
+            # Exclude _pg_registry from pickle since ProcessGroup objects can't be pickled
+            state = self.__dict__.copy()
+            state.pop("_pg_registry", None)
+            return state
+
+        def __setstate__(self, state: dict) -> None:
+            self.__dict__.update(state)
+            # Reconstruct _pg_registry from _dim_group_names
+            self._pg_registry = {}
+            if hasattr(self, "_dim_group_names"):
+                for name in self._dim_group_names:
+                    try:
+                        pg = _resolve_process_group(name)
+                        if pg is not None:
+                            self._pg_registry[name] = pg
+                    except RuntimeError:
+                        # Note: process groups may not exist if loading in a different process
+                        logger.warning(
+                            "It seems like pickling/unpickling of the DeviceMesh "
+                            "occurred before the PGs were created. This will cause PG "
+                            "lookup to fail when torch.compile is enabled"
+                        )
 
         @property
         def device_type(self) -> str:
@@ -366,8 +426,6 @@ else:
 
         def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
-            # TODO: think about how to allow pg options to be passed to world group
-            # or mesh dimension groups
             if not default_initialized:
                 init_process_group()
 
@@ -376,6 +434,14 @@ else:
                 raise RuntimeError(
                     f"Mesh should not be bigger than default world size {world_size}, but found {self._layout.numel()} ranks!"
                 )
+
+            # Skip device setup for fake backend (cross-compilation mode).
+            # The fake backend is used to simulate distributed training on a
+            # single process without actual devices, enabling compilation of
+            # GPU programs on CPU-only machines.
+            backend = get_backend()
+            if backend == "fake":
+                return _get_default_group()
 
             # ONLY set the device if the current device is not initialized, if user already
             # set the device before DeviceMesh init, we respect the user's choice.
@@ -391,6 +457,12 @@ else:
                     )
                     device_handle.set_device(local_rank)
                 else:
+                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
+                    # NOTE: This device selection would only work for homogeneous hardware.
+                    num_devices_per_host = device_handle.device_count()
+                    # Skip device setup if no devices are available (cross-compilation mode)
+                    if num_devices_per_host == 0:
+                        return _get_default_group()
                     warnings.warn(
                         "It seems like you did not set/select the default device for the current process before the DeviceMesh "
                         "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
@@ -400,9 +472,6 @@ else:
                         "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. ",
                         stacklevel=2,
                     )
-                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
-                    # NOTE: This device selection would only work for homogeneous hardware.
-                    num_devices_per_host = device_handle.device_count()
                     if (
                         world_size > num_devices_per_host
                         and world_size % num_devices_per_host != 0
@@ -449,7 +518,7 @@ else:
                 ranks = list(range(get_world_size()))
                 dim_group = (
                     new_group(
-                        backend="cpu:gloo,cuda:nccl",
+                        backend=backend,
                         ranks=ranks,
                         group_desc="mesh_default",
                     )
@@ -468,7 +537,10 @@ else:
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
             if (
-                getattr(default_group, "bound_device_id", None) is not None
+                (
+                    getattr(default_group, "bound_device_id", None) is not None
+                    or dist_config.use_torchcomms
+                )
                 and torch.cuda.is_available()
                 and (
                     backend is None
@@ -483,7 +555,9 @@ else:
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
                 )
-                return dim_group.group_name  # type: ignore[union-attr]
+                if dim_group is None:
+                    return None
+                return dim_group.group_name
 
             # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
             # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
@@ -525,7 +599,10 @@ else:
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
                     DeviceMesh._init_one_process_group(
-                        layout[dim], rank_map, dim_name, backend_override[dim]
+                        layout[dim],
+                        rank_map,
+                        dim_name,
+                        backend_override[dim],
                     )
                 )
             # Filter out None values. If any are None then they should all be None.
@@ -679,17 +756,18 @@ else:
                     "please use `get_all_groups()` instead.",
                 )
 
+            root_mesh = self._get_root_mesh()
+
             # Quick return if the current device_mesh is a 1D mesh.
             if len(self._layout) == 1 and mesh_dim is None:
-                return not_none(_resolve_process_group(self._dim_group_names[0]))
+                return not_none(_get_pg_from_name(root_mesh, self._dim_group_names[0]))
 
-            root_mesh = self._get_root_mesh()
             root_to_flatten_mapping = root_mesh._flatten_mapping
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
                 dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
                 ]._dim_group_names[0]
-                return not_none(_resolve_process_group(dim_group_name))
+                return not_none(_get_pg_from_name(root_mesh, dim_group_name))
             else:
                 mesh_dim = (
                     self._get_mesh_dim_by_name(mesh_dim)
@@ -700,7 +778,9 @@ else:
                     raise AssertionError(
                         f"mesh_dim must be an int, got {type(mesh_dim)}"
                     )
-                return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
+                return not_none(
+                    _get_pg_from_name(root_mesh, self._dim_group_names[mesh_dim])
+                )
 
         def get_all_groups(self) -> list[ProcessGroup]:
             """
@@ -1006,6 +1086,7 @@ else:
                     _init_backend=False,
                 )
                 device_mesh._dim_group_names = [group.group_name]
+                device_mesh._pg_registry[group.group_name] = group
                 return device_mesh
 
             # nD scenario
@@ -1036,6 +1117,8 @@ else:
                 device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
             )
             device_mesh._dim_group_names = [group.group_name for group in groups]
+            for group in groups:
+                device_mesh._pg_registry[group.group_name] = group
             return device_mesh
 
         def size(self, mesh_dim: int | None = None) -> int:
@@ -1104,6 +1187,19 @@ else:
         def _is_current_rank_part_of_mesh(self) -> bool:
             """
             Return True if the current rank is part of this mesh.
+
+            When a DeviceMesh is created with a subset of ranks (a sub-mesh),
+            ranks not included in the mesh are "non-participating ranks". These
+            ranks:
+
+            - Return None from get_coordinate()
+            - Hold empty tensors as their local DTensor representation
+            - Skip computation during DTensor dispatch (returning default values)
+            - Skip collective operations during redistribute
+            - Return 0 cost for redistribute cost calculations
+
+            This allows DTensor operations to execute correctly across the entire
+            process group while only performing actual work on participating ranks.
             """
             return self._coordinate_on_dim is not None
 
@@ -1112,12 +1208,31 @@ else:
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
-            return self._coordinate_on_dim if self._coordinate_on_dim else None
+            return self._coordinate_on_dim
 
         def _sym_get_coordinate(self, index: int) -> int:
-            # This is only valid when the current rank is part of the mesh.
-            assert self._coordinate_on_dim
-            return self._coordinate_on_dim[index]
+            import torch.distributed.config as config
+            from torch._guards import detect_fake_mode
+
+            if not detect_fake_mode() or not config.compile_on_one_rank:
+                # This is only valid when the current rank is part of the mesh.
+                assert self._coordinate_on_dim is not None
+                return self._coordinate_on_dim[index]
+
+            # This will cause the ops to be registered - so don't let RUFF
+            # delete this import because it thinks it's unused...
+            from ._ops import device_mesh  # noqa: F401
+
+            # Temporarily turn off tracing while we lift the constant
+            # rank_map to a list so it can be a constant in the graph.
+            with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                rank_map_list = self._rank_map.tolist()
+            rank_map = torch.tensor(rank_map_list, device="cpu", dtype=torch.int)
+            full_mesh = self._layout.remap_to_tensor(rank_map)
+
+            return torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
+                full_mesh, index
+            )
 
         def _flatten(
             self,
@@ -1192,13 +1307,19 @@ else:
             # per dim backend init.
             if hasattr(self, "_dim_group_names"):
                 dim_group_names = self._dim_group_names.copy()
-                dim_group_names[dim : dim + 1] = self._init_process_groups(
+                new_group_names = self._init_process_groups(
                     partial_layout,
                     root_mesh._rank_map,
                     mesh_dim_names,
                     backend_override,
                 )
+                dim_group_names[dim : dim + 1] = new_group_names
                 res_mesh._dim_group_names = dim_group_names
+                # Populate root mesh's pg registry with new groups
+                for name in new_group_names:
+                    pg = _resolve_process_group(name)
+                    if pg is not None:
+                        root_mesh._pg_registry[name] = pg
 
             return res_mesh
 

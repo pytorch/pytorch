@@ -557,6 +557,16 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+    if get_scheduling_for_device("tpu") is None:
+        tpu_backends = {
+            "pallas": PallasScheduling,
+        }
+        register_backend_for_device(
+            "tpu",
+            lambda scheduling: tpu_backends[config.tpu_backend](scheduling),
+            PythonWrapperCodegen,
+        )
+
     if get_scheduling_for_device("mps") is None:
         register_backend_for_device(
             "mps",
@@ -624,6 +634,12 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
         from .cuda import device_op_overrides  # noqa: F401
         from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
+
+    if device not in device_op_overrides_dict:
+        # For backends like TPU that only need no-op overrides (Pallas handles codegen)
+        from .cpu_device_op_overrides import CpuDeviceOpOverrides
+
+        register_device_op_overrides(device, CpuDeviceOpOverrides())
 
     return device_op_overrides_dict[device]
 
@@ -851,6 +867,7 @@ class PythonPrinter(_PythonPrinter):
         if isinstance(item, sympy.Mod):
             # use parenthesis to enforce precedence.
             # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            # pyrefly: ignore [missing-attribute]
             return f"({self._print(item)})"
         else:
             return super().parenthesize(item, level, strict)
@@ -915,6 +932,11 @@ class OpDecompositions:
     def fma(x: OpVarT, y: OpVarT, z: OpVarT) -> OpVarT:
         # for backends that don't override this (halide)
         return ops.add(ops.mul(x, y), z)
+
+    @staticmethod
+    def mul_rn(x: OpVarT, y: OpVarT) -> OpVarT:
+        # for backends that don't override this, just use regular mul
+        return ops.mul(x, y)
 
     @staticmethod
     def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
@@ -1236,8 +1258,26 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
         cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
-        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        # NOTE: We use tl.fma instead of libdevice.fma because libdevice.fma
+        # has Flush-To-Zero (FTZ) behavior for subnormal values, which causes
+        # numerical differences compared to eager CUDA execution. tl.fma
+        # preserves subnormals and matches eager's FMA precision.
+        triton=lambda x, y, z: f"tl.fma({x}, {y}, {z})",
         name="fma",
+    ),
+    # mul_rn: Multiplication with round-to-nearest. This prevents Triton's
+    # compiler from fusing the multiplication with subsequent operations,
+    # which is needed to match eager's rounding behavior in operations like
+    # addcmul where the product must be rounded before use.
+    # Note: libdevice.mul_rn is not supported on ROCm, so we fall back to
+    # regular multiplication there.
+    mul_rn=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        cpp=lambda x, y: f"({x}) * ({y})",  # C++ doesn't need special handling
+        triton=lambda x, y: f"({x}) * ({y})"
+        if torch.version.hip
+        else f"libdevice.mul_rn({x}, {y})",
+        name="mul_rn",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
@@ -2154,6 +2194,22 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
             if disallow_stores:
                 assert not sb, "unexpected store inside swap_buffers"
 
+    def emit_kernel_override(
+        self,
+        wrapper,
+        src_code: str,
+        kernel_name: str,
+        node_schedule,
+        kernel_path: str,
+        get_kernel_metadata,
+    ) -> bool:
+        """Override kernel emission. Return True if overridden, False to use default.
+
+        External template handlers (e.g. Helion) can override this method
+        to implement custom kernel emission to the wrapper.
+        """
+        return False
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         raise NotImplementedError
 
@@ -2403,7 +2459,7 @@ class KernelTemplate:
     """
     Base class for defining kernel templates.
 
-    Children classes: TritonTemplate, CUDATemplate
+    Children classes: TritonTemplate, CUTLASSTemplate
     """
 
     @staticmethod
@@ -2656,12 +2712,12 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
-        from .cuda.cuda_kernel import CUDATemplateKernel
+        from .cutlass.kernel import CUTLASSTemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
             return ValueRanges.unknown()
 
-        if isinstance(V.kernel, CUDATemplateKernel):
+        if isinstance(V.kernel, CUTLASSTemplateKernel):
             return ValueRanges.unknown()
 
         if isinstance(V.interpreter, NullHandler):
