@@ -117,7 +117,7 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     return values
 
 
-def _to_numpy_array(input: torch.Tensor | int | float | str | bool) -> np.ndarray:
+def _to_numpy_array(input: torch.Tensor | float | str | bool) -> np.ndarray:
     if isinstance(input, (int, float, str, bool)):
         return ir.tensor(input).numpy()
 
@@ -144,7 +144,7 @@ def _from_numpy_array(array: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(array)
 
 
-def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValue:
+def _to_ort_value(input: torch.Tensor | float | str | bool) -> ort.OrtValue:
     """Convert a PyTorch tensor to an ONNX Runtime OrtValue."""
     import numpy as np
     import onnxruntime as ort

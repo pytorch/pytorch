@@ -105,13 +105,13 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_5, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[]? x) -> SymInt")
 
-        def foo_op_6(x: typing.Union[int, float, bool]) -> types.Number:
+        def foo_op_6(x: Union[float, bool]) -> types.Number:
             return x
 
         result = torch.library.infer_schema(foo_op_6, mutates_args=mutates_args)
         self.assertEqual(result, "(Scalar x) -> Scalar")
 
-        def foo_op_7(x: typing.Union[int, bool, float]) -> types.Number:
+        def foo_op_7(x: Union[bool, float]) -> types.Number:
             return x
 
         result = torch.library.infer_schema(foo_op_7, mutates_args=mutates_args)
@@ -172,13 +172,13 @@ class TestInferSchemaWithAnnotation(TestCase):
         result = torch.library.infer_schema(foo_op_9, mutates_args=mutates_args)
         self.assertEqual(result, "(SymInt[]? x) -> SymInt")
 
-        def foo_op_10(x: Union[int, float, bool]) -> types.Number:
+        def foo_op_10(x: Union[float, bool]) -> types.Number:
             return x
 
         result = torch.library.infer_schema(foo_op_10, mutates_args=mutates_args)
         self.assertEqual(result, "(Scalar x) -> Scalar")
 
-        def foo_op_11(x: Union[int, bool, float]) -> types.Number:
+        def foo_op_11(x: Union[bool, float]) -> types.Number:
             return x
 
         result = torch.library.infer_schema(foo_op_11, mutates_args=mutates_args)

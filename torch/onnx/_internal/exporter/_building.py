@@ -255,16 +255,7 @@ def _get_or_create_constant(
         ],
         ir.Value,
     ],
-    arg: bool
-    | int
-    | float
-    | str
-    | tuple[int, ...]
-    | tuple[float, ...]
-    | tuple[bool, ...]
-    | list[int]
-    | list[float]
-    | list[bool],
+    arg: bool | float | str | tuple[int, ...] | tuple[float, ...] | tuple[bool, ...] | list[int] | list[float] | list[bool],
     dtype: ir.DataType,
     opset: onnxscript.values.Opset,
 ) -> ir.Value:

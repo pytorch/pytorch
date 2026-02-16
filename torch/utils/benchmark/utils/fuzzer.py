@@ -25,8 +25,8 @@ class FuzzedParameter:
     def __init__(
         self,
         name: str,
-        minval: int | float | None = None,
-        maxval: int | float | None = None,
+        minval: float | None = None,
+        maxval: float | None = None,
         distribution: str | dict[Any, float] | None = None,
         strict: bool = False,
     ) -> None:

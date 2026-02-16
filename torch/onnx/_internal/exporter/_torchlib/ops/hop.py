@@ -19,7 +19,7 @@ def call_op(
     *args: ir.Value | None,
     _num_outputs: int = 1,
     _domain: str = "",
-    **kwargs: int | float | str | bool | ir.Graph | ir.TensorProtocol | Sequence[int],
+    **kwargs: float | str | bool | ir.Graph | ir.TensorProtocol | Sequence[int],
 ) -> Sequence[ir.Value]:
     """Call an operator with the given arguments and keyword arguments.
 

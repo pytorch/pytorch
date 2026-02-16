@@ -99,7 +99,7 @@ def diagonal(
 
 
 def _check_vector_norm_args(
-    x: TensorLikeType, ord: Union[float, int] = 2, dim: Optional[DimsType] = None
+    x: TensorLikeType, ord: float = 2, dim: Optional[DimsType] = None
 ):
     from torch.fx.experimental.symbolic_shapes import sym_or
 
@@ -130,7 +130,7 @@ def _check_vector_norm_args(
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
-    ord: Union[float, int] = 2,
+    ord: float = 2,
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,

@@ -356,7 +356,7 @@ def _create_range_input_gen_fn(
     base_gen_fn: Callable[[torch.Tensor], torch.Tensor],
     dim_index: int,
     range_start: int,
-    range_end: Union[int, float],
+    range_end: float,
     range_upper_bound: int,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     """Create input generator that modifies target dimension to top of range.

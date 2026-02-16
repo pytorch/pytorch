@@ -94,8 +94,8 @@ class TestClipGradNorm(FSDPTestContinuous):
     def _test_ddp_parity(
         self,
         device,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
+        max_norm: float,
+        norm_type: float,
         sharding_strategy: Union[ShardingStrategy, str],
         use_orig_params: bool,
         offload_params: bool,
@@ -257,8 +257,8 @@ class TestClipGradNorm(FSDPTestContinuous):
     def _test_low_precision_grads(
         self,
         device,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
+        max_norm: float,
+        norm_type: float,
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):

@@ -138,7 +138,7 @@ def _no_grad_zero_(tensor: Tensor) -> Tensor:
 
 
 def calculate_gain(
-    nonlinearity: _NonlinearityType, param: int | float | None = None
+    nonlinearity: _NonlinearityType, param: float | None = None
 ) -> float:
     r"""Return the recommended gain value for the given nonlinearity function.
 

@@ -2313,7 +2313,7 @@ class PallasKernel(SIMDKernel):
 
     @staticmethod
     def _get_index_coefficient(
-        index: sympy.Expr, var: sympy.Symbol, default: int | float = 0
+        index: sympy.Expr, var: sympy.Symbol, default: float = 0
     ) -> int | float:
         """Get integer coefficient of a variable in an index expression."""
         coeff = index.coeff(var)

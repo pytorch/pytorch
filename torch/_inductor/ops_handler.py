@@ -95,7 +95,7 @@ class OpsHandler(Generic[T]):
     all the metaprogramming has run.
     """
 
-    def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
+    def constant(self, value: Union[bool, float], dtype: torch.dtype) -> T:
         """Produces a scalar constant of type dtype."""
         raise NotImplementedError
 

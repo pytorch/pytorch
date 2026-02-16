@@ -17,7 +17,7 @@ from torch.nn.attention.flex_attention import (
 __all__ = ["PagedAttention"]
 
 
-def _cdiv(x: int | float | torch.Tensor, multiple: int | float | torch.Tensor):
+def _cdiv(x: float | torch.Tensor, multiple: float | torch.Tensor):
     return (x + multiple - 1) // multiple
 
 

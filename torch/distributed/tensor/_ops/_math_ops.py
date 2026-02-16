@@ -71,7 +71,7 @@ class _NormPartial(Partial):
 
     norm_type: int | float = 2
 
-    def __init__(self, norm_type: int | float = 2):
+    def __init__(self, norm_type: float = 2):
         super().__init__("sum")
         object.__setattr__(self, "norm_type", norm_type)
 
@@ -402,7 +402,7 @@ def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
-def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
+def _get_norm_reduction_op(norm_type: float | str) -> ReductionOpType:
     """Get the reduction op for vector/foreach norm based on norm_type.
 
     For inf/-inf norms, returns simple reduction ops ("max", "min").

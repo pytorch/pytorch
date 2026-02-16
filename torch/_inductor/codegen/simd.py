@@ -352,7 +352,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def constant_repr(value: Union[int, float]) -> str:
+def constant_repr(value: float) -> str:
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
@@ -1069,7 +1069,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     @contextlib.contextmanager
     def mask_loads(
-        self, mask: Union[str, OpsWrapper], value: Union[int, float]
+        self, mask: Union[str, OpsWrapper], value: float
     ) -> Iterator[str]:
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask

@@ -1740,7 +1740,7 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
-    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+    def get_constant(x: Union[SymInt, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):
             return x
         if isinstance(x, SymInt):

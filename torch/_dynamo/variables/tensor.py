@@ -2168,7 +2168,7 @@ class UnspecializedPythonVariable(TensorVariable):
         self,
         proxy: torch.fx.Proxy,
         *,
-        raw_value: float | int | None = None,
+        raw_value: float | None = None,
         need_unwrap: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -2180,7 +2180,7 @@ class UnspecializedPythonVariable(TensorVariable):
     def from_tensor_variable(
         cls,
         tensor_variable: TensorVariable,
-        raw_value: float | int | None,
+        raw_value: float | None,
         need_unwrap: bool = True,
     ) -> "UnspecializedPythonVariable":
         # Convert a `TensorVariable` instance into an `UnspecializedPythonVariable` instance.

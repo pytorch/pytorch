@@ -37,7 +37,7 @@ def register_binary_linear(op: OpType) -> Callable[..., Any]:
         lhs: ComplexTensor,
         rhs: ComplexTensor,
         *args: Any,
-        alpha: int | float | complex,
+        alpha: complex,
         **kwargs: Any,
     ) -> ComplexTensor:
         return op(lhs, aten.mul(rhs, alpha, *args, **kwargs), *args, **kwargs)
@@ -161,7 +161,7 @@ fill__impl = register_binary_linear(aten.fill_)
 
 @register_complex(aten.rsub)
 def rsub_impl(
-    lhs: ComplexTensor, rhs: ComplexTensor, alpha: int | float | complex | None = None
+    lhs: ComplexTensor, rhs: ComplexTensor, alpha: complex | None = None
 ) -> ComplexTensor:
     if alpha is None:
         return torch.sub(rhs, lhs)  # type: ignore[bad-return]
@@ -669,8 +669,8 @@ def addmm_impl(
     mat1: ComplexTensor,
     mat2: ComplexTensor,
     out_dtype: torch.dtype | None = None,
-    beta: int | float | complex = 1,
-    alpha: int | float | complex = 1,
+    beta: complex = 1,
+    alpha: complex = 1,
 ) -> ComplexTensor:
     ret = beta * input + alpha * torch.mm(mat1, mat2)
     if not isinstance(ret, ComplexTensor):

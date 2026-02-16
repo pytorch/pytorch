@@ -1477,7 +1477,7 @@ class TestLinalg(TestCase):
                 return tensor_unbacked_size
 
         def test(
-            ord: Union[float, int],
+            ord: float,
             dim: Optional[DimsType],
             expect_numel_runtime_check: bool,
             expect_index_0_check: bool = False,

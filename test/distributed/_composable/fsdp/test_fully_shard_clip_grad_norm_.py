@@ -32,8 +32,8 @@ device_type = torch.device(get_devtype())
 class _TestClipGradNormBase(FSDPTest):
     def _test_clip_grad_norm(
         self,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int],
+        max_norm: float,
+        norm_type: float,
         ref_model: nn.Module,
         ref_optim: torch.optim.Optimizer,
         model: nn.Module,

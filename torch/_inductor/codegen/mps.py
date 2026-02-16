@@ -53,7 +53,7 @@ DTYPE_TO_METAL = {
 }
 
 
-def value_to_metal(val: Union[float, int, bool, str, CSEVariable]) -> str:
+def value_to_metal(val: Union[float, bool, str, CSEVariable]) -> str:
     if isinstance(val, float):
         if val == torch.inf:
             return "HUGE_VALF"
@@ -203,7 +203,7 @@ class MetalOverrides(OpOverrides):
         return f"as_type<{DTYPE_TO_METAL[dtype]}>(static_cast<{DTYPE_TO_METAL[src_dtype]}>({x}))"
 
     @staticmethod
-    def constant(val: Union[bool, float, int], dtype: torch.dtype) -> str:
+    def constant(val: Union[bool, float], dtype: torch.dtype) -> str:
         return value_to_metal(val)
 
     @staticmethod

@@ -1080,7 +1080,7 @@ def max_unpool3d(
 
 def lp_pool3d(
     input: Tensor,
-    norm_type: int | float,
+    norm_type: float,
     kernel_size: BroadcastingList3[int],
     stride: Optional[BroadcastingList3[int]] = None,
     ceil_mode: bool = False,
@@ -1121,7 +1121,7 @@ def lp_pool3d(
 
 def lp_pool2d(
     input: Tensor,
-    norm_type: int | float,
+    norm_type: float,
     kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False,
@@ -1160,7 +1160,7 @@ def lp_pool2d(
 
 def lp_pool1d(
     input: Tensor,
-    norm_type: int | float,
+    norm_type: float,
     kernel_size: int,
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False,

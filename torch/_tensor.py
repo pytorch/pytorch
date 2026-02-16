@@ -1112,11 +1112,11 @@ class Tensor(torch._C.TensorBase):
         )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+    def __rsub__(self, other: Union["Tensor", bool, complex]) -> "Tensor":
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rdiv__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+    def __rdiv__(self, other: Union["Tensor", bool, complex]) -> "Tensor":
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
@@ -1138,7 +1138,7 @@ class Tensor(torch._C.TensorBase):
     )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+    def __rmod__(self, other: Union["Tensor", bool, complex]) -> "Tensor":
         return torch.remainder(other, self)
 
     def __format__(self, format_spec):
@@ -1151,28 +1151,28 @@ class Tensor(torch._C.TensorBase):
         return object.__format__(self, format_spec)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+    def __rpow__(self, other: Union["Tensor", bool, complex]) -> "Tensor":
         return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
+    def __floordiv__(self, other: Union["Tensor", float, bool]) -> "Tensor":  # type: ignore[override]
         # TODO(rec): the superclass says it accepts complex here,
         # but torch.floor_divide says it doesn't.
         return torch.floor_divide(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
-    def __rfloordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
+    def __rfloordiv__(self, other: Union["Tensor", float, bool]) -> "Tensor":  # type: ignore[override]
         return torch.floor_divide(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rlshift__(
-        self, other: Union["Tensor", int, float, bool, complex]
+        self, other: Union["Tensor", bool, complex]
     ) -> "Tensor":
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rrshift__(
-        self, other: Union["Tensor", int, float, bool, complex]
+        self, other: Union["Tensor", bool, complex]
     ) -> "Tensor":
         return torch.bitwise_right_shift(other, self)
 

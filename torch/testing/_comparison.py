@@ -224,8 +224,8 @@ def _make_mismatch_msg(
 
 
 def make_scalar_mismatch_msg(
-    actual: Union[bool, int, float, complex],
-    expected: Union[bool, int, float, complex],
+    actual: Union[bool, complex],
+    expected: Union[bool, complex],
     *,
     rtol: float,
     atol: float,

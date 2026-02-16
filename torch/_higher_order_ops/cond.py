@@ -94,7 +94,7 @@ cond_op = CondOp()
 
 @exposed_in("torch")
 def cond(
-    pred: Union[bool, int, float, torch.Tensor],
+    pred: Union[bool, float, torch.Tensor],
     true_fn: Callable,
     false_fn: Callable,
     operands: Union[tuple, list] = (),

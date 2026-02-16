@@ -106,7 +106,7 @@ class FunctionCounts:
     ) -> "FunctionCounts":
         return self._merge(other, operator.neg)
 
-    def __mul__(self, other: int | float) -> "FunctionCounts":
+    def __mul__(self, other: float) -> "FunctionCounts":
         return self._from_dict({
             fn: int(c * other) for c, fn in self._data
         }, self.inclusive)

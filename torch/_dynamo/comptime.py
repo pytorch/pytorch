@@ -328,7 +328,7 @@ class ComptimeContext:
         """
         return self.__tx
 
-    def sleep(self, sec: Union[int, float]) -> None:
+    def sleep(self, sec: float) -> None:
         time.sleep(sec)
 
 
@@ -437,7 +437,7 @@ class _Comptime:
         comptime(inner)
 
     @staticmethod
-    def sleep(sec: Union[int, float]) -> None:
+    def sleep(sec: float) -> None:
         comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 

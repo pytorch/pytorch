@@ -458,7 +458,7 @@ def is_concrete_bool(a: BoolLikeType) -> bool:
     return False
 
 
-def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> bool:
+def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float]) -> bool:
     """
     User-code friendly utility to check if a value is static or dynamic.
     Returns true if given a constant, or a symbolic expression with a fixed value.
@@ -1633,7 +1633,7 @@ def sym_or(x: BoolLikeType, *others: BoolLikeType) -> BoolLikeType:
 
 
 def guard_scalar(
-    a: Union[SymBool, SymInt, SymFloat, int, bool, float],
+    a: Union[SymBool, SymInt, SymFloat, bool, float],
 ) -> Union[bool, int, float]:
     """
     Guard a scalar value, which can be a symbolic or concrete boolean, integer, or float.
@@ -2315,7 +2315,7 @@ class TrackedFake:
 
 
 def is_symbolic(
-    val: Union[int, SymInt, float, SymFloat, bool, SymBool],
+    val: Union[SymInt, float, SymFloat, bool, SymBool],
 ) -> TypeGuard[Union[SymInt, SymFloat, SymBool]]:
     if isinstance(val, (int, float, bool)):
         return False
@@ -5105,7 +5105,7 @@ class ShapeEnv:
     @record_shapeenv_event()
     def create_unspecified_symbol(
         self,
-        val: Union[int, SymInt, float, SymFloat],
+        val: Union[SymInt, float, SymFloat],
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None

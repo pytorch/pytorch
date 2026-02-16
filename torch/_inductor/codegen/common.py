@@ -997,7 +997,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         return f"({string})"
 
     @staticmethod
-    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
+    def constant(value: Union[bool, float], dtype: torch.dtype) -> OpVarT:
         return repr(value)
 
     @staticmethod

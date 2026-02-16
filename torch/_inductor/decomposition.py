@@ -638,7 +638,7 @@ def _get_shape_permutation_like(
 @register_decomposition(aten.full_like)
 def full_like(
     self: torch.Tensor,
-    fill_value: Union[int, float],
+    fill_value: float,
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,

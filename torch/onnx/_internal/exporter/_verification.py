@@ -60,8 +60,8 @@ class VerificationInfo:
     def from_tensors(
         cls,
         name: str,
-        expected: torch.Tensor | float | int | bool,
-        actual: torch.Tensor | float | int | bool,
+        expected: torch.Tensor | float | bool,
+        actual: torch.Tensor | float | bool,
     ) -> VerificationInfo:
         """Create a VerificationInfo object from two tensors.
 

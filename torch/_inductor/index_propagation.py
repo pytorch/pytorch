@@ -91,7 +91,7 @@ class SymPyOps:
         return value
 
     @staticmethod
-    def constant(value: Union[int, float, bool], dtype: torch.dtype) -> TypedExpr:
+    def constant(value: Union[float, bool], dtype: torch.dtype) -> TypedExpr:
         return TypedExpr(value, dtype)
 
     @staticmethod

@@ -2263,13 +2263,13 @@ class VariableBuilder:
     @overload
     def _wrap_lazy_constant(
         self,
-        value: Union[int, float, bool, str],
+        value: Union[float, bool, str],
         wrap_fn: None = None,
     ) -> VariableTracker: ...
 
     def _wrap_lazy_constant(
         self,
-        value: Union[int, float, bool, str],
+        value: Union[float, bool, str],
         wrap_fn: Optional[Callable[[Any], VariableTracker]] = None,
     ) -> VariableTracker:
         """Wrap a primitive constant, deferring guard installation if allowed."""
@@ -4148,7 +4148,7 @@ class SourcelessBuilder:
     @overload
     @staticmethod
     def create(
-        tx: "InstructionTranslatorBase", value: bool | int | float | str
+        tx: "InstructionTranslatorBase", value: bool | float | str
     ) -> ConstantVariable: ...
 
     @overload

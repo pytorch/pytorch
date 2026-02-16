@@ -152,7 +152,7 @@ class CuteDSLOpOverrides(OpOverrides):
         return op_format.format(x=x)
 
     @staticmethod
-    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> str:
+    def constant(value: Union[bool, float], dtype: torch.dtype) -> str:
         """Generate CuteDSL constant representation."""
         if value == float("-inf"):
             return "float('-inf')"
