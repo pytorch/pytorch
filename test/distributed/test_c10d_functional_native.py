@@ -88,11 +88,9 @@ class TestWithNCCL(DistributedTestBase):
             "default",
         )
         output = torch.ops._c10d_functional.wait_tensor(output)
-        if id(output) == id(input):
-            raise AssertionError("Expected output to be a different object than input")
+        assert id(output) != id(input)
         expect = sum(self.ranks) / self.world_size
-        if not output.eq(expect).all():
-            raise AssertionError(f"Expected output to equal {expect}")
+        assert output.eq(expect).all()
 
         # Test Python API and AsyncCollectiveTensor
         output = all_reduce(
@@ -100,14 +98,10 @@ class TestWithNCCL(DistributedTestBase):
             "avg",
             "default",
         )
-        if not isinstance(output, AsyncCollectiveTensor):
-            raise AssertionError(f"Expected AsyncCollectiveTensor, got {type(output)}")
-        if output.completed:
-            raise AssertionError("Expected output.completed to be False")
-        if not output.eq(expect).all():
-            raise AssertionError(f"Expected output to equal {expect}")
-        if not output.completed:
-            raise AssertionError("Expected output.completed to be True after access")
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(expect).all()
+        assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_single_(self) -> None:
@@ -120,11 +114,9 @@ class TestWithNCCL(DistributedTestBase):
             "default",
         )
         output = torch.ops._c10d_functional.wait_tensor(output)
-        if id(output) != id(input):
-            raise AssertionError("Expected output to be the same object as input")
+        assert id(output) == id(input)
         expect = sum(self.ranks) / self.world_size
-        if not output.eq(expect).all():
-            raise AssertionError(f"Expected output to equal {expect}")
+        assert output.eq(expect).all()
 
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced(self) -> None:
@@ -141,11 +133,8 @@ class TestWithNCCL(DistributedTestBase):
         )
         for i, (output, input) in enumerate(zip(outputs, inputs)):
             output = torch.ops._c10d_functional.wait_tensor(output)
-            if id(output) == id(input):
-                raise AssertionError("Expected output to be different from input")
-            expected = sum(self.ranks) / self.world_size * i
-            if not output.eq(expected).all():
-                raise AssertionError(f"Expected output to equal {expected}")
+            assert id(output) != id(input)
+            assert output.eq(sum(self.ranks) / self.world_size * i).all()
 
         # Test Python API and AsyncCollectiveTensor
         outputs = all_reduce_coalesced(
@@ -154,15 +143,9 @@ class TestWithNCCL(DistributedTestBase):
             "default",
         )
         for i, (output, input) in enumerate(zip(outputs, inputs)):
-            if output.completed:
-                raise AssertionError("Expected output.completed to be False")
-            expected = sum(self.ranks) / self.world_size * i
-            if not output.eq(expected).all():
-                raise AssertionError(f"Expected output to equal {expected}")
-            if not output.completed:
-                raise AssertionError(
-                    "Expected output.completed to be True after access"
-                )
+            assert not output.completed
+            assert output.eq(sum(self.ranks) / self.world_size * i).all()
+            assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_(self) -> None:
@@ -179,11 +162,8 @@ class TestWithNCCL(DistributedTestBase):
         )
         for i, (output, input) in enumerate(zip(outputs, inputs)):
             output = torch.ops._c10d_functional.wait_tensor(output)
-            if id(output) != id(input):
-                raise AssertionError("Expected output to be the same object as input")
-            expected = sum(self.ranks) / self.world_size * i
-            if not output.eq(expected).all():
-                raise AssertionError(f"Expected output to equal {expected}")
+            assert id(output) == id(input)
+            assert output.eq(sum(self.ranks) / self.world_size * i).all()
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_into_tensor_single(self) -> None:
@@ -202,10 +182,8 @@ class TestWithNCCL(DistributedTestBase):
                 for rank in self.ranks
             ]
         )
-        if not torch.allclose(output, expect):
-            raise AssertionError("Expected output to be close to expect")
-        if not output.eq(expect).all():
-            raise AssertionError("Expected output to equal expect")
+        assert torch.allclose(output, expect)
+        assert output.eq(expect).all()
 
         # Test out-variant of all_gather_into_tensor
         output = torch.empty(expect.shape, device=self.device)
@@ -216,10 +194,8 @@ class TestWithNCCL(DistributedTestBase):
             out=output,
         )
         output = torch.ops._c10d_functional.wait_tensor(output)
-        if not torch.allclose(output, expect):
-            raise AssertionError("Expected output to be close to expect")
-        if not output.eq(expect).all():
-            raise AssertionError("Expected output to equal expect")
+        assert torch.allclose(output, expect)
+        assert output.eq(expect).all()
 
         # Test Python API and AsyncCollectiveTensor
         output = all_gather_tensor(
@@ -227,14 +203,10 @@ class TestWithNCCL(DistributedTestBase):
             0,
             "default",
         )
-        if not isinstance(output, AsyncCollectiveTensor):
-            raise AssertionError(f"Expected AsyncCollectiveTensor, got {type(output)}")
-        if output.completed:
-            raise AssertionError("Expected output.completed to be False")
-        if not output.eq(expect).all():
-            raise AssertionError("Expected output to equal expect")
-        if not output.completed:
-            raise AssertionError("Expected output.completed to be True after access")
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(expect).all()
+        assert output.completed
 
     # https://github.com/pytorch/pytorch/issues/133421
     @skip_if_lt_x_gpu(2)
@@ -293,10 +265,7 @@ class TestWithNCCL(DistributedTestBase):
             mem_usage[i] = torch.accelerator.max_memory_allocated()
             compiled(arg)
 
-        if mem_usage[9] != mem_usage[8]:
-            raise AssertionError(
-                f"Memory leak detected: {mem_usage[9]} != {mem_usage[8]}"
-            )
+        assert mem_usage[9] == mem_usage[8]
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_into_tensor_coalesced(self) -> None:
@@ -322,8 +291,7 @@ class TestWithNCCL(DistributedTestBase):
         ]
         for i, output in enumerate(outputs):
             output = torch.ops._c10d_functional.wait_tensor(output)
-            if not output.eq(expect[i]).all():
-                raise AssertionError(f"Expected output to equal expect[{i}]")
+            assert output.eq(expect[i]).all()
 
         # Test Python API and AsyncCollectiveTensor
         outputs = all_gather_into_tensor_coalesced(
@@ -331,14 +299,9 @@ class TestWithNCCL(DistributedTestBase):
             "default",
         )
         for i, output in enumerate(outputs):
-            if output.completed:
-                raise AssertionError("Expected output.completed to be False")
-            if not output.eq(expect[i]).all():
-                raise AssertionError(f"Expected output to equal expect[{i}]")
-            if not output.completed:
-                raise AssertionError(
-                    "Expected output.completed to be True after access"
-                )
+            assert not output.completed
+            assert output.eq(expect[i]).all()
+            assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_single(self) -> None:
@@ -352,8 +315,7 @@ class TestWithNCCL(DistributedTestBase):
             "default",
         )
         output = torch.ops._c10d_functional.wait_tensor(output)
-        if not output.eq(self.rank).all():
-            raise AssertionError(f"Expected output to equal {self.rank}")
+        assert output.eq(self.rank).all()
 
         # Test Python API and AsyncCollectiveTensor
         output = reduce_scatter_tensor(
@@ -362,14 +324,10 @@ class TestWithNCCL(DistributedTestBase):
             0,
             "default",
         )
-        if not isinstance(output, AsyncCollectiveTensor):
-            raise AssertionError(f"Expected AsyncCollectiveTensor, got {type(output)}")
-        if output.completed:
-            raise AssertionError("Expected output.completed to be False")
-        if not output.eq(self.rank).all():
-            raise AssertionError(f"Expected output to equal {self.rank}")
-        if not output.completed:
-            raise AssertionError("Expected output.completed to be True after access")
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(self.rank).all()
+        assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_out(self) -> None:
@@ -385,8 +343,7 @@ class TestWithNCCL(DistributedTestBase):
             out=out,
         )
         torch.ops._c10d_functional.wait_tensor(w)
-        if not out.eq(self.rank).all():
-            raise AssertionError(f"Expected out to equal {self.rank}")
+        assert out.eq(self.rank).all()
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_coalesced(self) -> None:
@@ -401,9 +358,7 @@ class TestWithNCCL(DistributedTestBase):
         )
         for i, output in enumerate(outputs):
             output = torch.ops._c10d_functional.wait_tensor(output)
-            expected = self.rank * i
-            if not output.eq(expected).all():
-                raise AssertionError(f"Expected output to equal {expected}")
+            assert output.eq(self.rank * i).all()
 
         # Test Python API and AsyncCollectiveTensor
         outputs = reduce_scatter_tensor_coalesced(
@@ -413,15 +368,9 @@ class TestWithNCCL(DistributedTestBase):
             "default",
         )
         for i, output in enumerate(outputs):
-            if output.completed:
-                raise AssertionError("Expected output.completed to be False")
-            expected = self.rank * i
-            if not output.eq(expected).all():
-                raise AssertionError(f"Expected output to equal {expected}")
-            if not output.completed:
-                raise AssertionError(
-                    "Expected output.completed to be True after access"
-                )
+            assert not output.completed
+            assert output.eq(self.rank * i).all()
+            assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single(self) -> None:
@@ -450,19 +399,15 @@ class TestWithNCCL(DistributedTestBase):
                 for rank, sz in enumerate(output_split_sizes)
             ]
         )
-        if not output.eq(expect).all():
-            raise AssertionError("Expected output to equal expect")
+        assert output.eq(expect).all()
 
         # Test Python API and AsyncCollectiveTensor
         output = all_to_all_single(
             input, output_split_sizes, input_split_sizes, "default"
         )
-        if output.completed:
-            raise AssertionError("Expected output.completed to be False")
-        if not output.eq(expect).all():
-            raise AssertionError("Expected output to equal expect")
-        if not output.completed:
-            raise AssertionError("Expected output.completed to be True after access")
+        assert not output.completed
+        assert output.eq(expect).all()
+        assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_broadcast(self) -> None:
@@ -475,11 +420,9 @@ class TestWithNCCL(DistributedTestBase):
             "default",
         )
         output = torch.ops._c10d_functional.wait_tensor(output)
-        if id(output) == id(input):
-            raise AssertionError("Expected output to be a different object than input")
+        assert id(output) != id(input)
         expect = 1
-        if not output.eq(expect).all():
-            raise AssertionError(f"Expected output to equal {expect}")
+        assert output.eq(expect).all()
 
         # Test Python API and AsyncCollectiveTensor
         output = funcol.broadcast(
@@ -487,14 +430,10 @@ class TestWithNCCL(DistributedTestBase):
             1,
             "default",
         )
-        if not isinstance(output, AsyncCollectiveTensor):
-            raise AssertionError(f"Expected AsyncCollectiveTensor, got {type(output)}")
-        if output.completed:
-            raise AssertionError("Expected output.completed to be False")
-        if not output.eq(expect).all():
-            raise AssertionError(f"Expected output to equal {expect}")
-        if not output.completed:
-            raise AssertionError("Expected output.completed to be True after access")
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(expect).all()
+        assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_wait_tensor(self) -> None:
@@ -900,18 +839,16 @@ class CompileTest(TestCase):
         torch.accelerator.set_device_index(0)
         self.device = torch.accelerator.current_accelerator()
 
-        if not dist.is_initialized():
-            store = FakeStore()
-            dist.init_process_group(
-                backend="fake",
-                world_size=self.world_size,
-                rank=self.rank,
-                store=store,
-            )
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
     def tearDown(self):
-        if dist.is_initialized():
-            dist.destroy_process_group()
+        dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -946,10 +883,7 @@ class CompileTest(TestCase):
             .run(code)
         )
         # Check the return tensor from wait_tensor is not used anywhere
-        if "= torch.ops._c10d_functional.wait_tensor.default" in code:
-            raise AssertionError(
-                "Expected wait_tensor return value to not be used in code"
-            )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         with torch._inductor.config.patch({"cpp_wrapper": True}):
             code = run_and_get_triton_code(compiled, arg)
@@ -1003,10 +937,7 @@ class CompileTest(TestCase):
             .check(f"return ({buf0}, {buf2}, {buf1}, {buf3}, )")
             .run(code)
         )
-        if "= torch.ops._c10d_functional.wait_tensor.default" in code:
-            raise AssertionError(
-                "Expected wait_tensor return value to not be used in code"
-            )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
@@ -1051,8 +982,7 @@ class CompileTest(TestCase):
 
         code = run_and_get_triton_code(compiled, arg)
         # clone induced by non contig input
-        if "torch.ops._c10d_functional.wait_tensor.default" not in code:
-            raise AssertionError("Expected wait_tensor.default in code")
+        assert "torch.ops._c10d_functional.wait_tensor.default" in code
 
         def func2(arg: torch.Tensor) -> torch.Tensor:
             torch.ops._c10d_functional.all_reduce_(arg, "avg", "0")
@@ -1062,8 +992,7 @@ class CompileTest(TestCase):
 
         code = run_and_get_triton_code(compiled, arg)
         # clone induced by non contig input
-        if "torch.ops._c10d_functional.wait_tensor.default" not in code:
-            raise AssertionError("Expected wait_tensor.default in code")
+        assert "torch.ops._c10d_functional.wait_tensor.default" in code
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(
@@ -1102,10 +1031,7 @@ class CompileTest(TestCase):
             .check(f"return ({buf1}, buf8, )")
             .run(code)
         )
-        if "= torch.ops._c10d_functional.wait_tensor.default" in code:
-            raise AssertionError(
-                "Expected wait_tensor return value to not be used in code"
-            )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1128,10 +1054,7 @@ class CompileTest(TestCase):
             .check("return (buf0, )")
             .run(code)
         )
-        if "= torch.ops._c10d_functional.wait_tensor.default" in code:
-            raise AssertionError(
-                "Expected wait_tensor return value to not be used in code"
-            )
+        assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
@@ -1152,7 +1075,7 @@ class CompileTest(TestCase):
             FileCheck()
             .check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
-                ".default([arg0_1, arg1_1, arg2_1, arg3_1]"
+                ".default([arg3_1, arg2_1, arg1_1, arg0_1]"
             )
             .check("buf1 = buf0[0]")
             .check("buf2 = buf0[1]")

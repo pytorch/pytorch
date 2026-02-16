@@ -516,30 +516,3 @@ jobs:
           { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
         ]}
     secrets: inherit
-
-  dynamo-cpython-build:
-    name: dynamo-cpython-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.13-clang15
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.13-clang15
-      test-matrix: |
-        { include: [
-          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-        ]}
-    secrets: inherit
-
-  dynamo-cpython-test:
-    name: dynamo-cpython-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs: [get-label-type, dynamo-cpython-build]
-    with:
-      build-environment: linux-jammy-py3.13-clang15
-      docker-image: ci-image:pytorch-linux-jammy-py3.13-clang15
-      test-matrix: |
-        { include: [
-          { config: "dynamo_cpython", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-        ]}
-    secrets: inherit

@@ -17,13 +17,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._matrix_ops import (
-    gen_single_dim_einsum_strategies,
-    mm_single_dim_strategy,
-)
-from torch.distributed.tensor._ops.single_dim_strategy import (
-    register_single_dim_strategy,
-)
+from torch.distributed.tensor._ops._matrix_ops import gen_single_dim_einsum_strategies
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
@@ -369,51 +363,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
-
-    @with_comms
-    def test_aten_linear(self):
-        device_mesh = self.build_device_mesh()
-        x = distribute_tensor(
-            torch.randn(1, 47, 2048),
-            device_mesh,
-            [Replicate()],
-        )
-        w = distribute_tensor(
-            torch.randn(2048, 2048),
-            device_mesh,
-            [Shard(0)],
-        )
-
-        with torch.inference_mode():  # call aten::linear
-            out = torch.nn.functional.linear(x, w)
-
-        self.assertEqual(out.placements, (Shard(2),))
-
-    @with_comms
-    def test_mm_single_dim_strategy(self):
-        register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
-        # unshardable input where some rank have empty _local_tensor
-        # eg sharding tensor (world_size - 1) over world_size
-        device_mesh = self.build_device_mesh()
-        global_inps_viewed = (
-            torch.arange((self.world_size - 1) * self.world_size)
-            .float()
-            .view(self.world_size - 1, self.world_size)
-        )
-        inps_viewed = distribute_tensor(
-            global_inps_viewed,
-            device_mesh,
-            (Shard(dim=0),),
-        )
-        global_weight = (
-            torch.arange(self.world_size * self.world_size)
-            .float()
-            .view(self.world_size, self.world_size)
-        )
-        weight = distribute_tensor(global_weight, device_mesh, (Replicate(),))
-        out = torch.mm(inps_viewed, weight)
-        expected_placements = (Replicate(),)
-        self.assertEqual(out.placements, expected_placements)
 
     @with_comms
     @skip_unless_torch_gpu

@@ -178,13 +178,11 @@ class TestAutograd(TestCase):
             @torch.no_grad()
             class Foo:
                 def __init__(self) -> None:
-                    if torch.is_grad_enabled():
-                        raise AssertionError("expected grad to be disabled")
+                    assert not torch.is_grad_enabled()
 
                 def foo(self):
                     # Not applied to methods
-                    if not torch.is_grad_enabled():
-                        raise AssertionError("expected grad to be enabled")
+                    assert torch.is_grad_enabled()
 
             # Show that we can actually construct the class
             foo = Foo()
@@ -195,21 +193,18 @@ class TestAutograd(TestCase):
 
             @torch.no_grad()
             def foo():
-                if torch.is_grad_enabled():
-                    raise AssertionError("expected grad to be disabled")
+                assert not torch.is_grad_enabled()
 
             foo()
 
             class Foo2:
                 @torch.no_grad()
                 def __init__(self) -> None:
-                    if torch.is_grad_enabled():
-                        raise AssertionError("expected grad to be disabled")
+                    assert not torch.is_grad_enabled()
 
                 @torch.no_grad()
                 def foo(self):
-                    if torch.is_grad_enabled():
-                        raise AssertionError("expected grad to be disabled")
+                    assert not torch.is_grad_enabled()
 
             foo2 = Foo2()
             foo2.foo()
@@ -911,8 +906,7 @@ class TestAutograd(TestCase):
         a = torch.rand(4, 0, requires_grad=True)
         b = torch.rand(4, 1, requires_grad=True)
         c = a + b
-        if c.shape != (4, 0):
-            raise AssertionError(f"expected shape (4, 0), got {c.shape}")
+        assert c.shape == (4, 0)
         c.sum().backward()
 
         self.assertEqual(b.grad, torch.zeros(4, 1))
@@ -2110,10 +2104,8 @@ class TestAutograd(TestCase):
         class NoneGradientFunction(Function):
             @staticmethod
             def forward(ctx, x, y):
-                if not ctx.needs_input_grad[0]:
-                    raise AssertionError("expected needs_input_grad[0] to be True")
-                if ctx.needs_input_grad[1]:
-                    raise AssertionError("expected needs_input_grad[1] to be False")
+                assert ctx.needs_input_grad[0]
+                assert not ctx.needs_input_grad[1]
                 return x, y
 
             @staticmethod
@@ -2922,8 +2914,7 @@ class TestAutograd(TestCase):
 
         with torch.enable_grad():
             coro = coro_no_grad()
-            if 0 != next(coro):
-                raise AssertionError("expected next(coro) == 0")
+            assert 0 == next(coro)
             try:
                 while True:
                     r = coro.throw(RecoverableException)
@@ -2934,8 +2925,7 @@ class TestAutograd(TestCase):
 
         with torch.no_grad():
             coro = coro_enable_grad()
-            if 0 != next(coro):
-                raise AssertionError("expected next(coro) == 0")
+            assert 0 == next(coro)
             try:
                 while True:
                     r = coro.throw(RecoverableException)
@@ -2977,15 +2967,13 @@ class TestAutograd(TestCase):
 
         with torch.enable_grad():
             coro = coro_no_grad()
-            if 0 != next(coro):
-                raise AssertionError("expected next(coro) == 0")
+            assert 0 == next(coro)
             with self.assertRaises(SecondaryException):
                 coro.throw(UnrecoverableException)
 
         with torch.no_grad():
             coro = coro_enable_grad()
-            if 0 != next(coro):
-                raise AssertionError("expected next(coro) == 0")
+            assert 0 == next(coro)
             with self.assertRaises(SecondaryException):
                 coro.throw(UnrecoverableException)
 
@@ -5299,8 +5287,7 @@ Done""",
         ]
         for thread, ranges in threads:
             for range in ranges:
-                if len(range) != 3:
-                    raise AssertionError(f"expected len(range) == 3, got {len(range)}")
+                assert len(range) == 3
                 events.append(
                     FunctionEvent(
                         id=range[2],
@@ -5321,8 +5308,7 @@ Done""",
         def get_children_ids(event):
             return [child.id for child in event.cpu_children]
 
-        if [get_children_ids(event) for event in events] != res:
-            raise AssertionError("children ids mismatch")
+        assert [get_children_ids(event) for event in events] == res
 
     def test_profiler_aggregation_table(self):
         """
@@ -5653,10 +5639,8 @@ Done""",
         grad = torch.randn(5, 10, requires_grad=True)
         out_shape, grad_shape = _calculate_shape(out, grad, False)
 
-        if out_shape != torch.Size([10, 5]):
-            raise AssertionError(f"expected out_shape == (10, 5), got {out_shape}")
-        if grad_shape != torch.Size([5, 10]):
-            raise AssertionError(f"expected grad_shape == (5, 10), got {grad_shape}")
+        assert out_shape == torch.Size([10, 5])
+        assert grad_shape == torch.Size([5, 10])
 
         out = torch.nested.as_nested_tensor(
             [
@@ -5673,10 +5657,8 @@ Done""",
         )
         out_shape, grad_shape = _calculate_shape(out, grad, False)
 
-        if not torch.equal(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]])):
-            raise AssertionError("out_shape mismatch")
-        if not torch.equal(grad_shape, torch.tensor([[5, 10], [5, 10]])):
-            raise AssertionError("grad_shape mismatch")
+        assert torch.equal(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]))
+        assert torch.equal(grad_shape, torch.tensor([[5, 10], [5, 10]]))
 
     def test_nested_anomaly_detect_nan(self):
         size = 10
@@ -6655,40 +6637,6 @@ Done""",
 
         c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
         self.assertTrue(gradcheck(fn2, (c)))
-
-    @unittest.skipIf(TEST_CUDA, "CPU-only test")
-    def test_gradcheck_adjusted_atol_complex_inputs(self):
-        # Regression test for incorrect atol transformation for
-        # complex inputs, allowing fast gradcheck to fail and slow gradcheck to pass.
-        # See issue: https://github.com/pytorch/pytorch/issues/166385
-
-        # this particular seed on CPU triggers a specific input tangent vector u in [0,1)^d such that
-        # v^T(j_n - j_a)u is interesting.
-        torch.manual_seed(97)
-
-        def sample_func(z):
-            return 1.0 / torch.norm(z)
-
-        # Input needs to be at least 2-dim. to trigger
-        # in gradcheck an input projection vector u
-        # that is not all 1s.
-        eps = 10e-3  # eps distance factor from origin, to get
-        # some interesting numerical vs analytic discrepancy.
-        z = eps * torch.rand(
-            2,
-            dtype=torch.complex128,
-            requires_grad=True,
-        )
-        atol = 8.3e-6
-        rtol = 1e-9
-
-        # check both fast and slow gradcheck pass after the fix to _adjusted_atol()
-        self.assertTrue(
-            gradcheck(sample_func, (z,), fast_mode=True, atol=atol, rtol=rtol)
-        )
-        self.assertTrue(
-            gradcheck(sample_func, (z,), fast_mode=False, atol=atol, rtol=rtol)
-        )
 
     def test_gradcheck_get_numerical_jacobian(self):
         # get_numerical_jacobian is deprecated and no longer used internally by gradcheck

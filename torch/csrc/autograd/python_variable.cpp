@@ -2380,21 +2380,10 @@ create_native_op_schema(
     idx++;
   }
 
-  // Check kwargs for device_mesh even if not used for cache key
-  if (compute_mesh.is_none()) {
-    for (auto argument_it = args_kwargs.kwargs_begin();
-         argument_it != args_kwargs.kwargs_end();
-         ++argument_it) {
-      const auto [tensor_flavor, py_tensor] =
-          check_for_dtensor_or_tensor(*argument_it);
-      if (tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
-          tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
-        compute_mesh = py::reinterpret_borrow<py::object>(
-            py_tensor.attr(dtensor_interned_strings.device_mesh));
-        break;
-      }
-    }
-  }
+  TORCH_CHECK(
+      !compute_mesh.is_none(),
+      "found no DeviceMesh from dtensor args for ",
+      op.operator_name());
 
   if (native_info.static_kwargkey && !native_info.static_kwargkey.is_none()) {
     // Separator to disambiguate kwargs from args in comparison and hashing.
@@ -2417,10 +2406,6 @@ create_native_op_schema(
         case TensorFlavor::EXACTLY_DTENSOR:
         case TensorFlavor::DTENSOR_SUBCLASS: {
           handle_dtensor_arg(py_tensor.attr(dtensor_interned_strings._spec));
-          if (compute_mesh.is_none()) {
-            compute_mesh = py::reinterpret_borrow<py::object>(
-                py_tensor.attr(dtensor_interned_strings.device_mesh));
-          }
           break;
         }
         case TensorFlavor::EXACTLY_TENSOR:
@@ -2454,11 +2439,6 @@ create_native_op_schema(
       }
     }
   }
-
-  TORCH_CHECK(
-      !compute_mesh.is_none(),
-      "found no DeviceMesh from dtensor args for ",
-      op.operator_name());
 
   return std::make_pair(
       NativeOpSchema(

@@ -419,10 +419,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
             templates_to_use.append(mm_template)
 
+            if use_triton_tma_template(mat1, mat2, output_layout=layout):
+                templates_to_use.append(persistent_tma_mm_template)
+
             if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            elif use_triton_tma_template(mat1, mat2, output_layout=layout):
-                templates_to_use.append(persistent_tma_mm_template)
 
             if (
                 inductor_config.is_fbcode()
@@ -664,10 +665,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
+        if use_triton_tma_template(mat1, mat2, output_layout=layout):
+            templates_to_use.append(persistent_tma_mm_template)
+
         if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-        elif use_triton_tma_template(mat1, mat2, output_layout=layout):
-            templates_to_use.append(persistent_tma_mm_template)
 
         templates_to_use.append(addmm_contiguous_subgraph_template)
 
@@ -1007,7 +1009,6 @@ def tuned_scaled_mm(
             choices,
             layout,
             input_nodes,
-            kernel_inputs=kernel_inputs,
         )
 
     # Early return for MX variants
@@ -1105,10 +1106,16 @@ def mm_autoheuristic(
 
 def get_size_hints(mat1, mat2, m, n, k):
     if not isinstance(m, int) or not isinstance(k, int):
-        (m, k) = V.graph.sizevars.optimization_hints(mat1.get_size())
+        (m, k) = V.graph.sizevars.size_hints(
+            mat1.get_size(),
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
 
     if not isinstance(n, int) or not isinstance(k, int):
-        (k, n) = V.graph.sizevars.optimization_hints(mat2.get_size())
+        (k, n) = V.graph.sizevars.size_hints(
+            mat2.get_size(),
+            fallback=torch._inductor.config.unbacked_symint_fallback,
+        )
     return m, n, k
 
 
@@ -1119,6 +1126,9 @@ def get_size_hints_strides(mat1, mat2):
     strides_hints = []
     for stride in strides:
         if not isinstance(stride, int):
-            stride = V.graph.sizevars.optimization_hints(stride)
+            stride = V.graph.sizevars.size_hints(
+                stride,
+                fallback=torch._inductor.config.unbacked_symint_fallback,
+            )
         strides_hints.append(stride)
     return strides_hints[0], strides_hints[1]

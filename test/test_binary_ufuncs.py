@@ -82,8 +82,6 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
-_unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
-
 
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
@@ -96,10 +94,7 @@ class TestBinaryUfuncs(TestCase):
     def assertEqualHelper(
         self, actual, expected, msg, *, dtype, exact_dtype=True, **kwargs
     ):
-        if not isinstance(actual, torch.Tensor):
-            raise AssertionError(
-                f"expected actual to be torch.Tensor, got {type(actual)}"
-            )
+        assert isinstance(actual, torch.Tensor)
 
         # Some NumPy functions return scalars, not arrays
         if isinstance(expected, Number):
@@ -112,19 +107,13 @@ class TestBinaryUfuncs(TestCase):
                 # Also ops like scipy.special.erf, scipy.special.erfc, etc, promote float16
                 # to float32
                 if expected.dtype == np.float32:
-                    if actual.dtype not in (
+                    assert actual.dtype in (
                         torch.float16,
                         torch.bfloat16,
                         torch.float32,
-                    ):
-                        raise AssertionError(
-                            f"actual.dtype {actual.dtype} not in expected dtypes"
-                        )
+                    )
                 else:
-                    if expected.dtype != torch_to_numpy_dtype_dict[actual.dtype]:
-                        raise AssertionError(
-                            f"dtype mismatch: {expected.dtype} != {torch_to_numpy_dtype_dict[actual.dtype]}"
-                        )
+                    assert expected.dtype == torch_to_numpy_dtype_dict[actual.dtype]
 
             self.assertEqual(
                 actual,
@@ -3477,8 +3466,7 @@ class TestBinaryUfuncs(TestCase):
 
         # test with scalar
         m = torch.randn(1, device=device).squeeze()
-        if m.dim() != 0:
-            raise AssertionError("m is intentionally a scalar")
+        assert m.dim() == 0, "m is intentionally a scalar"
         self.assertEqual(torch.pow(2, m), 2**m)
 
     @skipXPU
@@ -4519,25 +4507,11 @@ class TestBinaryUfuncs(TestCase):
         _compare_helper(t, zeros, *xlog1py_fns)
         _compare_helper(t, 0.0, *xlog1py_fns)
 
-    @dtypes(
-        *product(
-            all_types_and(torch.bool, *_unsigned_int_types),
-            all_types_and(torch.bool, *_unsigned_int_types),
-        )
-    )
+    @dtypes(*product(all_types_and(torch.bool), all_types_and(torch.bool)))
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @slowTest
     def test_zeta(self, device, dtypes):
         x_dtype, q_dtype = dtypes
-        # Skip incompatible type combinations for uints
-        try:
-            torch.promote_types(x_dtype, q_dtype)
-        except RuntimeError:
-            if not {x_dtype, q_dtype}.isdisjoint(_unsigned_int_types):
-                self.skipTest(
-                    f"Type promotion not supported for {x_dtype} and {q_dtype}"
-                )
-            raise
 
         def test_helper(x, q):
             x_np = x if isinstance(x, float) else x.cpu().numpy()
@@ -4681,8 +4655,7 @@ def generate_not_implemented_tests(cls):
 
     for op in tensor_binary_ops:
         test_name = f"test_{op}_not_implemented"
-        if hasattr(cls, test_name):
-            raise AssertionError(f"{test_name} already in {cls.__name__}")
+        assert not hasattr(cls, test_name), f"{test_name} already in {cls.__name__}"
 
         setattr(cls, test_name, create_test_func(op))
 

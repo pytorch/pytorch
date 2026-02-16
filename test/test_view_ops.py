@@ -796,8 +796,7 @@ class TestViewOps(TestCase):
                 y = prepro_fn(x) if prepro_fn is not None else x
                 max_offset = sum((si - 1) * st for si, st in zip(size, strides))
                 max_offset += offset if offset is not None else y.storage_offset()
-                if max_offset >= len(y.storage()):
-                    raise AssertionError("test case resizes storage")
+                assert max_offset < len(y.storage()), "test case resizes storage"
 
             def closure(x):
                 if prepro_fn is not None:

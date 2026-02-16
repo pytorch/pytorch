@@ -240,7 +240,3 @@ class CPythonTestCase(TestCase):
                 enable_trace_unittest=True,
             ),
         )
-
-    # pyrefly: ignore [implicit-any]
-    def wrap_with_policy(self, method_name: str, policy: Callable) -> None:
-        pass

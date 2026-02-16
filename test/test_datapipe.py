@@ -945,12 +945,9 @@ class TestFunctionalIterDataPipe(TestCase):
                 thing=getattr(input_dp, dp_funcname), forceload=True
             )
 
-            if f"(functional name: ``{dp_funcname}``)" not in docstring:
-                raise AssertionError(f"expected functional name in docstring for {dp_funcname}")
-            if "Args:" not in docstring:
-                raise AssertionError(f"expected 'Args:' in docstring for {dp_funcname}")
-            if "Example:" not in docstring and "Examples:" not in docstring:
-                raise AssertionError(f"expected 'Example:' or 'Examples:' in docstring for {dp_funcname}")
+            assert f"(functional name: ``{dp_funcname}``)" in docstring
+            assert "Args:" in docstring
+            assert "Example:" in docstring or "Examples:" in docstring
 
     def test_iterable_wrapper_datapipe(self):
         input_ls = list(range(10))
@@ -2185,12 +2182,9 @@ class TestFunctionalMapDataPipe(TestCase):
             docstring = pydoc.render_doc(
                 thing=getattr(input_dp, dp_funcname), forceload=True
             )
-            if f"(functional name: ``{dp_funcname}``)" not in docstring:
-                raise AssertionError(f"expected functional name in docstring for {dp_funcname}")
-            if "Args:" not in docstring:
-                raise AssertionError(f"expected 'Args:' in docstring for {dp_funcname}")
-            if "Example:" not in docstring and "Examples:" not in docstring:
-                raise AssertionError(f"expected 'Example:' or 'Examples:' in docstring for {dp_funcname}")
+            assert f"(functional name: ``{dp_funcname}``)" in docstring
+            assert "Args:" in docstring
+            assert "Example:" in docstring or "Examples:" in docstring
 
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))

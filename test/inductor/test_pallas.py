@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import unittest
+from unittest import mock
 
 import torch
 import torch._dynamo
@@ -52,18 +53,24 @@ except ImportError:
 test_classes = {}
 
 
-def make_pallas(cls):
+def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
     """Create a test class variant that uses Pallas backend.
 
     Args:
         cls: The test class to create a Pallas variant of.
+        _debug_cpu_to_tpu_pallas: If True, route CPU operations to TPU.
     """
     patches = [
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
     ]
-    cls_prefix = "Pallas"
-    suffix = "_pallas"
+    if _debug_cpu_to_tpu_pallas:
+        cls_prefix = "PallasTpu"
+        suffix = "_pallas_tpu"
+        patches.append((config, "_debug_cpu_to_tpu_pallas", True))
+    else:
+        cls_prefix = "Pallas"
+        suffix = "_pallas"
 
     # Mark tests based on sentinel files in pallas_expected_failures/ and pallas_skip_tests/
     for name in cls.__dict__:
@@ -97,22 +104,34 @@ def make_pallas(cls):
     return test_class
 
 
-def _skip_if(condition_fn, reason):
-    def decorator(fn):
-        @functools.wraps(fn)
-        def wrapper(self, *args, **kwargs):
-            if condition_fn(self):
-                self.skipTest(reason)
-            fn(self, *args, **kwargs)
+def skip_if_tpu(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if config._debug_cpu_to_tpu_pallas:
+            self.skipTest("Not yet working on TPU")
+        fn(self, *args, **kwargs)
 
-        return wrapper
-
-    return decorator
+    return wrapper
 
 
-skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu", "Not yet working on TPU")
-skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
-skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
+def skip_if_cpu(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self.DEVICE == "cpu":
+            self.skipTest("Not yet working on CPU")
+        fn(self, *args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_cuda(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if self.DEVICE == "cuda":
+            self.skipTest("Not yet working on GPU")
+        fn(self, *args, **kwargs)
+
+    return wrapper
 
 
 class PallasTestsMixin:
@@ -152,12 +171,7 @@ class PallasTestsMixin:
                 pass
 
     def _compile(self, fn):
-        device_to_backend_key = {
-            "cuda": "cuda_backend",
-            "cpu": "cpu_backend",
-            "tpu": "tpu_backend",
-        }
-        key = device_to_backend_key[self.DEVICE]
+        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
         return torch.compile(fn, backend="inductor", options={key: "pallas"})
 
     def test_simple_add(self):
@@ -314,7 +328,14 @@ class PallasTestsMixin:
     def test_compile_options(self):
         """Test that Pallas backend is properly configured."""
 
-        pallas_fn = self._compile(lambda a, b: a.sin() + b.cos())
+        @torch.compile(
+            backend="inductor",
+            options={
+                ("cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"): "pallas"
+            },
+        )
+        def pallas_fn(a, b):
+            return a.sin() + b.cos()
 
         _, (code,) = run_and_get_code(
             pallas_fn,
@@ -329,7 +350,11 @@ class PallasTestsMixin:
     def test_jax_jit_wrapper_is_emitted(self):
         """Ensure generated Pallas code wraps pl.pallas_call in jax.jit."""
 
-        pallas_fn = self._compile(lambda a, b: a + b)
+        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
+
+        @torch.compile(backend="inductor", options={key: "pallas"})
+        def pallas_fn(a, b):
+            return a + b
 
         _, (code,) = run_and_get_code(
             pallas_fn,
@@ -735,7 +760,6 @@ class PallasTestsMixin:
         expected = fn(x, row_indices)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex64_mul(self):
         """Test complex64 multiplication."""
 
@@ -750,7 +774,6 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex_conj(self):
         """Test complex conjugate."""
 
@@ -764,7 +787,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex_real(self):
         """Test extracting real part of complex tensor."""
 
@@ -778,7 +800,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex_imag(self):
         """Test extracting imaginary part of complex tensor."""
 
@@ -792,7 +813,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex_abs(self):
         """Test complex absolute value (magnitude)."""
 
@@ -806,7 +826,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex128_conj(self):
         """Test complex128 conjugate operation."""
 
@@ -820,7 +839,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex_mul_scalar(self):
         """Test complex multiplication with scalar."""
 
@@ -834,7 +852,6 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_complex_conj_mul(self):
         """Test conjugate followed by multiplication."""
 
@@ -907,7 +924,6 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_sign(self):
         """Test sign operation."""
 
@@ -1021,6 +1037,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_tpu
+    @skip_if_tpu
     def test_prod_reduction(self):
         """Test prod reduction."""
         if self.DEVICE == "cuda":
@@ -1038,7 +1055,6 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_softmax_two_pass(self):
         """Test two-pass softmax (max reduction + sum reduction)."""
 
@@ -1053,7 +1069,6 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_rms_norm(self):
         """Test RMS normalization (mean-of-squares reduction + rsqrt)."""
 
@@ -1071,7 +1086,6 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_welford(self):
         """Test Welford variance/mean computation (two-pass fallback)."""
 
@@ -1087,7 +1101,6 @@ class PallasTestsMixin:
         self.assertEqual(var_result, var_expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_layer_norm(self):
         """Test layer normalization (mean + variance reduction, normalize, scale + shift)."""
 
@@ -1106,6 +1119,7 @@ class PallasTestsMixin:
         expected = fn(x, weight, bias)
         self.assertEqual(result, expected)
 
+    @skip_if_cpu
     @skip_if_cuda
     @skip_if_tpu
     def test_rope(self):
@@ -1128,50 +1142,6 @@ class PallasTestsMixin:
         sin = torch.randn(32, 32, device=self.DEVICE)
         result = compiled(x, cos, sin)
         expected = fn(x, cos, sin)
-        self.assertEqual(result, expected)
-
-    @skip_if_cuda
-    @skip_if_tpu
-    def test_rope_interleaved(self):
-        """Test Rotary Position Embedding with interleaved halves.
-
-        Uses even/odd stride-2 slicing instead of contiguous halves, then
-        reassembles via stack + reshape. Exercises strided input access.
-        """
-
-        def fn(x, cos, sin):
-            x1 = x[..., 0::2]
-            x2 = x[..., 1::2]
-            o1 = x1 * cos - x2 * sin
-            o2 = x2 * cos + x1 * sin
-            return torch.stack([o1, o2], dim=-1).reshape_as(x)
-
-        compiled = self._compile(fn)
-
-        x = torch.randn(32, 64, device=self.DEVICE)
-        cos = torch.randn(32, 32, device=self.DEVICE)
-        sin = torch.randn(32, 32, device=self.DEVICE)
-        result = compiled(x, cos, sin)
-        expected = fn(x, cos, sin)
-        self.assertEqual(result, expected)
-
-    @skip_if_cuda
-    @skip_if_tpu
-    def test_chained_stride_slice(self):
-        """Test that chained stride slices compose into a single strided access.
-
-        x[:, 1::2][:, 2::3][:, 3::4] should compose to x[:, 23::24].
-        """
-
-        def fn(x):
-            return x[:, 1::2][:, 2::3][:, 3::4] + 1
-
-        compiled = self._compile(fn)
-
-        # last dim = 480 which is divisible by 24
-        x = torch.randn(4, 480, device=self.DEVICE)
-        result = compiled(x)
-        expected = fn(x)
         self.assertEqual(result, expected)
 
     @skip_if_tpu
@@ -1495,8 +1465,7 @@ class PallasTestsMixin:
         expected = fn(*ws, x)
         self.assertEqual(result, expected)
 
-    @skip_if_cuda
-    @skip_if_tpu
+    @skip_if_cuda  # Mosaic GPU backend doesn't support axis-based reductions needed for softmax
     def test_nanogpt(self):
         """Test a minimal NanoGPT-style transformer block.
 
@@ -1597,14 +1566,28 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
-    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
 
-    tpu_api.tpu_device()  # initialize TPU runtime
-
+    @config.patch({"_debug_cpu_to_tpu_pallas": True})
     class PallasTestsTPU(PallasTestsMixin, TestCase):
-        DEVICE = "tpu"
+        DEVICE = "cpu"
 
-    make_pallas(test_torchinductor.SweepInputsTpuTest)
+        @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
+        def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
+            def fn(a, b):
+                return a + b
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                (
+                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                    "Please make sure that you have a TPU available and that JAX is configured correctly."
+                ),
+            ):
+                torch.compile(
+                    fn, backend="inductor", options={"cpu_backend": "pallas"}
+                )(torch.randn(16), torch.randn(16))
+
+    make_pallas(test_torchinductor.SweepInputsTpuTest, _debug_cpu_to_tpu_pallas=True)
 
 
 if __name__ == "__main__":

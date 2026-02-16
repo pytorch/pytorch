@@ -90,7 +90,6 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
@@ -154,7 +153,6 @@ try:
     else:
         NP_SUPPORTED_MODULES = ()
 
-        # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
@@ -209,7 +207,7 @@ class ReinplaceCounters:
     @classmethod
     def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int) -> None:
         if count != 0:
-            cls._values[f"missed_tensors_{trigger.name}"] += count
+            cls._values[f"missed_tensors_{trigger}"] += count
 
     @classmethod
     def clear(cls) -> None:
@@ -219,7 +217,7 @@ class ReinplaceCounters:
     def get_total_missed(cls) -> int:
         sum = 0
         for trigger in ReInplaceTrigger:
-            sum += cls._values.get(f"missed_tensors_{trigger.name}", 0)
+            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
         return sum
 
     @classmethod
@@ -614,25 +612,6 @@ class CompileEventLogger:
         CompileEventLogger.add_data(
             event_name, CompileEventLogLevel.PT2_COMPILE, overwrite=False, **metadata
         )
-
-    @staticmethod
-    def add_record_function_data(event_name: str, **metadata: object) -> None:
-        """
-        Add record function data to the profiler event.
-
-        This emits profiler event data so compilation events show up in stack profilers
-        like the PyTorch profiler.
-
-        Args:
-            event_name: Name of the event to record
-            **metadata: Additional metadata to attach to the record function
-        """
-        if torch.autograd.profiler._is_profiler_enabled and metadata:
-            metadata_str = ", ".join(f"{k}={v}" for k, v in metadata.items())
-            with torch.autograd.profiler.record_function(
-                f"{event_name}_data: {metadata_str}"
-            ):
-                pass
 
     @staticmethod
     def compilation_metric(overwrite: bool = False, **metadata: object) -> None:
@@ -1123,21 +1102,6 @@ if sys.version_info >= (3, 12):
     )
 
 
-def get_inputs_devices(
-    inputs: collections.abc.Sequence[object],
-    model: torch.fx.GraphModule,
-) -> list[Optional[torch.device]]:
-    all_inputs = pytree.tree_flatten(inputs)[0] + [
-        node.meta["val"] for node in list(model.graph.nodes) if "val" in node.meta
-    ]
-    devices: list[Optional[torch.device]] = list(
-        OrderedSet([i.device for i in all_inputs if hasattr(i, "device")])
-    )
-    return [
-        i for i in devices if (isinstance(i, torch.device) and i.type != "meta")
-    ] + [None]
-
-
 if sys.version_info >= (3, 14):
     _builtin_final_typing_classes += (typing.Union,)
 
@@ -1154,7 +1118,7 @@ def is_typing(value: Any) -> bool:
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
     return (
-        isinstance(value, (types.UnionType, typing._Final))  # type: ignore[attr-defined]
+        isinstance(value, typing._Final)  # type: ignore[attr-defined]
         or value is typing.Generic
         or value is typing.Union
     )
@@ -1838,8 +1802,6 @@ def get_compilation_metrics() -> list[CompilationMetrics]:
 class ChromiumEventLogger:
     """Logs chromium events to structured logs. tlparse will concatenate these into a perfetto UI link.
 
-    Also emits RecordFunction calls to torch.profiler when enabled.
-
     See https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview#heading=h.yr4qxyxotyw for
     a specification of the Chromium Event JSON format.
     """
@@ -1878,11 +1840,6 @@ class ChromiumEventLogger:
         if not hasattr(self.tls, "event_data"):
             self.tls.event_data = {}
         return self.tls.event_data
-
-    def get_record_functions(self) -> dict[str, AbstractContextManager[None]]:
-        if not hasattr(self.tls, "record_functions"):
-            self.tls.record_functions = {}
-        return self.tls.record_functions
 
     def __init__(self) -> None:
         self.tls = threading.local()
@@ -1997,16 +1954,6 @@ class ChromiumEventLogger:
         if log_pt2_compile_event:
             self.get_pt2_compile_substack().append(event_name)
 
-        # Emit profiler event so compilation events show up in stock PyTorch profiler
-        if torch.autograd.profiler._is_profiler_enabled:
-            rf = torch._C._profiler._RecordFunctionFast(event_name)
-            rf.__enter__()
-            self.get_record_functions()[event_name] = rf
-
-            # Add metadata to the profiler event if present
-            if metadata:
-                CompileEventLogger.add_record_function_data(event_name, **metadata)
-
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
         # cleared the stack.
@@ -2016,12 +1963,6 @@ class ChromiumEventLogger:
         substack.clear()
         event_data = self.get_event_data()
         event_data.clear()
-        # Clean up any lingering record functions (shouldn't happen in normal operation)
-        record_functions = self.get_record_functions()
-        if record_functions:
-            for rf in record_functions.values():
-                rf.__exit__(None, None, None)
-            record_functions.clear()
 
     def log_event_end(
         self,
@@ -2051,7 +1992,6 @@ class ChromiumEventLogger:
             event_metadata = all_event_data[event_name]
             del all_event_data[event_name]
         else:
-            # pyrefly: ignore [implicit-any]
             event_metadata = {}
         # Add the passed in metadata
         event_metadata.update(metadata)
@@ -2096,12 +2036,6 @@ class ChromiumEventLogger:
 
         # Finally pop the actual event off the stack
         event_stack.pop()
-
-        # End profiler event so compilation events show up in stock PyTorch profiler
-        record_functions = self.get_record_functions()
-        if event_name in record_functions:
-            rf = record_functions.pop(event_name)
-            rf.__exit__(None, None, None)
 
     def _log_timed_event(
         self,
@@ -3622,18 +3556,6 @@ def get_fake_value(
     tx: InstructionTranslatorBase,
     allow_non_graph_fake: bool = False,
 ) -> Any:
-    _t0 = time.time_ns()
-    try:
-        return _get_fake_value_impl(node, tx, allow_non_graph_fake)
-    finally:
-        tx.output.bytecode_tracing_timings.get_fake_value_ns += time.time_ns() - _t0
-
-
-def _get_fake_value_impl(
-    node: torch.fx.Node,
-    tx: InstructionTranslatorBase,
-    allow_non_graph_fake: bool = False,
-) -> Any:
     """
     Run the computation represented by `node` using fake tensors and return the result.
 
@@ -3668,9 +3590,7 @@ def _get_fake_value_impl(
             id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
         }
     else:
-        # pyrefly: ignore [implicit-any]
         flat_args_kwargs = []
-        # pyrefly: ignore [implicit-any]
         id_to_initial_version = {}
 
     nnmodule = None

@@ -2337,34 +2337,6 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         disabled_bound = torch._dynamo.disable(bound_method)
         self.assertIs(innermost_fn(disabled_bound), bound_method)
 
-    def test_disable_functools_wraps(self):
-        # Test that functools.wraps copying _torchdynamo_orig_callable doesn't
-        # cause innermost_fn to bypass the outer wrapper. This tests the fix
-        # using _torchdynamo_wrapper_id to verify the attribute was set by our
-        # decorator, not copied by functools.wraps.
-        from torch._dynamo.eval_frame import innermost_fn
-
-        @torch._dynamo.disable
-        def inner_fn(x):
-            return x + 1
-
-        # Outer wrapper uses functools.wraps which copies _torchdynamo_orig_callable
-        @functools.wraps(inner_fn)
-        def outer_wrapper(x):
-            return inner_fn(x) * 2
-
-        # innermost_fn should NOT follow the copied _torchdynamo_orig_callable
-        # because _torchdynamo_wrapper_id won't match
-        self.assertIs(innermost_fn(outer_wrapper), outer_wrapper)
-
-        # Applying disable to outer_wrapper should wrap outer_wrapper, not inner_fn
-        disabled_outer = torch._dynamo.disable(outer_wrapper)
-
-        x = torch.tensor([1.0, 2.0, 3.0])
-        expected = outer_wrapper(x)  # (x+1)*2 = [4, 6, 8]
-        actual = disabled_outer(x)
-        self.assertEqual(expected, actual)
-
     def test_dynamo_disable_annotations(self):
         class SimpleModel(torch.nn.Module):
             def __init__(self) -> None:
@@ -3597,36 +3569,6 @@ class GraphModule(torch.nn.Module):
             @leaf_function
             def bad_fn2(x):
                 return (x,)
-
-    def test_leaf_function_no_return_value(self):
-        printed = []
-
-        @leaf_function
-        def fn_no_return(x):
-            print("processing")
-
-        @fn_no_return.register_fake
-        def fn_no_return_fake(x):
-            pass
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-
-            def forward(self, x):
-                fn_no_return(x)
-                return (self.linear(x),)
-
-        def args_fn():
-            return (torch.randn(3, 3, requires_grad=True),)
-
-        def loss_fn(out):
-            return out[0].sum()
-
-        with patch("builtins.print", lambda *args, **kwargs: printed.append(args)):
-            self._test_leaf_function_helper(Mod, args_fn, loss_fn)
-        self.assertTrue(any("processing" in p for p in printed))
 
 
 instantiate_parametrized_tests(DecoratorTests)
