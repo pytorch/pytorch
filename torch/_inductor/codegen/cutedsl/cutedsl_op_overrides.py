@@ -17,7 +17,7 @@ from torch._inductor.virtualized import OpsValue, V
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
-CuteDSLArg = Union[CSEVariable, str]
+CuteDSLArg = Union[CSEVariable, str, bool, float, int]
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
@@ -44,6 +44,7 @@ class CuteDSLOpOverrides(OpOverrides):
         torch.int16: "cutlass.Int16",
         torch.int32: "cutlass.Int32",
         torch.int64: "cutlass.Int64",
+        torch.uint8: "cutlass.Uint8",
         torch.bool: "cutlass.Boolean",
         torch.float8_e4m3fn: "cutlass.Float8E4M3FN",
         torch.float8_e5m2: "cutlass.Float8E5M2",
@@ -131,6 +132,23 @@ class CuteDSLOpOverrides(OpOverrides):
         return op_format.format(a=a, b=b)
 
     @staticmethod
+    def _expected_tensor_dtype() -> Optional[torch.dtype]:
+        current_node = V.current_node
+        if current_node is None:
+            return None
+        value = current_node.meta.get("val")
+        if isinstance(value, torch.Tensor):
+            return value.dtype
+        return None
+
+    @staticmethod
+    def _cast_expr(expr: str, dtype: torch.dtype) -> str:
+        cute_type = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(dtype)
+        if cute_type is None:
+            return expr
+        return f"{cute_type}({expr})"
+
+    @staticmethod
     def _apply_unary_op(x: CuteDSLArg, op_format: str) -> CuteDSLArg:
         """
         Apply a unary operation, returning CSEVariable if input is a tensor.
@@ -193,6 +211,8 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def exp(x: CuteDSLArg) -> CuteDSLArg:
         """Exponential using CuteDSL cute.math.exp function."""
+        if CuteDSLOpOverrides._get_cse_var(x) is None:
+            x = CuteDSLOpOverrides._cast_expr(str(x), torch.float32)
         return CuteDSLOpOverrides._apply_unary_op(
             x, f"cute.math.exp2({{x}} * {CuteDSLOpOverrides.LOG2_E})"
         )
@@ -223,12 +243,68 @@ class CuteDSLOpOverrides(OpOverrides):
         return CuteDSLOpOverrides._apply_unary_op(x, "cute.math.erf({x})")
 
     @staticmethod
+    def sigmoid(x: CuteDSLArg) -> CuteDSLArg:
+        """Sigmoid with fp32 compute and cast-back to expected output dtype."""
+        x_cse = CuteDSLOpOverrides._get_cse_var(x)
+        if x_cse is not None:
+            x_fp32: CuteDSLArg = CuteDSLOpOverrides.to_dtype(
+                x_cse,
+                torch.float32,
+                use_compute_types=False,
+            )
+        else:
+            x_fp32 = CuteDSLOpOverrides._cast_expr(str(x), torch.float32)
+
+        result = CuteDSLOpOverrides._apply_unary_op(
+            x_fp32,
+            f"(1.0 / (1.0 + cute.math.exp2(-{{x}} * {CuteDSLOpOverrides.LOG2_E})))",
+        )
+
+        expected_dtype = CuteDSLOpOverrides._expected_tensor_dtype()
+        if expected_dtype is not None and expected_dtype != torch.float32:
+            result_cse = CuteDSLOpOverrides._get_cse_var(result)
+            if result_cse is not None:
+                return CuteDSLOpOverrides.to_dtype(
+                    result_cse,
+                    expected_dtype,
+                    use_compute_types=False,
+                )
+            return CuteDSLOpOverrides._cast_expr(str(result), expected_dtype)
+        return result
+
+    @staticmethod
     def maximum(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        raise NotImplementedError("TODO: maximum is not supported yet for TensorSSA")
+        tensor_arg = CuteDSLOpOverrides._get_cse_var(
+            a
+        ) or CuteDSLOpOverrides._get_cse_var(b)
+        if tensor_arg is not None:
+            return CuteDSLOpOverrides._apply_binary_op(
+                a, b, "cute.where(({a}) > ({b}), {a}, {b})"
+            )
+
+        lhs = str(a)
+        rhs = str(b)
+        if expected_dtype := CuteDSLOpOverrides._expected_tensor_dtype():
+            lhs = CuteDSLOpOverrides._cast_expr(lhs, expected_dtype)
+            rhs = CuteDSLOpOverrides._cast_expr(rhs, expected_dtype)
+        return f"({lhs} if {lhs} > {rhs} else {rhs})"
 
     @staticmethod
     def minimum(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
-        raise NotImplementedError("TODO: minimum is not supported yet for TensorSSA")
+        tensor_arg = CuteDSLOpOverrides._get_cse_var(
+            a
+        ) or CuteDSLOpOverrides._get_cse_var(b)
+        if tensor_arg is not None:
+            return CuteDSLOpOverrides._apply_binary_op(
+                a, b, "cute.where(({a}) < ({b}), {a}, {b})"
+            )
+
+        lhs = str(a)
+        rhs = str(b)
+        if expected_dtype := CuteDSLOpOverrides._expected_tensor_dtype():
+            lhs = CuteDSLOpOverrides._cast_expr(lhs, expected_dtype)
+            rhs = CuteDSLOpOverrides._cast_expr(rhs, expected_dtype)
+        return f"({lhs} if {lhs} < {rhs} else {rhs})"
 
     @staticmethod
     def where(
@@ -287,11 +363,14 @@ class CuteDSLOpOverrides(OpOverrides):
 
     @staticmethod
     def neg(x: CuteDSLArg) -> CuteDSLArg:
-        """Negation using CuteDSL TensorSSA __neg__ operator."""
-        # TODO: See https://github.com/NVIDIA/cutlass/issues/2584
-        return CuteDSLOpOverrides._apply_unary_op(
-            x, "cute.TensorSSA(-{x}, {x}.shape, {x}.dtype)"
-        )
+        """Negation for both TensorSSA and scalar-like expressions."""
+        # TensorSSA path: avoid relying on __neg__ directly due upstream issue.
+        if CuteDSLOpOverrides._get_cse_var(x) is not None:
+            return CuteDSLOpOverrides._apply_unary_op(
+                x, "cute.TensorSSA(-{x}, {x}.shape, {x}.dtype)"
+            )
+        # Scalar path: shape/dtype attributes are unavailable.
+        return CuteDSLOpOverrides._apply_unary_op(x, "(-{x})")
 
     @staticmethod
     def to_dtype(
