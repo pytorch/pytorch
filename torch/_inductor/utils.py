@@ -2860,6 +2860,7 @@ def get_gpu_shared_memory() -> int:
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
         warp_size = torch.cuda.get_device_properties().warp_size
+        # pyrefly: ignore [missing-attribute]
         max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
     else:
         # Defaults
@@ -3270,8 +3271,10 @@ def dump_node_schedule(node_schedule: Sequence[BaseSchedulerNode]) -> None:
     print(f"Node schedule with {len(node_schedule)} nodes")
     for idx, node in enumerate(node_schedule):
         print(f" {idx:3}:")
+        # pyrefly: ignore [unnecessary-comparison]
         if node is EnableReduction:
             print("enable reduction")
+        # pyrefly: ignore [unnecessary-comparison]
         elif node is DisableReduction:
             print("disable reduction")
         elif isinstance(node, SchedulerNode):
