@@ -349,6 +349,18 @@ class InputObserverInfo:
         # adds missing attributes
         for k, v in self.missing.items():
             if k not in kwargs:
+                # Validate that `missing` keys are compatible with the observed signature.
+                # If the function does not accept **kwargs, all missing keys must be
+                # present in the observed signature names.
+                if (
+                    k not in self.signature_names
+                    and not getattr(self, "kwargs_name", None)
+                ):
+                    raise ValueError(
+                        f"Unexpected keyword argument '{k}' provided as a missing input "
+                        "for a function that does not accept it. All missing keys must "
+                        f"be in the observed signature: {tuple(self.signature_names)}."
+                    )
                 kwargs[k] = v
 
         # kwargs may come in a different order each time.
