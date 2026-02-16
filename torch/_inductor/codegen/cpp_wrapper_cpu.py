@@ -2511,6 +2511,8 @@ if (!custom_op_wrapper) {
             return f"{val}"
 
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
+        """Generate C++ statements that append one argument to a Python arg tuple."""
+
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             def handle_scalar(scalar):
                 if isinstance(scalar, int):

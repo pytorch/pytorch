@@ -60,12 +60,7 @@ from torch._functorch.aot_autograd import (
     SerializableAOTDispatchCompiler,
 )
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
-from torch._inductor.cudagraph_utils import (
-    BoxedDeviceIndex,
-    format_default_skip_message,
-    log_cudagraph_skip_and_bump_counter,
-    PlaceholderInfo,
-)
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex, PlaceholderInfo
 from torch._inductor.custom_graph_pass import CustomPartitionerFn
 from torch._inductor.debug import (
     create_mapping_pre_post_grad_nodes,

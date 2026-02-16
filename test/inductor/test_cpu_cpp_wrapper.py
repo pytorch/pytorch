@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: cpu inductor"]
 import sys
 import unittest
-from typing import List, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 import torch
 from torch._inductor import config
@@ -60,7 +60,7 @@ class TestCppWrapper(InductorTestCase):
             "inductor_test_cpp_wrapper::add_optional_list_int", mutates_args=()
         )
         def add_optional_list_int(
-            x: torch.Tensor, addends: Optional[List[int]] = None
+            x: torch.Tensor, addends: Optional[list[int]] = None
         ) -> torch.Tensor:
             if addends is None:
                 return x.clone()
@@ -68,7 +68,7 @@ class TestCppWrapper(InductorTestCase):
 
         @torch.library.register_fake("inductor_test_cpp_wrapper::add_optional_list_int")
         def add_optional_list_int_fake(
-            x: torch.Tensor, addends: Optional[List[int]] = None
+            x: torch.Tensor, addends: Optional[list[int]] = None
         ) -> torch.Tensor:
             return x.clone()
 
