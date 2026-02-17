@@ -5,7 +5,7 @@ import threading
 import weakref
 from dataclasses import dataclass
 from functools import partial, reduce
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -560,6 +560,7 @@ class WorldData:
     tags_to_pg: dict[str, list[dist.ProcessGroup]]
     pg_to_tag: dict[dist.ProcessGroup, str]
     pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
+    comms: list[Any]
 
 
 class ThreadLocalWorld:
@@ -568,7 +569,7 @@ class ThreadLocalWorld:
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(
-                None, {}, {}, {}, {}, 0, {}, {}, {}
+                None, {}, {}, {}, {}, 0, {}, {}, {}, []
             )
         return ThreadLocalWorld._world.world
 
@@ -615,6 +616,10 @@ class ThreadLocalWorld:
     @property
     def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]:
         return self._get_world().pg_coalesce_state
+
+    @property
+    def comms(self) -> list[Any]:
+        return self._get_world().comms
 
 
 _old_pg_world = None
