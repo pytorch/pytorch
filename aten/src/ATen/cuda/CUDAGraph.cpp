@@ -471,6 +471,9 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
 
   UniquePtrExternalCudaStream child_stream = create_external_stream();
   conditional_graph_capture_streams_ids_.push(0);
+
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
   c10::cuda::CUDACachingAllocator::beginAllocateToPool(
       capture_dev_, mempool_id_, create_child_allocate_filter());
   auto filter = create_child_allocate_filter();
@@ -525,6 +528,24 @@ void CUDAGraph::end_capture_to_conditional_node() {
   descendent_graphs_.push_back(graph);
   conditional_node_streams_.pop();
   conditional_graph_capture_streams_ids_.pop();
+
+  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+  if (conditional_graph_capture_streams_ids_.empty()) {
+    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+        capture_dev_, mempool_id_, create_allocate_filter());
+    auto filter = create_allocate_filter();
+    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
+      return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
+    });
+  } else {
+    c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+        capture_dev_, mempool_id_, create_child_allocate_filter());
+    auto filter = create_child_allocate_filter();
+    at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
+      return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
+    });
+  }
 
 #else // !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   AT_ERROR(
