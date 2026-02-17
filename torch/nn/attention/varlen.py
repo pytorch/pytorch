@@ -14,7 +14,7 @@ import torch
 
 log = logging.getLogger(__name__)
 
-__all__ = ["varlen_attn", "AuxRequest"]
+__all__ = ["varlen_attn", "varlen_attn_out", "AuxRequest"]
 
 
 def _normalize_window_size(window_size: list[int] | None) -> list[int]:
@@ -124,7 +124,28 @@ def _varlen_attn(
     rng_state_ = torch.zeros(
         (2,), dtype=torch.uint64, device=query.device
     )  # hardcoded since dropout is hardcoded to 0
+
     return output, softmax_lse, rng_state_
+
+
+def _fake_lse_and_rng(
+    query: torch.Tensor, cu_seq_q: torch.Tensor, max_q: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    total_q = query.size(0)
+    num_heads = query.size(1)
+    if torch.version.hip:
+        batch_size = cu_seq_q.size(0) - 1
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+        )
+    else:
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
+
+    rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
+
+    return logsumexp, rng_state
 
 
 @_varlen_attn.register_fake
@@ -147,31 +168,99 @@ def _varlen_attn_fake(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
-
-    Based on the 3D varlen path from meta__flash_attention_forward:
-    - query shape: (total, num_heads, head_dim)
-    - logsumexp shape: (num_heads, total_q)
     """
-    # Output has same shape as query
     output = torch.empty_like(query)
-
-    # For varlen path: logsumexp shape is (num_heads, total_q)
-    total_q = query.size(0)
-    num_heads = query.size(1)
-    if torch.version.hip:
-        # ROCm uses batched format: [batch_size, num_heads, max_q]
-        batch_size = cu_seq_q.size(0) - 1
-        logsumexp = torch.empty(
-            (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
-        )
-    else:
-        logsumexp = torch.empty(
-            (num_heads, total_q), dtype=torch.float, device=query.device
-        )
-
-    rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
-
+    logsumexp, rng_state = _fake_lse_and_rng(query, cu_seq_q, max_q)
     return output, logsumexp, rng_state
+
+
+@torch.library.custom_op("torch_attn::_varlen_attn_out", mutates_args={"out"})
+def _varlen_attn_out(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    is_causal: bool = False,
+    scale: float | None = None,
+    window_size: list[int] | None = None,
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Private custom op for variable-length attention with pre-allocated output.
+
+    This is the internal implementation. Users should use the public varlen_attn_out function instead.
+    """
+    window_size = _normalize_window_size(window_size)
+
+    if (k_cache is None) != (v_cache is None):
+        raise ValueError("k_cache and v_cache must both be provided or both be None")
+
+    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+    if use_cudnn:
+        # TODO: look into this
+        raise RuntimeError("cuDNN backend does not support out variant.")
+
+    log.info("Using Flash Attention backend for varlen_attn_out")
+    _, softmax_lse, _, _, _ = torch.ops.aten._flash_attention_forward(
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        0.0,  # dropout_p hardcoded to 0.0
+        is_causal,
+        False,  # return_debug_mask
+        scale=scale,
+        window_size_left=window_size[0],
+        window_size_right=window_size[1],
+        k_cache=k_cache,
+        v_cache=v_cache,
+        cache_seqlens=cache_seqlens,
+        cache_batch_idx=cache_batch_idx,
+        page_table=page_table,
+        out=out,
+    )
+
+    rng_state_ = torch.zeros(
+        (2,), dtype=torch.uint64, device=query.device
+    )  # hardcoded since dropout is hardcoded to 0
+
+    return softmax_lse, rng_state_
+
+
+@_varlen_attn_out.register_fake
+def _varlen_attn_out_fake(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    is_causal: bool = False,
+    scale: float | None = None,
+    window_size: list[int] | None = None,
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Fake implementation for meta tensor computation and tracing.
+    """
+    return _fake_lse_and_rng(query, cu_seq_q, max_q)
 
 
 def varlen_attn(
@@ -286,7 +375,68 @@ def varlen_attn(
         ... )
     """
     is_causal = window_size == (-1, 0)
-    out, lse, _ = torch.ops.torch_attn._varlen_attn(
+    output, lse, _ = torch.ops.torch_attn._varlen_attn(
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        is_causal,
+        scale,
+        list(window_size),
+        k_cache,
+        v_cache,
+        cache_seqlens,
+        cache_batch_idx,
+        page_table,
+    )
+    if return_aux is not None and return_aux.lse:
+        return output, lse
+    return output
+
+
+def varlen_attn_out(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor,
+    max_q: int,
+    max_k: int,
+    *,
+    return_aux: AuxRequest | None = None,
+    scale: float | None = None,
+    window_size: tuple[int, int] = (-1, -1),
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """
+    Out-variant of :func:`varlen_attn` that writes the output into a pre-allocated tensor.
+    This avoids allocating a new output tensor, which can be useful for inference.
+
+    Autograd is NOT supported.
+
+    Args:
+        out (Tensor): Pre-allocated output tensor; shape :math:`(T_q, H, D)`.
+            The attention result is written directly into this tensor.
+
+    All other arguments are the same as :func:`varlen_attn`.
+
+    Returns:
+        output (Tensor): The ``out`` tensor with attention results written in-place.
+
+        If ``return_aux`` is not None and ``return_aux.lse`` is True:
+            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(T_q, H)`.
+    """
+    is_causal = window_size == (-1, 0)
+    lse, _ = torch.ops.torch_attn._varlen_attn_out(
+        out,
         query,
         key,
         value,
@@ -332,7 +482,9 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         p is not None
         for p in (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table)
     ):
-        raise RuntimeError("KV cache mode does not support autograd")
+        raise RuntimeError(
+            "Inference-only parameters (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table) do not support autograd"
+        )
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 

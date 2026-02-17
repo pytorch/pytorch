@@ -1179,7 +1179,8 @@ _flash_attention_forward(
     const std::optional<Tensor>& v_cache,
     const std::optional<Tensor>& cache_seqlens,
     const std::optional<Tensor>& cache_batch_idx,
-    const std::optional<Tensor>& page_table
+    const std::optional<Tensor>& page_table,
+    const std::optional<Tensor>& _out
     ) {
 #if defined(USE_FLASH_ATTENTION)
   // KV cache parameters require FA3
@@ -1192,7 +1193,7 @@ _flash_attention_forward(
     "Please install FA3 and activate using torch.nn.attention.activate_flash_attention_impl('FA3').");
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).expect_float();
-  std::optional<Tensor> out = std::nullopt;
+  std::optional<Tensor> out = _out;
 
   std::optional<Tensor> seqused_k = _seqused_k;
   std::optional<at::Tensor> block_table = std::nullopt;  // we are not using the block table yet
