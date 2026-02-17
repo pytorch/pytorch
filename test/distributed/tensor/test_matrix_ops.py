@@ -28,6 +28,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -275,6 +276,7 @@ class DistMatrixOpsTest(DTensorTestBase):
                         f"Got bias={bias_placement.reduce_op}, output={output_placement.reduce_op}",
                     )
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     def test_mm_with_strided_input(self):
         # Case 1: 1D mesh with StridedShard

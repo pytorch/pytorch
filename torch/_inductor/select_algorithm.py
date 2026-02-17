@@ -3090,13 +3090,20 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     # Await precompilation future, thread pool
                     precompile_start_ts = time.time()
+                    final_choices = choices
                     if precompile_future:
-                        precompile_future.result()
+                        try:
+                            precompile_future.result()
+                        except NoValidChoicesError:
+                            log.error(
+                                "Runtime error for autotuning triton choices, defaulting to extern kernels.",
+                            )
+                            final_choices = extern_kernels
                     precompile_elapse = time.time() - precompile_start_ts
 
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
-                    results = AsyncAutotuner.get_results(choices, inputs_key)
+                    results = AsyncAutotuner.get_results(final_choices, inputs_key)
                     autotune_wait_ts = time.time() - autotune_start_ts
                     AlgorithmSelectorCache.log_results(
                         name,

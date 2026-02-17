@@ -154,6 +154,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          checkout-mode: treeless
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
