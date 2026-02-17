@@ -137,11 +137,65 @@ def _lower_multi_output(
     non_tensor_args: Sequence[Any],
     kwargs: dict[str, Any],
 ) -> Optional[list[ir.IRNode]]:
-    """Lower a multi-output functional op to ExternKernelOut.
+    """Lower a multi-output functional op to a packed node + AllocatingMultiOutput children.
 
-    Implemented in a follow-up commit.
+    Architecture:
+        1. Create a CustomOpMultiOutputNode (packed) with MultiOutputLayout.
+           This node's codegen emits the .out(..., out1=buf1, out2=buf2) call.
+        2. Create AllocatingMultiOutput children (one per tensor output) with
+           FixedLayout and should_allocate()=True — each output buffer
+           participates in AllocateLine.plan() buffer reuse.
+        3. Return the list of AllocatingMultiOutput nodes.
     """
-    return None
+    # Validate all outputs are tensors on the same device before creating IR nodes.
+    # This avoids leaking a registered packed node if we bail out midway.
+    device: Optional[torch.device] = None
+    for i, tensor_out in enumerate(example_output):
+        if not isinstance(tensor_out, torch.Tensor):
+            log.debug("Skipping %s: non-tensor in multi-output at index %d", kernel, i)
+            return None
+        if device is None:
+            device = tensor_out.device
+        elif tensor_out.device != device:
+            log.debug(
+                "Skipping %s: mixed devices at index 0=%s vs index %d=%s",
+                kernel, device, i, tensor_out.device,
+            )
+            return None
+
+    assert device is not None, "empty multi-output should have been caught earlier"
+    packed = CustomOpMultiOutputNode(
+        layout=ir.MultiOutputLayout(device=device),
+        inputs=list(tensor_args),
+        constant_args=list(non_tensor_args),
+        out_op=out_op,
+        out_arg_names=out_arg_names,
+        op_overload=out_op,
+        kwargs=kwargs,
+    )
+
+    outputs = []
+    for i, tensor_out in enumerate(example_output):
+        layout = ir.FixedLayout(
+            device=tensor_out.device,
+            dtype=tensor_out.dtype,
+            size=[*tensor_out.shape],
+            stride=[*tensor_out.stride()],
+        )
+        multi_out = AllocatingMultiOutput(
+            layout=layout,
+            input=packed,
+            indices=[(type(example_output), i)],
+        )
+        outputs.append(multi_out)
+
+    packed.output_nodes = outputs
+
+    log.debug(
+        "Lowered %s -> %s (multi-output, %d outputs, out args: %s)",
+        kernel, out_op, len(outputs), out_arg_names,
+    )
+    return type(example_output)(outputs)  # type: ignore[return-value]
 
 
 def _make_python_kernel_name(out_op: OpOverload) -> str:
@@ -221,3 +275,95 @@ class CustomOpExternKernelOut(ir.ExternKernelOut):
         all_args = [*args, *kwargs_list]
         all_args.append(f"{self.out_arg_names[0]}={out_ref}")
         wrapper.writeline(f"{kernel_name}({', '.join(all_args)})")
+
+
+class AllocatingMultiOutput(ir.MultiOutput):
+    """
+    MultiOutput with should_allocate()=True for buffer reuse.
+
+    The parent CustomOpMultiOutputNode emits the .out() call; these children
+    are pre-allocated destinations.  We skip the base MultiOutput codegen
+    which would emit redundant "buf1 = buf0[0]" tuple-indexing — the buffer
+    was already allocated via AllocateLine (should_allocate=True).
+    """
+
+    def should_allocate(self) -> bool:
+        return True
+
+    def codegen(self, wrapper: Any) -> None:
+        if not self.skip_size_stride_alignment_checks:
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
+
+
+class CustomOpMultiOutputNode(ir.ExternKernel):
+    """
+    Packed node for multi-output custom op out-variant calls.
+
+    Has MultiOutputLayout.  Its codegen emits the .out(..., out1=buf1, out2=buf2)
+    call, referencing the pre-allocated buffers of its AllocatingMultiOutput children.
+
+    The children have should_allocate()=True, so their buffers participate in
+    AllocateLine.plan() buffer reuse.
+    """
+
+    out_op: OpOverload
+    out_arg_names: list[str]
+    output_nodes: list[AllocatingMultiOutput]
+
+    def __init__(
+        self,
+        layout: ir.MultiOutputLayout,
+        inputs: Sequence[ir.IRNode],
+        constant_args: Sequence[Any] = (),
+        out_op: Optional[OpOverload] = None,
+        out_arg_names: Optional[list[str]] = None,
+        op_overload: Optional[OpOverload] = None,
+        kwargs: Optional[dict[str, Any]] = None,
+    ) -> None:
+        assert out_op is not None, "out_op is required"
+        python_kernel_name = _make_python_kernel_name(out_op)
+        super().__init__(
+            None,
+            layout,
+            self.unwrap_storage(inputs),
+            constant_args,
+            kwargs or {},
+            None,
+            python_kernel_name,
+            None,
+            (),
+            op_overload,
+        )
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+        self.out_op = out_op
+        self.out_arg_names = out_arg_names or []
+        self.output_nodes = []
+
+    def should_allocate(self) -> bool:
+        # The packed node itself doesn't allocate;
+        # its AllocatingMultiOutput children do.
+        return False
+
+    def codegen(self, wrapper: Any) -> None:
+        self.codegen_comment(wrapper)
+        kernel_name = self.get_kernel_name()
+
+        # NOTE: Allocate child output buffers BEFORE emitting the .out() call.
+        # In the normal multi-output flow (FallbackKernel), the packed node
+        # stores the result and children extract via indexing (buf1 = buf0[0]).
+        # In our flow, the .out() call needs pre-allocated buffers as arguments,
+        # so we explicitly trigger allocation here.
+        for out_node in self.output_nodes:
+            wrapper.codegen_allocation(out_node)
+
+        args = _codegen_input_args(self)
+        kwargs_list = _codegen_kwargs(self, skip_names=set(self.out_arg_names))
+
+        all_args = [*args, *kwargs_list]
+        for out_name, out_node in zip(self.out_arg_names, self.output_nodes):
+            all_args.append(f"{out_name}={out_node.get_name()}")
+
+        # Assign to packed node name so "del buf0" doesn't raise UnboundLocalError
+        wrapper.writeline(f"{self.get_name()} = {kernel_name}({', '.join(all_args)})")
