@@ -163,9 +163,11 @@ def cond(
           - The function must return a tensor with the same metadata, e.g. shape,
             dtype, etc.
 
-          - The function cannot have in-place mutations on inputs or global variables.
+          - The function cannot have in-place mutations on global variables.
             (Note: in-place tensor operations such as `add_` for intermediate results
             are allowed in a branch)
+
+          - The function can perform in-place mutations on its input tensors. However, after cond, mutated inputs will be returned as new tensors that do not share object identity with the original inputs
 
     """
     if torch.compiler.is_dynamo_compiling():
