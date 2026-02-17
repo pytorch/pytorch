@@ -2280,6 +2280,7 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     shape_env_to_source_to_symbol_cache: dict[int, dict[str, sympy.Expr]] = field(
         default_factory=dict
     )
+    excluded_sizes: Optional[tuple[Optional[int], ...]] = None
 
 
 @dataclass(frozen=True, slots=True)
