@@ -143,7 +143,7 @@ from .utils import (
 from .variables.base import typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable
+from .variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
@@ -1194,7 +1194,7 @@ class ExceptionStack:
                 break
 
             if context is val:
-                o.set_context(ConstantVariable(None))  # type: ignore[union-attr, arg-type]
+                o.set_context(CONSTANT_VARIABLE_NONE)  # type: ignore[union-attr, arg-type]
                 break
 
             o = context  # type: ignore[assignment]
@@ -2219,7 +2219,7 @@ class InstructionTranslatorBase(
         assert exc is None
         self.push(exc)
 
-        self.push(exit.call_function(self, [ConstantVariable.create(None)] * 3, {}))
+        self.push(exit.call_function(self, [CONSTANT_VARIABLE_NONE] * 3, {}))
 
     def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
         self.popn(2)
@@ -2240,7 +2240,7 @@ class InstructionTranslatorBase(
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(ConstantVariable.create(None))
+                self.push(CONSTANT_VARIABLE_NONE)
             else:
                 # pop the iterator in Python < 3.12
                 self.pop()
@@ -2544,9 +2544,9 @@ class InstructionTranslatorBase(
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
-                    self.push(variables.ConstantVariable(None))
-                    self.push(variables.ConstantVariable(None))
-                    self.push(variables.ConstantVariable(None))
+                    self.push(variables.CONSTANT_VARIABLE_NONE)
+                    self.push(variables.CONSTANT_VARIABLE_NONE)
+                    self.push(variables.CONSTANT_VARIABLE_NONE)
 
                 # Push new exception - tb, val, type
                 # Traceback is currently mapped to UnknownVariable
@@ -2587,7 +2587,7 @@ class InstructionTranslatorBase(
 
         val = self.pop()
         if len(self.exn_vt_stack) == 0:
-            prev_exc: VariableTracker = ConstantVariable(None)
+            prev_exc: VariableTracker = CONSTANT_VARIABLE_NONE
         else:
             prev_exc = self.exn_vt_stack[-1]
         self.push(prev_exc)
@@ -5902,7 +5902,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if self.output.should_exit:
             # graph break
-            return ConstantVariable.create(None)  # return dummy variable
+            return CONSTANT_VARIABLE_NONE  # return dummy variable
 
         assert self.symbolic_result is not None
 
@@ -6161,7 +6161,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        self.push(ConstantVariable.create(None))
+        self.push(CONSTANT_VARIABLE_NONE)
         if (
             config.enable_faithful_generator_behavior
             or self.is_generator_from_ctx_manager
