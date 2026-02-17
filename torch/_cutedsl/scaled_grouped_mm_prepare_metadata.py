@@ -4,7 +4,7 @@ from torch._cutedsl._compile_with_safe_names import _compile_with_safe_names
 
 
 @functools.cache
-def _compile_scaled_grouped_mm_prepare_metadata():
+def _compile_scaled_grouped_mm_prepare_metadata(a_is_2d: bool, b_is_2d: bool):
     import cuda.bindings.driver as cuda
     import cutlass
     import cutlass.cute as cute
@@ -30,6 +30,8 @@ def _compile_scaled_grouped_mm_prepare_metadata():
         stride_c: tuple[cutlass.Int64, cutlass.Int64],
         stride_scale_a: tuple[cutlass.Int64, cutlass.Int64],
         stride_scale_b: tuple[cutlass.Int64, cutlass.Int64],
+        A_IS_2D: cutlass.Constexpr[bool],
+        B_IS_2D: cutlass.Constexpr[bool],
         transpose_ab: cutlass.Int32,
         CLUSTER_TILE_M: cutlass.Int32,
         CLUSTER_TILE_N: cutlass.Int32,
@@ -50,42 +52,109 @@ def _compile_scaled_grouped_mm_prepare_metadata():
                 off_start = offs[g - 1]
             off_end = offs[g]
             group_size = off_end - off_start
+            byte_off_a = cutlass.Int64(0)
+            b_byte_off = cutlass.Int64(0)
+            c_byte_off = cutlass.Int64(0)
+            byte_off_scale_a = cutlass.Int64(0)
+            byte_off_scale_b = cutlass.Int64(0)
+            problem_m = cutlass.Int32(0)
+            problem_n = cutlass.Int32(0)
+            problem_k = cutlass.Int32(0)
 
-            byte_off_a = (
-                cutlass.Int64(off_start) * stride_a[0] * cutlass.Int64(sizeof_ab)
-            )
-            b_byte_off = cutlass.Int64(g) * stride_b[0] * cutlass.Int64(sizeof_ab)
-            c_byte_off = (
-                cutlass.Int64(off_start) * stride_c[0] * cutlass.Int64(sizeof_c)
-            )
+            if not cutlass.const_expr(A_IS_2D and B_IS_2D):
+                # 2d/3d: offs partition rows (M) of A/output.
+                byte_off_a = (
+                    cutlass.Int64(off_start) * stride_a[0] * cutlass.Int64(sizeof_ab)
+                )
+                b_byte_off = cutlass.Int64(g) * stride_b[0] * cutlass.Int64(sizeof_ab)
+                c_byte_off = (
+                    cutlass.Int64(off_start) * stride_c[0] * cutlass.Int64(sizeof_c)
+                )
 
-            # Scale factors for A are stored per group, but with each
-            # group padded to 128 rows. Compute the scale row offset accordingly.
-            off_start_scale_a = cutlass.Int32(0)
-            for i in cutlass.range(G):
-                if i < g:
-                    off_start = 0
-                    if i > 0:
-                        off_start = offs[i - 1]
-                    off_end = offs[i]
-                    off_start_scale_a += cute.ceil_div(off_end - off_start, 128) * 128
-            byte_off_scale_a = (
-                cutlass.Int64(off_start_scale_a)
-                * stride_scale_a[0]
-                * cutlass.Int64(sizeof_scale_ab)
-            )
+                # Scale factors for A are stored per group, but with each
+                # group padded to 128 rows.
+                off_start_scale_a = cutlass.Int32(0)
+                for i in cutlass.range(G):
+                    if i < g:
+                        prev_off_start = cutlass.Int32(0)
+                        if i > 0:
+                            prev_off_start = offs[i - 1]
+                        prev_off_end = offs[i]
+                        off_start_scale_a += (
+                            cute.ceil_div(prev_off_end - prev_off_start, 128) * 128
+                        )
+                byte_off_scale_a = (
+                    cutlass.Int64(off_start_scale_a)
+                    * stride_scale_a[0]
+                    * cutlass.Int64(sizeof_scale_ab)
+                )
+                byte_off_scale_b = (
+                    cutlass.Int64(g)
+                    * stride_scale_b[0]
+                    * cutlass.Int64(sizeof_scale_ab)
+                )
 
-            byte_off_scale_b = (
-                cutlass.Int64(g) * stride_scale_b[0] * cutlass.Int64(sizeof_scale_ab)
-            )
-
-            if transpose_ab != 0:
-                out_mnkl[g, 0] = N
-                out_mnkl[g, 1] = group_size
+                if transpose_ab != 0:
+                    problem_m = N
+                    problem_n = group_size
+                else:
+                    problem_m = group_size
+                    problem_n = N
+                problem_k = K
             else:
-                out_mnkl[g, 0] = group_size
-                out_mnkl[g, 1] = N
-            out_mnkl[g, 2] = K
+                # 2d/2d: offs partition contraction dim (K) of both A and B.
+                byte_off_a = (
+                    cutlass.Int64(off_start) * stride_a[1] * cutlass.Int64(sizeof_ab)
+                )
+                b_byte_off = (
+                    cutlass.Int64(off_start) * stride_b[1] * cutlass.Int64(sizeof_ab)
+                )
+                c_byte_off = (
+                    cutlass.Int64(g)
+                    * cutlass.Int64(M)
+                    * stride_c[0]
+                    * cutlass.Int64(sizeof_c)
+                )
+
+                scale_cols_padded = cute.ceil_div(group_size, 32)
+                scale_cols_padded = cute.ceil_div(scale_cols_padded, 4) * 4
+                m_rounded = cute.ceil_div(M, 128) * 128
+                n_rounded = cute.ceil_div(N, 128) * 128
+                off_start_scale_a = cutlass.Int32(0)
+                off_start_scale_b = cutlass.Int32(0)
+                for i in cutlass.range(G):
+                    if i < g:
+                        prev_off_start = cutlass.Int32(0)
+                        if i > 0:
+                            prev_off_start = offs[i - 1]
+                        prev_off_end = offs[i]
+                        prev_group_k = prev_off_end - prev_off_start
+                        prev_scale_cols = cute.ceil_div(prev_group_k, 32)
+                        prev_scale_cols = cute.ceil_div(prev_scale_cols, 4) * 4
+                        off_start_scale_a += m_rounded * prev_scale_cols
+                        off_start_scale_b += n_rounded * prev_scale_cols
+                byte_off_scale_a = (
+                    cutlass.Int64(off_start_scale_a)
+                    * stride_scale_a[1]
+                    * cutlass.Int64(sizeof_scale_ab)
+                )
+                byte_off_scale_b = (
+                    cutlass.Int64(off_start_scale_b)
+                    * stride_scale_b[1]
+                    * cutlass.Int64(sizeof_scale_ab)
+                )
+
+                if transpose_ab != 0:
+                    problem_m = N
+                    problem_n = M
+                else:
+                    problem_m = M
+                    problem_n = N
+                problem_k = group_size
+
+            out_mnkl[g, 0] = problem_m
+            out_mnkl[g, 1] = problem_n
+            out_mnkl[g, 2] = problem_k
             out_mnkl[g, 3] = cutlass.Int32(1)
 
             if transpose_ab != 0:
@@ -124,12 +193,20 @@ def _compile_scaled_grouped_mm_prepare_metadata():
                 off_end = offs[i]
                 nclusters_m = cutlass.Int32(0)
                 nclusters_n = cutlass.Int32(0)
-                if transpose_ab != 0:
-                    nclusters_m = cute.ceil_div(N, CLUSTER_TILE_M)
-                    nclusters_n = cute.ceil_div(off_end - off_start, CLUSTER_TILE_N)
+                if not cutlass.const_expr(A_IS_2D and B_IS_2D):
+                    if transpose_ab != 0:
+                        nclusters_m = cute.ceil_div(N, CLUSTER_TILE_M)
+                        nclusters_n = cute.ceil_div(off_end - off_start, CLUSTER_TILE_N)
+                    else:
+                        nclusters_m = cute.ceil_div(off_end - off_start, CLUSTER_TILE_M)
+                        nclusters_n = cute.ceil_div(N, CLUSTER_TILE_N)
                 else:
-                    nclusters_m = cute.ceil_div(off_end - off_start, CLUSTER_TILE_M)
-                    nclusters_n = cute.ceil_div(N, CLUSTER_TILE_N)
+                    if transpose_ab != 0:
+                        nclusters_m = cute.ceil_div(N, CLUSTER_TILE_M)
+                        nclusters_n = cute.ceil_div(M, CLUSTER_TILE_N)
+                    else:
+                        nclusters_m = cute.ceil_div(M, CLUSTER_TILE_M)
+                        nclusters_n = cute.ceil_div(N, CLUSTER_TILE_N)
                 nclusters += nclusters_m * nclusters_n
             out_nclusters[0] = nclusters
 
@@ -153,6 +230,8 @@ def _compile_scaled_grouped_mm_prepare_metadata():
         stride_c: tuple[cutlass.Int64, cutlass.Int64],
         stride_scale_a: tuple[cutlass.Int64, cutlass.Int64],
         stride_scale_b: tuple[cutlass.Int64, cutlass.Int64],
+        A_IS_2D: cutlass.Constexpr[bool],
+        B_IS_2D: cutlass.Constexpr[bool],
         transpose_ab: cutlass.Int32,
         CLUSTER_TILE_M: cutlass.Int32,
         CLUSTER_TILE_N: cutlass.Int32,
@@ -184,6 +263,8 @@ def _compile_scaled_grouped_mm_prepare_metadata():
             stride_c,
             stride_scale_a,
             stride_scale_b,
+            A_IS_2D,
+            B_IS_2D,
             transpose_ab,
             CLUSTER_TILE_M,
             CLUSTER_TILE_N,
@@ -226,6 +307,8 @@ def _compile_scaled_grouped_mm_prepare_metadata():
             stride_c=(cute.sym_int(64), cute.sym_int(64)),
             stride_scale_a=(cute.sym_int(64), cute.sym_int(64)),
             stride_scale_b=(cute.sym_int(64), cute.sym_int(64)),
+            A_IS_2D=a_is_2d,
+            B_IS_2D=b_is_2d,
             transpose_ab=0,
             CLUSTER_TILE_M=0,
             CLUSTER_TILE_N=0,

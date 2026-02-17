@@ -260,6 +260,7 @@ def _bench_backend_subprocess(
     mma_tile_mn: tuple[int, int] | None,
     cluster_shape_mn: tuple[int, int] | None,
     transpose_ab: bool | None,
+    layout_mode: str,
 ) -> float:
     cmd = [
         sys.executable,
@@ -291,6 +292,7 @@ def _bench_backend_subprocess(
         )
     if transpose_ab is not None:
         cmd.extend(["--transpose-ab", "on" if transpose_ab else "off"])
+    cmd.extend(["--layout-mode", layout_mode])
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise RuntimeError(
@@ -358,7 +360,14 @@ def _convert_to_mxfp8_with_hp_ref(t, block_size: int):
 
 
 def _prepare_inputs(
-    g: int, m: int, n: int, k: int, dtype, seed: int, grouping: str = "balanced"
+    g: int,
+    m: int,
+    n: int,
+    k: int,
+    dtype,
+    seed: int,
+    grouping: str = "balanced",
+    layout_mode: str = "2d/3d",
 ):
     torch.manual_seed(seed)
     device = "cuda"
@@ -367,55 +376,99 @@ def _prepare_inputs(
     align = 16 // dtype.itemsize
     k_align = (k_eff + align - 1) // align * align
 
-    x = torch.randn((m, k_align), device=device, dtype=dtype)[:, :k_eff] * 0.1
-    w = torch.randn((g, n, k_align), device=device, dtype=dtype)[:, :, :k_eff] * 0.01
-    if k_eff > k:
-        x[:, k:] = 0
-        w[:, :, k:] = 0
-    offs = _generate_offsets(m, g, device, mode=grouping, align=16)
+    if layout_mode == "2d/3d":
+        x = torch.randn((m, k_align), device=device, dtype=dtype)[:, :k_eff] * 0.1
+        w = (
+            torch.randn((g, n, k_align), device=device, dtype=dtype)[:, :, :k_eff]
+            * 0.01
+        )
+        if k_eff > k:
+            x[:, k:] = 0
+            w[:, :, k:] = 0
+        offs = _generate_offsets(m, g, device, mode=grouping, align=16)
 
-    wh_list = []
-    wq_list = []
-    w_blocked_scales = []
-    for i in range(g):
-        wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(w[i], block_size)
-        w_scale_blocked = to_blocked(w_scale)
-        wh_list.append(wh)
-        wq_list.append(wq)
-        w_blocked_scales.append(w_scale_blocked)
-    wh = torch.stack(wh_list, dim=0).contiguous()
-    wq = torch.stack(wq_list, dim=0).contiguous()
-    w_blocked_scales = torch.stack(w_blocked_scales, dim=0).contiguous()
+        wh_list = []
+        wq_list = []
+        w_blocked_scales = []
+        for i in range(g):
+            wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(w[i], block_size)
+            w_scale_blocked = to_blocked(w_scale)
+            wh_list.append(wh)
+            wq_list.append(wq)
+            w_blocked_scales.append(w_scale_blocked)
+        wh = torch.stack(wh_list, dim=0).contiguous()
+        wq = torch.stack(wq_list, dim=0).contiguous()
+        w_blocked_scales = torch.stack(w_blocked_scales, dim=0).contiguous()
 
-    xh_list = []
-    xq_list = []
-    x_scale_list = []
-    x_scale_elems = 0
-    for i in range(g):
-        start = 0 if i == 0 else int(offs[i - 1].item())
-        end = int(offs[i].item())
-        if end == start:
-            continue
-        x_slice = x[start:end, :]
-        xh, xq_slice, x_scale = _convert_to_mxfp8_with_hp_ref(x_slice, block_size)
-        x_scale_blocked = to_blocked(x_scale)
-        x_scale_list.append(x_scale_blocked)
-        x_scale_elems += x_scale_blocked.numel()
-        xh_list.append(xh)
-        xq_list.append(xq_slice)
-    xh = torch.cat(xh_list, dim=0).contiguous()
-    xq = torch.cat(xq_list, dim=0).contiguous()
-    x_scale_flat = torch.empty(
-        (x_scale_elems,), device=device, dtype=w_blocked_scales.dtype
-    )
-    offset = 0
-    for t in x_scale_list:
-        n = t.numel()
-        x_scale_flat[offset : offset + n] = t.view(-1)
-        offset += n
-    x_blocked_scales = x_scale_flat.reshape(-1, k_eff // block_size).contiguous()
-    xq = xq.view(-1, xq.shape[-1])
-    xh = xh.view(-1, xh.shape[-1])
+        xh_list = []
+        xq_list = []
+        x_scale_list = []
+        x_scale_elems = 0
+        for i in range(g):
+            start = 0 if i == 0 else int(offs[i - 1].item())
+            end = int(offs[i].item())
+            if end == start:
+                continue
+            x_slice = x[start:end, :]
+            xh, xq_slice, x_scale = _convert_to_mxfp8_with_hp_ref(x_slice, block_size)
+            x_scale_blocked = to_blocked(x_scale)
+            x_scale_list.append(x_scale_blocked)
+            x_scale_elems += x_scale_blocked.numel()
+            xh_list.append(xh)
+            xq_list.append(xq_slice)
+        xh = torch.cat(xh_list, dim=0).contiguous()
+        xq = torch.cat(xq_list, dim=0).contiguous()
+        x_scale_flat = torch.empty(
+            (x_scale_elems,), device=device, dtype=w_blocked_scales.dtype
+        )
+        offset = 0
+        for t in x_scale_list:
+            n = t.numel()
+            x_scale_flat[offset : offset + n] = t.view(-1)
+            offset += n
+        x_blocked_scales = x_scale_flat.reshape(-1, k_eff // block_size).contiguous()
+        xq = xq.view(-1, xq.shape[-1])
+        xh = xh.view(-1, xh.shape[-1])
+    else:
+        x = torch.randn((m, k_align), device=device, dtype=dtype)[:, :k_eff] * 0.1
+        w = torch.randn((n, k_align), device=device, dtype=dtype)[:, :k_eff] * 0.01
+        if k_eff > k:
+            x[:, k:] = 0
+            w[:, k:] = 0
+        offs = _generate_offsets(k_eff, g, device, mode=grouping, align=block_size)
+        m_rounded = ((m + 127) // 128) * 128
+        n_rounded = ((n + 127) // 128) * 128
+
+        xh_list = []
+        xq_list = []
+        x_scale_list = []
+        wh_list = []
+        wq_list = []
+        w_scale_list = []
+        for i in range(g):
+            start = 0 if i == 0 else int(offs[i - 1].item())
+            end = int(offs[i].item())
+            if end == start:
+                continue
+            x_slice = x[:, start:end].contiguous()
+            w_slice = w[:, start:end].contiguous()
+            xh, xq, x_scale = _convert_to_mxfp8_with_hp_ref(x_slice, block_size)
+            wh, wq, w_scale = _convert_to_mxfp8_with_hp_ref(w_slice, block_size)
+            xh_list.append(xh)
+            xq_list.append(xq)
+            x_scale_list.append(to_blocked(x_scale))
+            wh_list.append(wh)
+            wq_list.append(wq)
+            w_scale_list.append(to_blocked(w_scale))
+
+        xh = torch.cat(xh_list, dim=1).contiguous()
+        xq = torch.cat(xq_list, dim=1).contiguous()
+        wh = torch.cat(wh_list, dim=1).contiguous()
+        wq = torch.cat(wq_list, dim=1).contiguous()
+        x_blocked_scales = torch.cat(x_scale_list, dim=0).contiguous()
+        w_blocked_scales = torch.cat(w_scale_list, dim=0).contiguous()
+        x_blocked_scales = x_blocked_scales.reshape(m_rounded, -1).contiguous()
+        w_blocked_scales = w_blocked_scales.reshape(n_rounded, -1).contiguous()
 
     return xq, wq, x_blocked_scales, w_blocked_scales, offs, xh, wh, k_eff
 
@@ -439,6 +492,7 @@ def benchmark_scaled_grouped_mm(
     cluster_shape_mn: tuple[int, int] | None = None,
     transpose_ab: bool | None = None,
     set_max_gpu_clocks=False,
+    layout_mode: str = "2d/3d",
 ):
     if dtype is None:
         dtype = torch.bfloat16
@@ -474,6 +528,10 @@ def benchmark_scaled_grouped_mm(
             [48, 131072, 6144, 2048],
             [64, 131072, 6144, 2048],
         ]
+        if layout_mode == "2d/2d":
+            # Backward-style mapping from 2d/3d forward defaults:
+            # (G, M, N, K) -> (G, K, N, M)
+            gmnk = [[g, k, n, m] for g, m, n, k in gmnk]
     swizzle = SwizzleType.NO_SWIZZLE
     if torch.version.cuda:
         swizzle = SwizzleType.SWIZZLE_32_4_4
@@ -536,7 +594,7 @@ def benchmark_scaled_grouped_mm(
             xh,
             wh,
             k_eff,
-        ) = _prepare_inputs(g, m, n, k, dtype, seed, grouping)
+        ) = _prepare_inputs(g, m, n, k, dtype, seed, grouping, layout_mode)
 
         if not emit_us_only:
             print(f"G={g}, M={m}, N={n}, K={k} (eff K={k_eff})")
@@ -590,6 +648,7 @@ def benchmark_scaled_grouped_mm(
                     mma_tile_mn=mma_tile_mn,
                     cluster_shape_mn=cluster_shape_mn,
                     transpose_ab=transpose_ab,
+                    layout_mode=layout_mode,
                 )
                 trial_cute = _bench_backend_subprocess(
                     g=g,
@@ -606,6 +665,7 @@ def benchmark_scaled_grouped_mm(
                     mma_tile_mn=mma_tile_mn,
                     cluster_shape_mn=cluster_shape_mn,
                     transpose_ab=transpose_ab,
+                    layout_mode=layout_mode,
                 )
                 cpp_samples.append(trial_cpp)
                 cute_samples.append(trial_cute)
@@ -769,7 +829,13 @@ if __name__ == "__main__":
         "--grouping",
         choices=["balanced", "random"],
         default="balanced",
-        help="How to split M across groups.",
+        help="How to split the grouped dimension: M for 2d/3d, K for 2d/2d.",
+    )
+    parser.add_argument(
+        "--layout-mode",
+        choices=["2d/3d", "2d/2d"],
+        default="2d/3d",
+        help="Input layout mode for grouped MM benchmark.",
     )
     parser.add_argument(
         "--use-subprocess",
@@ -849,4 +915,5 @@ if __name__ == "__main__":
         cluster_shape_mn=args.cluster_shape_mn,
         transpose_ab=(None if args.transpose_ab is None else args.transpose_ab == "on"),
         set_max_gpu_clocks=args.set_max_gpu_clocks,
+        layout_mode=args.layout_mode,
     )

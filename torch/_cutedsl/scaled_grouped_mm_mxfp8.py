@@ -417,13 +417,26 @@ def _round_up(a: int, b: int) -> int:
     return ((a + b - 1) // b) * b
 
 
-def _allocate_output(mat_a: Tensor, mat_b: Tensor, out_dtype: torch.dtype) -> Tensor:
+def _allocate_output(
+    mat_a: Tensor, mat_b: Tensor, out_dtype: torch.dtype, ngroups: int
+) -> Optional[Tensor]:
+    a_is_2d = mat_a.dim() == 2
+    b_is_2d = mat_b.dim() == 2
     M, N = mat_a.size(0), mat_b.size(-1)
     alignment = 128 // torch.finfo(out_dtype).bits
     N_padded = _round_up(N, alignment)
-    return torch.empty_strided(
-        (M, N), (N_padded, 1), device=mat_a.device, dtype=out_dtype
-    )
+    if a_is_2d and b_is_2d:
+        return torch.empty_strided(
+            (ngroups, M, N),
+            (M * N_padded, N_padded, 1),
+            device=mat_a.device,
+            dtype=out_dtype,
+        )
+    if a_is_2d and not b_is_2d:
+        return torch.empty_strided(
+            (M, N), (N_padded, 1), device=mat_a.device, dtype=out_dtype
+        )
+    return None
 
 
 @functools.cache
@@ -630,8 +643,23 @@ def scaled_grouped_mm_mxfp8(
     use_fast_accum: bool = False,
     bias: Optional[Tensor] = None,
 ) -> Tensor:
-    if mat_a.size(-1) % 32 != 0:
-        raise ValueError("K dimension must be divisible by 32 for MXFP8 block scaling")
+    def _is_transposed_layout(t: Tensor) -> bool:
+        end_dim = t.dim() - 1
+        if t.stride(end_dim - 1) == 1 and t.stride(end_dim) >= max(
+            1, t.size(end_dim - 1)
+        ):
+            return True
+        if t.stride(end_dim) == 1 and t.stride(end_dim - 1) >= max(1, t.size(end_dim)):
+            return False
+        raise ValueError(
+            f"Invalid strides/sizes, got {t.stride()} for strides and "
+            f"{t.size()} for sizes"
+        )
+
+    a_is_2d = mat_a.dim() == 2
+    b_is_2d = mat_b.dim() == 2
+    if not a_is_2d:
+        raise ValueError("MXFP8 CuTeDSL path currently supports only 2d/2d and 2d/3d")
 
     # tvm-ffi validates shape/dtype/layout constraints at runtime.
     if offs is None:
@@ -653,38 +681,36 @@ def scaled_grouped_mm_mxfp8(
     if bias is not None:
         raise ValueError("bias is not supported for scaled grouped MM")
 
+    ngroups = int(offs.numel())
+    out_dtype = output_dtype or torch.bfloat16
+    out = _allocate_output(mat_a, mat_b, out_dtype, ngroups)
+    if out is None:
+        raise ValueError("MXFP8 CuTeDSL path currently supports only 2d/2d and 2d/3d")
+    if ngroups == 0:
+        return out
+
     if mat_a.data_ptr() % 16 != 0:
         raise ValueError("expected data_ptr to be aligned to 16 bytes")
-    if mat_a.stride(0) == 1 and mat_a.stride(1) >= max(1, mat_a.size(0)):
-        raise ValueError("expected mat_a to be transposed")
-    if not (mat_a.stride(1) == 1 and mat_a.stride(0) >= max(1, mat_a.size(1))):
-        raise ValueError(
-            f"Invalid strides/sizes, got {mat_a.stride()} for strides and "
-            f"{mat_a.size()} for sizes"
-        )
+    if _is_transposed_layout(mat_a):
+        raise ValueError("expected mat_a to not be transposed")
 
     if mat_b.data_ptr() % 16 != 0:
         raise ValueError("expected data_ptr to be aligned to 16 bytes")
-    if mat_b.stride(1) == 1 and mat_b.stride(2) >= max(1, mat_b.size(1)):
-        pass
-    elif mat_b.stride(2) == 1 and mat_b.stride(1) >= max(1, mat_b.size(2)):
+    if not _is_transposed_layout(mat_b):
         raise ValueError("expected mat_b to be transposed")
-    else:
-        raise ValueError(
-            f"Invalid strides/sizes, got {mat_b.stride()} for strides and "
-            f"{mat_b.size()} for sizes"
-        )
 
     if use_fast_accum:
         raise ValueError("use_fast_accum is not supported for scaled grouped MM")
-    if contraction_dim and tuple(contraction_dim) != (-1, -2):
-        raise ValueError("contraction_dim must be (-1, -2) if provided")
-    if contraction_dim:
-        if mat_a.size(contraction_dim[0]) != mat_b.size(contraction_dim[1]):
-            raise ValueError("contraction dimension of mat_a and mat_b must match")
-    else:
-        if mat_a.size(-1) != mat_b.size(-2):
-            raise ValueError("contraction dimension of mat_a and mat_b must match")
+    if a_is_2d and not b_is_2d:
+        if contraction_dim and tuple(contraction_dim) != (-1, -2):
+            raise ValueError("contraction_dim must be (-1, -2) if provided")
+        if contraction_dim:
+            if mat_a.size(contraction_dim[0]) != mat_b.size(contraction_dim[1]):
+                raise ValueError("contraction dimension of mat_a and mat_b must match")
+        else:
+            if mat_a.size(-1) != mat_b.size(-2):
+                raise ValueError("contraction dimension of mat_a and mat_b must match")
+
     if len(scale_recipe_a) != 1 or len(scale_recipe_b) != 1:
         raise ValueError("scale_recipe_a and scale_recipe_b must be singleton lists")
     if scale_recipe_a[0] != ScalingType.BlockWise1x32:
@@ -698,11 +724,11 @@ def scaled_grouped_mm_mxfp8(
     if swizzle_b[0] != SwizzleType.SWIZZLE_32_4_4:
         raise ValueError("swizzle_b must be SWIZZLE_32_4_4 for MXFP8")
 
-    out_dtype = output_dtype or torch.bfloat16
-    out = _allocate_output(mat_a, mat_b, out_dtype)
-    ngroups = int(offs.numel())
-    if ngroups == 0:
-        return out
+    if a_is_2d and b_is_2d and mat_a.size(1) != mat_b.size(0):
+        raise ValueError("for 2d/2d grouped gemm, total K dimensions must match")
+    if a_is_2d and not b_is_2d and ngroups != mat_b.size(0):
+        raise ValueError("for 2d/3d grouped gemm, offs size must match mat_b.size(0)")
+
     device = mat_a.device
 
     props = torch.cuda.get_device_properties(device)
@@ -710,8 +736,9 @@ def scaled_grouped_mm_mxfp8(
     threads_per_block = min(ngroups, max_threads)
     num_blocks = (ngroups + threads_per_block - 1) // threads_per_block
 
-    M_per_group_avg = mat_a.size(0) // max(ngroups, 1)
-    config = _select_kernel_config(M_per_group_avg, mat_b.size(-1), mat_a.size(-1))
+    m_for_heuristic = mat_a.size(0) if b_is_2d else (mat_a.size(0) // max(ngroups, 1))
+    k_for_heuristic = mat_a.size(1) // max(ngroups, 1) if b_is_2d else mat_a.size(1)
+    config = _select_kernel_config(m_for_heuristic, mat_b.size(-1), k_for_heuristic)
 
     cluster_size = config.cluster_shape_mn[0] * config.cluster_shape_mn[1]
     device_id = (
@@ -743,7 +770,7 @@ def scaled_grouped_mm_mxfp8(
         cluster_tile_m = cta_tile_m * config.cluster_shape_mn[0]
         cluster_tile_n = config.mma_tile_mn[1] * config.cluster_shape_mn[1]
     scaled_grouped_mm_prepare_metadata_compiled = (
-        _compile_scaled_grouped_mm_prepare_metadata()
+        _compile_scaled_grouped_mm_prepare_metadata(a_is_2d, b_is_2d)
     )
 
     import cuda.bindings.driver as cuda_driver
@@ -753,7 +780,7 @@ def scaled_grouped_mm_mxfp8(
     scaled_grouped_mm_prepare_metadata_compiled(
         ngroups,
         int(mat_a.size(0)),
-        int(mat_b.size(2)),
+        int(mat_b.size(-1)),
         int(mat_a.size(1)),
         int(mat_a.data_ptr()),
         int(mat_b.data_ptr()),
@@ -765,8 +792,12 @@ def scaled_grouped_mm_mxfp8(
         int(scale_a[0].element_size()),
         int(out.element_size()),
         tuple(map(int, mat_a.stride())),
-        tuple(map(int, mat_b.stride())),
-        tuple(map(int, out.stride())),
+        (
+            (0, int(mat_b.stride(0)), int(mat_b.stride(1)))
+            if b_is_2d
+            else tuple(map(int, mat_b.stride()))
+        ),
+        tuple(map(int, out[0].stride() if b_is_2d else out.stride())),
         tuple(map(int, scale_a[0].stride())),
         tuple(map(int, scale_b[0].stride())),
         int(config.transpose_ab),
@@ -794,8 +825,12 @@ def scaled_grouped_mm_mxfp8(
 
     scaled_grouped_mm_mxfp8_compiled(
         _with_l_dim(mat_a),
-        _with_l_dim(mat_b[0].transpose(0, 1)),
-        _with_l_dim(out.transpose(0, 1) if config.transpose_ab else out),
+        _with_l_dim(mat_b.transpose(0, 1) if b_is_2d else mat_b[0].transpose(0, 1)),
+        _with_l_dim(
+            (out[0].transpose(0, 1) if config.transpose_ab else out[0])
+            if b_is_2d
+            else (out.transpose(0, 1) if config.transpose_ab else out)
+        ),
         _with_l_dim(scale_a[0]),
         _with_l_dim(scale_b[0]),
         ngroups,
@@ -839,7 +874,10 @@ def _should_use_cutedsl_scaled_grouped_mm_mxfp8(
         return False
     if mat_a.device.type != "cuda" or mat_b.device.type != "cuda":
         return False
-    if mat_a.dim() != 2 or mat_b.dim() != 3:
+    a_is_2d = mat_a.dim() == 2
+    b_is_2d = mat_b.dim() == 2
+    b_dim = mat_b.dim()
+    if not a_is_2d or (not b_is_2d and b_dim != 3):
         return False
     try:
         major, _ = torch.cuda.get_device_capability(mat_a.device)
@@ -962,9 +1000,11 @@ def scaled_grouped_mm_mxfp8_register_kernels() -> Library:
 
     # Capture original CUDA kernel before installing override.
     if _ORIGINAL_SCALED_GROUPED_MM_V2_KERNEL is None:
-        _ORIGINAL_SCALED_GROUPED_MM_V2_KERNEL = torch._C._dispatch_get_computed_kernel_for_dispatch_key(  # pyrefly: ignore [missing-module-attribute]
-            "aten::_scaled_grouped_mm_v2",
-            "CUDA",
+        dispatch_get = (
+            torch._C._dispatch_get_computed_kernel_for_dispatch_key
+        )  # pyrefly: ignore [missing-module-attribute]
+        _ORIGINAL_SCALED_GROUPED_MM_V2_KERNEL = dispatch_get(
+            "aten::_scaled_grouped_mm_v2", "CUDA"
         )
 
     lib = Library("aten", "IMPL", "CUDA")
