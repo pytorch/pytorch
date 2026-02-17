@@ -89,7 +89,8 @@ def scan(
     Performs an inclusive scan with a combine function.
 
     .. warning::
-        `torch.scan` is a prototype feature in PyTorch. You may run into miscompiles.
+
+        ``torch.scan`` is a prototype feature in PyTorch. You may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
