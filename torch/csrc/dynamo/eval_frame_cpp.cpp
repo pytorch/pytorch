@@ -94,17 +94,16 @@ py::list _get_frame_value_stack_with_depth(
   // depth. The caller's tracked depth can lag behind (e.g. after a CALL
   // instruction pops arguments but the effect hasn't been applied to the
   // Python-side tracker yet).
-  bool have_stack_pointer = false;
 #if IS_PYTHON_3_14_PLUS
   if (iframe->stackpointer != nullptr) {
     int actual_depth =
         (int)(iframe->stackpointer - (iframe->localsplus + nlocalsplus));
     if (actual_depth >= 0) {
       depth = std::min(actual_depth, depth);
-      have_stack_pointer = true;
     }
   }
 #else
+  bool have_stack_pointer = false;
   if (iframe->stacktop > 0) {
     int actual_depth = iframe->stacktop - nlocalsplus;
     if (actual_depth >= 0) {
