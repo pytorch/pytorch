@@ -3299,8 +3299,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
 
         x_eager = x.clone()
-        result_eager = fn(x_eager)
-        self.assertEqual(result_eager[0], x + 1)
+        with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
+            fn(x_eager)
 
         compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
         with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
