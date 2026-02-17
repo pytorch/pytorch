@@ -68,6 +68,16 @@ lark==0.12.0
 #Pinned versions: 0.12.0
 #test that import:
 
+nvidia-cutlass-dsl
+#Description: NVIDIA CUTLASS Python DSL
+#Pinned versions:
+#test that import:
+
+apache-tvm-ffi
+#Description: Apache TVM FFI runtime ABI
+#Pinned versions:
+#test that import:
+
 librosa>=0.6.2 ; python_version < "3.11" and platform_machine != "s390x"
 librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: A python package for music and audio analysis
