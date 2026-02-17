@@ -39,6 +39,14 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuDeviceGetDevResource_(
       device, &device_resource, CU_DEV_RESOURCE_TYPE_SM));
 
+  TORCH_CHECK(
+      num_sms > 0 && num_sms <= device_resource.sm.smCount,
+      "Invalid number of SMs requested for green context: ",
+      num_sms,
+      " (device has ",
+      device_resource.sm.smCount,
+      " SMs)");
+
   // Split resources
   std::vector<CUdevResource> result(1);
   auto result_data = result.data();

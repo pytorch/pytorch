@@ -93,6 +93,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::min only supported for 2 args")
+        # pyrefly: ignore [missing-attribute]
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -101,6 +102,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Max(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::max only supported for 2 args")
+        # pyrefly: ignore [missing-attribute]
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -108,10 +110,12 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"metal::abs({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"static_cast<long>(metal::rint({self._print(expr.args[0])}))"
 
     def _print_RoundDecimal(self, expr: sympy.Expr) -> str:
@@ -129,6 +133,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**23
+        # pyrefly: ignore [missing-attribute]
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
@@ -955,6 +960,10 @@ class MetalKernel(SIMDKernel):
                     else:
                         code.writeline(f"constant long& {idx_var.prefix}numel,")
 
+                # Add error buffer parameter if error header is used
+                if "error" in self.headers:
+                    code.writeline("device c10::metal::ErrorMessages* error_buf,")
+
                 assert len(idx_vars) < 4, "Up to 3 index variables are supported"
                 thread_pos_dtype = (
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
@@ -1066,6 +1075,13 @@ class MetalKernel(SIMDKernel):
                 args += [None]  # type: ignore[list-item]
                 arg_types.append(None)
 
+        # Add error buffer index if error reporting is used
+        # TODO(malfet) Figure out how to do it for aoti
+        if "error" in self.headers and not V.graph.cpp_wrapper:
+            args.append(
+                f"error_buf_idx={len([arg for arg in args if arg is not None and '=' not in arg])}"
+            )
+
         wrapper.generate_kernel_call(
             name,
             args,
@@ -1079,11 +1095,11 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         if not (lower or upper):
             return
-        # TODO(malfet): support asserts
-        # See https://github.com/pytorch/pytorch/issues/144634
+
         expr_str = self.index_to_str(expr)
         size_str = self.index_to_str(size)
 
+        # Generate bounds checking with error reporting
         # TODO(malfet): Is upper bound inclusive or exclusive?
         if lower and upper:
             # Check both lower and upper bounds
@@ -1093,7 +1109,22 @@ class MetalKernel(SIMDKernel):
         else:
             condition = f"{expr_str} >= {size_str}"
 
-        self.cse.generate(self.compute, f"if ({condition}) return", assignment=False)
+        # Generate error reporting code
+        if V.graph.cpp_wrapper:
+            self.cse.generate(
+                self.compute, f"if ({condition}) return", assignment=False
+            )
+        else:
+            # Add error header for error reporting
+            self.headers.add("error")
+            self.compute.writelines(
+                [
+                    f"if ({condition}) {{",
+                    f'    TORCH_REPORT_ERROR(error_buf, "Index ", {expr_str}, " out of range [0, ", {size_str}, ")");',
+                    "    return;",
+                    "}",
+                ]
+            )
 
 
 class MetalScheduling(SIMDScheduling):

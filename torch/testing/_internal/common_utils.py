@@ -7,6 +7,7 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
 
+import sysconfig
 import argparse
 import contextlib
 import copy
@@ -1322,12 +1323,12 @@ def run_tests(argv=None):
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
-            if len(failed_tests) != 0:
-                raise AssertionError(
-                    "{} unit test(s) failed:\n\t{}".format(
-                        len(failed_tests), '\n\t'.join(failed_tests)
-                    )
+        if len(failed_tests) != 0:
+            raise AssertionError(
+                "{} unit test(s) failed:\n\t{}".format(
+                    len(failed_tests), '\n\t'.join(failed_tests)
                 )
+            )
 
     elif RUN_PARALLEL > 1:
         test_cases = discover_test_cases_recursively(suite)
@@ -1731,6 +1732,12 @@ def xfailIfWindows(func):
 
 def xfailIfROCm(func):
     return unittest.expectedFailure(func) if torch.version.hip is not None else func
+
+
+def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
+    if not isinstance(msg, str):
+        raise AssertionError("Are you using skipIfFreeThreaded correctly?")
+    return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
@@ -5519,20 +5526,63 @@ def dtype_name(dtype):
     return str(dtype).split('.')[1]
 
 
-@functools.lru_cache
-def get_cycles_per_ms() -> float:
-    """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
-    """
+def _cpu_sleep(cycles: int) -> None:
+    """Spin-wait for approximately the given number of cycles."""
+    for _ in range(cycles):
+        pass
 
-    def measure() -> float:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        torch.cuda._sleep(1000000)
-        end.record()
-        end.synchronize()
-        cycles_per_ms = 1000000 / start.elapsed_time(end)
-        return cycles_per_ms
+
+def device_sleep(device: str, cycles: int) -> None:
+    """Sleep for the given number of cycles on the specified device.
+
+    For CPU, temporarily patches torch.cpu._sleep if needed.
+    For CUDA/other devices, uses torch.get_device_module(device)._sleep.
+    """
+    if device == "cpu":
+        orig = getattr(torch.cpu, "_sleep", None)
+        torch.cpu._sleep = _cpu_sleep
+        try:
+            torch.cpu._sleep(cycles)
+        finally:
+            if orig is None:
+                delattr(torch.cpu, "_sleep")
+            else:
+                torch.cpu._sleep = orig
+    else:
+        torch.get_device_module(device)._sleep(cycles)
+
+
+@functools.lru_cache
+def get_cycles_per_ms(device: str = "cuda") -> float:
+    """Measure and return approximate number of cycles per millisecond for device _sleep.
+
+    Args:
+        device: Device type to measure cycles for ("cuda" or "cpu").
+
+    Works for both CUDA (torch.cuda._sleep) and CPU (torch.cpu._sleep).
+    """
+    test_cycles = 1000000
+
+    if device == "cpu":
+        import time
+
+        def measure() -> float:
+            start = time.perf_counter()
+            _cpu_sleep(test_cycles)
+            end = time.perf_counter()
+            elapsed_ms = (end - start) * 1000
+            cycles_per_ms = test_cycles / elapsed_ms if elapsed_ms > 0 else 1000000
+            return cycles_per_ms
+    else:
+        def measure() -> float:
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            torch.cuda._sleep(test_cycles)
+            end.record()
+            end.synchronize()
+            cycles_per_ms = test_cycles / start.elapsed_time(end)
+            return cycles_per_ms
 
     # Get 10 values and remove the 2 max and 2 min and return the avg.
     # This is to avoid system disturbance that skew the results, e.g.
