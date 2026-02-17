@@ -405,12 +405,10 @@ BATCH_INVARIANCE_XFAILS = {
     "inductor_default": {
         "matmul": {ALL},
         "nn.functional.linear": {ALL},
-        "pow": {fp32},
     },
     "inductor_numerics": {
         "matmul": {ALL},
         "nn.functional.linear": {ALL},
-        "pow": {fp32},
     },
 }
 
@@ -453,11 +451,31 @@ XFAIL_DICTS = {
     "binary_numerical": BINARY_NUMERICAL_XFAILS,
 }
 
+# Additional expected failures that only apply on ROCm.
+# Same structure as the main xfail dicts: test_type -> backend -> op_name -> dtypes.
+ROCM_XFAILS = {
+    "batch_invariance": {
+        "inductor_default": {
+            "log1p": {fp32},
+            "pow": {fp32},
+        },
+        "inductor_numerics": {
+            "pow": {fp32},
+        },
+    },
+}
+
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
     xfails = XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
     is_xfail = dtype in xfails or ALL in xfails
+
+    if not is_xfail and torch.version.hip is not None:
+        rocm_xfails = (
+            ROCM_XFAILS.get(test_type, {}).get(backend, {}).get(op_name, set())
+        )
+        is_xfail = dtype in rocm_xfails or ALL in rocm_xfails
 
     return is_xfail
 
