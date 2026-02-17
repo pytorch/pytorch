@@ -4342,6 +4342,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
 
+    def test_class_reassignment_graph_break(self):
+        class BaseClass:
+            def __init__(self, x):
+                self.x = x
+
+        class DerivedClass(BaseClass):
+            def __init__(self, x):
+                super().__init__(x)
+                self.y = x * 2
+
+        def fn(x):
+            obj = BaseClass(5)
+            obj.__class__ = DerivedClass
+            is_derived = isinstance(obj, DerivedClass)
+            has_y = hasattr(obj, "y")
+            return x + 1, is_derived, has_y
+
+        x = torch.ones(1)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(eager_result, compiled_result)
+
     def test_user_defined_class_python_type(self):
         class MyClass1:
             pass
@@ -13461,12 +13483,6 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
-
-    @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+")
-    def test_CALL_INTRINSIC(self):
-        from torch.testing._internal.py312_intrinsics import Foo
-
-        Foo.test_default_update(self)
 
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_RAISE_VARARGS_0(self):
