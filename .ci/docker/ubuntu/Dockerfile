@@ -28,17 +28,19 @@ RUN echo 'APT::Sandbox::User "root";' | tee -a /etc/apt/apt.conf.d/10sandbox
 RUN --mount=type=bind,source=./common/install_base.sh,target=/install_base.sh \
     bash /install_base.sh
 
-# Install sccache early so cmake-based compilation steps (Halide, Triton,
-# executorch) benefit from cached object files. sccache auto-detects its
-# backend from env: SCCACHE_BUCKET for S3 (CI), SCCACHE_DIR for local disk.
+# Install a lightweight prebuilt sccache for docker image builds only.
+# This is separate from the CI sccache (installed later by install_cache.sh
+# with dist features). It caches cmake-based compilation steps (Halide,
+# Triton, executorch) during image builds.
 ARG SCCACHE_BUCKET
 ARG SCCACHE_REGION
 ARG SCCACHE_S3_USE_SSL
-RUN curl -sL "https://github.com/mozilla/sccache/releases/download/v0.13.0/sccache-v0.13.0-$(uname -m)-unknown-linux-musl.tar.gz" \
-    | tar xz --strip-components=1 -C /usr/local/bin/ --wildcards '*/sccache' \
+RUN mkdir -p /opt/sccache-docker-builder && \
+    curl -sL "https://github.com/mozilla/sccache/releases/download/v0.13.0/sccache-v0.13.0-$(uname -m)-unknown-linux-musl.tar.gz" \
+    | tar xz --strip-components=1 -C /opt/sccache-docker-builder/ --wildcards '*/sccache' \
     || echo "WARNING: sccache download failed, builds will proceed without compilation cache"
-ENV CMAKE_C_COMPILER_LAUNCHER=sccache
-ENV CMAKE_CXX_COMPILER_LAUNCHER=sccache
+ENV CMAKE_C_COMPILER_LAUNCHER=/opt/sccache-docker-builder/sccache
+ENV CMAKE_CXX_COMPILER_LAUNCHER=/opt/sccache-docker-builder/sccache
 
 # Install clang
 ARG LLVMDEV

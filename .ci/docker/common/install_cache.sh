@@ -3,12 +3,24 @@
 set -ex
 
 install_ubuntu() {
-  ARCH=$(uname -m)
-  SCCACHE_VERSION=v0.13.0
-  echo "Downloading pre-built sccache ${SCCACHE_VERSION} for ${ARCH}"
-  curl --retry 3 -sL \
-    "https://github.com/mozilla/sccache/releases/download/${SCCACHE_VERSION}/sccache-${SCCACHE_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
-    | tar xz --strip-components=1 -C /opt/cache/bin/ --wildcards '*/sccache'
+  echo "Installing pkg-config and libssl-dev"
+  apt-get update && apt-get install -y pkg-config libssl-dev curl
+  echo "Installing rust"
+  curl https://sh.rustup.rs -sSf | sh -s -- -y
+  echo "Checking out sccache repo"
+  git clone https://github.com/mozilla/sccache -b v0.13.0
+  cd sccache
+  echo "Patch dist build on aarch64"
+  sed -i '/all(target_os = "linux", target_arch = "x86_64"),/{ p; s/x86_64/aarch64/; }' src/bin/sccache-dist/main.rs
+  echo "Building sccache"
+  . "$HOME/.cargo/env" && cargo build --release --features="dist-client dist-server"
+  cp target/release/sccache /opt/cache/bin
+  cp target/release/sccache-dist /opt/cache/bin
+  echo "Cleaning up"
+  cd ..
+  rm -rf sccache .cargo
+  apt-get remove -y pkg-config libssl-dev
+  apt-get autoclean && apt-get clean
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
   curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
