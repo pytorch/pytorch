@@ -24,7 +24,7 @@ from torch._jit_internal import (
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
 from torch.nn.modules._functions import (
-    LinearCrossEntropyFunction,
+    LinearCrossEntropyFunction as _LinearCrossEntropyFunction,
     LinearCrossEntropyOptions,
 )
 from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
@@ -39,6 +39,7 @@ from torch.overrides import (
 # Set visibility of the bound enums to this module
 ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
+LinearCrossEntropyOptions.__module__ = "torch.nn.functional"
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -3774,7 +3775,7 @@ def linear_cross_entropy(
         if ignore_index >= 0:
             weight = weight.clone()
             weight.narrow(0, ignore_index, 1).zero_()
-        options = LinearCrossEntropyFunction.optimal_chunking(
+        options = _LinearCrossEntropyFunction.optimal_chunking(
             options,
             num_batches,
             in_features,
@@ -3788,7 +3789,7 @@ def linear_cross_entropy(
         if not has_batches:
             input = input.unsqueeze(0)
             target = target.unsqueeze(0)
-        result = LinearCrossEntropyFunction.apply(
+        result = _LinearCrossEntropyFunction.apply(
             input, linear_weight, target, weight, reduction, label_smoothing, options
         )
         if not has_batches:
