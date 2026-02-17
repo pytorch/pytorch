@@ -54,6 +54,7 @@ _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
 _PYNVML_ERR = None
+_AMDSMI_ERR = None
 try:
     from torch import version as _version
 
@@ -105,9 +106,13 @@ try:
                 def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
                     ctypes.CDLL = self.original_CDLL  # type: ignore[misc]
 
-            with _amdsmi_cdll_hook():
-                import amdsmi  # type: ignore[import]
-            _HAS_AMDSMI = True
+            try:
+                with _amdsmi_cdll_hook():
+                    import amdsmi  # type: ignore[import]
+                _HAS_AMDSMI = True
+            except ModuleNotFoundError as err:
+                _AMDSMI_ERR = err
+                raise
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
@@ -1301,7 +1306,7 @@ def _get_amdsmi_handler(device: Device = None):
     if not _HAS_AMDSMI:
         raise ModuleNotFoundError(
             "amdsmi does not seem to be installed or it can't be imported."
-        )
+        ) from _AMDSMI_ERR
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
