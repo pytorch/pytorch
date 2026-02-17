@@ -66,25 +66,11 @@ if args.output_directory:
     out_dir = args.output_directory
 
 includes = [
-    "caffe2/operators/*",
-    "caffe2/sgd/*",
-    "caffe2/image/*",
-    "caffe2/transforms/*",
-    "caffe2/video/*",
-    "caffe2/distributed/*",
-    "caffe2/queue/*",
-    "caffe2/contrib/aten/*",
     "binaries/*",
-    "caffe2/**/*_test*",
     "caffe2/core/*",
-    "caffe2/db/*",
     "caffe2/utils/*",
-    "caffe2/contrib/gloo/*",
-    "caffe2/contrib/nccl/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
-    "modules/*",
-    "third_party/nvfuser/*",
     # PyTorch paths
     # Keep this synchronized with is_pytorch_file in hipify_python.py
     "aten/src/ATen/cuda/*",
@@ -120,21 +106,12 @@ for new_dir in args.extra_include_dir:
         includes.append(abs_new_dir)
 
 ignores = [
-    "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
-    "caffe2/operators/pool_op_cudnn.cu",
     "*/hip/*",
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
     # Correct path to generate HIPConfig.h:
     #   CUDAConfig.h.in -> (amd_build) HIPConfig.h.in -> (cmake) HIPConfig.h
     "aten/src/ATen/cuda/CUDAConfig.h",
-    "third_party/nvfuser/csrc/codegen.cpp",
-    "third_party/nvfuser/runtime/block_reduction.cu",
-    "third_party/nvfuser/runtime/block_sync_atomic.cu",
-    "third_party/nvfuser/runtime/block_sync_default_rocm.cu",
-    "third_party/nvfuser/runtime/broadcast.cu",
-    "third_party/nvfuser/runtime/grid_reduction.cu",
-    "third_party/nvfuser/runtime/helpers.cu",
     "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     "torch/csrc/jit/ir/ir.h",
@@ -156,28 +133,10 @@ def is_hip_clang() -> bool:
 
 # TODO Remove once the following submodules are updated
 hip_platform_files = [
-    "third_party/fbgemm/fbgemm_gpu/CMakeLists.txt",
     "third_party/fbgemm/fbgemm_gpu/cmake/Hip.cmake",
-    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_dense_host.cpp",
-    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_host_template.cpp",
-    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_template.cu",
-    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_forward_quantized_split_lookup.cu",
-    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/cuda_prelude.cuh",
-    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/stochastic_rounding.cuh",
-    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/vec4.cuh",
-    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/utils/weight_row.cuh",
-    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/sparse_ops.cuh",
-    "third_party/fbgemm/fbgemm_gpu/src/jagged_tensor_ops.cu",
-    "third_party/fbgemm/fbgemm_gpu/src/quantize_ops.cu",
-    "third_party/fbgemm/fbgemm_gpu/src/sparse_ops.cu",
-    "third_party/fbgemm/fbgemm_gpu/src/split_embeddings_cache_cuda.cu",
-    "third_party/fbgemm/fbgemm_gpu/src/topology_utils.cpp",
-    "third_party/fbgemm/src/EmbeddingSpMDM.cc",
     "third_party/gloo/cmake/Dependencies.cmake",
     "third_party/gloo/gloo/cuda.cu",
     "third_party/kineto/libkineto/CMakeLists.txt",
-    "third_party/nvfuser/CMakeLists.txt",
-    "third_party/tensorpipe/cmake/Hip.cmake",
 ]
 
 
