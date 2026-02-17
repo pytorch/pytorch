@@ -2,6 +2,11 @@
 
 set -ex
 
+if command -v sccache &>/dev/null; then
+  export CC="sccache ${CC:-gcc}"
+  export CXX="sccache ${CXX:-g++}"
+fi
+
 if [[ -d "/usr/local/cuda/" ]];  then
   with_cuda=/usr/local/cuda/
 else

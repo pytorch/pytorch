@@ -3,6 +3,10 @@
 
 PREFIX="$1"
 
+if command -v sccache &>/dev/null; then
+  export CC="sccache ${CC:-gcc}"
+fi
+
 ###########################
 ### prereqs
 ###########################

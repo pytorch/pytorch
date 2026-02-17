@@ -2,6 +2,10 @@
 
 set -ex
 
+if command -v sccache &>/dev/null; then
+  export CC="sccache ${CC:-gcc}"
+fi
+
 OPENSSL=openssl-1.1.1k
 
 wget -q -O "${OPENSSL}.tar.gz" "https://ossci-linux.s3.amazonaws.com/${OPENSSL}.tar.gz"
