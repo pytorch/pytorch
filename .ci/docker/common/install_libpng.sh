@@ -3,6 +3,10 @@
 
 set -ex
 
+if command -v sccache &>/dev/null; then
+  export CC="sccache ${CC:-gcc}"
+fi
+
 LIBPNG_VERSION=1.6.37
 
 mkdir -p libpng

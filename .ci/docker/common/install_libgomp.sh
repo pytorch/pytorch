@@ -6,6 +6,11 @@ set -ex
 # install dependencies
 dnf -y install gmp-devel libmpc-devel texinfo flex bison
 
+if command -v sccache &>/dev/null; then
+  export CC="sccache ${CC:-gcc}"
+  export CXX="sccache ${CXX:-g++}"
+fi
+
 cd /usr/local/src
 # fetch source for gcc 13
 git clone --depth 1 --single-branch -b releases/gcc-13.3.0 https://github.com/gcc-mirror/gcc.git gcc-13.3.0
