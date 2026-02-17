@@ -7,6 +7,7 @@ SET_CONSTANT = {1, 2, 3, 4, 5}
 BOOLEAN_CONSTANT = True
 NONE_CONSTANT = None
 
+
 def greeter(name: int | str | None = None):
     return f"Hello, {name}!"
 

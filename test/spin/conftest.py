@@ -1,6 +1,7 @@
 import pathlib
 
 import pytest
+
 from spin.tests.conftest import dir_switcher
 
 
