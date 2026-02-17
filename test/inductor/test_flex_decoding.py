@@ -1988,7 +1988,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @skip_on_xpu  # TODO: SYCL acc issue
     def test_non_sparse_mulitple_block_size(self, device):
         def generate_causal_offset(offset: torch.Tensor):
             def causal_offset_mask(b, h, q_idx, kv_idx):

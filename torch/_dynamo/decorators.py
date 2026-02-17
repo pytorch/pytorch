@@ -13,9 +13,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
-from torch._guards import detect_fake_mode
 from torch.compiler import is_compiling
-from torch.fx.experimental.proxy_tensor import get_proxy_mode
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -102,6 +100,9 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_wrapper_id = id(  # type: ignore[attr-defined]
+                nonrecursive_disable_wrapper
+            )
             nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
             # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
@@ -203,6 +204,7 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
+# pyrefly: ignore [implicit-any]
 def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> None:
     mutually_exclusive = {
         "leaf_function": trace_rules.is_leaf_function,
@@ -567,26 +569,22 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     @functools.wraps(fn)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        if inner._torchdynamo_leaf_fake_fn is None:  # type: ignore[attr-defined]
-            if (
-                get_proxy_mode() is not None
-                or detect_fake_mode(args) is not None
-                or torch.compiler.is_dynamo_compiling()
-            ):
+        if not torch.compiler.is_dynamo_compiling():
+            if inner._torchdynamo_leaf_fake_fn is None:  # type: ignore[attr-defined]
                 raise ValueError(
-                    f"Tracing/compiling leaf_function '{getattr(fn, '__name__', fn)}' "
+                    f"leaf_function '{getattr(fn, '__name__', fn)}' "
                     "requires a fake implementation. Please provide one using the @<func>.register_fake "
                     "decorator. See the leaf_function docstring for details."
                 )
-
-        # pyrefly: ignore [bad-argument-type]
-        return _invoke_leaf_function_python(
-            fn,
             # pyrefly: ignore [bad-argument-type]
-            inner._torchdynamo_leaf_fake_fn,
-            args,
-            kwargs,
-        )  # type: ignore[attr-defined]
+            return _invoke_leaf_function_python(
+                fn,
+                # pyrefly: ignore [bad-argument-type]
+                inner._torchdynamo_leaf_fake_fn,
+                args,
+                kwargs,
+            )  # type: ignore[attr-defined]
+        return fn(*args, **kwargs)
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
@@ -945,6 +943,9 @@ def mark_unbacked(
         index (int or list/tuple of int): The dimension(s) to mark as unbacked. Can be a single integer or a list/tuple of integers.
         hint_override (Optional[int], default=None): An optional integer to override the size hint for this dimension.
             This is only used by the inductor backend for size hint queries, such as during autotuning.
+            NOTE: changing hint_override values will cause FxGraphCache misses, since hint overrides
+            affect inductor codegen decisions and are included in the cache key via
+            ShapeEnv.var_to_hint_override.
         strict (bool, default=False): If True, an error will be raised if the unbacked dimension is specialized.
             By default (strict=False), specialization is allowed and will proceed without error.
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
@@ -973,12 +974,14 @@ def mark_unbacked(
             return
 
         if not hasattr(t, "_specialized_on"):
+            # pyrefly: ignore [implicit-any]
             t._specialize_on = {}
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
 
         if not hasattr(t, "_dynamo_hint_overrides"):
+            # pyrefly: ignore [implicit-any]
             t._dynamo_hint_overrides = {}
 
         if hint_override:
@@ -986,6 +989,7 @@ def mark_unbacked(
 
         if shape_id is not None:
             if not hasattr(t, "_dynamo_shape_ids"):
+                # pyrefly: ignore [implicit-any]
                 t._dynamo_shape_ids = {}
             t._dynamo_shape_ids[index] = shape_id
 
@@ -1036,7 +1040,9 @@ def mark_dynamic(
     before torch.compile.
 
     5) If hint_override is passed, the hint_override for the specified dimension will replace the provided value
-    from the first example input as the official size hint.
+    from the first example input as the official size hint. Note: changing hint_override values will cause
+    FxGraphCache misses, since hint overrides affect inductor codegen decisions (autotuning, reduction
+    strategy, etc.) and are included in the cache key via ShapeEnv.var_to_hint_override.
 
     6) If specialize_on is passed in, we will perform a single generic Dynamo trace followed by
     multiple specialized compilations in addition to a single generic compilation. NB: For now we only support
@@ -1067,9 +1073,11 @@ def mark_dynamic(
 
             t._dynamo_dynamic_range = set()
 
+            # pyrefly: ignore [implicit-any]
             t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
+            # pyrefly: ignore [implicit-any]
             t._specialize_on = {}
 
         if hint_override:
