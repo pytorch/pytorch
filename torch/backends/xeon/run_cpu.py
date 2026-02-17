@@ -295,11 +295,15 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
                 break
         if not lib_set:
             for lib_path in library_paths:
+                # pyrefly: ignore [unbound-name]
                 library_file = os.path.join(lib_path, f"lib{lib_type}.so")
                 matches = glob.glob(library_file)
                 if len(matches) > 0:
+                    # pyrefly: ignore [unbound-name]
                     ld_preloads = [f"{matches[0]}", os.getenv("LD_PRELOAD", "")]
+                    # pyrefly: ignore [unbound-name]
                     os.environ["LD_PRELOAD"] = os.pathsep.join(
+                        # pyrefly: ignore [unbound-name]
                         [p.strip(os.pathsep) for p in ld_preloads if p]
                     )
                     lib_find = True
