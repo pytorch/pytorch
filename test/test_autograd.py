@@ -5953,9 +5953,7 @@ Done""",
         # SystemError.
         with torch.library._scoped_library("_test_autograd", "FRAGMENT"):
 
-            @torch.library.custom_op(
-                "_test_autograd::sin_op", mutates_args=()
-            )
+            @torch.library.custom_op("_test_autograd::sin_op", mutates_args=())
             def sin_op(x: torch.Tensor) -> torch.Tensor:
                 return x.sin()
 
@@ -5977,9 +5975,7 @@ Done""",
                 return torch.ops._test_autograd.sin_op(x)
 
             try:
-                torch.cuda.memory._record_memory_history(
-                    "all", stacks="python"
-                )
+                torch.cuda.memory._record_memory_history("all", stacks="python")
                 x = torch.randn(4, device="cuda", requires_grad=True)
                 y = checkpoint(fn, x, use_reentrant=False)
                 y.sum().backward()
