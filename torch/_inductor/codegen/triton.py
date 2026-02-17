@@ -1758,11 +1758,20 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
-        # Similar to div_floor_kernel_cuda in pytorch core.
-        # Notice that // in triton behaves as truncdiv instead of floordiv
-        quot = f"{a} // {b}"
-        rem = f"{a} % {b}"
-        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+        # Notice that // in triton behaves as truncdiv instead of floordiv.
+        #
+        # We avoid feeding negative values into Triton's // operator because
+        # Triton's AxisInfo analysis incorrectly deduplicates signed division
+        # results for contiguous inputs (triton-lang/triton#XXXX). Instead we
+        # use bitwise complement (~) to make the dividend non-negative:
+        #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
+        # For negative b we negate both operands first.
+        #
+        # a and b are always simple tmpN variable names so safe to repeat.
+        a2 = f"tl.where({b} < 0, -{a}, {a})"
+        b2 = f"tl.where({b} < 0, -{b}, {b})"
+        quot = f"tl.where({a2} < 0, ~{a2}, {a2}) // {b2}"
+        return f"tl.where({a2} < 0, ~({quot}), {quot})"
 
     @staticmethod
     def sign(x):
