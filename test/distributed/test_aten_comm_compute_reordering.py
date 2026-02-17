@@ -1652,6 +1652,8 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
             self.assertGreater(len(all_new_nodes), 0, "Should have created new nodes")
 
             for node in all_new_nodes:
+                if "_pt2_compiled_region" in node.meta.get("custom"):
+                    del node.meta["custom"]["_pt2_compiled_region"]
                 self.assertEqual(
                     node.meta.get("nn_module_stack"), test_metadata["nn_module_stack"]
                 )

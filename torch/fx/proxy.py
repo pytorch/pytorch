@@ -164,8 +164,11 @@ _COPY_META_FIELDS = [
     "from_node",
     "quantization_tag",  # TODO deprecated
     "_numeric_debug_handle",  # TODO deprecated
-    "custom",
     "partitioner_tag",
+    # There are from torch.fx.traceback.ANNOTATION_META_KEYS.
+    # we cannot import here due to circular import
+    "custom",
+    "annotated_rqn",
 ]
 
 
@@ -257,8 +260,9 @@ class TracerBase:
             replay_node: Node = fx_traceback.get_current_replay_node()
             if replay_node is not None:
                 node.meta["is_functional_regenerated"] = True
-                if "custom" in replay_node.meta:
-                    node.meta["custom"] = replay_node.meta.get("custom")
+                for key in fx_traceback.ANNOTATION_META_KEYS:
+                    if key in replay_node.meta:
+                        node.meta[key] = replay_node.meta.get(key)
                 if "stack_trace" in replay_node.meta:
                     node.stack_trace = replay_node.meta.get("stack_trace")
 

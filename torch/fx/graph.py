@@ -665,11 +665,18 @@ class CodeGen:
                 annotation_trunc = {}
                 if annotation:
                     for key, value in annotation.items():
+                        if key == torch.fx.traceback.COMPILE_RQN_ANNOTATION_KEY:
+                            continue
                         value_str = str(value)
                         if len(value_str) > 40:
                             annotation_trunc[key] = value_str[:40] + "..."
                         else:
                             annotation_trunc[key] = value
+                # Handle annotated_rqn with label
+                annotated_rqn = node.meta.get("annotated_rqn", None)
+                if annotated_rqn:
+                    annotation_trunc["RQN"] = annotated_rqn
+                if annotation_trunc:
                     annotation_str = f" Annotation: {annotation_trunc}"
 
                 stack_trace_str = "No stacktrace found for following nodes"
