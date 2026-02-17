@@ -678,7 +678,7 @@ class TestFP8Matmul(TestCase):
                 if major in (10, 11):
                     layouts_supported = True
                 elif major == 12 and (minor == 1 or _get_torch_cuda_version() >= (13, 1)):
-                    layouts_supported = x_cm == True
+                    layouts_supported = x_cm
                 else:
                     layouts_supported = (x_cm, y_cm) == (True, False)
                 with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
