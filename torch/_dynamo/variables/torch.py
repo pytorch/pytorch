@@ -42,7 +42,7 @@ import torch.fx
 import torch.nn
 import torch.utils._pytree as _pytree
 from torch._C import DispatchKeySet
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
@@ -933,7 +933,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 "call_function", torch._C._set_deterministic_algorithms, (value,), {}
             )
             torch._C._set_deterministic_algorithms(value)
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
@@ -1205,7 +1205,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 isinstance(condition, variables.SymNodeVariable)
                 and condition.evaluate_expr()
             ):
-                return ConstantVariable(None)
+                return CONSTANT_VARIABLE_NONE
             return None
 
         @register(SDPAParams)
@@ -1292,7 +1292,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     placements_vt = args[2]
 
                 if placements_vt is None:
-                    placements_vt = ConstantVariable.create(None)
+                    placements_vt = CONSTANT_VARIABLE_NONE
                 elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
                     placements_vt = SourcelessBuilder.create(tx, tuple).call_function(
                         tx, [placements_vt], {}
@@ -1663,7 +1663,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             TorchFunctionModeStackVariable.register_mutation(tx)
             # type: ignore[arg-type]
             tx.symbolic_torch_function_state.push_torch_function_mode(args[0])
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         @register(torch._C._len_torch_function_stack)
         def handle_len_torch_function(
@@ -1795,7 +1795,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         @register(torch._check)
         def handle_check(
@@ -1863,7 +1863,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             if predicate_vt.is_python_constant():
                 self.value(predicate_vt.as_python_constant(), message_eager)
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
 
             predicate_proxy = predicate_vt.as_proxy()
 
