@@ -1041,6 +1041,11 @@ class aten_distributed_optimizations:
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
     collective_estimator: Literal["analytical", "benchmark"] = "analytical"
 
+    # Method for estimating compute (ATen op) runtime
+    # "analytical": Use roofline model estimates (deterministic, no GPU sync)
+    # "benchmark": Use GPU benchmarking (more accurate, requires GPU sync)
+    compute_estimator: Literal["analytical", "benchmark"] = "benchmark"
+
     # Maximum memory increase above baseline for prefetch operations
     # Uses minimum of absolute cap and ratio of baseline
     max_memory_increase_gb: Optional[float] = None  # Absolute cap in GB

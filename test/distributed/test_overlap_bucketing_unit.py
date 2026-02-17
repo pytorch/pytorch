@@ -769,6 +769,40 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         # Should not crash
         collapse_fusion_regions(gm, region_of)
 
+    @torch._inductor.config.patch(deterministic=True)
+    def test_deterministic_mode_no_benchmark_error(self):
+        """
+        Test that deterministic mode doesn't error when running overlap scheduling.
+
+        Before the fix, deterministic mode would error when trying to benchmark
+        compute nodes. Now it uses analytical estimation instead.
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import schedule_overlap_bucketing
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+
+            # Compute with gemm
+            mm_result = torch.mm(a, b)
+            pointwise = mm_result + 1.0
+
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return (pointwise + ag_out).sum()
+
+        with FakeTensorMode():
+            a = torch.randn(16, 16, device=self.device)
+            b = torch.randn(16, 16, device=self.device)
+            gm = make_fx(func)(a, b)
+
+        # Should not error in deterministic mode (would have errored before fix)
+        schedule_overlap_bucketing(gm)
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
