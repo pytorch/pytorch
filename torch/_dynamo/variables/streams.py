@@ -16,7 +16,7 @@ from ..graph_bytecode_inputs import (
 )
 from ..source import CurrentStreamSource
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
 from .lazy import LazyVariableTracker
 
@@ -329,7 +329,7 @@ class StreamVariable(StreamContextVariable):
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
-            return ConstantVariable(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "query":
             return wrap_fx_proxy_cls(
                 target_cls=ConstantVariable,
@@ -457,7 +457,7 @@ class EventVariable(VariableTracker):
                 ),
                 {},
             )
-            return ConstantVariable(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "record":
             tx.output.create_proxy(
                 "call_function",
@@ -468,12 +468,12 @@ class EventVariable(VariableTracker):
                 ),
                 {},
             )
-            return ConstantVariable(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "synchronize":
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
-            return ConstantVariable(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "query":
             return wrap_fx_proxy_cls(
                 target_cls=ConstantVariable,
