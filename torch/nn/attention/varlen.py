@@ -388,8 +388,6 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ) = inputs
     out, lse, rng_state = output
 
-    # do we want to add seqused_k to the backward? this is only supported in FA3
-    # is there a real use case for this or should it be inference only?
     if any(
         p is not None
         for p in (
