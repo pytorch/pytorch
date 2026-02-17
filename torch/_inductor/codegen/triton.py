@@ -1766,12 +1766,14 @@ class TritonOverrides(OpOverrides):
         # use bitwise complement (~) to make the dividend non-negative:
         #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
         # For negative b we negate both operands first.
-        #
-        # a and b are always simple tmpN variable names so safe to repeat.
-        a2 = f"tl.where({b} < 0, -{a}, {a})"
-        b2 = f"tl.where({b} < 0, -{b}, {b})"
-        quot = f"tl.where({a2} < 0, ~{a2}, {a2}) // {b2}"
-        return f"tl.where({a2} < 0, ~({quot}), {quot})"
+        zero = ops.constant(0, torch.int32)
+        b_neg = ops.lt(b, zero)
+        a = ops.where(b_neg, ops.sub(zero, a), a)
+        b = ops.where(b_neg, ops.sub(zero, b), b)
+        a_neg = ops.lt(a, zero)
+        a = ops.where(a_neg, ops.bitwise_not(a), a)
+        quot = ops.truncdiv(a, b)
+        return ops.where(a_neg, ops.bitwise_not(quot), quot)
 
     @staticmethod
     def sign(x):
