@@ -217,7 +217,7 @@ if [[ -z "$BUILD_PYTHONLESS" && $RENAME_WHEEL == true  ]]; then
     # Copy the whl to a final destination before tests are run
     echo "Renaming Wheel file: $wheel_filename_gen to $wheel_filename_new"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new"
-elif [[ $RENAME_WHEEL == false ]]; then
+elif [[ -z "$BUILD_PYTHONLESS" && $RENAME_WHEEL == false ]]; then
     echo "Copying Wheel file: $wheel_filename_gen to $PYTORCH_FINAL_PACKAGE_DIR"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_gen"
     if [[ "$VERIFY_WHEELNAME" == "true" && "$wheel_filename_gen" != "$wheel_filename_new" ]]; then

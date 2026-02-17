@@ -103,7 +103,7 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset2) {
   //   Assert that engine2 should be increment_val+1 steps behind engine1.
   if (!at::cuda::is_available()) return;
   test_engine_offset2();
-  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
   bool isEQ = cudaGetLastError() == cudaSuccess;
   ASSERT_TRUE(isEQ);
 }
@@ -130,7 +130,7 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset3) {
   //   Assert that engine1 is 1 step behind engine2.
   if (!at::cuda::is_available()) return;
   test_engine_offset3();
-  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
   bool isEQ = cudaGetLastError() == cudaSuccess;
   ASSERT_TRUE(isEQ);
 }
@@ -154,7 +154,7 @@ TEST(CUDAGeneratorImpl, TestPhiloxEngineIndex) {
   //   Assert that the engines have different sequences.
   if (!at::cuda::is_available()) return;
   test_engine_thread_index();
-  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
   bool isEQ = cudaGetLastError() == cudaSuccess;
   ASSERT_TRUE(isEQ);
 }
