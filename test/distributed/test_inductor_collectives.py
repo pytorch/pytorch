@@ -169,7 +169,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
         def func(x):
             y = x * x
-            y = dist.all_reduce(y, op=dist.ReduceOp.SUM)
+            dist.all_reduce(y, op=dist.ReduceOp.SUM)
             x = torch.nn.functional.silu(x)
             return x * y
 
