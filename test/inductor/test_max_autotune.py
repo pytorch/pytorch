@@ -9,6 +9,7 @@ import os
 import random
 import re
 import tempfile
+import time
 import unittest
 from collections.abc import Callable
 from typing import Optional
@@ -32,12 +33,14 @@ from torch._inductor.autotune_process import (
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
+    use_pipelined_autotuning,
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
     add_preprocessing_fn,
@@ -46,6 +49,7 @@ from torch._inductor.select_algorithm import (
     clear_feedback_savers,
     clear_preprocessing_fns,
     ExternKernelCaller,
+    NoValidChoicesError,
     TritonTemplate,
     TritonTemplateCaller,
 )
@@ -2766,10 +2770,8 @@ class TestTemplateConfigPruning(TestCase):
             def mock_autotune(self, *args, **kwargs):
                 timings = original_autotune(self, *args, **kwargs)
                 nonlocal triton_compilation_fails
-                for caller, time in timings.items():
-                    if isinstance(caller, TritonTemplateCaller) and time != float(
-                        "inf"
-                    ):
+                for caller, t in timings.items():
+                    if isinstance(caller, TritonTemplateCaller) and t != float("inf"):
                         triton_compilation_fails = False
                 return timings
 
@@ -4000,18 +4002,40 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         original_tma_mm_configs = tma_heuristic.mm_configs
         original_mm_mm_configs = mm_heuristic.mm_configs
 
-        bad_tma_config = GemmConfig(256, 128, 64, 4, 8, group_m=8)
         good_tma_config = GemmConfig(128, 64, 64, 4, 8, group_m=8)
         if use_async_compile:
             torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
-        for gemm_config in [bad_tma_config, good_tma_config]:
+        original_compile_kernel = Scheduler.compile_kernel
+
+        for simulate_fusion_failure in [True, False]:
             torch._dynamo.reset()
-            tma_heuristic.mm_configs = [
-                gemm_config,
-            ]
+            tma_heuristic.mm_configs = [good_tma_config]
             # Regular mm template gets no configs
             mm_heuristic.mm_configs = []
+
+            def mock_compile_kernel_fail_fusion(self, nodes, hint_override=None):
+                fut, mod = original_compile_kernel(self, nodes, hint_override)
+
+                if simulate_fusion_failure and len(nodes) > 1:
+                    if fut is not None:
+
+                        def failing_result_fn():
+                            raise RuntimeError
+
+                        return torch._inductor.codecache.LambdaFuture(
+                            failing_result_fn, fut.future
+                        ), mod
+                    else:
+
+                        class FailingPrecompile:
+                            def precompile(self):
+                                raise RuntimeError
+
+                        mod.triton_ = FailingPrecompile()
+                        return None, mod
+
+                return fut, mod
 
             # Different paths:
             # benchmark_epilogue_fusion: True -> always multi_template
@@ -4035,11 +4059,16 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                             aten_time=float("inf"), triton_time=0.1
                         ),
                     ),
+                    mock.patch.object(
+                        Scheduler,
+                        "compile_kernel",
+                        mock_compile_kernel_fail_fusion,
+                    ),
                 ):
                     compiled_f = torch.compile(f, mode="max-autotune")
                     out, code = run_and_get_code(compiled_f, a, b)
 
-                    if gemm_config == good_tma_config:
+                    if not simulate_fusion_failure:
                         # Fusion should occur
                         FileCheck().check("triton_tem_fused__to_copy_mm").run(code[0])
                     else:
@@ -4259,6 +4288,10 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             mm_heuristic.mm_configs = original_mm_configs
 
 
+def simple_fn():
+    return 42
+
+
 class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAnalysis):
     """Tests for AsyncPipelinedAutotuning path."""
 
@@ -4311,7 +4344,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         # Clear the AsyncAutotuner cache to prevent test pollution
         AsyncAutotuner.choice_hash_to_future.clear()
 
-    @config.patch(max_autotune=True)
+    @config.patch(max_autotune_gemm=True)
     def test_async_autotuner_cache_same_inputs(self):
         M, K, N = 128, 64, 256
         M2, K2, N2 = 256, 128, 64
@@ -4344,6 +4377,121 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         self.assertEqual(
             cache_size, 4, "Cache should have 2 entries (one per unique input shape)"
         )
+
+    @patch(
+        "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
+        2,
+    )
+    def test_autotune_process_pool_inactivity_shutdown(self):
+        AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
+
+        pool_instance = AutotuneProcessPool.get_instance()
+        pool_instance.warm_up()
+
+        future = pool_instance.submit(simple_fn)
+        result = future.result()
+        self.assertEqual(result, 42)
+        self.assertIsNotNone(pool_instance._pool)
+
+        time.sleep(5)
+
+        self.assertIsNone(pool_instance._pool)
+        self.assertIsNone(pool_instance._timer)
+        self.assertTrue(AutotuneProcessPool._shutdown_for_inactivity)
+
+    @patch(
+        "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
+        2,
+    )
+    @config.patch(max_autotune=True)
+    def test_compilation_after_inactivity(self):
+        """Test that compilation after pool inactivity shutdown uses synchronous path."""
+
+        # Reset state
+        AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
+        AsyncAutotuner.choice_hash_to_future.clear()
+        torch._dynamo.reset()
+
+        # First compilation - should use pipelined path
+        self.assertTrue(use_pipelined_autotuning())
+
+        def matmul_fn(a, b):
+            return torch.mm(a, b)
+
+        a1 = torch.randn(64, 32, device=GPU_TYPE, dtype=torch.bfloat16)
+        b1 = torch.randn(32, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        a2 = torch.randn(128, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        b2 = torch.randn(64, 128, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        compiled_fn = torch.compile(matmul_fn)
+        compiled_fn(a1, b1)
+
+        # Verify pipelined path was used (cache should have entries)
+        cache_entries_after_first = len(AsyncAutotuner.choice_hash_to_future)
+        self.assertGreater(cache_entries_after_first, 0)
+
+        # Wait for inactivity shutdown
+        time.sleep(5)
+
+        self.assertTrue(AutotuneProcessPool._shutdown_for_inactivity)
+        self.assertFalse(use_pipelined_autotuning())
+
+        AsyncAutotuner.choice_hash_to_future.clear()
+        torch._dynamo.reset()
+
+        compiled_fn2 = torch.compile(matmul_fn)
+        compiled_fn2(a2, b2)
+
+        cache_entries_after_second = len(AsyncAutotuner.choice_hash_to_future)
+        self.assertEqual(cache_entries_after_second, 0)
+
+    @config.patch(max_autotune_gemm=True)
+    def test_triton_error_precompilation_and_autotuning(self):
+        """
+        Test error handling when do_autotuning throws NoValidChoicesError
+        for Triton choices. The fallback to extern kernels should still work.
+        """
+
+        def mock_do_autotuning(*args, **kwargs):
+            raise NoValidChoicesError("Simulated: all Triton choices failed")
+
+        a = torch.randn(64, 32, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(32, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def mm_func(a, b, epilogue):
+            if epilogue:
+                return torch.mm(a, b) + 1.0
+            else:
+                return torch.mm(a, b)
+
+        def test_aten_chosen():
+            for epilogue in (True, False):
+                torch._dynamo.reset()
+                compiled_fn = torch.compile(mm_func)
+                out, code = run_and_get_code(compiled_fn, a, b, epilogue)
+                FileCheck().check_not("triton_tem").run(code[0])
+
+        with mock.patch.object(
+            AlgorithmSelectorCache, "do_autotuning", mock_do_autotuning
+        ):
+            test_aten_chosen()
+
+        original_start = AsyncAutotuner.start
+        bmreq = _TestBenchmarkRequest(
+            exc=RuntimeError("Simulated benchmark failure in subprocess")
+        )
+        bmreq.module_cache_key = ""
+
+        def mock_start(choices, inputs_key):
+            for choice in choices:
+                if isinstance(choice, TritonTemplateCaller):
+                    choice.bmreq = bmreq
+            return original_start(choices, inputs_key)
+
+        with mock.patch.object(AsyncAutotuner, "start", mock_start):
+            test_aten_chosen()
 
 
 if __name__ == "__main__":
