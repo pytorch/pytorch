@@ -24,6 +24,32 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 
 namespace mps {
 
+static const char* interp_to_string(GridSamplerInterpolation mode) {
+  switch (mode) {
+    case GridSamplerInterpolation::Bilinear:
+      return "bilinear";
+    case GridSamplerInterpolation::Nearest:
+      return "nearest";
+    case GridSamplerInterpolation::Bicubic:
+      return "bicubic";
+  }
+  TORCH_CHECK(false, "Unrecognised interpolation mode: ", mode);
+  return "";
+}
+
+static const char* padding_to_string(GridSamplerPadding mode) {
+  switch (mode) {
+    case GridSamplerPadding::Zeros:
+      return "zeros";
+    case GridSamplerPadding::Border:
+      return "border";
+    case GridSamplerPadding::Reflection:
+      return "reflection";
+  }
+  TORCH_CHECK(false, "Unrecognised padding mode: ", mode);
+  return "";
+}
+
 static void grid_sampler_2d_mps_impl(Tensor& output,
                                      const Tensor& input,
                                      const Tensor& grid,
@@ -46,30 +72,10 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
   auto interpolation_mode = static_cast<GridSamplerInterpolation>(_interpolation_mode);
   auto padding_mode = static_cast<GridSamplerPadding>(_padding_mode);
 
-  switch (interpolation_mode) {
-    case GridSamplerInterpolation::Bilinear:
-    case GridSamplerInterpolation::Nearest:
-    case GridSamplerInterpolation::Bicubic:
-      break;
-    default:
-      TORCH_CHECK(false, "grid_sampler_2d: Unrecognised interpolation mode: ", _interpolation_mode);
-  }
-
-  switch (padding_mode) {
-    case GridSamplerPadding::Zeros:
-    case GridSamplerPadding::Border:
-    case GridSamplerPadding::Reflection:
-      break;
-    default:
-      TORCH_CHECK(false, "grid_sampler_2d: Unrecognised Padding Mode: ", _padding_mode);
-  }
-
   auto dims = input.dim();
 
-  GridSamplerParams<5> params;
+  GridSamplerParams<4> params;
   params.sampler_dims = 2;
-  params.padding_mode = padding_mode;
-  params.interpolation_mode = interpolation_mode;
   params.align_corners = align_corners;
 
   for (const auto dim : c10::irange(dims)) {
@@ -91,7 +97,10 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc("grid_sampler_2d_" + scalarToMetalTypeString(input));
+      auto pso = lib.getPipelineStateForFunc(fmt::format("grid_sampler_2d_{}_{}_{}",
+                                                         interp_to_string(interpolation_mode),
+                                                         padding_to_string(padding_mode),
+                                                         scalarToMetalTypeString(input)));
 
       getMPSProfiler().beginProfileKernel(pso, "grid_sampler_2d", {input, grid});
       [computeEncoder setComputePipelineState:pso];
@@ -144,15 +153,6 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
       TORCH_CHECK(false, op_name, ": Unrecognised interpolation mode: ", _interpolation_mode);
   }
 
-  switch (padding_mode) {
-    case GridSamplerPadding::Zeros:
-    case GridSamplerPadding::Border:
-    case GridSamplerPadding::Reflection:
-      break;
-    default:
-      TORCH_CHECK(false, op_name, ": Unrecognised Padding Mode: ", _padding_mode);
-  }
-
   auto input_size = input.sizes();
   auto grid_size = grid.sizes();
   output.resize_({input_size[0], input_size[1], grid_size[1], grid_size[2], grid_size[3]}, MemoryFormat::Contiguous);
@@ -161,8 +161,6 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
 
   GridSamplerParams<5> params;
   params.sampler_dims = sampler_dims;
-  params.padding_mode = padding_mode;
-  params.interpolation_mode = interpolation_mode;
   params.align_corners = align_corners;
 
   for (const auto dim : c10::irange(dims)) {
@@ -180,7 +178,8 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc("grid_sampler_" + scalarToMetalTypeString(input));
+      auto pso = lib.getPipelineStateForFunc(
+          fmt::format("grid_sampler_3d_{}_{}", padding_to_string(padding_mode), scalarToMetalTypeString(input)));
 
       getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid});
       [computeEncoder setComputePipelineState:pso];
