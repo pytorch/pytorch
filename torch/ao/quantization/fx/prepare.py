@@ -1338,15 +1338,19 @@ def _maybe_make_input_output_share_observers(
             if input_idx == 0:
                 continue
             iteration_guard = 0
+            # pyrefly: ignore [bad-argument-type]
             while not _is_activation_post_process_node(input_arg, named_modules):
                 # failed to trace back since no input arg for the current node
+                # pyrefly: ignore [missing-attribute]
                 if len(input_arg.args) < 1:
                     return False
+                # pyrefly: ignore [bad-index, unsupported-operation]
                 input_arg = input_arg.args[0]
                 iteration_guard += 1
                 if iteration_guard > 10000:
                     raise AssertionError("Unable to find observer of previous node")
 
+            # pyrefly: ignore [missing-attribute]
             parent_name, name = _parent_name(input_arg.target)
             setattr(named_modules[parent_name], name, obs_mod_to_use)
 

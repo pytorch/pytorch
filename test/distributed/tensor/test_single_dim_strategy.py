@@ -34,6 +34,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     _get_unique_placements,
     _insert_single_dim_replication_strategy,
     _ShardingPlaceholder,
+    _SingleDimStrategyInfo,
     register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
@@ -129,7 +130,7 @@ class TestExpandPlaceholder(TestCase):
                 linearity=linearity or -1
             )
             expanded = _expand_single_dim_strategy_to_mesh(
-                mesh, op_schema, strategy_fn, output_meta
+                mesh, op_schema, _SingleDimStrategyInfo(strategy_fn), output_meta
             )
             strategy = expanded(op, op_schema.args_meta, op_schema.kwargs_meta)
 
@@ -246,7 +247,9 @@ class TestExpandPlaceholder(TestCase):
             expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
                 mesh,
                 op_schema,
-                single_mesh_dim_linear_pointwise_strategy(linearity=1),
+                _SingleDimStrategyInfo(
+                    single_mesh_dim_linear_pointwise_strategy(linearity=1)
+                ),
                 output_tensor_meta,
             )
             strategy = expanded_strategy_fn(
@@ -331,7 +334,10 @@ class TestExpandPlaceholder(TestCase):
             )
 
             expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                mesh, op_schema, cat_single_dim_strategy, output_meta
+                mesh,
+                op_schema,
+                _SingleDimStrategyInfo(cat_single_dim_strategy),
+                output_meta,
             )
             strategy = expanded_strategy_fn(
                 torch.ops.aten.cat.default, op_schema.args_meta, op_schema.kwargs_meta
@@ -445,16 +451,17 @@ class TestExpandPlaceholder(TestCase):
 
         # Expand the strategy to the full mesh
         expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-            mesh, op_schema, mm_single_dim_strategy, output_meta
+            mesh, op_schema, _SingleDimStrategyInfo(mm_single_dim_strategy), output_meta
         )
         strategy = expanded_strategy_fn(
             torch.ops.aten.matmul.default, op_schema.args_meta, op_schema.kwargs_meta
         )
         assert isinstance(strategy, OpStrategy)
 
-        # For a 3D mesh with 4 single-dim strategies (3 explicit + 1 implicit replicate),
-        # we should have 4^3 = 64 strategies maximum
-        self.assertEqual(len(strategy.strategies), 64)
+        # For a 3D mesh with 8 single-dim strategies per mesh dim
+        # (3 sharding + 4 per-input linearity + 1 implicit replicate),
+        # we get 8^3 = 512 strategy combinations.
+        self.assertEqual(len(strategy.strategies), 512)
 
         all_replicate_found = False
         shard_0_found = False
@@ -533,9 +540,15 @@ class TestExpandPlaceholder(TestCase):
         )
 
         # Test Case 1: All-replicate inputs - no sharding expansion
-        # Expected: Only implicit all-replicate rule (no sharding builders available)
+        # Expected: The implicit all-replicate rule plus the per-input linearity
+        # strategies (which have no placeholders and pass through unchanged).
+        # Strategies with placeholders are dropped since there are no shard builders.
         expected_replicate = [
-            [Replicate(), Replicate(), Replicate()],  # Implicit all-replicate
+            [Replicate(), Replicate(), Replicate()],
+            [Partial("sum"), Partial("sum"), Replicate()],
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Replicate()],
+            [Partial("avg"), Replicate(), Partial("avg")],
         ]
         single_dim_strategies = _insert_single_dim_replication_strategy(
             single_dim_strategies, num_outputs=1, num_input_tensors=2
@@ -547,12 +560,17 @@ class TestExpandPlaceholder(TestCase):
         self.assertEqual(expanded_replicate, expected_replicate)
 
         # Test Case 2: (_Strided)Shard-only inputs - only (_Strided)Shard expansion
-        # Expected: 3 strategies with placeholders filled using (_Strided)Shard + implicit replicate
+        # Expected: 3 strategies with placeholders filled using (_Strided)Shard,
+        # plus the per-input linearity strategies (no placeholders), plus implicit replicate
         expected_shard = [
             [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
             [Shard(0), Shard(0), Replicate()],
             [Shard(1), Replicate(), Shard(1)],
+            [Partial("sum"), Partial("sum"), Replicate()],
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Replicate()],
+            [Partial("avg"), Replicate(), Partial("avg")],
         ]
 
         expanded_shard = _fill_single_dim_strategy_placeholders(
@@ -592,6 +610,11 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(dim=1, split_factor=4),
             ],
+            # Per-input linearity strategies (no placeholders, pass through unchanged)
+            [Partial("sum"), Partial("sum"), Replicate()],
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Replicate()],
+            [Partial("avg"), Replicate(), Partial("avg")],
         ]
         expanded_strided_shard = _fill_single_dim_strategy_placeholders(
             {
@@ -603,7 +626,8 @@ class TestExpandPlaceholder(TestCase):
         self.assertEqual(expanded_strided_shard, expected_strided_shard)
 
         # Test Case 3: Mixed Shard and _StridedShard inputs - both types of expansion
-        # Expected: 3 strategies * 2 shard types (Shard and _StridedShard) + implicit replicate
+        # Expected: 3 strategies * 2 shard types (Shard and _StridedShard),
+        # plus per-input linearity strategies, plus implicit replicate
         expected_mixed = [
             [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
@@ -624,6 +648,11 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(1, split_factor=2),
             ],
+            # Per-input linearity strategies (no placeholders, pass through unchanged)
+            [Partial("sum"), Partial("sum"), Replicate()],
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Replicate()],
+            [Partial("avg"), Replicate(), Partial("avg")],
         ]
 
         expanded_mixed = _fill_single_dim_strategy_placeholders(
@@ -878,7 +907,10 @@ class TestExpandPlaceholder(TestCase):
         # because _insert_single_dim_replication_strategy created [R, R] (2 elements)
         # instead of [R, R, R, R] (4 elements for 3 outputs + 1 input)
         expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-            mesh, op_schema, mock_multi_output_strategy, output_metas
+            mesh,
+            op_schema,
+            _SingleDimStrategyInfo(mock_multi_output_strategy),
+            output_metas,
         )
         strategy = expanded_strategy_fn(
             torch.ops.aten.abs.default,
@@ -964,7 +996,10 @@ class TestExpandPlaceholder(TestCase):
             "in-place operations that require placement changes are not supported",
         ):
             expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                mesh, op_schema, mock_pointwise_strategy, input_meta
+                mesh,
+                op_schema,
+                _SingleDimStrategyInfo(mock_pointwise_strategy),
+                input_meta,
             )
             expanded_strategy_fn(
                 torch.ops.aten.clamp_.default,
