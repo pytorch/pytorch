@@ -2771,7 +2771,7 @@ class PallasKernel(SIMDKernel):
         # On CPU (interpret mode) each tile iteration has significant
         # Python/JAX overhead, so cap the grid size to avoid regressions
         # on large tensors.  On TPU the grid executes natively.
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
         if not is_tpu:
             from ..runtime.runtime_utils import pallas_compute_tiling
 
@@ -3394,7 +3394,9 @@ from torch._inductor.runtime.runtime_utils import (
 
         skip_n = self.tile_skip_last_n
         code.writeline(
-            f"_tile, _grid, _ax2g = pallas_compute_tiling(out_shapes[0], transpose={transpose_literal}, skip_last_n={skip_n}, exact_only=True)"
+            f"_tile, _grid, _ax2g = pallas_compute_tiling("
+            f"out_shapes[0], transpose={transpose_literal}, "
+            f"skip_last_n={skip_n}, exact_only=True)"
         )
         code.writeline("_ng = len(_grid)")
         code.writeline("_ref = out_shapes[0]")
@@ -3589,7 +3591,6 @@ from torch._inductor.runtime.runtime_utils import (
             f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
         )
         with code.indent():
-            code.writeline("# Enable JAX x64 mode for float64/int64 support")
             code.writeline("jax.config.update('jax_enable_x64', True)")
             code.writeline("jax.clear_caches()")
             if ctx.alias_params:

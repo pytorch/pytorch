@@ -588,7 +588,7 @@ def _make_index_map(
     import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
 
     # Pre-build the mapping so the returned lambda is a plain lookup.
-    mapping = {ba: gd for ba, gd in tiled_pairs}
+    mapping = dict(tiled_pairs)
 
     if n_grid == 0 or (n_grid == 1 and not mapping):
         return lambda _i: tuple(jnp.int32(0) for _ in range(buf_nd))
