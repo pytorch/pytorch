@@ -494,7 +494,7 @@ jobs:
     needs:
       - wheel-py3_11-cpu-build
       - get-label-type
-    runs-on: "windows-11-arm64-preview"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
@@ -512,16 +512,12 @@ jobs:
         with:
           name: wheel-py3_11-cpu
           path: "${{ runner.temp }}/wheel_artifact/"
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
       - name: Extract libtorch from wheel
         shell: bash
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \

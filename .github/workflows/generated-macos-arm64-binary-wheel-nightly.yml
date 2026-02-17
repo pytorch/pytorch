@@ -817,10 +817,12 @@ jobs:
           sparse-checkout: .ci/libtorch/
           path: pytorch
           show-progress: false
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.10"
+          # .4 version is min minor for 3.10, and also no-gil version of 3.13 needs at least 3.13.3
+          python-version: "3.10.4"
+          freethreaded: false
       - uses: actions/download-artifact@v4.1.7
         name: Download Wheel Artifact
         with:
@@ -830,7 +832,7 @@ jobs:
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform macos \

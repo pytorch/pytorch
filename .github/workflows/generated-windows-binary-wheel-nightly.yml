@@ -8342,7 +8342,7 @@ jobs:
     needs:
       - wheel-py3_10-cpu-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cpu
@@ -8360,16 +8360,12 @@ jobs:
         with:
           name: wheel-py3_10-cpu
           path: "${{ runner.temp }}/wheel_artifact/"
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
       - name: Extract libtorch from wheel
         shell: bash
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
@@ -8404,7 +8400,7 @@ jobs:
     needs:
       - wheel-py3_10-cuda12_6-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu126
@@ -8422,16 +8418,12 @@ jobs:
         with:
           name: wheel-py3_10-cuda12_6
           path: "${{ runner.temp }}/wheel_artifact/"
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
       - name: Extract libtorch from wheel
         shell: bash
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
@@ -8467,7 +8459,7 @@ jobs:
     needs:
       - wheel-py3_10-cuda12_8-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu128
@@ -8485,16 +8477,12 @@ jobs:
         with:
           name: wheel-py3_10-cuda12_8
           path: "${{ runner.temp }}/wheel_artifact/"
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
       - name: Extract libtorch from wheel
         shell: bash
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
@@ -8530,7 +8518,7 @@ jobs:
     needs:
       - wheel-py3_10-cuda13_0-build
       - get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     timeout-minutes: 60
     env:
       DESIRED_CUDA: cu130
@@ -8548,16 +8536,12 @@ jobs:
         with:
           name: wheel-py3_10-cuda13_0
           path: "${{ runner.temp }}/wheel_artifact/"
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
       - name: Extract libtorch from wheel
         shell: bash
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \

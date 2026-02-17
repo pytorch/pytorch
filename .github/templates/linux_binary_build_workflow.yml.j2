@@ -242,15 +242,11 @@ jobs:
         with:
           name: !{{ lt_config["source_wheel_build_name"] }}
           path: "${{ runner.temp }}/wheel_artifact/"
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
       - name: Extract libtorch from wheel
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform linux \
