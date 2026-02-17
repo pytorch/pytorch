@@ -12,6 +12,7 @@ from torch.sparse._semi_structured_conversions import (
 from torch.sparse._semi_structured_ops import (
     fallback_dispatcher,
     semi_sparse_addmm,
+    semi_sparse_clone,
     semi_sparse_detach,
     semi_sparse_indices,
     semi_sparse_linear,
@@ -232,6 +233,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 torch.ops.aten.linear: semi_sparse_linear,
                 torch.ops.aten._to_copy: fallback_dispatcher,
                 torch.ops.aten._scaled_mm: semi_sparse_scaled_mm,
+                torch.ops.aten.clone: semi_sparse_clone,
             }
             if custom_dispatch_table is not None:
                 cls.SPARSE_DISPATCH.update(custom_dispatch_table)

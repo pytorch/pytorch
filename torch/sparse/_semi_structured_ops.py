@@ -15,6 +15,7 @@ __all__ = [
     "semi_sparse_addmm",
     "semi_sparse_linear",
     "semi_sparse_scaled_mm",
+    "semi_sparse_clone",
 ]
 
 
@@ -234,3 +235,11 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
         out_dtype=out_dtype,
     )
     return sparse_result
+
+
+def semi_sparse_clone(func, types, args=(), kwargs=None) -> torch.Tensor:
+    if len(args) != 1:
+        raise AssertionError(f"expected 1 arg, got {len(args)}")
+    self = args[0]
+    assert isinstance(self, torch.sparse.SparseSemiStructuredTensor)
+    return self.__class__.from_dense(self.to_dense())
