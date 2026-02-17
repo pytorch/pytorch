@@ -14,6 +14,31 @@ PyFunctionObject* _PyFunction_CopyWithNewCode(
     PyFunctionObject* o,
     PyCodeObject* code);
 
+#ifdef STATIC_LIBPYTHON
+// When libpython is statically linked, CPython's internal functions are
+// available at link time. Redirect THP_ wrappers to CPython originals.
+extern void _PyFrame_ClearExceptCode(_PyInterpreterFrame* frame);
+extern void _PyThreadState_PopFrame(
+    PyThreadState* tstate,
+    _PyInterpreterFrame* frame);
+#if IS_PYTHON_3_12_PLUS
+extern _PyInterpreterFrame* _PyThreadState_PushFrame(
+    PyThreadState* tstate,
+    size_t size);
+#else
+extern _PyInterpreterFrame* _PyThreadState_BumpFramePointerSlow(
+    PyThreadState* tstate,
+    size_t size);
+#endif
+
+#define THP_PyFrame_Clear _PyFrame_ClearExceptCode
+#define THP_PyThreadState_PopFrame _PyThreadState_PopFrame
+#if IS_PYTHON_3_12_PLUS
+#define THP_PyThreadState_BumpFramePointerSlow _PyThreadState_PushFrame
+#else
+#define THP_PyThreadState_BumpFramePointerSlow _PyThreadState_BumpFramePointerSlow
+#endif
+#else // !STATIC_LIBPYTHON
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
 
 _PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
@@ -23,6 +48,7 @@ _PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
 void THP_PyThreadState_PopFrame(
     PyThreadState* tstate,
     _PyInterpreterFrame* frame);
+#endif // STATIC_LIBPYTHON
 
 #endif
 

@@ -28,6 +28,17 @@ void init_THPCaches() {}
 
 #if IS_PYTHON_3_11_PLUS
 
+#ifdef STATIC_LIBPYTHON
+// When libpython is statically linked, CPython's internal symbols are
+// available at link time. Use extern declarations for opcode tables
+// instead of re-defining them via NEED_OPCODE_TABLES.
+extern const uint8_t _PyOpcode_Caches[256];
+#if IS_PYTHON_3_13_PLUS
+#define Py_BUILD_CORE
+#include <cpython/code.h> // To get PyUnstable_Code_GetFirstFree
+#undef Py_BUILD_CORE
+#endif
+#else // !STATIC_LIBPYTHON
 #define Py_BUILD_CORE
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 
@@ -42,6 +53,7 @@ void init_THPCaches() {}
 
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
+#endif // STATIC_LIBPYTHON
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this
 // check forces us to manually re-check that the function didn't change on the
@@ -99,6 +111,11 @@ PyFunctionObject* _PyFunction_CopyWithNewCode(
   PyObject_GC_Track(op);
   return op;
 }
+
+#ifndef STATIC_LIBPYTHON
+// The following functions are copied from CPython internals.
+// When STATIC_LIBPYTHON is defined (static libpython linking),
+// they are resolved directly from libpython via macros in cpython_defs.h.
 
 // From
 // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Objects/frameobject.c#L1020
@@ -490,6 +507,8 @@ void THP_PyThreadState_PopFrame(
     tstate->datastack_top = base;
   }
 }
+
+#endif // STATIC_LIBPYTHON
 
 #endif
 
