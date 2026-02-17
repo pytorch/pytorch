@@ -268,7 +268,7 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         # With custom metaclass, membership should always be False
         ref = fn(x, MyEnum.A)
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, MyEnum.A)
         self.assertEqual(ref, res)
         # Should return x - 1 since custom __contains__ returns False
@@ -291,7 +291,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure  # TODO: Support Enum.__iter__
     def test_enum_iter(self):
         """Test iterating over Enum class."""
 
@@ -312,7 +311,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure  # TODO: Support Enum.__iter__ (list uses iter)
     def test_enum_list(self):
         """Test list(Enum) to get all members."""
 
@@ -351,7 +349,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure  # TODO: Support Enum.__reversed__
     def test_enum_reversed(self):
         """Test reversed() on Enum class."""
 

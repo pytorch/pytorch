@@ -1016,8 +1016,6 @@ class UserDefinedEnumClassVariable(UserDefinedClassVariable):
     is from the standard EnumType metaclass and executing it directly.
 
     Not yet supported:
-    - __iter__: iteration over enum members (e.g., `for x in SomeEnum`)
-    - __reversed__: reversed iteration
     - Flag enum membership checks (e.g., `Flag.A in combined_flags`)
     """
 
@@ -1043,8 +1041,30 @@ class UserDefinedEnumClassVariable(UserDefinedClassVariable):
                     return variables.ConstantVariable.create(
                         arg.as_python_constant() in self.value
                     )
+        elif isinstance(method, types.FunctionType):
+            if name == "__contains__" and len(args) == 1 and not kwargs:
+                source = self.source and AttrSource(self.source, name)
+                return variables.UserMethodVariable(
+                    method, self, source=source
+                ).call_function(tx, args, kwargs)
 
         return super().call_method(tx, name, args, kwargs)
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslator"
+    ) -> list["VariableTracker"]:
+        return [variables.EnumVariable(item) for item in self.value]
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        method = self._maybe_get_baseclass_method(name)
+        if method in enum_type_methods:
+            # __iter__ is a bound method which is not correctly handled by the parent var_getattr, so need to handle it here
+            if name == "__iter__":
+                source = self.source and AttrSource(self.source, name)
+                return variables.UserMethodVariable(
+                    enum.EnumType.__iter__, self, source=source
+                )
+        return super().var_getattr(tx, name)
 
 
 class NO_SUCH_SUBOBJ:
