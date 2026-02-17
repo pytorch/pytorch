@@ -1,6 +1,6 @@
-"""CuteDSL norm kernels wrapping quack's RMSNorm/LayerNorm implementations.
+"""CuteDSL norm kernels for RMSNorm/LayerNorm.
 
-These functions adapt quack's kernel interface to match the ATen op signatures
+These functions adapt the CuTE DSL kernel interface to match the ATen op signatures
 for ``_fused_rms_norm``, ``_fused_rms_norm_backward``, ``native_layer_norm``,
 and ``native_layer_norm_backward``.
 """
@@ -11,11 +11,7 @@ import math
 
 import torch
 
-from quack.rmsnorm import (
-    _get_sm_count,
-    _rmsnorm_bwd,
-    _rmsnorm_fwd,
-)
+from ._rmsnorm_kernels import _get_sm_count, _rmsnorm_bwd, _rmsnorm_fwd
 
 
 def _stat_shape(input: torch.Tensor, normalized_shape: list[int]) -> list[int]:
@@ -80,7 +76,11 @@ def cutedsl_rmsnorm_bwd(
     _rmsnorm_bwd(x, weight, dout, rstd_flat, dx, dw_partial, None, None, None, sm_count)
 
     dx = dx.reshape(input.shape)
-    dw = dw_partial.sum(dim=0).to(weight.dtype) if weight is not None else torch.Tensor()
+    dw = (
+        dw_partial.sum(dim=0).to(weight.dtype)  # pyrefly: ignore[missing-attribute]
+        if weight is not None
+        else torch.Tensor()
+    )
     return dx, dw
 
 
@@ -151,6 +151,10 @@ def cutedsl_layernorm_bwd(
     dx = (wdy - x_hat * c1 - c2) * rstd_flat
     dx = dx.to(input.dtype).reshape(input.shape)
 
-    dw = (dout * x_hat).sum(dim=0).to(weight.dtype) if weight is not None else torch.Tensor()
+    dw = (
+        (dout * x_hat).sum(dim=0).to(weight.dtype)
+        if weight is not None
+        else torch.Tensor()
+    )
     db = dout.sum(dim=0).to(bias.dtype) if bias is not None else torch.Tensor()
     return dx, dw, db
