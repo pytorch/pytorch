@@ -3800,17 +3800,6 @@ we don't want to inline the lower level function call (e.g, f3) by default.
 _force_inline_flag = False
 
 
-def _module_has_hooks(module: Any) -> bool:
-    """Check if a module has forward hooks registered."""
-    for hooks_dict in (
-        getattr(module, "_forward_pre_hooks", {}),
-        getattr(module, "_forward_hooks", {}),
-    ):
-        if hooks_dict:
-            return True
-    return False
-
-
 @contextlib.contextmanager
 def _force_inline() -> Iterator[None]:
     """
@@ -3852,8 +3841,10 @@ def check_verbose(
         and isinstance(obj, types.CodeType)
         and is_inbuilt_nn_module_forward(obj)
     ):
+        from .utils import nnmodule_has_hooks
+
         module = frame.f_locals.get("self")
-        if module is not None and _module_has_hooks(module):
+        if module is not None and nnmodule_has_hooks(module, check_forward_hooks=True):
             return SkipResult(
                 False,
                 "inbuilt nn.Module.forward allowed - module has hooks",
