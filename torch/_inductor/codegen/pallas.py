@@ -11,7 +11,6 @@ import sympy  # noqa: TC002
 
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pallas import has_tpu_pallas
 from torch.utils._sympy.functions import ModularIndexing
 
 from .. import config
@@ -1459,7 +1458,7 @@ class PallasKernel(SIMDKernel):
         )
 
         # Check various conditions for skipping strided indexing
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
         is_known_non_contiguous = not is_contiguous and all(
             s is not None for s in actual_strides
         )
@@ -2628,20 +2627,8 @@ class PallasKernel(SIMDKernel):
         }
 
         kernel_name = name or "<KERNEL_NAME>"
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
-        interpret_is_cpu = (
-            V.graph.get_current_device_or_throw().type == "cpu" and not is_tpu
-        )
-        if is_tpu:
-            if not torch._inductor.config.pallas_take_first_jax_device_only:
-                raise RuntimeError(
-                    "Pallas backend currently only supports using the first JAX device."
-                )
-            if not has_tpu_pallas():
-                raise RuntimeError(
-                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                    "Please make sure that you have a TPU available and that JAX is configured correctly."
-                )
+        is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
+        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         interpret_literal = "True" if interpret_is_cpu else "False"
 
         aliasable_flags: dict[str, bool] = {}
@@ -2823,11 +2810,12 @@ from torch._inductor.runtime.runtime_utils import (
     pallas_gpu_unpad_results, pallas_partial_reduce,
     torch_dtype_to_jax_runtime,
 )
-""" + (
-            "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
-            if not ctx.interpret_is_cpu
-            else ""
-        )
+"""
+        if ctx.is_tpu:
+            imports += "\nimport jax.export"
+            imports += "\nfrom torch_tpu._internal.pallas import tpu_torch_pallas"
+        elif not ctx.interpret_is_cpu:
+            imports += "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
         ctx.code.splice(imports, strip=True)
 
     def _codegen_iteration_vars(
@@ -3193,6 +3181,117 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline(")")
 
     def _codegen_main_entry(self, ctx: _CodegenContext, jit_wrapper_name: str) -> None:
+        if ctx.is_tpu:
+            self._codegen_main_entry_tpu(ctx, jit_wrapper_name)
+        else:
+            self._codegen_main_entry_default(ctx, jit_wrapper_name)
+
+    def _codegen_main_entry_tpu(
+        self, ctx: _CodegenContext, jit_wrapper_name: str
+    ) -> None:
+        code = ctx.code
+        code.writeline("")
+        main_name = f"{ctx.kernel_name}_main"
+        kernel_name_str = ctx.kernel_name
+        code.writeline(
+            f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
+        )
+        with code.indent():
+            code.writeline("jax.config.update('jax_enable_x64', True)")
+            code.writeline("jax.clear_caches()")
+
+            # Build JAX placeholders for all inputs
+            code.writeline("# Build JAX placeholders for export tracing")
+            all_jax_input_names = []
+            for alias_name in ctx.alias_params:
+                code.writeline(
+                    f"{alias_name}_placeholder = jax.ShapeDtypeStruct("
+                    f"{alias_name}.shape, torch_dtype_to_jax_runtime({alias_name}.dtype))"
+                )
+                all_jax_input_names.append(f"{alias_name}_placeholder")
+            for ptr in ctx.pointer_tail:
+                code.writeline(
+                    f"{ptr}_placeholder = jax.ShapeDtypeStruct("
+                    f"{ptr}.shape, torch_dtype_to_jax_runtime({ptr}.dtype))"
+                )
+                all_jax_input_names.append(f"{ptr}_placeholder")
+
+            # Prepare output metadata
+            code.writeline(
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in ctx.output_params])
+                + ",)"
+            )
+            dtype_exprs: list[str] = []
+            for name in ctx.output_params:
+                buf_name = ctx.output_buffer_lookup.get(name)
+                if buf_name is not None:
+                    dtype = V.graph.get_dtype(buf_name)
+                    if dtype is not None:
+                        dtype_exprs.append(torch_dtype_to_jax(dtype))
+                        continue
+                dtype_exprs.append(f"torch_dtype_to_jax_runtime({name}.dtype)")
+            code.writeline("out_dtypes = (" + ", ".join(dtype_exprs) + ",)")
+
+            # Export the jit_wrapper
+            wrapper_placeholder_args = ["out_shapes", "out_dtypes"]
+            wrapper_placeholder_args.extend(ctx.size_var_params)
+            wrapper_placeholder_args.extend(all_jax_input_names)
+            code.writeline(
+                f"exported = jax.export.export("
+                f"{jit_wrapper_name}, platforms=['tpu'])"
+                f"({', '.join(wrapper_placeholder_args)})"
+            )
+
+            # Register and call via tpu_torch_pallas
+            code.writeline(
+                f"kernel_key = '{kernel_name_str}_' + "
+                f"'_'.join(str(s) for s in {ctx.output_params[0]}.shape)"
+            )
+            code.writeline(
+                f"if not tpu_torch_pallas.lookup_custom_kernel('{kernel_name_str}', kernel_key):"
+            )
+            with code.indent():
+                code.writeline(
+                    f"tpu_torch_pallas.register_custom_kernel("
+                    f"'{kernel_name_str}', kernel_key, exported.mlir_module_serialized)"
+                )
+
+            # Build input tensor list (all non-size-var inputs)
+            input_tensor_names = list(ctx.alias_params) + list(ctx.pointer_tail)
+            code.writeline(f"input_tensors = [{', '.join(input_tensor_names)}]")
+
+            # Build output shapes list
+            code.writeline("output_shape_tensors = [")
+            with code.indent():
+                for name in ctx.output_params:
+                    buf_name = ctx.output_buffer_lookup.get(name)
+                    if buf_name is not None:
+                        dtype = V.graph.get_dtype(buf_name)
+                        if dtype is not None:
+                            code.writeline(
+                                f"torch.empty({name}.shape, dtype={dtype!r}, device='tpu'),"
+                            )
+                            continue
+                    code.writeline(
+                        f"torch.empty({name}.shape, dtype={name}.dtype, device='tpu'),"
+                    )
+            code.writeline("]")
+
+            code.writeline(
+                f"results = tpu_torch_pallas.call_custom_kernel("
+                f"input_tensors, output_shape_tensors, "
+                f"'{kernel_name_str}', kernel_key)"
+            )
+
+            # Copy results to output buffers
+            for idx in ctx.copy_output_indices:
+                out_name = ctx.output_params[idx]
+                code.writeline(f"{out_name}.copy_(results[{idx}])")
+
+    def _codegen_main_entry_default(
+        self, ctx: _CodegenContext, jit_wrapper_name: str
+    ) -> None:
         code = ctx.code
         code.writeline("")
         main_name = f"{ctx.kernel_name}_main"
@@ -3263,32 +3362,16 @@ from torch._inductor.runtime.runtime_utils import (
                 )
                 for idx in ctx.copy_output_indices:
                     out_name = ctx.output_params[idx]
-                    if ctx.is_tpu:
-                        code.writeline(
-                            f"res_cpu = jax.device_get(result_values[{idx}])"
-                        )
-                        code.writeline(f"{out_name}.copy_(torch.from_dlpack(res_cpu))")
-                    else:
-                        code.writeline(
-                            f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
-                        )
+                    code.writeline(
+                        f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                    )
 
     @staticmethod
     def _emit_torch_to_jax(
         code: IndentedBuffer, var_name: str, is_tpu: bool, *, contiguous: bool
     ) -> None:
-        # TODO: The jax.device_put path is a temporary workaround for a Mosaic
-        # compiler bug with DLPack. Revert to from_dlpack once TorchTPU provides
-        # a direct method for placing a torch.Tensor on a TPU device.
-        if is_tpu:
-            code.writeline(
-                f"{var_name}_jax = jax.device_put({var_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
-            )
-        else:
-            suffix = ".detach().contiguous()" if contiguous else ".detach()"
-            code.writeline(
-                f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})"
-            )
+        suffix = ".detach().contiguous()" if contiguous else ".detach()"
+        code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})")
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""

@@ -46,7 +46,7 @@ void assert_with_expected_uniforms(uint64_t counter_offset) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Wait for GPU to finish before accessing on host
-  cudaDeviceSynchronize();
+  ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
 
   // get 4 new float from uniform_()
   auto self = at::empty({4}, at::TensorOptions(at::kCUDA));
@@ -172,10 +172,10 @@ TEST(RandomPermutationTest, TestIslandShuffle) {
   bool shuffled1 = false;
   bool shuffled2 = false;
   for (int i = 0; i < 100; i++) {
-    cudaDeviceSynchronize();
+    ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
     std::optional<at::Generator> gen = std::nullopt;
     randperm_handle_duplicate_keys(keys, values, 8, 5, gen);
-    cudaDeviceSynchronize();
+    ASSERT_EQ(cudaSuccess, cudaDeviceSynchronize());
     std::vector<int> slice1 = {values[0], values[1], values[2]};
     std::vector<int> slice2 = {values[3], values[4]};
     if (slice1 != valid_perms1[0]) {
