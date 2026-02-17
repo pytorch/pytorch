@@ -4561,6 +4561,10 @@ class Buffer(IRNode, CodegenSymbol):
         return loader
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
+            # This buffer writes directly into its mutation target via
+            # MutationLayout.  Any reference should resolve to the target's name.
+            return self.layout.get_buffer().codegen_reference(writer)
         return self.get_name()
 
     def decide_layout(self) -> None:
