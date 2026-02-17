@@ -45,7 +45,16 @@ import traceback
 import types
 import weakref
 from collections import deque
-from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import (
+    Any,
+    cast,
+    NoReturn,
+    Optional,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypeIs
 
 import torch
@@ -4256,6 +4265,11 @@ class InstructionTranslatorBase(
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
             self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
+        elif inst.argval == 7:
+            # INTRINSIC_TYPEVAR
+            v = self.pop().as_python_constant()
+            tv = variables.TypingVariable(TypeVar(v))
+            self.push(tv)
         else:
             unimplemented(
                 gb_type="Missing CALL_INTRINSIC_1 handler",
