@@ -1304,6 +1304,15 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         if torch.backends.cusparselt.version() < 602:
             raise AssertionError(f"cusparselt version should be >= 602, got {torch.backends.cusparselt.version()}")
 
+    @inference_dtypes
+    def test_cslt_sparse_tensor_clone(self, device, dtype):
+        A = rand_sparse_semi_structured_mask(256, 128, dtype=dtype)
+        A_clone = A.clone()
+        B = torch.ones((128, 256), device=device).to(dtype)
+        torch.testing.assert_equal(torch.mm(A, B), torch.mm(A_clone, B))
+        self.assertNotEqual(A.packed.data_ptr, B.packed.data_ptr)
+        torch.testing.assert_equal(A.packed, B.packed)
+
 if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) > 0:
     instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")
 if "cutlass" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
