@@ -532,6 +532,8 @@ def process_automatic_dynamic(
                     is_unspecialized_nn_module=is_unspecialized_nn_module,
                 )
         assert res is not None
+        if not torch._dynamo.config.guard_exclusion_for_automatic_dynamic:
+            res.excluded_sizes = None
         return res
 
 
