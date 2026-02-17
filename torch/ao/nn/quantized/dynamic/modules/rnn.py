@@ -167,6 +167,7 @@ class RNNBase(torch.nn.Module):
                     )
                     packed_ih = torch.ops.quantized.linear_prepack(w_ih, b_ih)
                     packed_hh = torch.ops.quantized.linear_prepack(w_hh, b_hh)
+                    # pyrefly: ignore [unnecessary-comparison]
                     if self.version is None or self.version < 2:
                         cell_params = (
                             torch.ops.quantized.make_quantized_cell_params_dynamic(
