@@ -9374,7 +9374,7 @@ class GraphModule(torch.nn.Module):
 class TestAutoFunctionalizeControlFlow(TestCase):
     def check(
         self, gen_fn, args, device, dynamic
-    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+    ) -> torch.fx.GraphModule:
         from unittest.mock import patch
 
         args = pytree.tree_map(lambda t: t.to(device=device), args)
@@ -9390,26 +9390,21 @@ class TestAutoFunctionalizeControlFlow(TestCase):
                 mod_or_fn.to(device)
             return mod_or_fn
 
-        with patch.object(
-            torch._dynamo.variables.higher_order_ops.CondHigherOrderVariable,
-            "supports_input_mutation",
-            True,
-        ):
-            # Only support input mutation in inference
-            cloned_args = [_clone(args) for _ in range(3)]
-            with torch.no_grad():
-                exp = _new_fn()(*cloned_args[0])
-            backend = AotEagerAndRecordGraphs()
-            torch._dynamo.reset()
-            with torch.no_grad():
-                eager_out = torch.compile(
-                    _new_fn(), backend=backend, fullgraph=True, dynamic=dynamic
-                )(*cloned_args[1])
-            torch._dynamo.reset()
-            with torch.no_grad():
-                inductor_out = torch.compile(
-                    _new_fn(), backend="inductor", fullgraph=True, dynamic=dynamic
-                )(*cloned_args[2])
+        # Only support input mutation in inference
+        cloned_args = [_clone(args) for _ in range(3)]
+        with torch.no_grad():
+            exp = _new_fn()(*cloned_args[0])
+        backend = AotEagerAndRecordGraphs()
+        torch._dynamo.reset()
+        with torch.no_grad():
+            eager_out = torch.compile(
+                _new_fn(), backend=backend, fullgraph=True, dynamic=dynamic
+            )(*cloned_args[1])
+        torch._dynamo.reset()
+        with torch.no_grad():
+            inductor_out = torch.compile(
+                _new_fn(), backend="inductor", fullgraph=True, dynamic=dynamic
+            )(*cloned_args[2])
 
         self.assertEqual(exp, eager_out)
         self.assertEqual(exp, inductor_out)
