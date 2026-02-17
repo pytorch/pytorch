@@ -6175,8 +6175,7 @@ def rotary_embedding_frequencies(
 
     # Compute inverse frequencies: 1 / (theta^(2i/dim)) for i = 0, 1, ..., dim/2-1
     inv_freq = 1.0 / (
-        theta
-        ** (torch.arange(0, dim, 2, device=device, dtype=torch.float32) / dim)
+        theta ** (torch.arange(0, dim, 2, device=device, dtype=torch.float32) / dim)
     )
     # Compute positions
     t = torch.arange(end, device=device, dtype=torch.float32)

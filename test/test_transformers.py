@@ -5059,7 +5059,7 @@ class TestRoPE(NNTestCase):
         def fn(q, k):
             return torch.stack(F.apply_rotary_emb(q, k, cos, sin))
 
-        assert gradcheck(fn, (q, k))
+        self.assertTrue(gradcheck(fn, (q, k)))
 
     def test_rope_norm_preservation(self, device):
         """RoPE is a rotation, so it should preserve vector norms."""
