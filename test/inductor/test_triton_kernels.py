@@ -26,7 +26,14 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_utils import (
+    NAVI_ARCH,
+    parametrize,
+    skipIfRocm,
+    skipIfRocmArch,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
@@ -325,6 +332,7 @@ def forward(self, x_1, output_1):
             )
 
     @requires_gpu
+    @skipIfRocm  # Temporary skip due to regression in triton 3.7 - codegen def error
     def test_triton_kernel_clone_wekdeps(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._inductor.choices import InductorChoices
@@ -2725,6 +2733,9 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     @inductor_config.patch("emulate_precision_casts", True)
+    @skipIfRocmArch(
+        NAVI_ARCH
+    )  # Temporary skip due to regression in triton 3.7 - slow test only on NAVI
     def test_triton_kernel_emulate_precision_unaffected(self):
         @triton.jit
         def triton_(in_ptr, out_ptr, numel, add_amount, BLOCK_SIZE: tl.constexpr):

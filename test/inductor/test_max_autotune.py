@@ -68,9 +68,11 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
+    MI200_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
+    skipIfRocmArch,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -864,6 +866,9 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm=True,
     )
     @parametrize("device", ("cpu", GPU_TYPE))
+    @skipIfRocm(
+        msg="Temporary skip due to regression in triton 3.7 - CPU failure on ROCm"
+    )
     def test_matmul_dropout(self, device):
         def fwd(a, b):
             x = a @ b
@@ -2489,6 +2494,9 @@ class TestMaxAutotune(TestCase):
         }
     )
     @parametrize("epilogue", (True, False))
+    @skipIfRocmArch(
+        MI200_ARCH
+    )  # Temporary skip due to regression in triton 3.7 - MI200 specific failure
     def test_deferred_layout_constraint_cat_fusion(self, epilogue):
         def mm_with_cat(a, b1, b2, d):
             catted_b = torch.cat([b1, b2], dim=1)
@@ -3148,6 +3156,9 @@ class TestMaxAutotuneSubproc(TestCase):
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     @parametrize("dynamic", (False, True))
+    @skipIfRocm(
+        msg="Temporary skip due to regression in triton 3.7 - Gemm related failure"
+    )
     def test_max_autotune_addmm(self, search_space, dynamic=False):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -3948,6 +3959,9 @@ class TestPrologueFusion(TestCase):
         "generated code is different in native matmul",
     )
     @parametrize("use_async_compile", (True, False))
+    @skipIfRocmArch(
+        MI200_ARCH
+    )  # Temporary skip due to regression in triton 3.7 - MI200 specific failure
     def test_lazy_template_fusion_multiple_candidates(self, use_async_compile: bool):
         """
         Test lazy evaluation of template fusions with multiple templates,
@@ -4302,6 +4316,9 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         ],
     )
     @parametrize("use_async_compile", (True, False))
+    @skipIfRocm(
+        msg="Temporary skip due to regression in triton 3.7 - codegen def error"
+    )
     def test_template_epilogue_fusion_static_analysis(
         self, test_case: str, use_async_compile: bool
     ):
