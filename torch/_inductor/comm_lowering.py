@@ -82,6 +82,81 @@ def can_realize_as_comm_buffer(
     return False
 
 
+def _iter_upstream_allocating_buffers(
+    buffer: ir.Buffer,
+) -> "Iterator[ir.Buffer]":
+    """Yield upstream buffers that a ComputedBuffer reads from and that allocate.
+
+    This is the shared traversal pattern used by both ``_find_upstream_comm_buffer``
+    and ``_propagate_comm_layout_to_upstream``.
+    """
+    if not isinstance(buffer, ir.ComputedBuffer):
+        return
+    try:
+        read_writes = buffer.get_read_writes()
+    except Exception:
+        return
+    for dep in read_writes.reads:
+        upstream_buf = V.graph.name_to_buffer.get(dep.name)
+        if upstream_buf is not None and upstream_buf.should_allocate():
+            yield upstream_buf
+
+
+def _find_upstream_comm_buffer(
+    buffer: ir.Buffer,
+) -> "Optional[ir.Buffer]":
+    """
+    If ``buffer`` is a ComputedBuffer, look at its reads and return the first
+    upstream allocating buffer that already has CommBufferLayout.  Returns
+    ``None`` when no such upstream exists.
+    """
+    for upstream_buf in _iter_upstream_allocating_buffers(buffer):
+        if isinstance(upstream_buf.get_output_spec(), ir.CommBufferLayout):
+            return upstream_buf
+    return None
+
+
+def _propagate_comm_layout_to_upstream(
+    buffer: ir.Buffer,
+    comm_buffer_type: ir.CommBufferType,
+    group_name: "torch.distributed.distributed_c10d.GroupName",
+) -> "Optional[ir.Buffer]":
+    """
+    Propagate CommBufferLayout to upstream allocating buffers.
+
+    When a pointwise op (e.g., relu) is optimized to run in-place on its
+    input, the input and output share the same storage via buffer reuse.
+    Comm buffers use a separate reuse pool from regular CUDA buffers, so
+    if only the pointwise output gets CommBufferLayout, the in-place reuse
+    with its upstream regular CUDA input will fail — leaving the comm
+    buffer uninitialized (the "disconnected P2P buffer" bug).
+
+    By marking the upstream buffer as a comm buffer and then making the
+    downstream ComputedBuffer mutate the upstream via MutationLayout,
+    we avoid allocating a separate comm buffer for the downstream op.
+
+    Returns the upstream buffer that was converted, or None.
+    """
+    converted_upstream = None
+    for upstream_buf in _iter_upstream_allocating_buffers(buffer):
+        upstream_layout = upstream_buf.get_output_spec()
+        if isinstance(upstream_layout, ir.CommBufferLayout):
+            converted_upstream = upstream_buf
+            continue
+        if not isinstance(upstream_layout, (ir.FlexibleLayout, ir.FixedLayout)):
+            continue
+        if is_symbolic(upstream_buf.get_numel()):
+            continue
+        upstream_buf.layout = ir.CommBufferLayout(
+            layout=upstream_layout,
+            comm_buffer_type=comm_buffer_type,
+            group_name=group_name,
+        )
+        converted_upstream = upstream_buf
+
+    return converted_upstream
+
+
 def realize_as_comm_buffer(
     x: ir.TensorBox,
     comm_buffer_type: ir.CommBufferType,
@@ -92,6 +167,12 @@ def realize_as_comm_buffer(
 
     Specifically, this realizes the underlying buffer if it's still unrealized
     and changes the layout of the buffer to `ir.CommBufferLayout`.
+
+    When the buffer is a ComputedBuffer (e.g., relu) whose upstream input can
+    be converted to a comm buffer, we use MutationLayout so the ComputedBuffer
+    writes directly into the upstream's comm buffer instead of allocating a
+    separate one.  This avoids the "disconnected P2P buffer" bug where the
+    in-place triton kernel would read from an uninitialized comm buffer.
     """
     x.realize()
     buffer = _get_data(x)
@@ -120,6 +201,12 @@ def realize_as_comm_buffer(
         comm_buffer_type=comm_buffer_type,
         group_name=group_name,
     )
+
+    upstream = _propagate_comm_layout_to_upstream(buffer, comm_buffer_type, group_name)
+
+    if upstream is not None and isinstance(buffer, ir.ComputedBuffer):
+        assert isinstance(layout, ir.FlexibleLayout), type(layout)
+        buffer.layout = ir.MutationLayoutSHOULDREMOVE(upstream)
 
 
 def _get_data(x: ir.TensorBox) -> ir.IRNode:
@@ -518,7 +605,7 @@ def register_symm_mem_lowerings():
             out_op=symm_mem.one_shot_all_reduce_copy_out.default,
             tensor_inputs=[symm_buffer, local_input],
             constant_args=[reduce_op, group_name],
-            output_like=symm_buffer,
+            output_like=local_input,
         )
 
     @register_lowering(symm_mem.one_shot_all_reduce_copy_out)
