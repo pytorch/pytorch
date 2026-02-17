@@ -82,6 +82,26 @@ def can_realize_as_comm_buffer(
     return False
 
 
+def _iter_upstream_allocating_buffers(
+    buffer: ir.Buffer,
+) -> "Iterator[ir.Buffer]":
+    """Yield upstream buffers that a ComputedBuffer reads from and that allocate.
+
+    This is the shared traversal pattern used by both ``_find_upstream_comm_buffer``
+    and ``_propagate_comm_layout_to_upstream``.
+    """
+    if not isinstance(buffer, ir.ComputedBuffer):
+        return
+    try:
+        read_writes = buffer.get_read_writes()
+    except Exception:
+        return
+    for dep in read_writes.reads:
+        upstream_buf = V.graph.name_to_buffer.get(dep.name)
+        if upstream_buf is not None and upstream_buf.should_allocate():
+            yield upstream_buf
+
+
 def _find_upstream_comm_buffer(
     buffer: ir.Buffer,
 ) -> "Optional[ir.Buffer]":
@@ -90,20 +110,8 @@ def _find_upstream_comm_buffer(
     upstream allocating buffer that already has CommBufferLayout.  Returns
     ``None`` when no such upstream exists.
     """
-    if not isinstance(buffer, ir.ComputedBuffer):
-        return None
-    try:
-        read_writes = buffer.get_read_writes()
-    except Exception:
-        return None
-    for dep in read_writes.reads:
-        upstream_buf = V.graph.name_to_buffer.get(dep.name)
-        if upstream_buf is None:
-            continue
-        if not upstream_buf.should_allocate():
-            continue
-        upstream_layout = upstream_buf.get_output_spec()
-        if isinstance(upstream_layout, ir.CommBufferLayout):
+    for upstream_buf in _iter_upstream_allocating_buffers(buffer):
+        if isinstance(upstream_buf.get_output_spec(), ir.CommBufferLayout):
             return upstream_buf
     return None
 
@@ -129,24 +137,10 @@ def _propagate_comm_layout_to_upstream(
 
     Returns the upstream buffer that was converted, or None.
     """
-    if not isinstance(buffer, ir.ComputedBuffer):
-        return None
-
-    try:
-        read_writes = buffer.get_read_writes()
-    except Exception:
-        return None
-
     converted_upstream = None
-    for dep in read_writes.reads:
-        upstream_buf = V.graph.name_to_buffer.get(dep.name)
-        if upstream_buf is None:
-            continue
-        if not upstream_buf.should_allocate():
-            continue
+    for upstream_buf in _iter_upstream_allocating_buffers(buffer):
         upstream_layout = upstream_buf.get_output_spec()
         if isinstance(upstream_layout, ir.CommBufferLayout):
-            # Already a comm buffer — record it but don't convert again.
             converted_upstream = upstream_buf
             continue
         if not isinstance(upstream_layout, (ir.FlexibleLayout, ir.FixedLayout)):
@@ -202,23 +196,17 @@ def realize_as_comm_buffer(
             f"a comm buffer (got {layout})."
         )
 
+    buffer.layout = ir.CommBufferLayout(
+        layout=layout,
+        comm_buffer_type=comm_buffer_type,
+        group_name=group_name,
+    )
+
     upstream = _propagate_comm_layout_to_upstream(buffer, comm_buffer_type, group_name)
 
     if upstream is not None and isinstance(buffer, ir.ComputedBuffer):
-        # The upstream buffer is now a comm buffer.  Instead of giving
-        # this ComputedBuffer its own separate comm buffer allocation
-        # (which would be uninitialized — the "disconnected P2P buffer"
-        # bug), make it mutate the upstream comm buffer in-place via
-        # MutationLayout.  The triton kernel will then read from *and*
-        # write to the upstream's P2P allocation.
         assert isinstance(layout, ir.FlexibleLayout), type(layout)
         buffer.layout = ir.MutationLayoutSHOULDREMOVE(upstream)
-    else:
-        buffer.layout = ir.CommBufferLayout(
-            layout=layout,
-            comm_buffer_type=comm_buffer_type,
-            group_name=group_name,
-        )
 
 
 def _get_data(x: ir.TensorBox) -> ir.IRNode:
