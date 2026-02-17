@@ -46,7 +46,7 @@ static const char* padding_to_string(GridSamplerPadding mode) {
     case GridSamplerPadding::Reflection:
       return "reflection";
   }
-  TORCH_CHECK(false, "Unrecognised Padding Mode: ", mode);
+  TORCH_CHECK(false, "Unrecognised padding mode: ", mode);
   return "";
 }
 
@@ -74,7 +74,7 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
 
   auto dims = input.dim();
 
-  GridSamplerParams<5> params;
+  GridSamplerParams<4> params;
   params.sampler_dims = 2;
   params.align_corners = align_corners;
 
@@ -178,8 +178,8 @@ static void grid_sampler_3d_mps_impl(Tensor& output,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(std::string("grid_sampler_3d_") + padding_to_string(padding_mode) + "_" +
-                                             scalarToMetalTypeString(input));
+      auto pso = lib.getPipelineStateForFunc(
+          fmt::format("grid_sampler_3d_{}_{}", padding_to_string(padding_mode), scalarToMetalTypeString(input)));
 
       getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid});
       [computeEncoder setComputePipelineState:pso];

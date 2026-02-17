@@ -69,8 +69,10 @@ static int32_t mod(int32_t a, int32_t b) {
 constant int32_t IDX_ZERO = -1;
 
 // Unnormalize grid coordinate from [-1, 1] to pixel space
-template <typename T>
-static T grid_sampler_unnormalize(T coord, int32_t size, bool align_corners) {
+static float grid_sampler_unnormalize(
+    float coord,
+    int32_t size,
+    bool align_corners) {
   if (align_corners) {
     return ((coord + 1) / 2) * (size - 1);
   } else {
@@ -79,9 +81,8 @@ static T grid_sampler_unnormalize(T coord, int32_t size, bool align_corners) {
 }
 
 // Clip coordinates for border padding
-template <typename T>
-static T clip_coordinates(T in, int32_t clip_limit) {
-  return ::metal::clamp(in, static_cast<T>(0), static_cast<T>(clip_limit - 1));
+static float clip_coordinates(float in, int32_t clip_limit) {
+  return ::metal::clamp(in, 0.0, clip_limit - 1.0);
 }
 
 // Reflect coordinates for reflection padding
@@ -107,8 +108,7 @@ struct PadZeros {
     return (idx < 0 || idx >= input_size) ? IDX_ZERO : idx;
   }
 
-  template <typename T>
-  static T compute_source(T coord, int32_t size, bool align_corners) {
+  static float compute_source(float coord, int32_t size, bool align_corners) {
     return grid_sampler_unnormalize(coord, size, align_corners);
   }
 };
@@ -120,8 +120,7 @@ struct PadBorder {
     return clamp(idx, 0, input_size - 1);
   }
 
-  template <typename T>
-  static T compute_source(T coord, int32_t size, bool align_corners) {
+  static float compute_source(float coord, int32_t size, bool align_corners) {
     coord = grid_sampler_unnormalize(coord, size, align_corners);
     return clip_coordinates(coord, size);
   }
@@ -138,8 +137,7 @@ struct PadReflection {
     return is_reverse ? idx_mod_reverse : idx_mod;
   }
 
-  template <typename T>
-  static T compute_source(T coord, int32_t size, bool align_corners) {
+  static float compute_source(float coord, int32_t size, bool align_corners) {
     coord = grid_sampler_unnormalize(coord, size, align_corners);
     if (align_corners) {
       coord = reflect_coordinates(coord, 0, 2 * (size - 1));
@@ -184,8 +182,8 @@ static T cubic_interp1d(T x0, T x1, T x2, T x3, T t) {
 template <typename Pad, typename T>
 static T interpolate_bilinear_2d(
     constant T* input,
-    opmath_t<T> ix,
-    opmath_t<T> iy,
+    float ix,
+    float iy,
     int32_t inp_H,
     int32_t inp_W,
     int32_t inp_sH,
@@ -203,14 +201,10 @@ static T interpolate_bilinear_2d(
   int32_t ix_se = ix_nw + 1;
   int32_t iy_se = iy_nw + 1;
 
-  opmath_t<T> nw = (static_cast<opmath_t<T>>(ix_se) - ix) *
-      (static_cast<opmath_t<T>>(iy_se) - iy);
-  opmath_t<T> ne = (ix - static_cast<opmath_t<T>>(ix_sw)) *
-      (static_cast<opmath_t<T>>(iy_sw) - iy);
-  opmath_t<T> sw = (static_cast<opmath_t<T>>(ix_ne) - ix) *
-      (iy - static_cast<opmath_t<T>>(iy_ne));
-  opmath_t<T> se = (ix - static_cast<opmath_t<T>>(ix_nw)) *
-      (iy - static_cast<opmath_t<T>>(iy_nw));
+  const auto nw = (ix_se - ix) * (iy_se - iy);
+  const auto ne = (ix - ix_sw) * (iy_sw - iy);
+  const auto sw = (ix_ne - ix) * (iy - iy_ne);
+  const auto se = (ix - ix_nw) * (iy - iy_nw);
 
   int32_t iy_nw_p = Pad::pad(iy_nw, inp_H, align_corners);
   int32_t ix_nw_p = Pad::pad(ix_nw, inp_W, align_corners);
@@ -221,26 +215,18 @@ static T interpolate_bilinear_2d(
   int32_t iy_se_p = Pad::pad(iy_se, inp_H, align_corners);
   int32_t ix_se_p = Pad::pad(ix_se, inp_W, align_corners);
 
-  opmath_t<T> out_acc = static_cast<opmath_t<T>>(0);
+  opmath_t<T> out_acc = 0;
   if (iy_nw_p != IDX_ZERO && ix_nw_p != IDX_ZERO) {
-    out_acc +=
-        static_cast<opmath_t<T>>(input[iy_nw_p * inp_sH + ix_nw_p * inp_sW]) *
-        nw;
+    out_acc += input[iy_nw_p * inp_sH + ix_nw_p * inp_sW] * nw;
   }
   if (iy_ne_p != IDX_ZERO && ix_ne_p != IDX_ZERO) {
-    out_acc +=
-        static_cast<opmath_t<T>>(input[iy_ne_p * inp_sH + ix_ne_p * inp_sW]) *
-        ne;
+    out_acc += input[iy_ne_p * inp_sH + ix_ne_p * inp_sW] * ne;
   }
   if (iy_sw_p != IDX_ZERO && ix_sw_p != IDX_ZERO) {
-    out_acc +=
-        static_cast<opmath_t<T>>(input[iy_sw_p * inp_sH + ix_sw_p * inp_sW]) *
-        sw;
+    out_acc += input[iy_sw_p * inp_sH + ix_sw_p * inp_sW] * sw;
   }
   if (iy_se_p != IDX_ZERO && ix_se_p != IDX_ZERO) {
-    out_acc +=
-        static_cast<opmath_t<T>>(input[iy_se_p * inp_sH + ix_se_p * inp_sW]) *
-        se;
+    out_acc += input[iy_se_p * inp_sH + ix_se_p * inp_sW] * se;
   }
 
   return static_cast<T>(out_acc);
@@ -287,17 +273,17 @@ static opmath_t<T> get_bicubic_value(
   int32_t y_p = Pad::pad(y, inp_H, align_corners);
   int32_t x_p = Pad::pad(x, inp_W, align_corners);
   if (y_p == IDX_ZERO || x_p == IDX_ZERO) {
-    return static_cast<opmath_t<T>>(0);
+    return 0;
   }
-  return static_cast<opmath_t<T>>(input[y_p * inp_sH + x_p * inp_sW]);
+  return input[y_p * inp_sH + x_p * inp_sW];
 }
 
 // 2D Bicubic interpolation
 template <typename Pad, typename T>
 static T interpolate_bicubic_2d(
     constant T* input,
-    opmath_t<T> ix,
-    opmath_t<T> iy,
+    float ix,
+    float iy,
     int32_t inp_H,
     int32_t inp_W,
     int32_t inp_sH,
@@ -306,10 +292,10 @@ static T interpolate_bicubic_2d(
   ix = grid_sampler_unnormalize(ix, inp_W, align_corners);
   iy = grid_sampler_unnormalize(iy, inp_H, align_corners);
 
-  opmath_t<T> ix_nw = floor(ix);
-  opmath_t<T> iy_nw = floor(iy);
-  opmath_t<T> tx = ix - ix_nw;
-  opmath_t<T> ty = iy - iy_nw;
+  auto ix_nw = floor(ix);
+  auto iy_nw = floor(iy);
+  auto tx = ix - ix_nw;
+  auto ty = iy - iy_nw;
 
   opmath_t<T> coefficients[4];
   int32_t ix_nw_i = static_cast<int32_t>(ix_nw);
@@ -402,8 +388,8 @@ struct Bicubic2D {
   template <typename T>
   static T interpolate(
       constant T* input,
-      opmath_t<T> ix,
-      opmath_t<T> iy,
+      float ix,
+      float iy,
       int32_t inp_H,
       int32_t inp_W,
       int32_t inp_sH,
@@ -420,9 +406,8 @@ kernel void grid_sampler_2d(
     device T* output [[buffer(0)]],
     constant T* input [[buffer(1)]],
     constant T* grid [[buffer(2)]],
-    constant GridSamplerParams<5>& params [[buffer(3)]],
+    constant GridSamplerParams<4>& params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  auto N = params.output_sizes[0];
   auto C = params.output_sizes[1];
   auto out_H = params.output_sizes[2];
   auto out_W = params.output_sizes[3];
@@ -443,11 +428,6 @@ kernel void grid_sampler_2d(
   auto grid_sCoor = params.grid_strides[3];
 
   auto align_corners = params.align_corners;
-
-  auto num_elements = N * out_H * out_W;
-  if (tid >= static_cast<uint>(num_elements)) {
-    return;
-  }
 
   int32_t w = tid % out_W;
   int32_t h = (tid / out_W) % out_H;
@@ -629,7 +609,7 @@ kernel void grid_sampler_3d(
       device DTYPE * output [[buffer(0)]],                              \
       constant DTYPE * input [[buffer(1)]],                             \
       constant DTYPE * grid [[buffer(2)]],                              \
-      constant GridSamplerParams<5> & params [[buffer(3)]],             \
+      constant GridSamplerParams<4> & params [[buffer(3)]],             \
       uint tid [[thread_position_in_grid]]);
 
 #define REGISTER_GRID_SAMPLER_2D_INTERP(DTYPE, INTERP, INAME)         \
