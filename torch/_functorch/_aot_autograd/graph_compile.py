@@ -343,9 +343,13 @@ def _apply_tensorify_python_scalars(module: torch.fx.GraphModule) -> None:
 def aot_stage2_compile(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
+    # pyrefly: ignore [implicit-any]
     partition_fn: Callable,
+    # pyrefly: ignore [implicit-any]
     fw_compiler: Callable,
+    # pyrefly: ignore [implicit-any]
     bw_compiler: Optional[Callable] = None,
+    # pyrefly: ignore [implicit-any]
     inference_compiler: Optional[Callable] = None,
 ) -> DispatchReturn:
     if bw_compiler is None:
@@ -403,6 +407,7 @@ def _aot_stage2b_inference_compile(
     maybe_subclass_meta: Optional[SubclassMeta],
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
+    # pyrefly: ignore [implicit-any]
 ) -> Callable:
     return _aot_stage2b_compile_forward_or_inference(
         fw_module,
@@ -793,7 +798,9 @@ def run_joint_graph_passes_on_hops(
 
     # Save the fw and bwd hop nodes. We will later in-place modify the graph
     # using these nodes.
+    # pyrefly: ignore [implicit-any]
     fw_hop_nodes = []
+    # pyrefly: ignore [implicit-any]
     bw_hop_nodes = []
     for node in joint_gm.graph.nodes:
         if (
@@ -1252,6 +1259,7 @@ def maybe_inline_graph_saved_tensors_hooks(
         inner_meta.num_tensors_saved_with_no_vc_check = len(
             [
                 n
+                # pyrefly: ignore [not-iterable]
                 for n in fw_outs_saved_for_bw
                 if isinstance(n, torch.fx.Node)
                 and n.meta.get("saved_tensor_with_no_vc_check", False)
@@ -1282,6 +1290,7 @@ def maybe_inline_graph_saved_tensors_hooks(
         structured_logs.append(f"allow_set:{allow_set}")
         structured_logs.append(f"exclude_set:{exclude_set}")
 
+    # pyrefly: ignore [not-iterable]
     for saved in fw_outs_saved_for_bw:
         if ((allow_set is not None) and (saved.name not in allow_set)) or (  # type: ignore[union-attr]
             (exclude_set is not None) and (saved.name in exclude_set)  # type: ignore[union-attr]
@@ -1972,6 +1981,7 @@ def _aot_stage2b_fw_compile(
     fw_metadata: ViewAndMutationMeta,
     num_fw_outs_saved_for_bw: int,
     aot_config: AOTConfig,
+    # pyrefly: ignore [implicit-any]
 ) -> tuple[Optional[list[Optional[tuple[int, ...]]]], Callable]:
     return _aot_stage2b_compile_forward_or_inference(
         fw_module,
@@ -1991,6 +2001,7 @@ def _aot_stage2b_bw_compile(
     fwd_output_strides: Optional[list[Optional[tuple[int, ...]]]],
     num_symints_saved_for_bw: int,
     aot_config: AOTConfig,
+    # pyrefly: ignore [implicit-any]
 ) -> tuple[AutogradLazyBackwardCompileInfo, Optional[Callable]]:
     """
     Compile the backward graph. Returns:
@@ -2414,6 +2425,7 @@ def _aot_stage2b_compile_forward_or_inference(
     *,
     is_inference: bool,
     num_fw_outs_saved_for_bw: Optional[int] = None,
+    # pyrefly: ignore [implicit-any]
 ) -> tuple[Optional[list[Optional[tuple[int, ...]]]], Callable]:
     """
     Compile the forward or inference graph. Returns:
