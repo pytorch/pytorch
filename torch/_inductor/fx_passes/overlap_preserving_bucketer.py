@@ -17,6 +17,7 @@ from torch._inductor.fx_passes.bucketing import (
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
 )
+from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather
 from torch._inductor.fx_passes.overlap_scheduling import (
     CollBucket,
     CollectiveInfo,
@@ -138,10 +139,11 @@ class OverlapPreservingBucketer:
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
-        bucket_mode: BucketMode = "custom_ops_multidtype",
-        bucket_exposed_first: bool = True,
         collective_bucketing: bool = True,
+        bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_exposed_first: bool | None = None,
         region_of: dict[fx.Node, Any] | None = None,
+        bucket_only_internode_comms: bool = False,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -151,6 +153,7 @@ class OverlapPreservingBucketer:
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_exposed_first = bucket_exposed_first
+        self.bucket_only_internode_comms = bucket_only_internode_comms
         self.bucket_mode = bucket_mode
         self.collective_bucketing = collective_bucketing
         self.region_of: dict[fx.Node, Any] = region_of or {}
@@ -275,15 +278,34 @@ class OverlapPreservingBucketer:
 
             self.all_hiding_nodes |= info.hiding_nodes
 
+    def identify_internode_group_names(self) -> OrderedSet[str]:
+        # Identify internode comm groups.
+        # Temporary uses FSDP pattern as heuristic for outer groups.
+        checked_pgs = OrderedSet()
+        internode_pgs = OrderedSet()
+        for start in self.collective_info:
+            pg = get_group_name(start)
+            if is_all_gather(start) and pg not in checked_pgs:
+                if is_fsdp_all_gather(start):
+                    internode_pgs.add(pg)
+                checked_pgs.add(pg)
+        return internode_pgs
+
     def _bucket_collectives_impl(self) -> list[CollBucket]:
         """Find and apply bucket transformations for collectives."""
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        internode_pgs = self.identify_internode_group_names()
+
         for start in self.collective_info:
             pg = get_group_name(start)
             pg_collectives[pg].add(start)
 
         all_buckets: list[CollBucket] = []
         for pg, collectives in pg_collectives.items():
+            if self.bucket_only_internode_comms and pg not in internode_pgs:
+                continue
+
+            # Populate node_to_event for this PG's timeline
             self._populate_node_to_event(pg)
 
             grouped_collectives: dict[object, OrderedSet[fx.Node]] = defaultdict(
@@ -300,7 +322,7 @@ class OverlapPreservingBucketer:
                     key,
                     [n.name for n in collective_group],
                 )
-                buckets = self._find_buckets(collective_group)
+                buckets = self._find_buckets(collective_group, internode_pgs)
                 all_buckets.extend(buckets)
 
         for coll_bucket in all_buckets:
@@ -439,16 +461,35 @@ class OverlapPreservingBucketer:
         hidden_time = info.estimated_time_ms - info.exposed_time_ms
         return hidden_time / info.estimated_time_ms
 
+    def _should_bucket_exposed_first(
+        self,
+        collective_group: OrderedSet[fx.Node],
+        current_pg: str,
+        internode_pgs: OrderedSet[str],
+    ) -> bool:
+        """Determine whether to bucket exposed collectives first."""
+        if self.bucket_exposed_first is None:
+            return current_pg in internode_pgs
+        return self.bucket_exposed_first
+
     def _find_buckets(
         self,
         collective_group: OrderedSet[fx.Node],
+        internode_pgs: OrderedSet[str],
     ) -> list[CollBucket]:
         """Find valid buckets within a group of similar collectives."""
         max_bucket_bytes = int(self.max_bucket_memory_gb * 1024 * 1024 * 1024)
         buckets = []
         processed: OrderedSet[fx.Node] = OrderedSet()
+        if len(collective_group) == 0:
+            return []
 
-        if self.bucket_exposed_first:
+        current_pg = get_group_name(next(iter(collective_group)))
+
+        bucket_exposed_first = self._should_bucket_exposed_first(
+            collective_group, current_pg, internode_pgs
+        )
+        if bucket_exposed_first:
             # Sort by overlap ratio (ascending) to bucket least hidden collectives first.
             # Exposed collectives benefit most from bucketing since their latency is on the
             # critical path. Prioritizing them also preserves hiding relationships for
@@ -498,7 +539,7 @@ class OverlapPreservingBucketer:
 
                 candidate_node_idx = self.node_idx[candidate]
                 if (
-                    self.bucket_exposed_first
+                    bucket_exposed_first
                     and abs(candidate_node_idx - start_node_idx)
                     > max_consecutive_failures
                 ):
@@ -1023,7 +1064,8 @@ def finalize_overlap_scheduling(
     max_bucket_memory_gb: float = 2.0,
     max_coll_distance: int = 1000,
     region_of: dict[fx.Node, Any] | None = None,
-    bucket_exposed_first: bool = True,
+    bucket_exposed_first: bool | None = None,
+    bucket_only_internode_comms: bool = False,
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
@@ -1052,7 +1094,8 @@ def finalize_overlap_scheduling(
         max_coll_distance=max_coll_distance,
         insert_overlap_deps=insert_overlap_deps,
         collective_bucketing=collective_bucketing,
-        region_of=region_of,
         bucket_exposed_first=bucket_exposed_first,
+        bucket_only_internode_comms=bucket_only_internode_comms,
+        region_of=region_of,
     )
     bucketer.bucket_collectives()
