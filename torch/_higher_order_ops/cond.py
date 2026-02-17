@@ -696,25 +696,16 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     )
     from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
 
-    try:
-        hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
-        # For now, we only support auto-functionalization for cond when using python
-        # functionalization mode
-        if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
-            return do_auto_functionalize_v2(
-                ctx.mode,
-                hop_instance,
-                tuple(pytree.tree_flatten((pred, true_fn, false_fn, inputs))[0]),
-                {},
-            )
-    except AssertionError as e:
-        if str(e) == "Mixing fake modes NYI":
-            # TODO: When handling nested cond, there can be mixed fake mode issues.
-            # Currently, auto functionalization does not support nested cond.
-            # Skip auto functionalization and fall back to the original implementation in this case.
-            pass
-        else:
-            raise
+    hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
+    # For now, we only support auto-functionalization for cond when using python
+    # functionalization mode
+    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            hop_instance,
+            tuple(pytree.tree_flatten((pred, true_fn, false_fn, inputs))[0]),
+            {},
+        )
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)
