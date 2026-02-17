@@ -379,6 +379,16 @@ class DistTensorOpsTest(DTensorTestBase):
             torch.stack([global_input, global_input], dim=1),
         )
 
+        # stack with negative dim: dim=-1 inserts at the last position of the
+        # output (ndim+1), so Shard(1) should stay Shard(1)
+        stack_neg_dim_dt = torch.stack([shard1_input, cloned_shard1_input], dim=-1)
+        self.assertEqual(stack_neg_dim_dt.placements, (Shard(1),))
+        self.assertEqual(stack_neg_dim_dt.shape, (8, 8, 2))
+        self.assertEqual(
+            stack_neg_dim_dt.full_tensor(),
+            torch.stack([global_input, global_input], dim=-1),
+        )
+
     @with_comms
     def test_stack_cache(self):
         device_mesh = self.build_device_mesh()
@@ -827,6 +837,7 @@ class DistTensorOpsTest(DTensorTestBase):
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.single_dim_strategy import (
             _ShardingPlaceholder,
+            _SingleDimStrategyInfo,
         )
         from torch.distributed.tensor.debug import _clear_sharding_prop_cache
 
@@ -856,7 +867,7 @@ class DistTensorOpsTest(DTensorTestBase):
         with (
             patch.dict(
                 propagator.op_single_dim_strategy_funcs,
-                {op: to_copy_single_dim_strategy},
+                {op: _SingleDimStrategyInfo(func=to_copy_single_dim_strategy)},
             ),
             patch.dict(
                 propagator.op_to_schema_info_for_single_dim_strategy, {op: schema_info}

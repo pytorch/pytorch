@@ -77,7 +77,9 @@ class FakeScriptObject:
             return memo[id(self)]
         new_obj = FakeScriptObject.__new__(FakeScriptObject)
         memo[id(self)] = new_obj
-        object.__setattr__(new_obj, "wrapped_obj", copy.deepcopy(self.wrapped_obj, memo))
+        object.__setattr__(
+            new_obj, "wrapped_obj", copy.deepcopy(self.wrapped_obj, memo)
+        )
         object.__setattr__(new_obj, "script_class_name", self.script_class_name)
         new_real_obj = copy.deepcopy(self.real_obj, memo)
         object.__setattr__(new_obj, "real_obj", new_real_obj)
@@ -91,9 +93,7 @@ class FakeScriptObject:
                     )
                 else:
                     if hasattr(new_real_obj, name):
-                        object.__setattr__(
-                            new_obj, name, getattr(new_real_obj, name)
-                        )
+                        object.__setattr__(new_obj, name, getattr(new_real_obj, name))
                     else:
                         object.__setattr__(new_obj, name, value)
         return new_obj

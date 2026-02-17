@@ -2247,6 +2247,43 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(ref.grad, res.grad)
 
+    def test_value_type_subclass(self):
+        """Subclasses of registered opaque types should be recognized as opaque."""
+
+        class ExtendedConfig(ValueConfig):
+            def __init__(self, mode: str, scale: float):
+                super().__init__(mode)
+                self.scale = scale
+
+            def __eq__(self, other):
+                return (
+                    isinstance(other, ExtendedConfig)
+                    and self.mode == other.mode
+                    and self.scale == other.scale
+                )
+
+            def __hash__(self):
+                return hash((self.mode, self.scale))
+
+            def __fx_repr__(self):
+                return (
+                    f"ExtendedConfig(mode={self.mode!r}, scale={self.scale!r})",
+                    {"ExtendedConfig": ExtendedConfig},
+                )
+
+        self.assertTrue(is_opaque_type(ExtendedConfig))
+        self.assertTrue(is_opaque_value_type(ExtendedConfig))
+
+        cfg = ExtendedConfig("square", 2.0)
+
+        def foo(x):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(foo, fullgraph=True, backend="aot_eager")
+        res = opt_f(x)
+        self.assertEqual(res, foo(x))
+
     def test_opaque_object_with_inductor_backend(self):
         """Test that opaque objects work correctly with inductor's get_attr handling."""
 

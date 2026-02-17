@@ -533,6 +533,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.unaligned_buffers: OrderedSet[str] = OrderedSet()
         self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
 
+        # Layout constraints for Triton template buffers.
+        # Maps buffer name -> expected FixedLayout (computed speculatively without freezing)
+        self.buffer_layout_constraints: dict[str, ir.FixedLayout] = {}
+
         self.low_precision_codegen_ops: OrderedSet[str] = OrderedSet()
         # more aggressive prologue fusion
         self.invoke_quant_ops: OrderedSet[str] = OrderedSet()
@@ -2593,7 +2597,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info
-            mod.benchmark_compiled_module(times=1, repeat=1)
+            args = mod.get_args()
+            mod.benchmark_compiled_module(args, times=1, repeat=1)
 
         return mod
 
