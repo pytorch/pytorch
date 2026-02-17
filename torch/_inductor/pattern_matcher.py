@@ -1342,10 +1342,11 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        raise AssertionError(
-                            "Deleted index from getitem, did you erase the index and not properly replace it?"
-                        )
-                    replace(user, new[idx])
+                        # Output is used directly
+                        # pyrefly: ignore [bad-argument-type]
+                        old.replace_all_uses_with(new)
+                    else:
+                        replace(user, new[idx])
                 graph.erase_node(old)
 
             if len(output_nodes) == len(replacement):
@@ -1482,16 +1483,22 @@ def register_replacement(
         with fake_mode:
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
+                    # pyrefly: ignore [missing-attribute]
                     if grad and is_integer_dtype(args[i].dtype):
                         return False
 
                     args[i] = torch.empty_strided(
+                        # pyrefly: ignore [missing-attribute]
                         args[i].size(),
+                        # pyrefly: ignore [missing-attribute]
                         args[i].stride(),
+                        # pyrefly: ignore [missing-attribute]
                         dtype=args[i].dtype,
+                        # pyrefly: ignore [missing-attribute]
                         device=args[i].device,
                         requires_grad=grad,
                     )
+                    # pyrefly: ignore [missing-attribute]
                     for v in itertools.chain(args[i].shape, args[i].stride()):
                         if isinstance(v, torch.SymInt) and all(
                             statically_known_true(v != a) for a in sym_args
@@ -2226,7 +2233,8 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
     with torch._guards.tracing(None):
         aot_function(
             fn,
-            lambda g, i: make_boxed_func(g),
+            # pyrefly: ignore[bad-argument-type]
+            lambda gm, example_inputs: make_boxed_func(gm),
             partition_fn=record_joint_graph,
             decompositions=select_decomp_table(),
             keep_inference_input_mutations=True,
@@ -2296,11 +2304,11 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
 
     @functools.cache
     @functools.wraps(fn)
-    def lazy_init() -> Any:
+    def lazy_init(input_device: Optional[torch.device] = None) -> Any:
         counters_ref = counters[backend].copy()
 
         with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
-            result = fn()
+            result = fn(input_device)
 
         # clear view matches encountered during tracing
         counters[backend] = counters_ref

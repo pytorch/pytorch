@@ -1658,7 +1658,8 @@ class GraphModule(torch.nn.Module):
 
             guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
             curr_var_to_val = {
-                str(k): v for k, v in context.fake_mode.shape_env.var_to_val.items()
+                str(k): v
+                for k, v in context.fake_mode.shape_env.backed_var_to_val.items()
             }
             curr_var_to_sources = {
                 str(k): v[0].name

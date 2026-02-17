@@ -67,7 +67,11 @@ T& CheckNotNullCommon(
     T& t,
     bool fatal) {
   if (t == nullptr) {
-    MessageLogger(file, line, ::google::GLOG_FATAL, fatal).stream()
+    MessageLogger(
+        SourceLocation::current(file, nullptr, line),
+        ::google::GLOG_FATAL,
+        fatal)
+            .stream()
         << "Check failed: '" << names << "' must be non NULL. ";
   }
   return t;
