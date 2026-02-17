@@ -83,5 +83,5 @@ jobs:
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs-matrix }}
+      test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit
