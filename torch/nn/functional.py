@@ -6286,17 +6286,20 @@ def apply_rotary_emb(
         fused by ``torch.compile``. No custom CUDA kernels are needed.
     """
     # Reshape cos/sin for broadcasting
-    seq_len = query.shape[seq_dim]
-    ndim = query.ndim
+    # cos/sin are [seq_len, dim], add broadcast dims based on layout
+    cos = cos.narrow(0, 0, query.size(seq_dim))
+    sin = sin.narrow(0, 0, query.size(seq_dim))
 
-    # cos/sin are [seq_len, dim], we need to reshape for broadcasting
-    # Build shape: 1 everywhere except seq_dim and last dim
-    shape = [1] * ndim
-    shape[seq_dim] = seq_len
-    shape[-1] = cos.shape[-1]
-
-    cos_b = cos[:seq_len].view(*shape)
-    sin_b = sin[:seq_len].view(*shape)
+    if seq_dim == 1:
+        # BSHD: [batch, seq, heads, dim] -> cos needs [1, seq, 1, dim]
+        cos_b = cos.unsqueeze(0).unsqueeze(2)
+        sin_b = sin.unsqueeze(0).unsqueeze(2)
+    elif seq_dim == 2:
+        # BHSD: [batch, heads, seq, dim] -> cos needs [1, 1, seq, dim]
+        cos_b = cos.unsqueeze(0).unsqueeze(0)
+        sin_b = sin.unsqueeze(0).unsqueeze(0)
+    else:
+        raise ValueError(f"seq_dim must be 1 or 2, got {seq_dim}")
 
     # Apply rotation: x_out = x * cos + rotate_half(x) * sin
     query_rot = query * cos_b + rotate_half(query, interleaved) * sin_b
