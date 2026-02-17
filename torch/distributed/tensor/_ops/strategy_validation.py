@@ -964,9 +964,9 @@ def _query_dtensor_rules(
                     args_schema.append(spec)
                 args_schema.extend(non_tensor_args)
                 op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
-                DecompShardingStrategy.ensure_schema_info(aten_op, propagator)
-                output_strategy = DecompShardingStrategy.propagate_strategy(
-                    op_schema, propagator
+                propagator.decomp_strategy.ensure_schema_info(aten_op)
+                output_strategy = propagator.decomp_strategy.propagate_strategy(
+                    op_schema,
                 )
                 if output_strategy is not None:
                     rules |= _extract_rules_from_op_strategy(

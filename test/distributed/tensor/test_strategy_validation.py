@@ -891,9 +891,9 @@ class TestDecompStrategyPath(TestCase):
             tensor_meta=TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype),
         )
         op_schema = OpSchema(aten_softplus, (spec,), {})
-        DecompShardingStrategy.ensure_schema_info(aten_softplus, propagator)
-        output_strategy = DecompShardingStrategy.propagate_strategy(
-            op_schema, propagator
+        propagator.decomp_strategy.ensure_schema_info(aten_softplus)
+        output_strategy = propagator.decomp_strategy.propagate_strategy(
+            op_schema,
         )
         self.assertIsNotNone(output_strategy)
 
