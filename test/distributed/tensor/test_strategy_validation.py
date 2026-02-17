@@ -16,9 +16,11 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
 from torch.distributed.tensor._ops.strategy_validation import (
     _create_partial_input,
+    _find_opinfo_candidates,
     extract_tensors_from_sample,
     get_1d_input_placements_for_tensor,
     get_1d_output_placements_for_tensor,
+    get_opinfo_by_name,
     is_fully_replicated,
     is_trivial_shard,
     normalize_combo_key,
@@ -27,6 +29,8 @@ from torch.distributed.tensor._ops.strategy_validation import (
     parse_placement,
     placement_tuple_to_str,
     PlacementCombination,
+    query_single_dim_strategy,
+    resolve_op_names,
     validate_combination,
 )
 from torch.distributed.tensor.placement_types import Partial, Shard
@@ -839,6 +843,334 @@ class TestPartialCombinationValidity(TestCase):
             "Expected True (false positive) for all-zero output, showing "
             "why compare_operator must skip such samples",
         )
+
+
+class TestDecompStrategyPath(TestCase):
+    """Test that decomposition-based strategy propagation discovers rules."""
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def test_decomp_discovers_rules_for_softplus(self):
+        """
+        Exercise DecompShardingStrategy.propagate_strategy directly on a unary
+        op (softplus) whose decomposition uses only registered ops.
+
+        Verifies the helper _extract_rules_from_op_strategy correctly extracts
+        elementwise sharding rules from the resulting OpStrategy.
+        """
+        try:
+            from torch.distributed.tensor._decompositions import DecompShardingStrategy
+        except ImportError:
+            self.skipTest("_decompositions module not available")
+        from torch.distributed.tensor._dtensor_spec import TensorMeta
+        from torch.distributed.tensor._op_schema import DTensorSpec, OpSchema
+        from torch.distributed.tensor._ops.strategy_validation import (
+            _extract_rules_from_op_strategy,
+        )
+
+        aten_softplus = torch.ops.aten.softplus.default
+        propagator = torch.distributed.tensor.DTensor._op_dispatcher.sharding_propagator
+        self.assertTrue(DecompShardingStrategy.has_decomp(aten_softplus))
+
+        t = torch.randn(8, 4)
+
+        mesh = init_device_mesh("cpu", (self.world_size,))
+        spec = DTensorSpec(
+            mesh=mesh,
+            placements=(Shard(0),),
+            tensor_meta=TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype),
+        )
+        op_schema = OpSchema(aten_softplus, (spec,), {})
+        DecompShardingStrategy.ensure_schema_info(aten_softplus, propagator)
+        output_strategy = DecompShardingStrategy.propagate_strategy(
+            op_schema, propagator
+        )
+        self.assertIsNotNone(output_strategy)
+
+        input_shapes = (t.shape,)
+        output_shape = tuple(torch.nn.functional.softplus(t).shape)
+        rules = _extract_rules_from_op_strategy(
+            output_strategy, input_shapes, output_shape
+        )
+
+        # Should discover elementwise sharding rules for a 2D tensor
+        self.assertIn((("S(0)",), "S(0)"), rules)
+        self.assertIn((("S(1)",), "S(1)"), rules)
+
+    def test_compare_operator_uses_decomp_path(self):
+        """
+        compare_operator should find rules via the decomp path when an op is
+        not registered in op_strategy_funcs or op_single_dim_strategy_funcs.
+
+        Temporarily removes addcmul from strategy registries to force the
+        decomp fallback, and uses even tensor sizes for correct sharding.
+        """
+        try:
+            from torch.distributed.tensor._decompositions import (  # noqa: F401
+                DecompShardingStrategy,
+            )
+        except ImportError:
+            self.skipTest("_decompositions module not available")
+
+        import torch.testing._internal.common_methods_invocations as common_ops
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+        from torch.testing._internal.opinfo import core as opinfo_core
+
+        propagator = torch.distributed.tensor.DTensor._op_dispatcher.sharding_propagator
+        aten_addcmul = torch.ops.aten.addcmul.default
+
+        # Save and remove addcmul from strategy registries to force decomp path
+        saved_strategy = propagator.op_strategy_funcs.pop(aten_addcmul, None)
+        saved_single = propagator.op_single_dim_strategy_funcs.pop(aten_addcmul, None)
+
+        # Override sizes to ensure even sharding with world_size=2
+        orig_sizes = (opinfo_core.L, opinfo_core.M, opinfo_core.S, opinfo_core.XS)
+        opinfo_core.L = common_ops.L = 24
+        opinfo_core.M = common_ops.M = 12
+        opinfo_core.S = common_ops.S = 4
+        opinfo_core.XS = common_ops.XS = 2
+
+        try:
+            # compare_operator manages its own process group
+            stats = compare_operator(
+                "addcmul",
+                device="cpu",
+                dtype=torch.float32,
+                world_size=self.world_size,
+                incorrect_only=True,
+            )
+            # Decomp should discover valid rules
+            self.assertGreater(stats.true_positives, 0)
+            # No incorrect rules
+            self.assertEqual(len(stats.false_positives), 0)
+        finally:
+            # Restore registries and sizes
+            if saved_strategy is not None:
+                propagator.op_strategy_funcs[aten_addcmul] = saved_strategy
+            if saved_single is not None:
+                propagator.op_single_dim_strategy_funcs[aten_addcmul] = saved_single
+            (
+                opinfo_core.L,
+                opinfo_core.M,
+                opinfo_core.S,
+                opinfo_core.XS,
+            ) = orig_sizes
+            (
+                common_ops.L,
+                common_ops.M,
+                common_ops.S,
+                common_ops.XS,
+            ) = orig_sizes
+
+
+class TestQuerySingleDimStrategyKwargs(TestCase):
+    """Test that query_single_dim_strategy forwards kwargs to strategy functions."""
+
+    def test_kwargs_forwarded_to_strategy(self):
+        """
+        A kwargs-aware strategy should receive the actual kwargs, not {}.
+
+        torch.add(a, b, alpha=-1) changes which Partial rules are valid:
+        with alpha=1, R,P(max)->P(max) is valid; with alpha=-1, it becomes
+        R,P(max)->P(min) instead. A strategy that accounts for alpha needs
+        to receive it through kwargs.
+        """
+        from torch.distributed.tensor._api import DTensor
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+        )
+
+        propagator = DTensor._op_dispatcher.sharding_propagator
+        aten_add = torch.ops.aten.add.Tensor
+
+        # A strategy that returns different rules depending on alpha.
+        # With alpha >= 0: R,P(max)->P(max) is valid
+        # With alpha < 0:  R,P(max)->P(min) is valid (negation flips max to min)
+        def alpha_aware_add_strategy(op, args_schema, kwargs_schema):
+            alpha = kwargs_schema.get("alpha", 1)
+            rules = [
+                [
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                ],
+                [Partial("sum"), Partial("sum"), Partial("sum")],
+            ]
+            if alpha < 0:
+                rules.append([Partial("min"), Replicate(), Partial("max")])
+            else:
+                rules.append([Partial("max"), Replicate(), Partial("max")])
+            return rules
+
+        original = propagator.op_single_dim_strategy_funcs.get(aten_add)
+        propagator.op_single_dim_strategy_funcs[aten_add] = alpha_aware_add_strategy
+        try:
+            tensors = [("a", torch.randn(4, 3)), ("b", torch.randn(4, 3))]
+
+            # Query with alpha=-1 kwargs
+            result = query_single_dim_strategy(
+                aten_add, tensors, None, kwargs={"alpha": -1}
+            )
+            self.assertIsNotNone(result)
+
+            # The third rule's output should be P(min) for alpha=-1
+            self.assertEqual(len(result), 3)
+            self.assertIsInstance(result[2][0], Partial)
+            self.assertEqual(
+                result[2][0].reduce_op,
+                "min",
+                "With alpha=-1, the strategy should produce P(min) output "
+                "but got P(max) — kwargs were not forwarded",
+            )
+        finally:
+            if original is not None:
+                propagator.op_single_dim_strategy_funcs[aten_add] = original
+            else:
+                propagator.op_single_dim_strategy_funcs.pop(aten_add, None)
+
+
+class TestCompareOperatorEndToEnd(TestCase):
+    """End-to-end smoke test for compare_operator."""
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
+    def test_compare_operator_add_no_incorrect(self):
+        """compare_operator on add should find valid rules with no incorrect ones."""
+        import torch.testing._internal.common_methods_invocations as common_ops
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+        from torch.testing._internal.opinfo import core as opinfo_core
+
+        orig_sizes = (opinfo_core.L, opinfo_core.M, opinfo_core.S, opinfo_core.XS)
+        opinfo_core.L = common_ops.L = 24
+        opinfo_core.M = common_ops.M = 12
+        opinfo_core.S = common_ops.S = 4
+        opinfo_core.XS = common_ops.XS = 2
+
+        try:
+            stats = compare_operator(
+                "add",
+                device="cpu",
+                dtype=torch.float32,
+                world_size=self.world_size,
+                incorrect_only=True,
+            )
+            self.assertGreater(stats.true_positives, 0)
+            self.assertEqual(len(stats.false_positives), 0)
+        finally:
+            (
+                opinfo_core.L,
+                opinfo_core.M,
+                opinfo_core.S,
+                opinfo_core.XS,
+            ) = orig_sizes
+            (
+                common_ops.L,
+                common_ops.M,
+                common_ops.S,
+                common_ops.XS,
+            ) = orig_sizes
+
+
+class TestOpInfoLookup(TestCase):
+    """Tests for get_opinfo_by_name, _find_opinfo_candidates, and resolve_op_names."""
+
+    def test_get_opinfo_by_name_exact(self):
+        results = get_opinfo_by_name("add")
+        self.assertGreater(len(results), 0)
+        for op in results:
+            self.assertEqual(op.name, "add")
+
+    def test_get_opinfo_by_name_qualified(self):
+        results = get_opinfo_by_name("nn.functional.relu")
+        self.assertGreater(len(results), 0)
+        for op in results:
+            self.assertEqual(op.name, "nn.functional.relu")
+
+    def test_get_opinfo_by_name_not_found_with_suggestions(self):
+        with self.assertRaises(ValueError) as ctx:
+            get_opinfo_by_name("relu")
+        self.assertIn("did you mean", str(ctx.exception))
+        self.assertIn("nn.functional.relu", str(ctx.exception))
+
+    def test_get_opinfo_by_name_not_found_no_suggestions(self):
+        with self.assertRaises(ValueError) as ctx:
+            get_opinfo_by_name("this_op_does_not_exist_xyz")
+        self.assertNotIn("did you mean", str(ctx.exception))
+
+    def test_find_opinfo_candidates_aten_name(self):
+        # relu OpInfo has aten_name="relu" explicitly set
+        candidates = _find_opinfo_candidates("relu")
+        self.assertIn("nn.functional.relu", candidates)
+
+    def test_find_opinfo_candidates_suffix(self):
+        candidates = _find_opinfo_candidates("dropout")
+        self.assertIn("nn.functional.dropout", candidates)
+
+    def test_find_opinfo_candidates_no_match(self):
+        candidates = _find_opinfo_candidates("this_op_does_not_exist_xyz")
+        self.assertEqual(candidates, [])
+
+    def test_resolve_op_names_exact(self):
+        result = resolve_op_names(["add"])
+        self.assertEqual(result, ["add"])
+
+    def test_resolve_op_names_qualified(self):
+        result = resolve_op_names(["nn.functional.relu"])
+        self.assertEqual(result, ["nn.functional.relu"])
+
+    def test_resolve_op_names_multiple(self):
+        result = resolve_op_names(["add", "mul"])
+        self.assertEqual(result, ["add", "mul"])
+
+    def test_resolve_op_names_deduplicates(self):
+        result = resolve_op_names(["add", "add"])
+        self.assertEqual(result, ["add"])
+
+    def test_resolve_op_names_glob(self):
+        result = resolve_op_names(["nn.functional.relu*"])
+        self.assertIn("nn.functional.relu", result)
+
+    def test_resolve_op_names_glob_no_match(self):
+        with self.assertRaises(ValueError) as ctx:
+            resolve_op_names(["zzz_no_match_*"])
+        self.assertIn("No OpInfo names match", str(ctx.exception))
+
+    def test_resolve_op_names_unambiguous_shorthand(self):
+        # "relu" should resolve unambiguously to "nn.functional.relu"
+        result = resolve_op_names(["nn.functional.relu"])
+        self.assertIn("nn.functional.relu", result)
+
+    def test_resolve_op_names_ambiguous_shorthand(self):
+        # "dropout" matches nn.functional.dropout, nn.functional.dropout2d, etc.
+        candidates = _find_opinfo_candidates("dropout")
+        if len(candidates) > 1:
+            with self.assertRaises(ValueError) as ctx:
+                resolve_op_names(["dropout"])
+            self.assertIn("ambiguous", str(ctx.exception))
+
+    def test_resolve_op_names_not_found(self):
+        with self.assertRaises(ValueError):
+            resolve_op_names(["this_op_does_not_exist_xyz"])
 
 
 if __name__ == "__main__":
