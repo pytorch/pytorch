@@ -765,6 +765,12 @@ register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
+    aten.squeeze.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.squeeze_.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
     aten.view.default,
     Tensor.view,
     schema_info=RuntimeSchemaInfo(1),
