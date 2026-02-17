@@ -45,6 +45,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
@@ -94,6 +95,7 @@ register_op_strategy(
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
+        prims.view_of.default,
     ]
 )(propagate_single_input_strategy)
 
@@ -861,7 +863,9 @@ def cat_single_dim_strategy(
     for i in range(common_ndim):
         if i != cat_dim:
             single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+    # pyrefly: ignore [bad-argument-type]
     single_dim_strategies.append([Partial("sum")] * (1 + num_inputs))
+    # pyrefly: ignore [bad-return]
     return single_dim_strategies
 
 
