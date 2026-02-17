@@ -1805,7 +1805,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     # CPython tests
-    'test/dynamo/cpython/**',
+    'test/cpython/**',
 ]
 
 # 'header_only_linter' reports on properly testing header-only APIs.
