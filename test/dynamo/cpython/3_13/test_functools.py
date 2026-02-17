@@ -443,8 +443,10 @@ class TestPartial:
 @unittest.skipUnless(c_functools, 'requires the C _functools module')
 class TestPartialC(TestPartial, CPythonTestCase):
     if c_functools:
-        module = c_functools
-        partial = c_functools.partial
+        module = functools
+        partial = functools.partial
+        # module = c_functools
+        # partial = c_functools.partial
 
     def test_attributes_unwritable(self):
         # attributes should not be writable
