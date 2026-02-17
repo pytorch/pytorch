@@ -6,7 +6,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -41,6 +41,7 @@ if not is_available():
 
 else:
     from torch._C._distributed_c10d import Backend as C10dBackend
+    from torch.distributed import config as dist_config
     from torch.distributed.distributed_c10d import (
         _get_default_group,
         _resolve_process_group,
@@ -425,8 +426,6 @@ else:
 
         def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
-            # TODO: think about how to allow pg options to be passed to world group
-            # or mesh dimension groups
             if not default_initialized:
                 init_process_group()
 
@@ -519,7 +518,7 @@ else:
                 ranks = list(range(get_world_size()))
                 dim_group = (
                     new_group(
-                        backend="cpu:gloo,cuda:nccl",
+                        backend=backend,
                         ranks=ranks,
                         group_desc="mesh_default",
                     )
@@ -538,7 +537,10 @@ else:
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
             if (
-                getattr(default_group, "bound_device_id", None) is not None
+                (
+                    getattr(default_group, "bound_device_id", None) is not None
+                    or dist_config.use_torchcomms
+                )
                 and torch.cuda.is_available()
                 and (
                     backend is None
@@ -597,7 +599,10 @@ else:
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
                     DeviceMesh._init_one_process_group(
-                        layout[dim], rank_map, dim_name, backend_override[dim]
+                        layout[dim],
+                        rank_map,
+                        dim_name,
+                        backend_override[dim],
                     )
                 )
             # Filter out None values. If any are None then they should all be None.
@@ -632,21 +637,19 @@ else:
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
-        def _hash_key(self) -> tuple[Any, ...]:
-            """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
-            return (
-                self._flatten_rank_map,
-                self._layout,
-                self._device_type,
-                self._mesh_dim_names,
-                self._thread_id,
-            )
-
         def __hash__(self):
             # lazily compute hash
             self._hash = getattr(self, "_hash", None)
             if not self._hash:
-                self._hash = hash(self._hash_key())
+                self._hash = hash(
+                    (
+                        self._flatten_rank_map,
+                        self._layout,
+                        self._device_type,
+                        self._mesh_dim_names,
+                        self._thread_id,
+                    )
+                )
             return self._hash
 
         def __eq__(self, other: object) -> bool:
@@ -661,17 +664,6 @@ else:
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
             )
-
-        def _stable_hash(self) -> str:
-            """
-            Return a stable hash for AOT autograd caching.
-            [See note: Tensor subclass stable hashing for AOT autograd cache]
-            """
-            import hashlib
-
-            return hashlib.blake2b(
-                repr(self._hash_key()).encode(), digest_size=16
-            ).hexdigest()
 
         def __getitem__(self, mesh_dim_names: str | tuple[str, ...]) -> "DeviceMesh":
             """
