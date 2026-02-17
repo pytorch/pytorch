@@ -247,6 +247,7 @@ def _initialize_memory_tracking(snodes, graph_inputs, graph_outputs):
         )
     )
     _curr_memory = dict(zip(snodes, snodes_curr_memory))
+    # pyrefly: ignore [unsupported-operation]
     _curr_memory[None] = (0, 0)
 
     # Build candidate buffer map for optimization
@@ -1050,7 +1051,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                         )
                         exposed_delta = exposed_after - exposed_before
                         for gw_comm_time, gw_comp_time in group_waits.values():
+                            # pyrefly: ignore [no-matching-overload]
                             gw_exposed_before = max(0, gw_comm_time - gw_comp_time)
+                            # pyrefly: ignore [no-matching-overload]
                             gw_exposed_after = max(
                                 0, gw_comm_time - gw_comp_time + c_runtime
                             )
@@ -1976,6 +1979,7 @@ def _sink_waits_iterative_internal(
                         # pyrefly: ignore[no-matching-overload]
                         -max(0, info.comm_time - info.comp_time - c_runtime)
                         for gc_comm_time, gc_comp_time in group_colls.values():
+                            # pyrefly: ignore [no-matching-overload]
                             exposed_delta += max(0, gc_comm_time - gc_comp_time) - max(
                                 0, gc_comm_time - gc_comp_time + c_runtime
                             )
