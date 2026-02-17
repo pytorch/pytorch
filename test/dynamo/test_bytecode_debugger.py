@@ -1299,7 +1299,12 @@ Stack (TOS at end):
         self.assertEqual(sess.result, inp + 3)
 
     def test_nested_debug_contexts(self):
-        """Test that nested debug() contexts restore the outer correctly."""
+        """Test that nested debug() contexts restore the outer correctly.
+
+        On Python 3.12+, compiled functions called during a sys.monitoring
+        callback skip Dynamo (tstate->tracing > 0), so nested debug contexts
+        must be tested outside monitoring callbacks.
+        """
 
         @torch.compile(backend="eager")
         def fn1(x):
@@ -1309,24 +1314,37 @@ Stack (TOS at end):
         def fn2(x):
             return x * 2
 
-        def test_logic(sess, initial):
-            self.assertIn("Entering Dynamo-generated code: fn1", initial)
-            # Enable verbose so we see all code entries
-            yield "v"
+        @torch.compile(backend="eager")
+        def fn3(x):
+            return x + 3
 
-            # Run fn2 inside a nested debug() — its context should take over
-            inner_buf = StringIO()
-            with redirect_stdout(inner_buf):
+        outer_buf = StringIO()
+        with patch("builtins.input", return_value="c"):
+            with redirect_stdout(outer_buf):
                 with debug():
-                    fn2(torch.randn(3))
-            inner_output = inner_buf.getvalue()
-            self.assertIn("Entering Dynamo-generated code: fn2", inner_output)
+                    fn1(torch.randn(3))
 
-            # Continue fn1 — outer context should still work after inner exits
-            output = yield "c"
-            self.assertIn("fn1 returned:", output)
+                    # After fn1 returns, we're outside any monitoring callback.
+                    # Create a nested debug context for fn2.
+                    inner_buf = StringIO()
+                    with redirect_stdout(inner_buf):
+                        with debug():
+                            fn2(torch.randn(3))
+                    inner_output = inner_buf.getvalue()
 
-        InteractiveDebugSession(fn1, (torch.randn(3),), test_logic)
+                    # After inner debug exits, outer should still work.
+                    fn3(torch.randn(3))
+
+        outer_output = outer_buf.getvalue()
+
+        self.assertIn("Entering Dynamo-generated code: fn1", outer_output)
+        self.assertIn("Entering Dynamo-generated code: fn2", inner_output)
+        self.assertIn("fn1 returned:", outer_output)
+        self.assertIn("fn2 returned:", inner_output)
+        # fn3 should still be tracked by the restored outer context.
+        # The "c" command disables stop-at-new-code, so we won't see the
+        # "Entering" message, but the return callback should still fire.
+        self.assertIn("fn3 returned:", outer_output)
 
     def test_nested_auto_breakpoints(self):
         """Test multiple functions with breakpoint() called sequentially."""

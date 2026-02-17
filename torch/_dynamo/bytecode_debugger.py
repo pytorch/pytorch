@@ -830,10 +830,7 @@ class _DebugContext:
         should_stop = state.step_mode or hit_breakpoint or hit_return_target
         if should_stop:
             if hit_breakpoint:
-                is_programmatic = inst is not None and self.is_programmatic_breakpoint(
-                    inst
-                )
-                if is_programmatic:
+                if inst is not None and self.is_programmatic_breakpoint(inst):
                     print("Breakpoint hit (programmatic)")
                 else:
                     print(f"Breakpoint hit at instruction {current_index}")
