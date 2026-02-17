@@ -1032,7 +1032,43 @@ class TestBenchmarkUtils(TestCase):
         for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
             x = tensors["x"]
             self.assertEqual(x, torch.tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
-
+    
+    def test_fuzzer_distributions(self):
+        for dist in ["uniform", "loguniform"]:
+            fuzzer = benchmark_utils.Fuzzer(
+                parameters=[
+                    benchmark_utils.FuzzedParameter(
+                        "n", minval=1, maxval=100, distribution=dist
+                    )
+                ],
+                tensors=[benchmark_utils.FuzzedTensor("x", size=("n",))],
+                seed=42,
+            )
+            tensors, _, _ = next(iter(fuzzer.take(1)))
+            self.assertIn("x", tensors)
+            self.assertIsInstance(tensors["x"], torch.Tensor)
+            self.assertGreaterEqual(tensors["x"].numel(), 1)
+            self.assertLessEqual(tensors["x"].numel(), 100)
+    
+    
+    def test_fuzzer_multiple_tensors(self):
+        fuzzer = benchmark_utils.Fuzzer(
+            parameters=[
+                benchmark_utils.FuzzedParameter("m", minval=2, maxval=8),
+                benchmark_utils.FuzzedParameter("n", minval=2, maxval=8),
+            ],
+            tensors=[
+                benchmark_utils.FuzzedTensor("A", size=("m", "n")),
+                benchmark_utils.FuzzedTensor("x", size=("n",)),
+            ],
+            seed=42,
+        )
+    
+        for tensors, _, _ in fuzzer.take(3):
+            A, x = tensors["A"], tensors["x"]
+            self.assertEqual(A.shape[1], x.shape[0])
+            result = A @ x
+            self.assertEqual(result.shape[0], A.shape[0])
 
 if __name__ == "__main__":
     run_tests()
