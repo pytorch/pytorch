@@ -1,7 +1,7 @@
 # Owner(s): ["module: sdpa"]
 import unittest
 from collections import namedtuple
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 import torch
 import torch.nn as nn
@@ -207,6 +207,29 @@ def create_variable_length_batch(
         "x_padded_ref": x_padded_ref,
         "max_len": max_len,
     }
+
+
+def create_kv_cache(
+    batch_size, max_len, num_heads, head_dim, page_size, device, dtype, fill_zeros=False
+):
+    alloc = torch.zeros if fill_zeros else torch.randn
+    if page_size > 0:
+        num_blocks_per_seq = (max_len + page_size - 1) // page_size
+        total_blocks = num_blocks_per_seq * batch_size
+        k = alloc(
+            total_blocks, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        v = alloc(
+            total_blocks, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        page_table = torch.arange(total_blocks, device=device, dtype=torch.int32).view(
+            batch_size, num_blocks_per_seq
+        )
+    else:
+        k = alloc(batch_size, max_len, num_heads, head_dim, device=device, dtype=dtype)
+        v = alloc(batch_size, max_len, num_heads, head_dim, device=device, dtype=dtype)
+        page_table = None
+    return k, v, page_table
 
 
 def combine_cache_and_new(
@@ -792,27 +815,9 @@ class TestVarlenAttention(NNTestCase):
             (batch_size,), cache_seqlen, device=device, dtype=torch.int32
         )
 
-        if page_size > 0:
-            num_blocks_per_seq = (max_cache_len + page_size - 1) // page_size
-            total_blocks = num_blocks_per_seq * batch_size
-            k_cache = torch.randn(
-                total_blocks, page_size, num_heads, head_dim, device=device, dtype=dtype
-            )
-            v_cache = torch.randn_like(k_cache)
-            page_table = torch.arange(
-                total_blocks, device=device, dtype=torch.int32
-            ).view(batch_size, num_blocks_per_seq)
-        else:
-            k_cache = torch.randn(
-                batch_size,
-                max_cache_len,
-                num_heads,
-                head_dim,
-                device=device,
-                dtype=dtype,
-            )
-            v_cache = torch.randn_like(k_cache)
-            page_table = None
+        k_cache, v_cache, page_table = create_kv_cache(
+            batch_size, max_cache_len, num_heads, head_dim, page_size, device, dtype
+        )
 
         cache_batch_idx = (
             torch.tensor([1, 0], device=device, dtype=torch.int32)
@@ -901,6 +906,100 @@ class TestVarlenAttention(NNTestCase):
 
         self.assertEqual(actual_out.data_ptr(), out_buf.data_ptr())
         self.assertEqual(out_buf, expected)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("seqlen_q", [1, 16])
+    @parametrize("seqlen_k", [32, 64, 128])
+    @parametrize("backend", ["FA2", "FA3"])
+    @parametrize("page_size", [0, 16])
+    def test_seqused_k_correctness(
+        self, device, dtype, seqlen_q, seqlen_k, backend, page_size
+    ):
+        if backend == "FA3" and (
+            not SM90OrLater or "FA3" not in list_flash_attention_impls()
+        ):
+            self.skipTest("FA3 requires SM90+")
+        if page_size > 0 and backend != "FA3":
+            self.skipTest("Paged KV cache requires FA3")
+
+        torch.manual_seed(42)
+        batch_size, num_heads, head_dim = 2, 4, 64
+        max_k = seqlen_k + 32
+
+        seqused_k = torch.tensor([seqlen_k, seqlen_k], device=device, dtype=torch.int32)
+
+        total_q = seqlen_q * batch_size
+        q = torch.randn(total_q, num_heads, head_dim, device=device, dtype=dtype)
+
+        k, v, page_table = create_kv_cache(
+            batch_size,
+            max_k,
+            num_heads,
+            head_dim,
+            page_size,
+            device,
+            dtype,
+        )
+
+        empty = torch.empty(0, num_heads, head_dim, device=device, dtype=dtype)
+        valid_k, valid_v, cu_seq_k_valid, max_k_valid = combine_cache_and_new(
+            batch_size,
+            None,
+            False,
+            page_size,
+            seqlen_k,
+            0,
+            empty,
+            empty,
+            k,
+            v,
+            page_table,
+            device,
+        )
+
+        if page_size > 0:
+            cu_seq_k = None
+        else:
+            k = k.reshape(batch_size * max_k, num_heads, head_dim)
+            v = v.reshape(batch_size * max_k, num_heads, head_dim)
+            cu_seq_k = torch.arange(
+                0, batch_size * max_k + 1, max_k, device=device, dtype=torch.int32
+            )
+
+        cu_seq_q = torch.arange(
+            0, total_q + 1, seqlen_q, device=device, dtype=torch.int32
+        )
+
+        with use_fa3() if backend == "FA3" else nullcontext(), torch.no_grad():
+            expected = varlen_attn(
+                query=q,
+                key=valid_k,
+                value=valid_v,
+                cu_seq_q=cu_seq_q,
+                cu_seq_k=cu_seq_k_valid,
+                max_q=seqlen_q,
+                max_k=max_k_valid,
+                window_size=(-1, 0),
+            )
+
+            actual = varlen_attn(
+                query=q,
+                key=k,
+                value=v,
+                cu_seq_q=cu_seq_q,
+                cu_seq_k=cu_seq_k,
+                max_q=seqlen_q,
+                max_k=max_k,
+                window_size=(-1, 0),
+                seqused_k=seqused_k,
+                page_table=page_table,
+            )
+
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual, expected)
 
 
 device_types = ("cuda",)
