@@ -3,8 +3,8 @@ name: Build Flash Attention 3 wheels (Windows)
 on:
   workflow_dispatch:
     inputs:
-      test:
-        description: 'Build test wheels with date suffix in version'
+      nightly:
+        description: 'Build nightly wheels (.dev{date})'
         required: false
         default: true
         type: boolean
@@ -125,11 +125,11 @@ jobs:
           nvcc --version
           python -m pip install torch==${PYTORCH_VERSION} --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
           python -m pip install einops==${EINOPS_VERSION} ninja==${NINJA_VERSION} numpy==${NUMPY_VERSION}
-          if [[ "${{ inputs.test }}" == "true" ]]; then
-            BUILD_DATE=$(date +%Y%m%d)
-            export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_VERSION}"
-          fi
           cd third_party/flash-attention/hopper
+          if [[ "${{ inputs.nightly || github.event_name == 'pull_request' }}" == "true" ]]; then
+            BUILD_DATE=$(date +%Y%m%d)
+            sed -i "s/^__version__ = \"\\(.*\\)\"/__version__ = \"\\1.dev${BUILD_DATE}\"/" __init__.py
+          fi
           python setup.py bdist_wheel -d "${FA_FINAL_PACKAGE_DIR}" -k --plat-name win_amd64
           echo "Wheel built:"
           ls -la "${FA_FINAL_PACKAGE_DIR}"/*.whl

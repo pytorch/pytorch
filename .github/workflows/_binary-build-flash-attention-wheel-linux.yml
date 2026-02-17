@@ -3,8 +3,8 @@ name: Build Flash Attention 3 wheels
 on:
   workflow_dispatch:
     inputs:
-      test:
-        description: 'Build test wheels with date suffix in version'
+      nightly:
+        description: 'Build nightly wheels (.dev{date})'
         required: false
         default: true
         type: boolean
@@ -127,7 +127,7 @@ jobs:
             -e MAX_JOBS="${{ matrix.max_jobs }}" \
             -e NVCC_THREADS="${{ matrix.nvcc_threads }}" \
             -e CUDA_INSTALLER_NAME="${{ matrix.cuda_installer_name }}" \
-            -e FA_TEST_BUILD="${{ inputs.test }}" \
+            -e FA_NIGHTLY_BUILD="${{ inputs.nightly || github.event_name == 'pull_request' }}" \
             "${container_name}" bash -c \
             "bash /pytorch/.ci/flash-attention/build.sh"
           docker exec -t "${container_name}" chown -R 1000:1000 /artifacts

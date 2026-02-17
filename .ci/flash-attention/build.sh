@@ -91,9 +91,9 @@ if [[ "${CUDA_VERSION}" == 13.* ]]; then
     export C_INCLUDE_PATH="${CCCL_INCLUDE}${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
 fi
 
-if [[ "${FA_TEST_BUILD}" == "true" ]]; then
+if [[ "${FA_NIGHTLY_BUILD}" == "true" ]]; then
     BUILD_DATE=$(date +%Y%m%d)
-    export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_SHORT}"
+    sed -i "s/^__version__ = \"\\(.*\\)\"/__version__ = \"\\1.dev${BUILD_DATE}\"/" __init__.py
 fi
 
 # stable ABI wheel requires torch>=2.9.0
