@@ -1035,12 +1035,11 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
 
             with CommDebugMode() as comm_mode:
                 # `A @ B2` will trigger redistribution on both inputs as below:
-                # A: S(1)[0]S(1)[1]
-                # B2: _S(0, 4)S(0)[0]->RS(0)->RR->S(0)R->S(0)[0]S(0)[1]
-                # The final output res2's placements will be PP.
+                # A: S(1)[0]S(1)[1]->S(1)R->RR
+                # B2: S(0)[1]S(0)[0]->RS(0)->RR
                 res2 = A @ B2
             self.assertEqual(
-                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 4
             )
             assert isinstance(res1, DTensor)
             assert isinstance(res2, DTensor)
@@ -1066,6 +1065,48 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
             assert isinstance(res2, DTensor)
             self.assertEqual(res2.full_tensor(), torch.sum(input_tensor, dim=1))
+
+    @with_comms
+    def test_inplace_op_with_strided_shard(self):
+        """Test that inplace ops work correctly with strided shard placements.
+
+        This verifies that the inplace_op flag is correctly passed during strategy
+        expansion, ensuring that incompatible Partial strategies are filtered out
+        for inplace ops like mul_.
+        """
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = init_device_mesh("cpu", (4, 4))
+            input_tensor = torch.arange(32).float().view(2, 16)
+            # Create a strided shard DTensor (similar to FSDP+TP pattern)
+            A = distribute_tensor(
+                input_tensor,
+                mesh,
+                [_StridedShard(1, split_factor=mesh.size(1)), Shard(1)],
+            )
+            original_placements = A.placements
+
+            # Test inplace mul_ with scalar - this should preserve the strided shard placement
+            with CommDebugMode() as comm_mode:
+                A.mul_(0.9)
+            # Inplace op should not require redistribution
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            # Placements should be preserved
+            self.assertEqual(A.placements, original_placements)
+            # Verify correctness
+            expected = input_tensor * 0.9
+            self.assertEqual(A.full_tensor(), expected)
+
+            # Test inplace add_ with scalar
+            B = distribute_tensor(
+                input_tensor,
+                mesh,
+                [_StridedShard(1, split_factor=mesh.size(1)), Shard(1)],
+            )
+            with CommDebugMode() as comm_mode:
+                B.add_(1.0)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(B.placements, original_placements)
+            self.assertEqual(B.full_tensor(), input_tensor + 1.0)
 
     def run_view_propagation(
         self,

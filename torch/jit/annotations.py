@@ -33,13 +33,13 @@ from torch._C import (
     TupleType,
     UnionType,
 )
-from torch._jit_internal import (  # type: ignore[attr-defined]
+from torch._jit_internal import (
     _Await,
     _qualified_name,
     Any,
     BroadcastingList1,
-    BroadcastingList2,
-    BroadcastingList3,
+    BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
+    BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
     Dict,
     Future,
     is_await,
@@ -98,7 +98,7 @@ class EvalEnv:
     def __init__(self, rcb) -> None:
         self.rcb = rcb
         if torch.distributed.rpc.is_available():
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
             self.env["RRef"] = RRef
 
     def __getitem__(self, name):
@@ -438,8 +438,11 @@ def try_ann_to_type(ann, loc, rcb=None):
         else:
             contained = ann_args[1]
         valid_type = try_ann_to_type(contained, loc)
-        msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
-        assert valid_type, msg.format(repr(ann), repr(contained), repr(loc))
+        if not valid_type:
+            raise AssertionError(
+                f"Unsupported annotation {repr(ann)} could not be resolved because "
+                f"{repr(contained)} could not be resolved. At\n{repr(loc)}"
+            )
         return OptionalType(valid_type)
     if is_union(ann):
         # TODO: this is hack to recognize NumberType
@@ -453,8 +456,11 @@ def try_ann_to_type(ann, loc, rcb=None):
             if a is None:
                 inner.append(NoneType.get())
             maybe_type = try_ann_to_type(a, loc)
-            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
-            assert maybe_type, msg.format(repr(ann), repr(maybe_type), repr(loc))
+            if not maybe_type:
+                raise AssertionError(
+                    f"Unsupported annotation {repr(ann)} could not be resolved because "
+                    f"{repr(a)} could not be resolved. At\n{repr(loc)}"
+                )
             inner.append(maybe_type)
         return UnionType(inner)  # type: ignore[arg-type]
     if torch.distributed.rpc.is_available() and is_rref(ann):
@@ -508,6 +514,7 @@ def try_ann_to_type(ann, loc, rcb=None):
     # Maybe resolve a NamedTuple to a Tuple Type
     if rcb is None:
         rcb = _fake_rcb
+    # pyrefly: ignore [bad-argument-type]
     return torch._C._resolve_type_from_object(ann, loc, rcb)
 
 

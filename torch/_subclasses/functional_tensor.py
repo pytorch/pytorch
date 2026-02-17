@@ -606,9 +606,14 @@ class FunctionalTensorMode(TorchDispatchMode):
                             for a in pytree.tree_leaves([args, kwargs]):
                                 if not isinstance(a, FunctionalTensor):
                                     continue
-                                curr_node = m.tracer.tensor_tracker[
-                                    torch._from_functional_tensor(a.elem)
-                                ].proxy.node
+                                unwrapped = torch._from_functional_tensor(a.elem)
+                                try:
+                                    tracker_entry = m.tracer.tensor_tracker[unwrapped]
+                                except KeyError:
+                                    raise RuntimeError(
+                                        f"cannot find {unwrapped} in tensor_tracker"
+                                    ) from None
+                                curr_node = tracker_entry.proxy.node
                                 with fx_traceback.set_current_replay_node(curr_node):
                                     torch._sync(a)
 
@@ -779,6 +784,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
 
+    # pyrefly: ignore [implicit-any]
     def functionalize(self, inner_f: Callable) -> Callable:
         return dispatch_functionalize(inner_f, self.mode)
 
@@ -836,6 +842,7 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _unwrap_all_tensors_from_functional(args, reapply_views=_reapply_views())
 
+    # pyrefly: ignore [implicit-any]
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(inner_f)
 
@@ -877,6 +884,7 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
             args, reapply_views=self.interpreter.functionalize_add_back_views()
         )
 
+    # pyrefly: ignore [implicit-any]
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(
             inner_f,

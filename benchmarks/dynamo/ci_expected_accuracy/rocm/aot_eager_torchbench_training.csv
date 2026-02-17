@@ -22,7 +22,7 @@ alexnet,pass,6
 
 
 
-basic_gnn_edgecnn,pass,21
+basic_gnn_edgecnn,pass,20
 
 
 
@@ -90,7 +90,7 @@ microbench_unbacked_tolist_sum,pass,9
 
 
 
-mnasnet1_0,pass,7
+mnasnet1_0,pass,0
 
 
 
