@@ -10,6 +10,7 @@ import unittest
 
 import torch
 import torch._inductor.config as inductor_config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -23,7 +24,7 @@ DEVICES = ("cpu", GPU_TYPE) if HAS_GPU else ("cpu",)
 
 
 @instantiate_parametrized_tests
-class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
+class TestCustomOpOutLowering(InductorTestCase):
     """Tests for lowering functional custom ops to out-variant ExternKernelOut."""
 
     def _register_add_one_ops(self, lib):
@@ -117,6 +118,182 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
             self.assertIn(".out(", code)
             self.assertIn("out0=", code)
             self.assertIn("out1=", code)
+
+    # ---- _out_variant.py unit tests ----
+
+    def test_to_out_variant_finds_add_one(self):
+        """Test that to_out_variant() finds the .out overload for single-output op."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_add_one_ops(lib)
+
+            from torch._library._out_variant import to_out_variant
+
+            found = to_out_variant(func_op.default)
+            self.assertIsNotNone(found)
+            self.assertEqual(found, out_op)
+
+    def test_to_out_variant_finds_split_add(self):
+        """Test that to_out_variant() finds .out for a two-output op."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_split_add_ops(lib)
+
+            from torch._library._out_variant import to_out_variant
+
+            found = to_out_variant(func_op.default)
+            self.assertIsNotNone(found)
+            self.assertEqual(found, out_op)
+
+    def test_to_out_variant_raises_for_mutable_op(self):
+        """Test that to_out_variant() raises RuntimeError for mutable ops."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("inplace_sin(Tensor(a!) x) -> ()")
+
+            def _inplace_sin_impl(x):
+                x.sin_()
+
+            lib.impl("inplace_sin", _inplace_sin_impl, "CompositeImplicitAutograd")
+
+            from torch._library._out_variant import to_out_variant
+
+            with self.assertRaises(RuntimeError):
+                to_out_variant(torch.ops.mylib.inplace_sin.default)
+
+    # ---- Additional integration tests ----
+
+    def _register_rms_norm_ops(self, lib):
+        """Register rms_norm with named 'result' out arg (follows vLLM pattern)."""
+        lib.define("rms_norm(Tensor input, Tensor weight, float epsilon) -> Tensor")
+        lib.define(
+            "rms_norm.out(Tensor input, Tensor weight, float epsilon, *, Tensor(a!) result) -> Tensor(a!)",
+            tags=(torch.Tag.out_variant,),
+        )
+
+        def _rms_norm_impl(input, weight, epsilon):
+            variance = input.pow(2).mean(-1, keepdim=True)
+            input = input * torch.rsqrt(variance + epsilon)
+            return input * weight
+
+        def _rms_norm_out_impl(input, weight, epsilon, *, result):
+            variance = input.pow(2).mean(-1, keepdim=True)
+            input = input * torch.rsqrt(variance + epsilon)
+            result.copy_(input * weight)
+            return result
+
+        lib.impl("rms_norm", _rms_norm_impl, "CompositeExplicitAutograd")
+        lib.impl("rms_norm.out", _rms_norm_out_impl, "CompositeExplicitAutograd")
+
+        @torch.library.register_fake("mylib::rms_norm", lib=lib)
+        def _rms_norm_fake(input, weight, epsilon):
+            return input.new_empty(input.shape)
+
+        return torch.ops.mylib.rms_norm, torch.ops.mylib.rms_norm.out
+
+    @inductor_config.patch(lower_custom_ops_to_out_variant=True)
+    @parametrize("device", DEVICES)
+    def test_rms_norm_lowered_to_out(self, device):
+        """Test rms_norm with named 'result' out arg (flexible out-arg naming)."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_rms_norm_ops(lib)
+
+            def f(x, weight):
+                return torch.ops.mylib.rms_norm(x, weight, 1e-5)
+
+            x = torch.randn(2, 4, device=device)
+            weight = torch.randn(4, device=device)
+            eager_out = f(x, weight)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x, weight
+            )
+            self.assertEqual(compiled_out, eager_out)
+            self.assertIn(".out(", code)
+            self.assertIn("result=", code)
+            self.assertNotIn(".default(", code)
+
+    @inductor_config.patch(lower_custom_ops_to_out_variant=True)
+    @parametrize("device", DEVICES)
+    def test_chained_ops_buffer_reuse(self, device):
+        """Test that chained custom ops participate in buffer reuse.
+
+        Pattern: x -> add_one -> (*2) -> add_one -> (+1) -> add_one -> output.
+        With ExternKernelOut, fused pointwise kernels between custom ops can
+        reuse dead buffers, producing '# reuse' comments in generated code.
+        """
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_add_one_ops(lib)
+
+            def f(x):
+                y1 = torch.ops.mylib.add_one(x)
+                y2 = y1 * 2.0
+                y3 = torch.ops.mylib.add_one(y2)
+                y4 = y3 + 1.0
+                y5 = torch.ops.mylib.add_one(y4)
+                return y5
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+            self.assertIn(".out(", code)
+            self.assertIn("# reuse", code)
+            self.assertIn("empty_strided", code)
+
+    @inductor_config.patch(lower_custom_ops_to_out_variant=True)
+    @parametrize("device", DEVICES)
+    def test_op_without_out_variant_falls_through(self, device):
+        """Test that ops without an out-variant fall through to FallbackKernel."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("no_out_op(Tensor x) -> Tensor")
+
+            def _impl(x):
+                return x + 1
+
+            lib.impl("no_out_op", _impl, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("mylib::no_out_op", lib=lib)
+            def _fake(x):
+                return x.new_empty(x.shape)
+
+            def f(x):
+                return torch.ops.mylib.no_out_op(x)
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+
+    @inductor_config.patch(lower_custom_ops_to_out_variant=True)
+    @parametrize("device", DEVICES)
+    def test_multi_output_buffer_reuse(self, device):
+        """Test buffer reuse for multi-output ops.
+
+        Pattern: split_add -> use only one output -> another op with same shape.
+        The unused output buffer should be reusable.
+        """
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_split_add_ops(lib)
+            self._register_add_one_ops(lib)
+
+            def f(x):
+                a, b = torch.ops.mylib.split_add(x, 1.0, 2.0)
+                c = torch.sin(a)
+                d = torch.ops.mylib.add_one(c)
+                return d + b
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+            self.assertIn(".out(", code)
 
     @inductor_config.patch(lower_custom_ops_to_out_variant=False)
     @parametrize("device", DEVICES)
