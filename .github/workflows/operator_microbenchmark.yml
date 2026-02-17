@@ -143,7 +143,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: opmicrobenchmark-build-rocm
     with:
-      timeout-minutes: 180
+      timeout-minutes: 250
       build-environment: ${{ needs.opmicrobenchmark-build-rocm.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}

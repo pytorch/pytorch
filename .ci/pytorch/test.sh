@@ -1823,10 +1823,10 @@ test_operator_microbenchmark() {
   TESTS_TO_RUN="${TEST_CONFIG#operator_microbenchmark_test_}"
 
   for test_module in ${TESTS_TO_RUN}; do
-    $TASKSET python -m pt.${test_module}_test --tag-filter long \
+    $TASKSET python -m "pt.${test_module}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${test_module}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
-    $TASKSET python -m pt.${test_module}_test --tag-filter long \
+    $TASKSET python -m "pt.${test_module}_test" --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${test_module}.json" \
       --benchmark-name "PyTorch operator microbenchmark"
   done
