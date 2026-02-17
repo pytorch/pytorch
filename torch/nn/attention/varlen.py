@@ -59,6 +59,7 @@ def _varlen_attn(
     cache_seqlens: torch.Tensor | None = None,
     cache_batch_idx: torch.Tensor | None = None,
     page_table: torch.Tensor | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -70,11 +71,18 @@ def _varlen_attn(
     if (k_cache is None) != (v_cache is None):
         raise ValueError("k_cache and v_cache must both be provided or both be None")
 
+    if cache_seqlens is not None and seqused_k is not None:
+        raise ValueError("cache_seqlens and seqused_k cannot both be provided.")
+
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
 
     if use_cudnn:
         if k_cache is not None:
             raise RuntimeError("cuDNN backend does not support KV cache.")
+        if seqused_k is not None:
+            # TODO: cuDNN supports per-sequence KV lengths via SEQ_LEN_KV + padding_mask,
+            # but _cudnn_attention_forward doesn't expose it yet.
+            raise RuntimeError("seqused_k is not yet supported with the cuDNN backend.")
         if window_size[0] != -1 or window_size[1] != -1:
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
@@ -114,6 +122,7 @@ def _varlen_attn(
             scale=scale,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
+            seqused_k=seqused_k,
             k_cache=k_cache,
             v_cache=v_cache,
             cache_seqlens=cache_seqlens,
@@ -165,6 +174,7 @@ def _varlen_attn_fake(
     cache_seqlens: torch.Tensor | None = None,
     cache_batch_idx: torch.Tensor | None = None,
     page_table: torch.Tensor | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -192,6 +202,7 @@ def _varlen_attn_out(
     cache_seqlens: torch.Tensor | None = None,
     cache_batch_idx: torch.Tensor | None = None,
     page_table: torch.Tensor | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention with pre-allocated output.
@@ -202,6 +213,9 @@ def _varlen_attn_out(
 
     if (k_cache is None) != (v_cache is None):
         raise ValueError("k_cache and v_cache must both be provided or both be None")
+
+    if cache_seqlens is not None and seqused_k is not None:
+        raise ValueError("cache_seqlens and seqused_k cannot both be provided.")
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
     if use_cudnn:
@@ -223,6 +237,7 @@ def _varlen_attn_out(
         scale=scale,
         window_size_left=window_size[0],
         window_size_right=window_size[1],
+        seqused_k=seqused_k,
         k_cache=k_cache,
         v_cache=v_cache,
         cache_seqlens=cache_seqlens,
@@ -256,6 +271,7 @@ def _varlen_attn_out_fake(
     cache_seqlens: torch.Tensor | None = None,
     cache_batch_idx: torch.Tensor | None = None,
     page_table: torch.Tensor | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -280,6 +296,7 @@ def varlen_attn(
     cache_seqlens: torch.Tensor | None = None,
     cache_batch_idx: torch.Tensor | None = None,
     page_table: torch.Tensor | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Compute variable-length attention using Flash Attention.
@@ -327,6 +344,12 @@ def varlen_attn(
             Shape ``(batch_size,)`` with dtype int32. If None, uses [0, 1, ..., batch_size-1].
         page_table (Tensor, optional): Page table for paged KV cache.
             Shape ``(batch_size, max_num_blocks_per_seq)`` with dtype int32.
+        seqused_k (Tensor, optional): Number of valid key/value tokens per batch element.
+            Shape ``(batch_size,)``. When provided, only the first
+            ``seqused_k[i]`` tokens of each sequence's keys/values are used during
+            attention. This is useful when key/value tensors (including any cached tokens)
+            are pre-populated and you want to limit how many are attended to, without
+            using the AppendKV cache path (``k_cache``/``v_cache``/``cache_seqlens``).
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
@@ -391,6 +414,7 @@ def varlen_attn(
         cache_seqlens,
         cache_batch_idx,
         page_table,
+        seqused_k,
     )
     if return_aux is not None and return_aux.lse:
         return output, lse
@@ -415,12 +439,13 @@ def varlen_attn_out(
     cache_seqlens: torch.Tensor | None = None,
     cache_batch_idx: torch.Tensor | None = None,
     page_table: torch.Tensor | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Out-variant of :func:`varlen_attn` that writes the output into a pre-allocated tensor.
     This avoids allocating a new output tensor, which can be useful for inference.
-
-    Autograd is NOT supported.
+    Autograd is not supported because the caller may reuse or overwrite ``out``
+    between forward and backward, which would corrupt the saved tensor.
 
     Args:
         out (Tensor): Pre-allocated output tensor; shape :math:`(T_q, H, D)`.
@@ -452,6 +477,7 @@ def varlen_attn_out(
         cache_seqlens,
         cache_batch_idx,
         page_table,
+        seqused_k,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -475,15 +501,25 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         cache_seqlens,
         cache_batch_idx,
         page_table,
+        seqused_k,
     ) = inputs
     out, lse, rng_state = output
 
     if any(
         p is not None
-        for p in (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table)
+        for p in (
+            k_cache,
+            v_cache,
+            cache_seqlens,
+            cache_batch_idx,
+            page_table,
+            seqused_k,
+        )
     ):
         raise RuntimeError(
-            "Inference-only parameters (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table) do not support autograd"
+            "Inference-only parameters \
+            (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table, seqused_k)\
+            do not support autograd"
         )
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
@@ -621,8 +657,8 @@ def _backward(
         window_size,
     )
     # None for: cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size,
-    #           k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table
-    return (dq, dk, dv, *((None,) * 12))
+    #           k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table, seqused_k
+    return (dq, dk, dv, *((None,) * 13))
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
