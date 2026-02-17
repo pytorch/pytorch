@@ -426,29 +426,9 @@ class InvokeLeafFunction(HigherOrderOperator):
     def gen_schema(self, real_fn_spec, fake_fn_spec, *flat_args):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import _maybe_fake_prop_ignore_unbacked
-        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
         fake_fn = unwrap_fn_spec(fake_fn_spec)
-
-        # Save and restore FunctionalTensorMode._tokens around the fake function
-        # call. For nested leaf functions, the fake function may call another
-        # invoke_leaf_function which triggers handle_effects and overwrites
-        # _tokens with a fake tensor token. This would corrupt the properly
-        # proxied token set up by handle_effect_tokens_fn for the joint trace.
-        # See an example in `test/dynamo/test_decorators.py -k test_leaf_function_nested_annotations`.
-        functional_mode = torch.utils._python_dispatch._detect_infra_mode(
-            torch._C._TorchDispatchModeKey.FUNCTIONAL
-        )
-        saved_tokens = dict(functional_mode._tokens) if functional_mode else None
-
-        # Disable proxy modes so the fake function's internal ops don't leak
-        # into the traced graph. Without this, operations inside
-        # the fake function would be captured as aten nodes by the proxy tracer.
-        with disable_proxy_modes_tracing():
-            fake_outputs = _maybe_fake_prop_ignore_unbacked(fake_fn, flat_args)
-
-        if functional_mode is not None and saved_tokens is not None:
-            functional_mode._tokens = saved_tokens
+        fake_outputs = _maybe_fake_prop_ignore_unbacked(fake_fn, flat_args)
 
         gen = HopSchemaGenerator(self)
         gen.add_arg("real_fn_spec", real_fn_spec)
