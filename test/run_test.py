@@ -420,18 +420,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
-<<<<<<< HEAD
-<<<<<<< HEAD
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
-=======
-CPYTHON_TESTS = [
-    test
-    for test in TESTS
-    if test.startswith(f"cpython/v{sys.version_info.major}_{sys.version_info.minor}")
-]
->>>>>>> e6de1122609 (Updated run_tests to include only current cpython version)
-=======
->>>>>>> 204eaca3b37 (Revert "Updated run_tests to include only current cpython version")
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
