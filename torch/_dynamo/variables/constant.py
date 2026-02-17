@@ -10,7 +10,7 @@ import enum
 import operator
 from collections.abc import Sequence
 from typing import Any, Literal, Optional, overload, TYPE_CHECKING, Union
-from typing_extensions import override
+from typing_extensions import Never, override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -42,6 +42,10 @@ class ConstantVariable(VariableTracker):
     The create() method intelligently constructs appropriate variable types for
     nested collections.
     """
+
+    @overload
+    @staticmethod
+    def create(value: None) -> Never: ...
 
     @overload
     @staticmethod
@@ -373,6 +377,9 @@ its type to `common_constant_types`.
             isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
+
+
+CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 
 
 class EnumVariable(VariableTracker):
