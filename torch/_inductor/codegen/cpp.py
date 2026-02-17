@@ -2938,6 +2938,7 @@ class CppVecKernel(CppKernel):
                     else f"{self._get_vec_type(dtype)}::loadu({var_expr}, {cexpr_index(self.num_elems)})"
                 )
                 value = f"({value} + {load})"
+            vec_lanes = self.vec_isa.nelements(dtype)
             if dtype == torch.float and self.tail_size is None:
                 code.writeline(f"{value}.store({var_expr});")
             else:
@@ -3583,14 +3584,17 @@ class CppTile2DKernel(CppVecKernel):
             and not inner_stride.has(outer_var)
         )
 
+
     def gen_transposed_tile_load_store(
         self, name, var, index, is_store, store_mode=None
     ):
         # transposed tile load/store outside the kernel inner loop
         dtype = V.graph.get_dtype(name)
         factor = self.tiling_factor
+
         src = f"{var} + {cexpr_index(index)}"
         dst = "__place_holder__"
+
         ld_src = f"{cexpr_index(stride_at_vec_range(index, self.itervars[self.tiling_idx], self.tiling_factor))}"
         ld_dst = f"{cexpr_index(self.num_elems)}"
         if is_store:
@@ -3601,23 +3605,43 @@ class CppTile2DKernel(CppVecKernel):
         if self.inner_is_tiling_idx ^ is_store:
             M, N = self.inner_num_elems, self.outer_num_elems
         else:
-            M, N = (
-                self.outer_num_elems,
-                self.inner_num_elems,
-            )
-        atomic_add = "true" if (is_store and (store_mode == "atomic_add")) else "false"
-        if (isinstance(M, sympy.Expr) and not M.is_number) or (
-            isinstance(N, sympy.Expr) and not N.is_number
-        ):
+            M, N = (self.outer_num_elems, self.inner_num_elems)
+
+        isa_class_name = self.vec_isa.__class__.__name__.lower()
+        is_sve = "sve" in isa_class_name
+
+        atomic_add = bool(is_store and (store_mode == "atomic_add"))
+        atomic_add_str = "true" if atomic_add else "false"
+
+        # Scalar fallback only for bf16/fp16 on AArch64 + SVE 256 bit, and only when NOT atomic_add.
+        use_scalar_transpose = is_sve and (dtype in (torch.bfloat16, torch.float16)) and (not atomic_add)
+
+        if use_scalar_transpose:
+            # Scalar transpose with the same semantics as transpose_mxn:
+            # dst[j * ld_dst + i] = src[i * ld_src + j]
             load_or_store = (
-                f"transpose_mxn<{DTYPE_TO_CPP[dtype]},{atomic_add}>"
-                f"({src}, {ld_src}, {dst}, {ld_dst}, {cexpr_index(M)}, {cexpr_index(N)});"
+                "{\n"
+                f"for (int64_t i = 0; i < {cexpr_index(M)}; ++i) {{\n"
+                f"  for (int64_t j = 0; j < {cexpr_index(N)}; ++j) {{\n"
+                f"    ({dst})[j * ({ld_dst}) + i] = ({src})[i * ({ld_src}) + j];\n"
+                "  }\n"
+                "}\n"
+                "}\n"
             )
         else:
-            load_or_store = (
-                f"transpose_mxn<{DTYPE_TO_CPP[dtype]},{cexpr_index(M)},{cexpr_index(N)},{atomic_add}>"
-                f"({src}, {ld_src}, {dst}, {ld_dst});"
-            )
+            if (isinstance(M, sympy.Expr) and not M.is_number) or (
+                isinstance(N, sympy.Expr) and not N.is_number
+            ):
+                load_or_store = (
+                    f"transpose_mxn<{DTYPE_TO_CPP[dtype]},{atomic_add_str}>"
+                    f"({src}, {ld_src}, {dst}, {ld_dst}, {cexpr_index(M)}, {cexpr_index(N)});"
+                )
+            else:
+                load_or_store = (
+                    f"transpose_mxn<{DTYPE_TO_CPP[dtype]},{cexpr_index(M)},{cexpr_index(N)},{atomic_add_str}>"
+                    f"({src}, {ld_src}, {dst}, {ld_dst});"
+                )
+
         if is_store:
             tile_var = self.cse.newvar()
         elif not self.cse.contains(load_or_store):
@@ -3628,11 +3652,8 @@ class CppTile2DKernel(CppVecKernel):
 
         if need_define:
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            # tiling_factor might be smaller than the alignment of cpp_dtype, such as
-            # with a vector that only holds 4 elements due to NEON 128-bit vectors and
-            # cpp_dtype being a 64-bit integer.
-            alignas = f"alignas(std::max(std::size_t({factor}), alignof({cpp_dtype})))"
-            define_line = f"{alignas} {cpp_dtype} {tile_var}[{factor}*{factor}];"
+            vec_align = self.vec_isa.bit_width() // 8
+            define_line = f"alignas({vec_align}) {cpp_dtype} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -3642,6 +3663,7 @@ class CppTile2DKernel(CppVecKernel):
             self.preloads.writeline(load_or_store)
 
         return tile_var
+
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -3927,26 +3949,37 @@ class TilingSelect:
                     # `#pragma omp simd simdlen(8)` for these cases.
                     return [], []
 
-            if dtype in DTYPE_LOWP_FP:
-                # For lower precision data type, if the call_range is not long enough,
-                # use tiling_factor // 2 for better performance
-                factor_lowp = cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype)
-                for tiling_indice in tiling_indices:
-                    if tiling_indice < 0:
-                        tiling_indice = tiling_indice + len(call_ranges)
-                    if tiling_indice < 0 or tiling_indice >= len(call_ranges):
-                        continue
-                    if has_free_symbols(call_ranges):
-                        call_range = V.graph.sizevars.size_hint(
-                            call_ranges[tiling_indice], fallback=0
-                        )
-                        if call_range < factor_lowp:
-                            V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]
-                            tiling_factor = factor_lowp // 2
-                            break
-                    elif call_ranges[tiling_indice] < factor_lowp:
-                        tiling_factor = factor_lowp // 2
-                        break
+                if dtype in DTYPE_LOWP_FP:
+                    # For lower precision data type, the "tiling_factor // 2" heuristic can
+                    # select half-width tiling on wide-vector ISAs (notably SVE 256 bit), which changes
+                    # codegen paths. Disable this heuristic on SVE 256 bit to avoid correctness issues.
+                    isa = cpu_vec_isa.pick_vec_isa()
+                    assert isa is not None
+                    factor_lowp = isa.nelements(dtype=dtype)
+
+                    is_sve256 = (
+                        "sve" in isa.__class__.__name__.lower()
+                        and isa.bit_width() == 256
+                    )
+                    if not is_sve256:
+                        for tiling_indice in tiling_indices:
+                            if tiling_indice < 0:
+                                tiling_indice = tiling_indice + len(call_ranges)
+                            if tiling_indice < 0 or tiling_indice >= len(call_ranges):
+                                continue
+                            if has_free_symbols(call_ranges):
+                                call_range = V.graph.sizevars.size_hint(
+                                    call_ranges[tiling_indice], fallback=0
+                                )
+                                if call_range < factor_lowp:
+                                    V.graph.sizevars.check_lt(call_range, factor_lowp)  # type: ignore[arg-type]
+                                    tiling_factor = factor_lowp // 2
+                                    break
+                            elif call_ranges[tiling_indice] < factor_lowp:
+                                tiling_factor = factor_lowp // 2
+                                break
+
+
 
             if len(tiling_indices) == 1:
                 return [tiling_factor], tiling_indices
