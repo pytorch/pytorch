@@ -432,21 +432,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -471,13 +459,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -558,21 +545,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -597,13 +572,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -673,6 +647,16 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
@@ -682,18 +666,6 @@ jobs:
         with:
           name: manywheel-py3_10-xpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -702,13 +674,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
@@ -1119,21 +1090,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1158,13 +1117,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -1245,21 +1203,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1284,13 +1230,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -1360,6 +1305,16 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
@@ -1369,18 +1324,6 @@ jobs:
         with:
           name: manywheel-py3_11-xpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -1389,13 +1332,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
@@ -1806,21 +1748,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1845,13 +1775,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -1932,21 +1861,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -1971,13 +1888,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -2047,6 +1963,16 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
@@ -2056,18 +1982,6 @@ jobs:
         with:
           name: manywheel-py3_12-xpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -2076,13 +1990,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
@@ -2493,21 +2406,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2532,13 +2433,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -2619,21 +2519,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -2658,13 +2546,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -2734,6 +2621,16 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
@@ -2743,18 +2640,6 @@ jobs:
         with:
           name: manywheel-py3_13-xpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -2763,13 +2648,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
@@ -3180,21 +3064,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3219,13 +3091,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -3306,21 +3177,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3345,13 +3204,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -3421,6 +3279,16 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
@@ -3430,18 +3298,6 @@ jobs:
         with:
           name: manywheel-py3_13t-xpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -3450,13 +3306,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
@@ -3867,21 +3722,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -3906,13 +3749,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -3993,21 +3835,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4032,13 +3862,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -4108,6 +3937,16 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
@@ -4117,18 +3956,6 @@ jobs:
         with:
           name: manywheel-py3_14-xpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -4137,13 +3964,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
@@ -4554,21 +4380,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4593,13 +4407,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.1
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -4680,21 +4493,9 @@ jobs:
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
-          git clean -fxd #Cloning for diskspace-cleanup of teardown-rocm
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Setup ROCm
-        uses: ./pytorch/.github/actions/setup-rocm
+        uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -4719,13 +4520,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.2
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -4795,6 +4595,16 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
@@ -4804,18 +4614,6 @@ jobs:
         with:
           name: manywheel-py3_14t-xpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -4824,13 +4622,12 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: xpu
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
