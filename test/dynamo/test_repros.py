@@ -1636,7 +1636,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
         def fn(model, x):
-            return x + torch.randn(10, dtype=get_parameter_dtype(model))
+            return x + torch.randn(
+                10, dtype=get_parameter_dtype(model), device=x.device
+            )
 
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
@@ -7145,9 +7147,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             ]
             return image_latent[torch.arange(B).unsqueeze(-1), indices][:, :num_ref]
 
+        # Generate input once to ensure consistency across runs
         torch.manual_seed(54321)
         torch.cuda.manual_seed_all(54321)
-        expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
+        image_latent = torch.randn((2, 12, 16, 32, 32))
+
+        torch.manual_seed(54321)
+        torch.cuda.manual_seed_all(54321)
+        expected = f(image_latent).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
         with torch._inductor.config.patch(fallback_random=True):
@@ -7155,7 +7162,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 torch.manual_seed(54321)
                 torch.cuda.manual_seed_all(54321)
                 actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                    torch.randn((2, 12, 16, 32, 32))
+                    image_latent
                 ).sum()
                 self.assertEqual(actual, expected)
 
