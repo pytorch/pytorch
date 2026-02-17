@@ -1,6 +1,5 @@
 # Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
-# Consolidated CuTE DSL utilities for RMSNorm/LayerNorm kernels.
-# Extracted from the quack repository (https://github.com/Dao-AILab/quack).
+# CuTE DSL utilities for RMSNorm/LayerNorm kernels.
 
 # pyre-ignore-all-errors
 # ruff: noqa: S101
@@ -13,30 +12,10 @@ from typing import Optional
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import BFloat16, Boolean, const_expr, Float16, Float32, Int32, Int64
+from cutlass import Boolean, const_expr, Float32, Int32, Int64
 from cutlass._mlir.dialects import llvm
 from cutlass.cute.nvgpu import cpasync
 from cutlass.cutlass_dsl import dsl_user_op, T
-
-import torch
-
-
-# ---------------------------------------------------------------------------
-# dtype mapping (from cute_dsl_utils.py)
-# ---------------------------------------------------------------------------
-
-torch2cute_dtype_map = {
-    torch.float16: Float16,
-    torch.bfloat16: BFloat16,
-    torch.float32: Float32,
-    torch.int32: Int32,
-    torch.int64: Int64,
-}
-
-
-# ---------------------------------------------------------------------------
-# make_fake_tensor (from compile_utils.py)
-# ---------------------------------------------------------------------------
 
 
 def make_fake_tensor(
@@ -55,20 +34,10 @@ def make_fake_tensor(
     )
 
 
-# ---------------------------------------------------------------------------
-# expand (from layout_utils.py)
-# ---------------------------------------------------------------------------
-
-
 def expand(a: cute.Tensor, dim: int, size: Int32 | int) -> cute.Tensor:
     shape = (*a.shape[:dim], size, *a.shape[dim:])
     stride = (*a.layout.stride[:dim], 0, *a.layout.stride[dim:])
     return cute.make_tensor(a.iterator, cute.make_layout(shape, stride=stride))
-
-
-# ---------------------------------------------------------------------------
-# Copy utilities (from copy_utils.py)
-# ---------------------------------------------------------------------------
 
 
 @dsl_user_op
@@ -139,11 +108,6 @@ def predicate_k(tAcA: cute.Tensor, limit: Int32) -> cute.Tensor:
                 tAcA[(0, rest_v), 0, rest_k][1], limit
             )
     return tApA
-
-
-# ---------------------------------------------------------------------------
-# PTX utilities (from utils.py)
-# ---------------------------------------------------------------------------
 
 
 @dsl_user_op
@@ -234,15 +198,9 @@ def fill_oob(
                 cute.autovec_copy(tXrX_fill, tXsX[(None, rest_v), None, rest_k])
 
 
-# ---------------------------------------------------------------------------
-# Reduction (from reduce.py)
-# ---------------------------------------------------------------------------
-
-
 @cute.jit
 def block_reduce(
     val: cute.Numeric,
-    op: Callable,
     reduction_buffer: cute.Tensor,
     init_val: cute.Numeric = 0.0,
 ) -> cute.Numeric:
@@ -256,13 +214,12 @@ def block_reduce(
     block_reduce_val = init_val
     if lane_idx < warps_per_row:
         block_reduce_val = reduction_buffer[row_idx, lane_idx]
-    return cute.arch.warp_reduction(block_reduce_val, op)
+    return cute.arch.warp_reduction(block_reduce_val, operator.add)
 
 
 @cute.jit
 def cluster_reduce(
     val: cute.Numeric,
-    op: Callable,
     reduction_buffer: cute.Tensor,
     mbar_ptr: cute.Pointer,
     init_val: cute.Numeric = 0.0,
@@ -296,25 +253,23 @@ def cluster_reduce(
     for i in cutlass.range_constexpr(num_iter):
         idx = lane_idx + i * cute.arch.WARP_SIZE
         if idx < cute.size(reduction_buffer, mode=[1]):
-            block_reduce_val = op(block_reduce_val, reduction_buffer[row_idx, idx])
-    return cute.arch.warp_reduction(block_reduce_val, op)
+            block_reduce_val = operator.add(block_reduce_val, reduction_buffer[row_idx, idx])
+    return cute.arch.warp_reduction(block_reduce_val, operator.add)
 
 
 @cute.jit
 def block_or_cluster_reduce(
     val: cute.Numeric,
-    op: Callable,
     reduction_buffer: cute.Tensor,
     mbar_ptr: Optional[cute.Pointer],
     phase: Optional[Int32] = None,
     init_val: cute.Numeric = 0.0,
 ) -> cute.Numeric:
     if const_expr(mbar_ptr is None):
-        return block_reduce(val, op, reduction_buffer, init_val=init_val)
+        return block_reduce(val, reduction_buffer, init_val=init_val)
     else:
         return cluster_reduce(
             val,
-            op,
             reduction_buffer,
             mbar_ptr,
             phase=phase,
@@ -325,7 +280,6 @@ def block_or_cluster_reduce(
 @cute.jit
 def row_reduce(
     x: cute.TensorSSA | cute.Numeric,
-    op: cute.ReductionOp,
     threads_per_row: cutlass.Constexpr[int],
     reduction_buffer: Optional[cute.Tensor] = None,
     mbar_ptr: Optional[cute.Pointer] = None,
@@ -335,20 +289,12 @@ def row_reduce(
 ) -> cute.Numeric:
     """reduction_buffer must have shape (num_warps / warps_per_row, (warps_per_row, cluster_n))"""
     if const_expr(isinstance(x, cute.TensorSSA)):
-        val = x.reduce(op, init_val=init_val, reduction_profile=0)
+        val = x.reduce(cute.ReductionOp.ADD, init_val=init_val, reduction_profile=0)
     else:
         val = x
-    warp_op = {
-        cute.ReductionOp.ADD: operator.add,
-        cute.ReductionOp.MAX: (
-            cute.arch.fmax if const_expr(x.dtype == Float32) else max
-        ),
-        cute.ReductionOp.MIN: min,
-        cute.ReductionOp.MUL: operator.mul,
-    }[op]
     val = cute.arch.warp_reduction(
         val,
-        warp_op,
+        operator.add,
         threads_in_group=min(threads_per_row, cute.arch.WARP_SIZE),
     )
     if const_expr(hook_fn is not None):
@@ -361,7 +307,6 @@ def row_reduce(
         if const_expr(warps_per_row > 1 or cluster_n > 1):
             val = block_or_cluster_reduce(
                 val,
-                warp_op,
                 reduction_buffer,
                 mbar_ptr,
                 phase=phase,
@@ -370,101 +315,87 @@ def row_reduce(
     return val
 
 
-# ---------------------------------------------------------------------------
-# ReductionBase (from reduction_base.py)
-# ---------------------------------------------------------------------------
+def get_tiled_copy(
+    dtype: type[cutlass.Numeric],
+    N: int,
+    cluster_n: int,
+    threads_per_row: int,
+    num_threads: int,
+    vecsize: int = 1,
+):
+    assert N % vecsize == 0, (
+        f"Input N {N} is not divisible by vector size {vecsize}"
+    )
+    assert num_threads % cute.arch.WARP_SIZE == 0
+    num_blocks_N = cute.ceil_div(N // vecsize, threads_per_row * cluster_n)
+    tiler_mn = (
+        num_threads // threads_per_row,
+        vecsize * num_blocks_N * threads_per_row,
+    )
+    tc = tiled_copy_2d(dtype, threads_per_row, num_threads, vecsize)
+    return tc, tiler_mn, threads_per_row
 
 
-class ReductionBase:
-    def __init__(
-        self,
-        dtype: type[cutlass.Numeric],
-        N: int,
-        stage: int,
-        reduction_dtype=Float32,
-    ):
-        self.dtype = dtype
-        self.N = N
-        self.stage = stage
-        self.reduction_dtype = reduction_dtype
+def get_reduction_buffer_layout(
+    stage: int,
+    tv_layout: cute.Layout,
+    cluster_n: int,
+):
+    num_warps = cute.size(tv_layout, mode=[0]) // cute.arch.WARP_SIZE
+    warps_per_row = (
+        num_warps
+        if cute.rank(tv_layout.shape[0]) == 1
+        else max(tv_layout.shape[0][0] // cute.arch.WARP_SIZE, 1)
+    )
+    return cute.make_ordered_layout(
+        (
+            num_warps // warps_per_row,
+            (warps_per_row, cluster_n),
+            stage,
+        ),
+        order=(1, 0, 2),
+    )
 
-    def _threads_per_row(self):
-        raise NotImplementedError
 
-    def _num_threads(self):
-        return 128 if self.N <= 16384 else 256
-
-    def _set_cluster_n(self):
-        self.cluster_n = 1
-
-    def _get_tiled_copy(self, vecsize: int = 1):
-        assert self.N % vecsize == 0, (
-            f"Input N {self.N} is not divisible by vector size {vecsize}"
+def allocate_reduction_buffer_and_mbar(
+    smem: cutlass.utils.SmemAllocator,
+    reduction_dtype: type[cutlass.Numeric],
+    stage: int,
+    cluster_n: int,
+    tv_layout: cute.Layout,
+    is_persistent: bool = False,
+) -> tuple[cute.Tensor, Optional[cute.Pointer]]:
+    reduction_buffer = smem.allocate_tensor(
+        reduction_dtype,
+        get_reduction_buffer_layout(stage, tv_layout, cluster_n),
+        byte_alignment=8,
+    )
+    if const_expr(cluster_n > 1):
+        mbar_ptr = smem.allocate_array(
+            Int64,
+            num_elems=(stage if not is_persistent else stage * 2),
         )
-        threads_per_row = self._threads_per_row()
-        num_threads = self._num_threads()
-        assert num_threads % cute.arch.WARP_SIZE == 0
-        num_blocks_N = cute.ceil_div(
-            self.N // vecsize, threads_per_row * self.cluster_n
-        )
-        tiler_mn = (
-            num_threads // threads_per_row,
-            vecsize * num_blocks_N * threads_per_row,
-        )
-        tc = tiled_copy_2d(self.dtype, threads_per_row, num_threads, vecsize)
-        return tc, tiler_mn, threads_per_row
+    else:
+        mbar_ptr = None
+    return reduction_buffer, mbar_ptr
 
-    def _get_reduction_buffer_layout(self, tv_layout: cute.Layout, cluster_n: int):
-        num_warps = cute.size(tv_layout, mode=[0]) // cute.arch.WARP_SIZE
-        warps_per_row = (
-            num_warps
-            if cute.rank(tv_layout.shape[0]) == 1
-            else max(tv_layout.shape[0][0] // cute.arch.WARP_SIZE, 1)
-        )
-        return cute.make_ordered_layout(
-            (
-                num_warps // warps_per_row,
-                (warps_per_row, cluster_n),
-                self.stage,
-            ),
-            order=(1, 0, 2),
-        )
 
-    def _allocate_reduction_buffer_and_mbar(
-        self,
-        smem: cutlass.utils.SmemAllocator,
-        tv_layout: cute.Layout,
-        is_persistent: bool = False,
-    ) -> tuple[cute.Tensor, Optional[cute.Pointer]]:
-        reduction_buffer = smem.allocate_tensor(
-            self.reduction_dtype,
-            self._get_reduction_buffer_layout(tv_layout, self.cluster_n),
-            byte_alignment=8,
-        )
-        if const_expr(self.cluster_n > 1):
-            mbar_ptr = smem.allocate_array(
-                Int64,
-                num_elems=(self.stage if not is_persistent else self.stage * 2),
-            )
-        else:
-            mbar_ptr = None
-        return reduction_buffer, mbar_ptr
-
-    @cute.jit
-    def _initialize_cluster(
-        self,
-        tidx: Int32,
-        mbar_ptr: cute.Pointer,
-        num_warps: int,
-        is_persistent: bool = False,
-    ):
-        if const_expr(self.cluster_n > 1):
-            if tidx < self.stage:
-                cute.arch.mbarrier_init(mbar_ptr + tidx, 1)
-                if const_expr(is_persistent):
-                    cute.arch.mbarrier_init(
-                        mbar_ptr + self.stage + tidx,
-                        num_warps * self.cluster_n,
-                    )
-            cute.arch.mbarrier_init_fence()
-            cute.arch.cluster_arrive_relaxed()
+@cute.jit
+def initialize_cluster(
+    tidx: Int32,
+    mbar_ptr: cute.Pointer,
+    num_warps: int,
+    cluster_n: int,
+    stage: int,
+    is_persistent: bool = False,
+):
+    if const_expr(cluster_n > 1):
+        if tidx < stage:
+            cute.arch.mbarrier_init(mbar_ptr + tidx, 1)
+            if const_expr(is_persistent):
+                cute.arch.mbarrier_init(
+                    mbar_ptr + stage + tidx,
+                    num_warps * cluster_n,
+                )
+        cute.arch.mbarrier_init_fence()
+        cute.arch.cluster_arrive_relaxed()

@@ -1,6 +1,5 @@
 # Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
 # RMSNorm/LayerNorm CuTE DSL kernel classes and torch.library.custom_op wrappers.
-# Extracted from the quack repository (https://github.com/Dao-AILab/quack).
 
 # pyre-ignore-all-errors
 # ruff: noqa: S101
@@ -13,28 +12,41 @@ import cuda.bindings.driver as cuda
 
 import cutlass
 import cutlass.cute as cute
-from cutlass import const_expr, Float32, Int32
+from cutlass import BFloat16, const_expr, Float16, Float32, Int32, Int64
 
 import torch
 from torch import Tensor
 
 from ._cute_utils import (
+    allocate_reduction_buffer_and_mbar,
     copy,
     expand,
     fill_oob,
+    get_tiled_copy,
+    initialize_cluster,
     make_fake_tensor as fake_tensor,
     predicate_k,
-    ReductionBase,
     row_reduce,
-    torch2cute_dtype_map,
 )
 
 
-class RMSNorm(ReductionBase):
+_TORCH2CUTE_DTYPE = {
+    torch.float16: Float16,
+    torch.bfloat16: BFloat16,
+    torch.float32: Float32,
+    torch.int32: Int32,
+    torch.int64: Int64,
+}
+
+
+class RMSNorm:
     def __init__(
         self, dtype: type[cutlass.Numeric], N: int, is_layernorm: bool = False
     ):
-        super().__init__(dtype, N, stage=2 if is_layernorm else 1)
+        self.dtype = dtype
+        self.N = N
+        self.stage = 2 if is_layernorm else 1
+        self.reduction_dtype = Float32
         self.is_layernorm = is_layernorm
         self.reload_from = None if N <= (16384 if is_layernorm else 8192) else "smem"
         self.delay_w_load = False
@@ -51,6 +63,9 @@ class RMSNorm(ReductionBase):
             if N <= limit:
                 return threads
         return 256
+
+    def _num_threads(self):
+        return 128 if self.N <= 16384 else 256
 
     def _set_cluster_n(self):
         N = self.N
@@ -100,7 +115,10 @@ class RMSNorm(ReductionBase):
             )
         )
         vecsize = math.gcd(self.N, 128 // largest_dtype_width)
-        tiled_copy, tiler_mn, threads_per_row = self._get_tiled_copy(vecsize=vecsize)
+        tiled_copy, tiler_mn, threads_per_row = get_tiled_copy(
+            self.dtype, self.N, self.cluster_n,
+            self._threads_per_row(), self._num_threads(), vecsize=vecsize,
+        )
         num_threads = tiled_copy.size
         mW, mB = [
             expand(mT, dim=0, size=tiler_mn[0]) if const_expr(mT is not None) else None
@@ -167,8 +185,8 @@ class RMSNorm(ReductionBase):
                 cute.make_ordered_layout(tiler_mn, order=(1, 0)),
                 byte_alignment=16,
             )
-        reduction_buffer, mbar_ptr = self._allocate_reduction_buffer_and_mbar(
-            smem, tv_layout
+        reduction_buffer, mbar_ptr = allocate_reduction_buffer_and_mbar(
+            smem, self.reduction_dtype, self.stage, self.cluster_n, tv_layout
         )
 
         shape = mX.shape
@@ -211,7 +229,7 @@ class RMSNorm(ReductionBase):
             tXrRes = cute.make_fragment_like(tXgRes)
 
         num_warps = cute.size(tiled_copy) // cute.arch.WARP_SIZE
-        self._initialize_cluster(tidx, mbar_ptr, num_warps)
+        initialize_cluster(tidx, mbar_ptr, num_warps, self.cluster_n, self.stage)
 
         is_even_N = const_expr(shape[1] == tiler_mn[1] * self.cluster_n)
         tXpX = (
@@ -250,7 +268,6 @@ class RMSNorm(ReductionBase):
         if const_expr(self.is_layernorm):
             sum_x = row_reduce(
                 x,
-                cute.ReductionOp.ADD,
                 threads_per_row,
                 reduction_buffer[None, None, 0],
                 mbar_ptr + 0 if const_expr(self.cluster_n > 1) else None,
@@ -281,7 +298,6 @@ class RMSNorm(ReductionBase):
                     x += tXrRes.load().to(cute.Float32)
             sum_sq_x_sub_mean = row_reduce(
                 (x - mean) * (x - mean),
-                cute.ReductionOp.ADD,
                 threads_per_row,
                 reduction_buffer[None, None, 1],
                 mbar_ptr + 1 if const_expr(self.cluster_n > 1) else None,
@@ -292,7 +308,6 @@ class RMSNorm(ReductionBase):
             mean = const_expr(0.0)
             sum_sq_x = row_reduce(
                 x * x,
-                cute.ReductionOp.ADD,
                 threads_per_row,
                 reduction_buffer[None, None, 0],
                 mbar_ptr,
@@ -376,7 +391,7 @@ def _rmsnorm_fwd(
 
     _, N = x.shape
     dtype, out_dtype, weight_dtype, bias_dtype, res_dtype, res_out_dtype = [
-        torch2cute_dtype_map[t.dtype] if t is not None else None
+        _TORCH2CUTE_DTYPE[t.dtype] if t is not None else None
         for t in [x, out, weight, bias, residual, residual_out]
     ]
     compile_key = (
@@ -433,9 +448,12 @@ def _rmsnorm_fwd(
 _rmsnorm_fwd.compile_cache = {}
 
 
-class RMSNormBackward(ReductionBase):
+class RMSNormBackward:
     def __init__(self, dtype: cutlass.Numeric, N: int):
-        super().__init__(dtype, N, stage=2, reduction_dtype=Float32)
+        self.dtype = dtype
+        self.N = N
+        self.stage = 2
+        self.reduction_dtype = Float32
         self.reload_wdy = None if N <= 16 * 1024 else "smem"
         if self.N > 128 * 1024 and self.dtype.width >= 32:
             raise ValueError(
@@ -492,7 +510,10 @@ class RMSNormBackward(ReductionBase):
             )
         )
         vecsize = math.gcd(self.N, 128 // largest_dtype_width)
-        tiled_copy, tiler_mn, threads_per_row = self._get_tiled_copy(vecsize=vecsize)
+        tiled_copy, tiler_mn, threads_per_row = get_tiled_copy(
+            self.dtype, self.N, self.cluster_n,
+            self._threads_per_row(), self._num_threads(), vecsize=vecsize,
+        )
         num_threads = tiled_copy.size
         mW = expand(mW, dim=0, size=tiler_mn[0]) if const_expr(mW is not None) else None
         num_blocks = sm_count
@@ -554,8 +575,9 @@ class RMSNormBackward(ReductionBase):
         )
         sX = smem.allocate_tensor(mX.element_type, smem_layout, byte_alignment=16)
         sdO = smem.allocate_tensor(mdO.element_type, smem_layout, byte_alignment=16)
-        reduction_buffer, mbar_ptr = self._allocate_reduction_buffer_and_mbar(
-            smem, tv_layout, is_persistent=True
+        reduction_buffer, mbar_ptr = allocate_reduction_buffer_and_mbar(
+            smem, self.reduction_dtype, self.stage, self.cluster_n,
+            tv_layout, is_persistent=True,
         )
         if const_expr(mbar_ptr is not None):
             mbar_full_ptr, mbar_empty_ptr = mbar_ptr, mbar_ptr + 2
@@ -616,7 +638,10 @@ class RMSNormBackward(ReductionBase):
 
         num_warps = cute.size(tiled_copy) // cute.arch.WARP_SIZE
 
-        self._initialize_cluster(tidx, mbar_ptr, num_warps, is_persistent=True)
+        initialize_cluster(
+            tidx, mbar_ptr, num_warps, self.cluster_n, self.stage,
+            is_persistent=True,
+        )
 
         tXrW = None
         if const_expr(mW is not None):
@@ -707,7 +732,6 @@ class RMSNormBackward(ReductionBase):
             mean_xhat_wdy = (
                 row_reduce(
                     x_hat * wdy,
-                    cute.ReductionOp.ADD,
                     threads_per_row,
                     reduction_buffer[None, None, stage],
                     (mbar_full_ptr + stage if const_expr(self.cluster_n > 1) else None),
@@ -885,7 +909,7 @@ def _rmsnorm_bwd(
             dw_partial.shape[0] if dw_partial is not None else db_partial.shape[0]
         )
     dtype, dout_dtype, dx_dtype, weight_dtype, dres_dtype, dres_out_dtype = [
-        torch2cute_dtype_map[t.dtype] if t is not None else None
+        _TORCH2CUTE_DTYPE[t.dtype] if t is not None else None
         for t in [x, dout, dx, weight, dresidual, dresidual_out]
     ]
     compile_key = (
