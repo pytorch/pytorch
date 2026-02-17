@@ -8952,7 +8952,7 @@ class GraphModule(torch.nn.Module):
 
     @requires_cuda
     @parametrize("device", ["cuda", "cpu"])
-    def test_cond_input_mutation_same_identity(self, device):
+    def test_cond_input_mutation(self, device):
         predicate_true = torch.tensor(True, device=device)
         predicate_false = torch.tensor(False, device=device)
         org_data = torch.ones(2, 2, device=device)
@@ -8967,6 +8967,7 @@ class GraphModule(torch.nn.Module):
             data = org_data.clone()
             output = torch.compile(fn)(predicate_false, data)
             self.assertEqual(output, expected)
+            self.assertIsNot(output, data)
 
             data = org_data.clone()
             output = torch.compile(fn)(predicate_true, data)
@@ -9404,7 +9405,6 @@ class TestAutoFunctionalizeControlFlow(TestCase):
                 eager_out = torch.compile(
                     _new_fn(), backend=backend, fullgraph=True, dynamic=dynamic
                 )(*cloned_args[1])
-            # print(backend.fw_graphs[0].print_readable(print_output=False))
             torch._dynamo.reset()
             with torch.no_grad():
                 inductor_out = torch.compile(
