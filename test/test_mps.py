@@ -423,7 +423,8 @@ class TestPixelShuffle(TestCaseMPS):
 
                 if num_input_dims == 1:
                     input = torch.rand(channels, requires_grad=True, device='mps')
-                    assert is_contiguous
+                    if not is_contiguous:
+                        raise AssertionError("1D input should be contiguous")
                 elif num_input_dims == 2:
                     input = torch.rand(width, height, requires_grad=True, device='mps').T
                     if is_contiguous:
@@ -436,7 +437,8 @@ class TestPixelShuffle(TestCaseMPS):
                         input = input.contiguous()
 
                 if not is_contiguous and len(input.reshape(-1)) > 0:
-                    assert not input.is_contiguous()
+                    if input.is_contiguous():
+                        raise AssertionError("expected non-contiguous input")
 
                 input = input.detach().clone()
                 input.requires_grad = True
@@ -697,7 +699,8 @@ class MPSLeakyReluTest(TestCaseMPS):
             # Transposing will make the tensor non-contiguous
             cpu_x = cpu_x.transpose(0, 1)
             mps_x = mps_x.transpose(0, 1)
-            assert not mps_x.is_contiguous()
+            if mps_x.is_contiguous():
+                raise AssertionError("expected non-contiguous tensor")
 
         cpu_x.requires_grad_()
         mps_x.requires_grad_()
@@ -716,7 +719,8 @@ class MPSLeakyReluTest(TestCaseMPS):
         mps_leaky_relu.backward(gradient=mps_grad)
         cpu_leaky_relu.backward(gradient=cpu_grad)
 
-        assert cpu_x.grad is not None  # Check that the grad is well-populated
+        if cpu_x.grad is None:
+            raise AssertionError("expected cpu_x.grad to be populated")
         self.assertEqual(cpu_x.grad, mps_x.grad)
 
     def testNumbersCPU(self):
@@ -1082,7 +1086,8 @@ class TestMPS(TestCaseMPS):
             d.backward(dist_grad)
             # Check that the backward pass does not contain invalid
             # values such as nan or inf
-            assert torch.isfinite(x.grad).all()
+            if not torch.isfinite(x.grad).all():
+                raise AssertionError("expected x.grad to be finite")
 
 
     def _brute_cdist(self, x, y, p=2):
@@ -4225,8 +4230,10 @@ class TestMPS(TestCaseMPS):
         inputs = torch.tensor([[0, 0], [3, 1], [2, 1], [1, 1], [3, 4]], device=device, dtype=torch.int32)
         weights = torch.tensor([[.1, 1], [.2, 2], [.3, 3], [.4, 4], [.5, 5]], device=device)
         for i in [0, 1]:
-            assert not inputs[:, i].is_contiguous(), "Inputs are supposed to be non-contiguous"
-            assert not weights[:, i].is_contiguous(), "Weights are supposed to be non-contiguous"
+            if inputs[:, i].is_contiguous():
+                raise AssertionError("Inputs are supposed to be non-contiguous")
+            if weights[:, i].is_contiguous():
+                raise AssertionError("Weights are supposed to be non-contiguous")
         # inputs are non-contiguous but weights are contiguous
         self.assertEqual(inputs[:, 0].bincount(), torch.tensor([1, 1, 1, 2]))
         # inputs and weights are non-contiguous
@@ -6539,7 +6546,8 @@ class TestMPS(TestCaseMPS):
                 # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
-                assert not x.is_contiguous()
+                if x.is_contiguous():
+                    raise AssertionError("expected non-contiguous tensor")
 
             cpu_x.requires_grad_()
             x.requires_grad_()
@@ -6695,7 +6703,8 @@ class TestMPS(TestCaseMPS):
                 # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
-                assert not x.is_contiguous()
+                if x.is_contiguous():
+                    raise AssertionError("expected non-contiguous tensor")
 
             cpu_x.requires_grad_()
             x.requires_grad_()
@@ -6714,7 +6723,8 @@ class TestMPS(TestCaseMPS):
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
 
-            assert x.grad is not None  # Check that the grad is well-populated
+            if x.grad is None:
+                raise AssertionError("expected x.grad to be populated")
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
@@ -6735,7 +6745,8 @@ class TestMPS(TestCaseMPS):
                 # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
-                assert not x.is_contiguous()
+                if x.is_contiguous():
+                    raise AssertionError("expected non-contiguous tensor")
 
             cpu_x.requires_grad_()
             x.requires_grad_()
@@ -6753,7 +6764,8 @@ class TestMPS(TestCaseMPS):
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(mish_result, mish_result_cpu.to(dtype), atol=atol, rtol=rtol)
 
-            assert x.grad is not None  # Check that the grad is well-populated
+            if x.grad is None:
+                raise AssertionError("expected x.grad to be populated")
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
@@ -8937,10 +8949,14 @@ class TestNNMPS(NNTestCase):
 
     def test_requires_grad_(self):
         m = self._create_basic_net()[-1]
-        assert len(list(m.buffers())) > 0, 'invalid test'
-        assert all(not b.requires_grad for b in m.buffers()) > 0, 'invalid test'
-        assert len(list(m.parameters())) > 0, 'invalid test'
-        assert all(p.requires_grad for p in m.parameters()) > 0, 'invalid test'
+        if len(list(m.buffers())) <= 0:
+            raise AssertionError('invalid test: expected buffers')
+        if not all(not b.requires_grad for b in m.buffers()):
+            raise AssertionError('invalid test: buffers should not require grad')
+        if len(list(m.parameters())) <= 0:
+            raise AssertionError('invalid test: expected parameters')
+        if not all(p.requires_grad for p in m.parameters()):
+            raise AssertionError('invalid test: parameters should require grad')
         for requires_grad in (False, True):
             self.assertIs(m.requires_grad_(requires_grad), m)
             for p in m.parameters():
@@ -11147,12 +11163,14 @@ class TestConvolutionMPS(TestCaseMPS):
 
                     def get_grid(device='cpu', data=None):
                         if data is not None:
-                            assert list(data.shape) == grid_shape
+                            if list(data.shape) != grid_shape:
+                                raise AssertionError(f"data.shape mismatch: {list(data.shape)} != {grid_shape}")
                             data = data.permute(grid_dim_contig_order).to(device)
                         else:
                             data = torch.randn(grid_init_shape, device=device)
                         grid = data.permute(grid_fwd_permute)
-                        assert grid.permute(grid_dim_contig_order).is_contiguous()
+                        if not grid.permute(grid_dim_contig_order).is_contiguous():
+                            raise AssertionError("expected grid to be contiguous after permute")
                         return grid
 
                     input_cpu = torch.randn(C, N, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
@@ -12291,7 +12309,8 @@ class TestRNNMPS(TestCaseMPS):
             inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
 
             output, (hx_out, cx_out) = rnn(inp, (hx, cx))
-            assert output_grad_presented or states_grad_presented, "At least some outputs must be used"
+            if not output_grad_presented and not states_grad_presented:
+                raise AssertionError("At least some outputs must be used")
 
             f = 0
             if output_grad_presented:
@@ -12677,8 +12696,8 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    def _run_op(self, op, mps_sample):
-        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+    def _run_op(self, op, mps_sample, dtype=None):
+        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
@@ -12691,12 +12710,15 @@ class TestConsistency(TestCaseMPS):
                     raise
                 if mps_sample.input.dtype not in [torch.float16, torch.bfloat16]:
                     raise
+                dtype = torch.float32
 
                 # Often CPU ops are not implemented for low precision dtypes
                 # In that case, upcast to higher precision and try again
                 cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
                 cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
-                cpu_out = cpu_out.to(dtype=mps_out.dtype)
+
+        if dtype is not None:
+            cpu_out = cpu_out.to(dtype=mps_out.dtype)
 
         return mps_out, cpu_out, cpu_sample
 
@@ -12713,7 +12735,11 @@ class TestConsistency(TestCaseMPS):
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 
-            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
+            opt_dtype = None
+            # CPU implementation is less precise than MPS one so compare MPS to full fp32
+            if dtype in [torch.float16, torch.bfloat16] and op.name in ["grid_sampler_2d", "grid_sampler_3d"]:
+                opt_dtype = torch.float32
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
@@ -12729,9 +12755,6 @@ class TestConsistency(TestCaseMPS):
                and mps_sample.kwargs.get("scale_factors") == [1.7, 0.9]):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
-
-            if op.name in ["grid_sampler_3d", "asinh"]:
-                atol, rtol = 1e-4, 1e-4
 
             if op.name == "kthvalue":
                 self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
@@ -12867,6 +12890,32 @@ class TestConsistency(TestCaseMPS):
         out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
         self.assertEqual(out_mps, out_cpu)
 
+    def test_householder_product_race(self, device):
+        # Regression testing for https://github.com/pytorch/pytorch/issues/173972
+        # Check correctness for input matrices that have more elements than the
+        # maximum number of threads per threadgroup. Before the issue was fixed,
+        # this test would fail due to a race.
+        max_threads_per_threadgroup = torch.mps.compile_shader("kernel void foo() {}").foo.max_threads_per_threadgroup
+        m0 = int(max_threads_per_threadgroup**(0.5))
+
+        for m in range(m0, 5 * m0, m0):
+            for num_batches in range(1, 11):
+                A = torch.eye(m, m).repeat(num_batches, 1, 1)
+                # Set one random non-diagonal element of each identity matrix to
+                # 1. This is better than using a fully random matrix, because
+                # that can cause fairly large errors for CPU vs MPS due to
+                # normal floating point error.
+                for i in range(num_batches):
+                    j = random.randint(0, m - 1)
+                    k = j
+                    while k == j:
+                        k = random.randint(0, m - 1)
+                    A[i, j, k] = 1
+                tau = torch.randn(num_batches, m)
+                r_cpu = torch.orgqr(A, tau)
+                r_mps = torch.orgqr(A.to('mps'), tau.to('mps'))
+                self.assertEqual(r_cpu, r_mps)
+
     def test_fmax_mixed_dtypes(self, device):
         # Regression testing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented
@@ -12957,7 +13006,8 @@ class TestCommon(TestCase):
                 fmt_str = opinfo.utils.str_format_dynamic_dtype(op)
                 err_msg += "\n" + fmt_str
 
-            assert len(filtered_ops) == 0, err_msg
+            if len(filtered_ops) != 0:
+                raise AssertionError(err_msg)
 
     # This is the MPS equivalent of `test_numpy_ref` from `test_ops.py`. It lives over here while
     # MPS still requires some fairly heavy special casing in the test framework.

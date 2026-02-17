@@ -19,7 +19,7 @@ macro(append_torchlib_if_found)
     if(${_arg}_LIBRARY)
       list(APPEND TORCH_LIBRARIES ${${_arg}_LIBRARY})
     else()
-      message(WARNING "static library ${${_arg}_LIBRARY} not found.")
+      message(WARNING "library ${_arg} not found.")
     endif()
   endforeach()
 endmacro()
@@ -37,7 +37,7 @@ macro(append_wholearchive_lib_if_found)
         list(APPEND TORCH_LIBRARIES "-Wl,--whole-archive ${${_arg}_LIBRARY} -Wl,--no-whole-archive")
       endif()
     else()
-      message(WARNING "static library ${${_arg}_LIBRARY} not found.")
+      message(WARNING "library ${_arg} not found.")
     endif()
   endforeach()
 endmacro()
@@ -53,15 +53,9 @@ else()
 endif()
 
 # Include directories.
-if(EXISTS "${TORCH_INSTALL_PREFIX}/include")
-  set(TORCH_INCLUDE_DIRS
-    ${TORCH_INSTALL_PREFIX}/include
-    ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
-else()
-  set(TORCH_INCLUDE_DIRS
-    ${TORCH_INSTALL_PREFIX}/include
-    ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
-endif()
+set(TORCH_INCLUDE_DIRS
+  ${TORCH_INSTALL_PREFIX}/include
+  ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
 
 # Library dependencies.
 if(@BUILD_SHARED_LIBS@)

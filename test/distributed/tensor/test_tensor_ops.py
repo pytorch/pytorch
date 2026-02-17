@@ -5,6 +5,7 @@ import itertools
 import unittest
 
 import torch
+from torch.distributed._local_tensor import LocalTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -14,6 +15,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -22,6 +24,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorConverter,
     DTensorTestBase,
+    LocalDTensorTestBase,
     with_comms,
 )
 
@@ -374,6 +377,16 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(
             stack_dim1_shard1_dt.full_tensor(),
             torch.stack([global_input, global_input], dim=1),
+        )
+
+        # stack with negative dim: dim=-1 inserts at the last position of the
+        # output (ndim+1), so Shard(1) should stay Shard(1)
+        stack_neg_dim_dt = torch.stack([shard1_input, cloned_shard1_input], dim=-1)
+        self.assertEqual(stack_neg_dim_dt.placements, (Shard(1),))
+        self.assertEqual(stack_neg_dim_dt.shape, (8, 8, 2))
+        self.assertEqual(
+            stack_neg_dim_dt.full_tensor(),
+            torch.stack([global_input, global_input], dim=-1),
         )
 
     @with_comms
@@ -812,6 +825,64 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(misses, 2)
 
     @with_comms
+    def test_single_dim_strategy_dtype_cache_key(self):
+        """Test that schema_info from single-dim strategy affects cache key.
+
+        When @register_single_dim_strategy specifies static_kwargkey=["dtype"],
+        the C++ dispatch path should include dtype in the cache key. This ensures
+        calls with different dtypes don't return the same cached result.
+        """
+        from unittest.mock import patch
+
+        from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _ShardingPlaceholder,
+            _SingleDimStrategyInfo,
+        )
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        call_count = [0]
+
+        def to_copy_single_dim_strategy(op, args_schema, kwargs_schema):
+            call_count[0] += 1
+            self_meta = args_schema[0]
+            assert isinstance(self_meta, TensorMeta)
+            single_dim_strategies = []
+            for dim in range(len(self_meta.shape)):
+                single_dim_strategies.append(
+                    [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)]
+                )
+            return single_dim_strategies
+
+        _clear_sharding_prop_cache()
+        mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        local_tensor = torch.randn(2, 8, dtype=torch.float32)
+        sharded_dtensor = DTensor.from_local(local_tensor, mesh, shard_spec)
+
+        propagator = DTensor._op_dispatcher.sharding_propagator
+        op = torch.ops.aten._to_copy.default
+        schema_info = RuntimeSchemaInfo(static_kwargkey=["dtype"])
+
+        with (
+            patch.dict(
+                propagator.op_single_dim_strategy_funcs,
+                {op: _SingleDimStrategyInfo(func=to_copy_single_dim_strategy)},
+            ),
+            patch.dict(
+                propagator.op_to_schema_info_for_single_dim_strategy, {op: schema_info}
+            ),
+            patch.dict(propagator.op_strategy_funcs, clear=True),
+            patch.dict(propagator.op_to_schema_info, clear=True),
+        ):
+            call_count[0] = 0
+            sharded_dtensor.to(torch.int32)
+            sharded_dtensor.to(torch.float64)
+
+            # With dtype in cache key, strategy should be called twice (different dtypes)
+            self.assertEqual(call_count[0], 2)
+
+    @with_comms
     def test_slice(self):
         mesh = self.build_device_mesh()  # 1D mesh
         comm_mode = CommDebugMode()
@@ -928,6 +999,57 @@ class DistTensorOpsTest(DTensorTestBase):
                     unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
                 ):
                     self.assertEqual(x.full_tensor(), y)
+
+
+class DistBucketizeTest(LocalDTensorTestBase):
+    @with_comms
+    def test_bucketize_partial_input(self):
+        # Bucketize returns indices, which cannot be combined with sum/avg
+        # reductions. Partial inputs should be converted to Replicate.
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            input_tensor = torch.tensor(
+                [[2.0, 4.0, 6.0, 8.0], [0.0, 1.0, 5.0, 9.0]],
+                device=self.device_type,
+            )
+
+            for reduce_op in ("sum", "avg", "max"):
+                partial_input = DTensor.from_local(
+                    input_tensor, mesh, [Partial(reduce_op)]
+                )
+                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+                result = torch.bucketize(partial_input, dist_boundaries)
+
+                # Output must be Replicate, not Partial
+                self.assertTrue(
+                    result.placements[0].is_replicate(),
+                    f"Expected Replicate output but got {result.placements[0]} "
+                    f"for Partial({reduce_op}) input",
+                )
+                # Expected is bucketize on the materialized global tensor, which
+                # differs per reduce_op (e.g. Partial("sum") allreduce-sums the
+                # local tensors across ranks).
+                global_input = partial_input.full_tensor()
+                expected = torch.bucketize(global_input, boundaries)
+                self.assertEqual(result.to_local(), expected)
+
+    @with_comms
+    def test_bucketize_sharded_input(self):
+        # Sharded inputs should propagate sharding to output normally.
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            boundaries = torch.tensor([1.0, 3.0, 5.0, 7.0], device=self.device_type)
+            input_tensor = torch.randn(8, 4, device=self.device_type)
+            expected = torch.bucketize(input_tensor, boundaries)
+
+            for shard_dim in range(2):
+                dist_input = distribute_tensor(input_tensor, mesh, [Shard(shard_dim)])
+                dist_boundaries = distribute_tensor(boundaries, mesh, [Replicate()])
+                result = torch.bucketize(dist_input, dist_boundaries)
+
+                self.assertTrue(result.placements[0].is_shard(shard_dim))
+                self.assertEqual(result.full_tensor(), expected)
 
 
 class DistArgMaxArgMinTest(DTensorTestBase):
