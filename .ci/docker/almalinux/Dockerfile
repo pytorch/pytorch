@@ -13,7 +13,7 @@ RUN yum -y update
 RUN yum -y install epel-release
 # install glibc-langpack-en make sure en_US.UTF-8 locale is available
 RUN yum -y install glibc-langpack-en
-RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
+RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make patchelf gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
@@ -27,11 +27,6 @@ RUN rm -rf /usr/local/cuda-*
 FROM base as openssl
 ADD ./common/install_openssl.sh install_openssl.sh
 RUN bash ./install_openssl.sh && rm install_openssl.sh
-
-FROM base as patchelf
-# Install patchelf
-ADD ./common/install_patchelf.sh install_patchelf.sh
-RUN bash ./install_patchelf.sh && rm install_patchelf.sh && cp $(which patchelf) /patchelf
 
 FROM base as conda
 # Install Anaconda
@@ -106,7 +101,6 @@ COPY --from=cuda13.0  /usr/local/cuda-13.0 /usr/local/cuda-13.0
 FROM ${BASE_TARGET} as final
 ARG DEVTOOLSET_VERSION=13
 COPY --from=openssl            /opt/openssl           /opt/openssl
-COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda
 
 # Add jni.h for java host build.

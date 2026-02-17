@@ -52,11 +52,6 @@ ADD ./common/install_jni.sh install_jni.sh
 ADD ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
-FROM base as libpng
-# Install libpng
-ADD ./common/install_libpng.sh install_libpng.sh
-RUN bash ./install_libpng.sh && rm install_libpng.sh
-
 FROM ${GPU_IMAGE} as common
 ARG DEVTOOLSET_VERSION=13
 ENV LC_ALL en_US.UTF-8
@@ -85,7 +80,8 @@ RUN yum install -y \
         gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
         gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
         gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
-        gcc-toolset-${DEVTOOLSET_VERSION}-gdb
+        gcc-toolset-${DEVTOOLSET_VERSION}-gdb \
+        libpng-devel
 
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
@@ -102,12 +98,6 @@ COPY --from=base               /opt/_internal                        /opt/_inter
 COPY --from=base               /usr/local/bin/auditwheel             /usr/local/bin/auditwheel
 COPY --from=intel              /opt/intel                            /opt/intel
 COPY --from=base               /usr/local/bin/patchelf               /usr/local/bin/patchelf
-COPY --from=libpng             /usr/local/bin/png*                   /usr/local/bin/
-COPY --from=libpng             /usr/local/bin/libpng*                /usr/local/bin/
-COPY --from=libpng             /usr/local/include/png*               /usr/local/include/
-COPY --from=libpng             /usr/local/include/libpng*            /usr/local/include/
-COPY --from=libpng             /usr/local/lib/libpng*                /usr/local/lib/
-COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/lib/pkgconfig
 COPY --from=jni                /usr/local/include/jni.h              /usr/local/include/jni.h
 
 FROM common as cpu_final
