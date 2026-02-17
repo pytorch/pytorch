@@ -450,6 +450,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             traced.graph,
             collective_info,
             scheduled,
+            bucket_only_internode_comms=False,
         )
         bucketer.bucket_collectives()
 
@@ -877,7 +878,7 @@ class TestCrossPGOverlap(InductorTestCase):
             return 0.0
 
         out = schedule_overlap_bucketing(
-            traced, custom_runtime_estimation=custom_runtime
+            traced, custom_runtime_estimation=custom_runtime, max_off_bucket_gb=None
         )
 
         # Get scheduled order
