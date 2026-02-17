@@ -93,6 +93,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::min only supported for 2 args")
+        # pyrefly: ignore [missing-attribute]
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -101,6 +102,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Max(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::max only supported for 2 args")
+        # pyrefly: ignore [missing-attribute]
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -108,10 +110,12 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"metal::abs({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"static_cast<long>(metal::rint({self._print(expr.args[0])}))"
 
     def _print_RoundDecimal(self, expr: sympy.Expr) -> str:
@@ -129,6 +133,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**23
+        # pyrefly: ignore [missing-attribute]
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
@@ -212,13 +217,32 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        with V.kernel.mask_loads(mask, other) as new_mask:
-            result = body()
+        # TODO: Should it be converted to lambda on MacOS-15+?
 
-        if result.bounds.is_bool:
-            other = bool(other)  # type: ignore[assignment]
+        other_str = value_to_metal(other)
+        scoped_body = IndentedBuffer()
+        with V.kernel.swap_buffers(scoped_body), scoped_body.indent():
+            # Reset the scoped variable counter so that each invocation of the same body
+            # generates identical variable names. Without this reset, repeated calls to
+            # body() would keep incrementing the counter, resulting in different cache key.
+            V.kernel.cse.iter_buffer_ids = itertools.count()
+            V.kernel.cse.name_prefix = "tmp_scoped_"
+            rc = body()
 
-        return ops.where(new_mask, result, other)
+        # Compute cache key manually as variable name is needed to actually generate the code
+        cache_key = f"{mask}:{scoped_body.getvalue()}:{other_str}"
+        var = V.kernel.cse.try_get(cache_key)
+        if not var:
+            var = V.kernel.cse.newvar(dtype=rc.dtype)
+            V.kernel.cse.put(cache_key, var)
+            V.kernel.compute.writelines(
+                [f"{DTYPE_TO_METAL[rc.dtype]} {var};", f"if ({mask}) {{"]
+            )
+            with V.kernel.compute.indent():
+                V.kernel.compute.splice(scoped_body)
+                V.kernel.compute.writeline(f"{var} = {rc};")
+            V.kernel.compute.writeline(f"}} else {var} = {other_str};")
+        return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
@@ -936,6 +960,10 @@ class MetalKernel(SIMDKernel):
                     else:
                         code.writeline(f"constant long& {idx_var.prefix}numel,")
 
+                # Add error buffer parameter if error header is used
+                if "error" in self.headers:
+                    code.writeline("device c10::metal::ErrorMessages* error_buf,")
+
                 assert len(idx_vars) < 4, "Up to 3 index variables are supported"
                 thread_pos_dtype = (
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
@@ -1047,6 +1075,13 @@ class MetalKernel(SIMDKernel):
                 args += [None]  # type: ignore[list-item]
                 arg_types.append(None)
 
+        # Add error buffer index if error reporting is used
+        # TODO(malfet) Figure out how to do it for aoti
+        if "error" in self.headers and not V.graph.cpp_wrapper:
+            args.append(
+                f"error_buf_idx={len([arg for arg in args if arg is not None and '=' not in arg])}"
+            )
+
         wrapper.generate_kernel_call(
             name,
             args,
@@ -1060,17 +1095,36 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         if not (lower or upper):
             return
-        # TODO(malfet): support asserts
-        # See https://github.com/pytorch/pytorch/issues/144634
+
         expr_str = self.index_to_str(expr)
-        lower_expr = f"{expr_str} < 0" if lower else ""
+        size_str = self.index_to_str(size)
+
+        # Generate bounds checking with error reporting
         # TODO(malfet): Is upper bound inclusive or exclusive?
-        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
-            line = f"if (({lower_expr}) && ({upper_expr})) return"
+            # Check both lower and upper bounds
+            condition = f"({expr_str} < 0 || {expr_str} >= {size_str})"
+        elif lower:
+            condition = f"{expr_str} < 0"
         else:
-            line = f"if ({lower_expr}{upper_expr}) return"
-        self.cse.generate(self.compute, line, assignment=False)
+            condition = f"{expr_str} >= {size_str}"
+
+        # Generate error reporting code
+        if V.graph.cpp_wrapper:
+            self.cse.generate(
+                self.compute, f"if ({condition}) return", assignment=False
+            )
+        else:
+            # Add error header for error reporting
+            self.headers.add("error")
+            self.compute.writelines(
+                [
+                    f"if ({condition}) {{",
+                    f'    TORCH_REPORT_ERROR(error_buf, "Index ", {expr_str}, " out of range [0, ", {size_str}, ")");',
+                    "    return;",
+                    "}",
+                ]
+            )
 
 
 class MetalScheduling(SIMDScheduling):

@@ -76,7 +76,8 @@ class TestDTensorDebugMode(TestCase):
             """\
   torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
-      redistribute_input(1, S(0) -> R)
+      -> output: S(0)
+      redistribute_input [implicit] (1, S(0) -> R)
         redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
           _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
           _c10d_functional::_wrap_tensor_autograd(t$3: f32[8, 32])  ->  t$4: f32[8, 32]
@@ -88,7 +89,7 @@ class TestDTensorDebugMode(TestCase):
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
-        self.assertTrue(isinstance(debug_mode.operators[2], _RedistributeCall))
+        self.assertTrue(isinstance(debug_mode.operators[3], _RedistributeCall))
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
 
         # check stringification
@@ -174,34 +175,69 @@ class TestDTensorDebugMode(TestCase):
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
-        self.assertExpectedInline(
-            debug_mode.debug_string(show_stack_trace=False),
-            """\
-  <method 'add' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
-    aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
-      redistribute_input(1, S(1) -> S(0))
-        redistribute_input(t: f32[8, 1], trace: S(1)->S(0))
-          _dtensor::shard_dim_alltoall(t: f32[8, 1], 1, 0, 0)
-      aten::add.Tensor(t: f32[1, 8], t: f32[1, 8])
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0))
-    aten::sum(dt: f32[8, 8]| S(0))
-      aten::sum(t: f32[1, 8])
-  torch._tensor.backward(dt: f32[]| P(sum), gradient=None, retain_graph=None, create_graph=False, inputs=None)
-    aten::ones_like(dt: f32[]| P(sum), pin_memory=False, memory_format=torch.preserve_format)
-      aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)
-    aten::expand(dt: f32[]| R, [8, 8])
-      aten::expand(t: f32[], [8, 8])
-      redistribute_input(t: f32[8, 8], trace: R->S(1))
-        aten::split.Tensor(t: f32[8, 8], 1, 1)
-        aten::clone(t: f32[8, 1])
-      aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
-      redistribute_input(t: f32[8, 8], trace: R->S(0))
-        aten::split.Tensor(t: f32[8, 8], 1)
-        aten::detach(t: f32[8, 1])
-        aten::clone(t: f32[1, 8])
-      aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
-      aten::detach(t: f32[1, 8])""",
+        debug_string = debug_mode.debug_string(show_stack_trace=False)
+
+        # Certain operations (clone, detach) appear in non-deterministic order during
+        # backward pass redistribution.
+        # For operations that appear multiple times, we include full parameters to
+        # disambiguate (e.g., two different aten::add operations). For unique operations,
+        # we use partial matching to avoid brittleness if the exact signature format changes.
+
+        # Check for key forward operations
+        self.assertIn(
+            "<method 'add' of 'torch._C.TensorBase' objects>", debug_string
+        )  # Unique - no params needed
+        self.assertIn(
+            "aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))", debug_string
         )
+        self.assertIn("redistribute_input [implicit] (1, S(1) -> S(0))", debug_string)
+        self.assertIn(
+            "redistribute_input(t: f32[8, 1], trace: S(1)->S(0))", debug_string
+        )
+        self.assertIn(
+            "_dtensor::shard_dim_alltoall", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::add.Tensor(t: f32[1, 8], t: f32[1, 8])", debug_string)
+
+        # Check for sum operations
+        self.assertIn(
+            "<method 'sum' of 'torch._C.TensorBase' objects>", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::sum(dt: f32[8, 8]| S(0))", debug_string)
+        self.assertIn("aten::sum(t: f32[1, 8])", debug_string)
+
+        # Check for backward operations
+        self.assertIn(
+            "torch._tensor.backward", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::ones_like(dt: f32[]| P(sum)", debug_string)
+        self.assertIn("aten::ones_like(t: f32[]", debug_string)
+        self.assertIn("aten::expand(dt: f32[]| R, [8, 8])", debug_string)
+        self.assertIn("aten::expand(t: f32[], [8, 8])", debug_string)
+
+        # Check for redistribute operations in backward pass
+        self.assertIn("redistribute_input(t: f32[8, 8], trace: R->S(1))", debug_string)
+        self.assertIn("redistribute_input(t: f32[8, 8], trace: R->S(0))", debug_string)
+
+        # Check for split operations in backward pass
+        self.assertIn("aten::split.Tensor(t: f32[8, 8], 1, 1)", debug_string)
+        self.assertIn("aten::split.Tensor(t: f32[8, 8], 1)", debug_string)
+
+        # Check for _to_copy operations
+        self.assertIn(
+            "aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)",
+            debug_string,
+        )
+        self.assertIn(
+            "aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)",
+            debug_string,
+        )
+
+        # Check that both clone and detach operations appear (order-independent)
+        self.assertIn("aten::clone(t: f32[8, 1])", debug_string)
+        self.assertIn("aten::clone(t: f32[1, 8])", debug_string)
+        self.assertIn("aten::detach(t: f32[8, 1])", debug_string)
+        self.assertIn("aten::detach(t: f32[1, 8])", debug_string)
 
         # check stack trace
         self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
@@ -264,7 +300,7 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
-    redistribute_input(1, S(1)[0]S(1)[1] -> RR)
+    redistribute_input [implicit] (1, S(1)[0]S(1)[1] -> RR)
       redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
         _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
@@ -281,10 +317,73 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[16, 128])""",
         )
 
+    def test_debug_mode_explicit_redistribute(self):
+        """Test that explicit user-called redistribute shows [explicit] annotation."""
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(1, 8)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+
+        with DebugMode() as debug_mode:
+            x_dtensor.redistribute(mesh, [Replicate()])
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    redistribute_input [explicit] (t: f32[1, 8], trace: S(0)->R)
+      _c10d_functional::all_gather_into_tensor(t: f32[1, 8], 8, 0)  ->  t: f32[8, 8]
+      _c10d_functional::_wrap_tensor_autograd(t: f32[8, 8])  ->  t: f32[8, 8]
+      _c10d_functional::wait_tensor(t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
+        with DebugMode() as debug_mode:
+            x_dtensor.full_tensor()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    redistribute_input [explicit] (t: f32[1, 8], trace: S(0)->R)
+      _c10d_functional::all_gather_into_tensor(t: f32[1, 8], 8, 0)  ->  t: f32[8, 8]
+      _c10d_functional::_wrap_tensor_autograd(t: f32[8, 8])  ->  t: f32[8, 8]
+      _c10d_functional::wait_tensor(t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::view(t: f32[8, 8], [8, 8])  ->  t: f32[8, 8]""",
+        )
+
+    def test_output_placements(self):
+        """Test that output placements are recorded for multi-output DTensor ops."""
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # Use topk which returns multiple outputs (values, indices)
+        # Shard on dim=1 (the topk dimension) to trigger redistribution
+        x = torch.randn(8, 2, requires_grad=False)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
+
+        # Test with redistribution (slow path) - output placements should be recorded
+        with DebugMode(record_output=True) as debug_mode:
+            torch.topk(x_dtensor, k=4, dim=1)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  aten::topk(dt: f32[8, 16]| S(1), 4, 1)
+    -> output: ('R', 'R')
+    redistribute_input [implicit] (0, S(1) -> R)
+      redistribute_input(t: f32[8, 2], trace: S(1)->R)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
+        _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
+        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
+        aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
+        aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
+        )
+
     def test_debug_mode_einsum(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
-        # Create test tensors
+        # Create test tensors with mixed Partial placements: P(sum)R and RP(sum).
+        # Per-input linearity allows bmm to operate directly on Partial inputs
+        # without redistribution, producing P(sum)P(sum) output.
+        # Numerics are verified in test_matrix_ops.py::test_mm_partial_inputs.
         a = torch.randn(16, 6, 8)
         b = torch.randn(8, 4, 4)
 
@@ -320,25 +419,7 @@ class TestDTensorDebugMode(TestCase):
     aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
-      redistribute_input(0, P(sum)R -> S(2)[0]S(2)[1])
-        redistribute_input(t: f32[1, 96, 8], trace: P(sum)R->S(2)R->S(2)[0]S(2)[1])
-          aten::chunk(t: f32[1, 96, 8], 4, 2)
-          aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
-          _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 1)
-          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 96, 2])
-          _c10d_functional::wait_tensor(t: f32[1, 96, 2])
-          aten::chunk(t: f32[1, 96, 2], 2, 2)
-          aten::clone(t: f32[1, 96, 1])
-      redistribute_input(1, RP(sum) -> S(1)[0]S(1)[1])
-        redistribute_input(t: f32[1, 8, 16], trace: RP(sum)->S(1)P(sum)->S(1)[0]S(1)[1])
-          aten::chunk(t: f32[1, 8, 16], 4, 1)
-          aten::clone(t: f32[1, 2, 16])
-          aten::chunk(t: f32[1, 2, 16], 2, 1)
-          aten::cat(['t: f32[1, 1, 16]', 't: f32[1, 1, 16]'])
-          _c10d_functional::reduce_scatter_tensor(t: f32[2, 1, 16], sum, 2, 3)
-          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 1, 16])
-          _c10d_functional::wait_tensor(t: f32[1, 1, 16])
-      aten::bmm(t: f32[1, 96, 1], t: f32[1, 1, 16])
+      aten::bmm(t: f32[1, 96, 8], t: f32[1, 8, 16])
     aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
     aten::permute(dt: f32[16, 6, 1, 4, 4]| P(sum)P(sum), [0, 1, 3, 4, 2])
@@ -443,7 +524,9 @@ class TestDTensorDebugMode(TestCase):
                 with inner_mode:
                     torch.mm(x_dtensor, y_dtensor)
 
-        self.assertTrue("redistribute_input(1, S(0) -> R)" in debug_mode.debug_string())
+        self.assertTrue(
+            "redistribute_input [implicit] (1, S(0) -> R)" in debug_mode.debug_string()
+        )
 
     def test_debug_mode_higher_order_cond(self):
         """Test DebugMode with higher order operation."""
@@ -1040,7 +1123,7 @@ class TestDTensorDebugMode(TestCase):
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""
 
-    def test_hash_empty_tenor(self):
+    def test_hash_empty_tensor(self):
         t = torch.tensor([])
         # hash tensor fn should not error out with empty tensor
         out = torch.utils._debug_mode.hash_tensor_fn(t)

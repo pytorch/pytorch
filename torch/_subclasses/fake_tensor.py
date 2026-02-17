@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
+    from torch._library.opaque_object import OpaqueType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
@@ -177,8 +178,8 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 
 
 def get_plain_tensors(
-    subclass: Tensor, *, out: list[Union[Tensor, int, SymInt]]
-) -> list[Union[Tensor, int, SymInt]]:
+    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueType]
+) -> list[Tensor | int | SymInt | OpaqueType]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -1940,17 +1941,18 @@ class FakeTensorMode(TorchDispatchMode):
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            if not isinstance(output, tuple):
+            if not isinstance(output, tuple) and output is not None:
                 raise AssertionError(
                     f"Expected tuple output for HOP {func}, got {type(output)}"
                 )
-            non_cacheable = any(
-                isinstance(o, (torch.Tensor, torch.SymInt))
-                and has_free_unbacked_symbols(o)
-                for o in output
-            )
-            if non_cacheable:
-                raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
+            if output is not None:
+                non_cacheable = any(
+                    isinstance(o, (torch.Tensor, torch.SymInt))
+                    and has_free_unbacked_symbols(o)
+                    for o in output  # pyrefly: ignore[not-iterable]
+                )
+                if non_cacheable:
+                    raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
 
         if isinstance(output, (int, torch.SymInt, type(None))):
             output_info = _DispatchCacheEntryOutputInfo(
@@ -2519,12 +2521,18 @@ class FakeTensorMode(TorchDispatchMode):
         # We will rely on functionalization for use of fake tensors constants as persistent
         # objects on an FX Graph.
 
-        # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
         all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
             isinstance(func, torch._ops.OpOverload)
             and torch.Tag.nondeterministic_seeded not in func.tags
-            and torch.Tag.inplace_view not in func.tags
+            # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view.
+            # Example: fake_a.transpose_(0,1) would mutate fake_a.constant in-place, changing its
+            # shape from (2,3) to (3,2), while fake_a.shape still reports (2,3) → divergence.
+            # However, detach_ is safe: it only mutates requires_grad (not shape/stride/data),
+            # and constants are used purely for their values, not autograd.
+            and (
+                torch.Tag.inplace_view not in func.tags or func is aten.detach_.default
+            )
             and all_constant
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
@@ -3227,6 +3235,7 @@ def run_fallback_kernel(
     if torch.Tag.inplace_view in func.tags:
         raise orig_not_implemented_exception
 
+    # pyrefly: ignore [implicit-any]
     inp_impls = {}
 
     # Don't use in_kernel_invocation_manager(fake_mode) as we want to do

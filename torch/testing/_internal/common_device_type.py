@@ -747,10 +747,13 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
         )
 
     # Replace your privateuse1 backend name with 'privateuse1'
+    # This handles the case where PrivateUse1TestBase.device_type has been
+    # changed from "privateuse1" to the actual backend name (e.g., "openreg")
+    # by setUpClass being called during previous instantiate_device_type_tests calls
     if is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
 
-        def func_replace(x: str):
+        def func_replace(x: str) -> str:
             return x.replace(privateuse1_backend_name, "privateuse1")
 
         except_for = (
@@ -763,14 +766,20 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
             if not isinstance(only_for, str)
             else func_replace(only_for)
         )
+    else:
+
+        def func_replace(x: str) -> str:
+            return x
 
     if except_for:
         device_type_test_bases = filter(
-            lambda x: x.device_type not in except_for, device_type_test_bases
+            lambda x: func_replace(x.device_type) not in except_for,
+            device_type_test_bases,
         )
     if only_for:
         device_type_test_bases = filter(
-            lambda x: x.device_type in only_for, device_type_test_bases
+            lambda x: func_replace(x.device_type) in only_for,
+            device_type_test_bases,
         )
 
     return list(device_type_test_bases)
@@ -1819,6 +1828,15 @@ def has_hipsolver():
     return rocm_version >= (5, 3)
 
 
+# Skips a test on CUDA if cuSOLVER is not available,
+# and on ROCm if MAGMA is not available.
+def skipCUDAIfNoCusolverROCMIfNoMagma(fn):
+    if TEST_WITH_ROCM:
+        return skipCUDAIfNoMagma(fn)
+    else:
+        return skipCUDAIfNoCusolver(fn)
+
+
 # Skips a test on CUDA/ROCM if cuSOLVER/hipSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
     return skipCUDAIf(
@@ -2048,23 +2066,26 @@ def get_all_device_types() -> list[str]:
 
 # skip since currently flex attention requires at least `avx2` support on CPU.
 IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
-    not torch.xpu.is_available()
-    and not torch.cuda.is_available()
-    and not IS_MACOS
+    not IS_MACOS
     and torch.cpu._is_avx2_supported()
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )
 IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED = (
     torch.xpu.is_available() and torch.utils._triton.has_triton()
 )
+IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
+    torch.cuda.is_available()
+    and torch.utils._triton.has_triton()
+    and torch.cuda.get_device_capability() >= (8, 0)
+)
 flex_attention_supported_platform = unittest.skipUnless(
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
-    or IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
     or (
-        torch.cuda.is_available()
-        and torch.utils._triton.has_triton()
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ),
+        IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+        and not torch.xpu.is_available()
+        and not torch.cuda.is_available()
+    )
+    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
 if (

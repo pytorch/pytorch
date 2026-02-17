@@ -1,0 +1,144 @@
+name: Build Flash Attention 3 wheels (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Build test wheels with date suffix in version'
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: '0 0 1,15 * *'
+  pull_request:
+    paths:
+      - .github/workflows/_binary-build-flash-attention-wheel-windows.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  build-wheel:
+    name: "Build FA3 Windows ${{ matrix.cuda_version }}"
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_version: "12.8.1"
+            cuda_short: "128"
+            torch_cuda_arch_list: "8.0;8.6;9.0"
+            runner: "windows.12xlarge"
+            # python 3.10 because 3.9 is not supported by torch >= 2.9; FA3 is ABI stable after 2.9
+            python_version: "3.10"
+            pytorch_version: "2.10.0"
+            pytorch_min_version: "2.9.0"
+            einops_version: "0.8.2"
+            ninja_version: "1.13.0"
+            numpy_version: "2.2.6"
+    timeout-minutes: 1440
+    defaults:
+      run:
+        shell: bash
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_short }}
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
+      PYTHON_VERSION: ${{ matrix.python_version }}
+      PYTORCH_VERSION: ${{ matrix.pytorch_version }}
+      PYTORCH_MIN_VERSION: ${{ matrix.pytorch_min_version }}
+      EINOPS_VERSION: ${{ matrix.einops_version }}
+      NINJA_VERSION: ${{ matrix.ninja_version }}
+      NUMPY_VERSION: ${{ matrix.numpy_version }}
+      VC_YEAR: "2022"
+      DISTUTILS_USE_SDK: 1
+    steps:
+      - name: Enable git long paths and symlinks on Windows
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+          git config --global core.ignorecase false
+          git config --global core.fsmonitor false
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+          submodules: true
+
+      - name: Set CUDA environment
+        run: |
+          CUDA_VER="${{ matrix.cuda_version }}"
+          CUDA_VER_SHORT="${CUDA_VER%.*}"
+          CUDA_PATH="/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${CUDA_VER_SHORT}"
+          echo "Using CUDA ${CUDA_VER_SHORT} at ${CUDA_PATH}"
+          echo "CUDA_HOME=${CUDA_PATH}" >> "${GITHUB_ENV}"
+          echo "${CUDA_PATH}/bin" >> "${GITHUB_PATH}"
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Remove link.exe conflict
+        run: rm -f /usr/bin/link
+
+      - name: Setup Windows
+        uses: ./.github/actions/setup-win
+        with:
+          cuda-version: ${{ matrix.cuda_version }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Apply Flash Attention patches for Windows
+        run: |
+          cd third_party/flash-attention/hopper
+          sed -i 's/bare_metal_version != Version("12.8")/& and not is_offline_build()/' setup.py
+          sed -i '/flags.append(f'"'"'ldflags = /i\    ldflags.remove("/LTCG")' setup.py
+
+          sed -i "s/python_requires=\">=3.8\"/python_requires=\">=${PYTHON_VERSION}\"/" setup.py
+          sed -i "s/\"torch\",/\"torch>=${PYTORCH_MIN_VERSION}\",/" setup.py
+
+      - name: Build Flash Attention 3 wheel
+        env:
+          FA_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
+          PYTORCH_ROOT: ${{ github.workspace }}
+          FLASH_ATTENTION_FORCE_BUILD: "TRUE"
+          FLASH_ATTENTION_OFFLINE_BUILD: "TRUE"
+          NVCC_THREADS: "1"
+          MAX_JOBS: "4"
+          FLASH_ATTENTION_DISABLE_SOFTCAP: "TRUE"
+        run: |
+          set -x
+          mkdir -p "${FA_FINAL_PACKAGE_DIR}"
+          nvcc --version
+          python -m pip install torch==${PYTORCH_VERSION} --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
+          python -m pip install einops==${EINOPS_VERSION} ninja==${NINJA_VERSION} numpy==${NUMPY_VERSION}
+          if [[ "${{ inputs.test }}" == "true" ]]; then
+            BUILD_DATE=$(date +%Y%m%d)
+            export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_VERSION}"
+          fi
+          cd third_party/flash-attention/hopper
+          python setup.py bdist_wheel -d "${FA_FINAL_PACKAGE_DIR}" -k --plat-name win_amd64
+          echo "Wheel built:"
+          ls -la "${FA_FINAL_PACKAGE_DIR}"/*.whl
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}-windows_amd64
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/*.whl
+      - name: Teardown Windows
+        uses: ./.github/actions/teardown-win
+        if: always()
+        timeout-minutes: 120

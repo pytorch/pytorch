@@ -8,7 +8,6 @@ import itertools
 import logging
 import operator
 import sys
-import time
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, Union
@@ -26,7 +25,6 @@ if TYPE_CHECKING:
     from .ir import IRNode, Operation
 
 from .memory import (
-    estimate_peak_memory,
     estimate_peak_memory_allocfree,
     FreeableInputBuffer,
     get_freeable_input_buf,
@@ -54,23 +52,39 @@ if TYPE_CHECKING:
 def align_runtime_estimations_across_all_distributed_ranks(
     snodes: list[BaseSchedulerNode],
 ):
+    from torch._inductor.scheduler import _get_mm_like_fn
+
     runtime_estimations = {}
+    runtime_estimations_for_mms = {}
+
     for snode in snodes:
         runtime_estimations[snode] = snode.get_estimated_runtime()
+        if _get_mm_like_fn(snode) is not None:
+            runtime_estimations_for_mms[snode] = runtime_estimations[snode]
+
     import torch.distributed as dist
     from torch.distributed.distributed_c10d import _get_default_group
 
     world_size = dist.get_world_size()
     pg = _get_default_group()
-    gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
+    gathered_runtime_estimations_for_mms: list[list[float]] = [
+        [] for _ in range(world_size)
+    ]
     dist.all_gather_object(
-        gathered_runtime_estimations, list(runtime_estimations.values()), pg
+        gathered_runtime_estimations_for_mms,
+        list(runtime_estimations_for_mms.values()),
+        pg,
     )
-    median_runtime_estimations = torch.median(
-        torch.tensor(gathered_runtime_estimations), dim=0
+    median_runtime_estimations_for_mms = torch.median(
+        torch.tensor(gathered_runtime_estimations_for_mms), dim=0
     ).values.tolist()
-    for i in range(len(snodes)):
-        snodes[i].override_estimated_runtime = median_runtime_estimations[i]
+    for idx, snode in enumerate(runtime_estimations_for_mms.keys()):
+        runtime_estimations_for_mms[snode] = median_runtime_estimations_for_mms[idx]
+
+    for snode in snodes:
+        if snode in runtime_estimations_for_mms:
+            runtime_estimations[snode] = runtime_estimations_for_mms[snode]
+        snode.override_estimated_runtime = runtime_estimations[snode]
 
 
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
@@ -233,6 +247,7 @@ def _initialize_memory_tracking(snodes, graph_inputs, graph_outputs):
         )
     )
     _curr_memory = dict(zip(snodes, snodes_curr_memory))
+    # pyrefly: ignore [unsupported-operation]
     _curr_memory[None] = (0, 0)
 
     # Build candidate buffer map for optimization
@@ -1036,7 +1051,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                         )
                         exposed_delta = exposed_after - exposed_before
                         for gw_comm_time, gw_comp_time in group_waits.values():
+                            # pyrefly: ignore [no-matching-overload]
                             gw_exposed_before = max(0, gw_comm_time - gw_comp_time)
+                            # pyrefly: ignore [no-matching-overload]
                             gw_exposed_after = max(
                                 0, gw_comm_time - gw_comp_time + c_runtime
                             )
@@ -1962,6 +1979,7 @@ def _sink_waits_iterative_internal(
                         # pyrefly: ignore[no-matching-overload]
                         -max(0, info.comm_time - info.comp_time - c_runtime)
                         for gc_comm_time, gc_comp_time in group_colls.values():
+                            # pyrefly: ignore [no-matching-overload]
                             exposed_delta += max(0, gc_comm_time - gc_comp_time) - max(
                                 0, gc_comm_time - gc_comp_time + c_runtime
                             )
@@ -2202,8 +2220,6 @@ def reorder_compute_and_comm_for_overlap(
     snodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
     order = snodes
-    graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
-    graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
     # pyrefly: ignore [bad-assignment]
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
@@ -2211,32 +2227,7 @@ def reorder_compute_and_comm_for_overlap(
         assert callable(p), (
             f"Invalid reorder_compute_and_comm_for_overlap pass: {p} is not callable"
         )
-        peak_memory, _ = estimate_peak_memory(
-            snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
-        )
-        if torch.distributed.get_rank() == 0:
-            overlap_log.debug(
-                f"==== Visualize overlap before reordering pass {p}, {peak_memory=} ===="  # noqa: G004
-            )
-            try:
-                visualize_overlap(order)
-            except Exception as e:
-                overlap_log.debug("", exc_info=e)
-        t0 = time.time()
         order = p(order)  # type: ignore[operator]
-        t = time.time() - t0
-        if torch.distributed.get_rank() == 0:
-            overlap_log.debug(
-                f"==== Visualize overlap after reordering pass {p} (ran in {t} sec)===="  # noqa: G004
-            )
-            try:
-                visualize_overlap(order)
-            except Exception as e:
-                overlap_log.debug("", exc_info=e)
-        peak_memory, _ = estimate_peak_memory(
-            snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
-        )
-        print(f"final {peak_memory=}")
     # pyrefly: ignore [bad-return]
     return order
 
