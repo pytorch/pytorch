@@ -8,6 +8,7 @@ import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.utils import ChromiumEventLogger
 from torch.autograd import (
     _record_function_with_args_enter,
     _record_function_with_args_exit,
@@ -224,6 +225,59 @@ class TestRecordFunction(TestCase):
         self.assertTrue(
             found_python_subclass,
             "PythonSubclass record function not found in profiler events",
+        )
+
+    def test_chromium_event_logger_profiler_integration(self):
+        """Verify ChromiumEventLogger emits RecordFunction events to profiler"""
+
+        with _profile(use_kineto=kineto_available()) as prof:
+            logger = ChromiumEventLogger()
+            logger.log_event_start("test_compile_event", 0, {})
+            logger.log_event_end(
+                "test_compile_event", 1000, {}, 0, log_pt2_compile_event=False
+            )
+
+        found = False
+        for e in prof.function_events:
+            if e.name == "test_compile_event":
+                found = True
+                break
+        self.assertTrue(
+            found,
+            "ChromiumEventLogger event not found in profiler output",
+        )
+
+    def test_chromium_logger_reset_cleans_open_events(self):
+        """Verify reset() cleans up lingering record functions on exception"""
+        from torch._dynamo.utils import ChromiumEventLogger
+
+        with _profile(use_kineto=kineto_available()):
+            logger = ChromiumEventLogger()
+
+            logger.log_event_start("incomplete_event", 0, {})
+
+            rf_dict = logger.get_record_functions()
+            self.assertIn("incomplete_event", rf_dict)
+
+            logger.reset()
+
+            rf_dict = logger.get_record_functions()
+            self.assertEqual(len(rf_dict), 0, "reset() failed to clean up open events")
+
+    def test_chromium_logger_no_overhead_when_profiler_disabled(self):
+        """Verify zero overhead when profiler is not enabled"""
+        from torch._dynamo.utils import ChromiumEventLogger
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        logger = ChromiumEventLogger()
+
+        logger.log_event_start("test_event", 0, {})
+        logger.log_event_end("test_event", 1000, {}, 0, log_pt2_compile_event=False)
+
+        rf_dict = logger.get_record_functions()
+        self.assertEqual(
+            len(rf_dict), 0, "RecordFunction created when profiler disabled"
         )
 
 
