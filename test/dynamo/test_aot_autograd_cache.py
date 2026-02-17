@@ -1303,6 +1303,76 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(result, expected)
 
     @requires_cuda_and_triton
+    def test_triton_op_kernel_detection_logging(self):
+        """
+        Test that get_inner_triton_kernels correctly detects triton kernels
+        and batches debug log messages.
+        """
+        import logging
+
+        from torch._library import capture_triton
+        from torch._library.triton import get_inner_triton_kernels
+
+        @triton.jit
+        def log_test_kernel(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(x_ptr + offsets, x + 1, mask=mask)
+
+        def my_triton_fn(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone()
+            n_elements = y.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            capture_triton(log_test_kernel)[grid](y, n_elements, BLOCK_SIZE=256)
+            return y
+
+        triton_logger = logging.getLogger("torch._library.triton")
+        log_records: list[logging.LogRecord] = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_records.append(record)
+
+        triton_logger.addHandler(handler)
+        old_level = triton_logger.level
+        triton_logger.setLevel(logging.DEBUG)
+        try:
+            kernels = get_inner_triton_kernels(my_triton_fn)
+        finally:
+            triton_logger.setLevel(old_level)
+            triton_logger.removeHandler(handler)
+
+        # The kernel should still be found correctly.
+        kernel_names = [getattr(k, "__name__", str(k)) for k in kernels]
+        self.assertIn("log_test_kernel", kernel_names)
+
+        # Debug messages should be batched: at most one "failed to resolve"
+        # and one "not found" message per resolve_names_to_kernels call,
+        # rather than one per name.
+        resolve_msgs = [
+            r
+            for r in log_records
+            if "failed to resolve to triton kernels" in r.getMessage()
+        ]
+        not_found_msgs = [
+            r
+            for r in log_records
+            if "not found in namespace or assignments" in r.getMessage()
+        ]
+        # Each category should produce at most a small number of batched
+        # messages (one per resolve_names_to_kernels call), not one per name.
+        self.assertLessEqual(
+            len(resolve_msgs),
+            5,
+            f"Expected batched 'failed to resolve' messages, got {len(resolve_msgs)}",
+        )
+        self.assertLessEqual(
+            len(not_found_msgs),
+            5,
+            f"Expected batched 'not found' messages, got {len(not_found_msgs)}",
+        )
+
+    @requires_cuda_and_triton
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})

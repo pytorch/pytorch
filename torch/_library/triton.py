@@ -3,6 +3,7 @@ import contextlib
 import inspect
 import logging
 import threading
+import types
 from collections.abc import Callable, Generator, Iterable
 from typing import Any, Optional, Union
 
@@ -189,6 +190,15 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
 
         all_names = build_namespace(fn)
 
+        # Collect function parameter names — they are runtime values and
+        # can never be statically resolved to Triton kernels.
+        _param_names: set[str] = set()
+        if hasattr(fn, "__code__"):
+            code = fn.__code__
+            _param_names = set(
+                code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
+            )
+
         def resolve_names_to_kernels(
             names: list[str],
             namespace: dict[str, Any],
@@ -202,16 +212,26 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 visited = set()
 
             results: list[object] = []
+            unresolved: set[str] = set()
+            not_found: set[str] = set()
             for name in names:
                 if name in visited:
                     continue
                 visited.add(name)
+
+                # Fast-path: skip function parameters — they are runtime
+                # values and can never be statically resolved to Triton kernels.
+                if name in _param_names:
+                    continue
 
                 if name in namespace:
                     obj = namespace[name]
                     kernel = resolve_to_kernel(obj)
                     if kernel is not None:
                         results.append(kernel)
+                        continue
+                    # Skip modules — they can never be Triton kernels.
+                    if isinstance(obj, types.ModuleType):
                         continue
                     # recurse into callable objects (factory fn's),
                     # unwrapping decorators if applicable
@@ -227,7 +247,7 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                             if nested:
                                 results.extend(nested)
                                 continue
-                    logger.debug("failed to resolve %s to a triton kernel", name)
+                    unresolved.add(name)
                 elif assignments is not None and name in assignments:
                     # trace through local assignments
                     for rhs_expr in assignments[name]:
@@ -237,7 +257,18 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                         )
                         results.extend(traced)
                 else:
-                    logger.debug("%s not found in namespace or assignments", name)
+                    not_found.add(name)
+
+            if unresolved:
+                logger.debug(
+                    "failed to resolve to triton kernels: %s",
+                    ", ".join(unresolved),
+                )
+            if not_found:
+                logger.debug(
+                    "not found in namespace or assignments: %s",
+                    ", ".join(not_found),
+                )
 
             return results
 
