@@ -1136,7 +1136,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         )
         with ctx:
             if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
-                fn_vt = VariableTracker.build(tx, fn, source=source)
+                fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
                 # Ideally we would have just used VariableTracker.build(tx, fn,
@@ -1161,7 +1161,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else:
                 source = None
 
-            fn_vt = VariableTracker.build(tx, fn, source=source)
+            fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
             return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
@@ -1172,7 +1172,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if isinstance(method, staticmethod):
                 source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
-                fn_vt = VariableTracker.build(tx, method.__func__, source=source)
+                fn_vt = VariableTracker.build(
+                    tx, method.__func__, source=source, realize=True
+                )
                 return fn_vt.call_function(tx, args, kwargs)
 
             if (
