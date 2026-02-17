@@ -146,16 +146,12 @@ class TestDecompSharding(TestCase):
             self.assertTrue(op not in sharding_prop.op_to_rules)
 
         # binary_cross_entropy_with_logits
-        # TODO(pianpwk): fix no sharding strategy for decomp <-> CIA ops
         check_no_strategy(aten.binary_cross_entropy_with_logits.default)
         input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
         target = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
         weight = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        with self.assertRaisesRegex(
-            NotImplementedError, "does not have a sharding strategy"
-        ):
-            out = aten.binary_cross_entropy_with_logits.default(input, target, weight)
-            self.assertEqual(out.placements, (Partial("avg"),))
+        out = aten.binary_cross_entropy_with_logits.default(input, target, weight)
+        self.assertEqual(out.placements, (Partial("avg"),))
 
         # mse_loss
         check_no_strategy(aten.mse_loss.default)
@@ -188,21 +184,15 @@ class TestDecompSharding(TestCase):
         # glu: force replicate
         check_no_strategy(aten.glu.default)
         x = d_empty(16, device_mesh=mesh, placements=[Partial()])
-        with self.assertRaisesRegex(
-            NotImplementedError, "does not have a sharding strategy"
-        ):
-            out = aten.glu.default(x)
-            self.assertEqual(out.placements, (Replicate(),))
+        out = aten.glu.default(x)
+        self.assertEqual(out.placements, (Replicate(),))
 
         # polar: force replicate
         check_no_strategy(aten.polar.default)
         x = d_empty(16, device_mesh=mesh, placements=[Partial()])
         y = d_empty(16, device_mesh=mesh, placements=[Partial()])
-        with self.assertRaisesRegex(
-            NotImplementedError, "does not have a sharding strategy"
-        ):
-            out = aten.polar.default(x, y)
-            self.assertEqual(out.placements, (Replicate(),))
+        out = aten.polar.default(x, y)
+        self.assertEqual(out.placements, (Replicate(),))
 
 
 class TestDecompShardingWithComms(DTensorTestBase):

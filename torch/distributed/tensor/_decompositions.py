@@ -102,12 +102,21 @@ class PlacementTrackingMode(TorchDispatchMode):
             op_schema.schema_info = schema_info
             op_schema._recompute_comparison_key()
 
-        if _are_we_tracing():
-            output_sharding = self.sharding_prop.propagate_op_sharding_non_cached(
-                op_schema
-            )
-        else:
-            output_sharding = self.sharding_prop.propagate_op_sharding(op_schema)
+        try:
+            if _are_we_tracing():
+                output_sharding = self.sharding_prop.propagate_op_sharding_non_cached(
+                    op_schema
+                )
+            else:
+                output_sharding = self.sharding_prop.propagate_op_sharding(op_schema)
+        except NotImplementedError:
+            # If no sharding strategy is found but the op can decompose (e.g. CIA ops
+            # encountered during decomposition tracing), decompose it further so each
+            # sub-op gets its placement propagated through this mode.
+            if func._can_decompose():
+                with self:
+                    return func.decompose(*args, **kwargs)
+            raise
 
         if output_sharding.needs_redistribute:  # pyrefly: ignore [missing-attribute]
             raise RuntimeError(f"Decomposition requires redistribution for {func}")
