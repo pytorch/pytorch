@@ -2669,6 +2669,10 @@ class BuiltinVariable(VariableTracker):
                         return VariableTracker.build(tx, value.__base__, source)
                     if name == "__flags__":
                         return ConstantVariable.create(value.__flags__)
+            except ObservedAttributeError:
+                if default is not None:
+                    return default
+                raise
             except NotImplementedError:
                 pass
 
