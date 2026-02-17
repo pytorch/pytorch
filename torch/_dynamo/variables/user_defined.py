@@ -1061,9 +1061,7 @@ class UserDefinedEnumClassVariable(UserDefinedClassVariable):
             # __iter__ is a bound method which is not correctly handled by the parent var_getattr, so need to handle it here
             if name == "__iter__":
                 source = self.source and AttrSource(self.source, name)
-                return variables.UserMethodVariable(
-                    enum.EnumType.__iter__, self, source=source
-                )
+                return variables.UserMethodVariable(method, self, source=source)
         return super().var_getattr(tx, name)
 
 
