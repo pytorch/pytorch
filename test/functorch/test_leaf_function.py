@@ -619,6 +619,41 @@ class TestLeafFunctionEscapedGradients(TestCase):
 class TestLeafFunctionMakeFxAndCompile(TestCase):
     """Tests for @leaf_function when mixing torch.compile and make_fx."""
 
+    def test_not_called_during_compilation(self):
+        """The real leaf_fn body runs only at runtime, not during compilation."""
+        torch._dynamo.reset()
+        call_count = 0
+
+        @leaf_function
+        def my_leaf(x, y):
+            nonlocal call_count
+            call_count += 1
+            return (x + y,)
+
+        @my_leaf.register_fake
+        def my_leaf_fake(x, y):
+            return (torch.empty_like(x),)
+
+        def f(x, y):
+            return my_leaf(x, y)[0]
+
+        compiled_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        # Compilation + first call
+        result = compiled_f(x, y)
+        self.assertEqual(call_count, 1)
+        self.assertEqual(result, x + y)
+
+        # Second call reuses compiled code, leaf_fn called again exactly once
+        x2 = torch.randn(3, 3)
+        y2 = torch.randn(3, 3)
+        result2 = compiled_f(x2, y2)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result2, x2 + y2)
+
     @config.patch(force_compile_during_fx_trace=True)
     def test_leaf_fn_only_in_compile(self):
         """Leaf function only inside the torch.compile'd region."""
