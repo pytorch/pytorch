@@ -217,12 +217,15 @@ def with_effects_functional(
     return ctx.wrap_tensors(result)
 
 
+_EFFECTFUL_HOPS_WITH_SCHEMA = {hop_print, invoke_leaf_function}
+
+
 def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema:
     if isinstance(op, torch._ops.OpOverload):
         return op._schema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
-    elif hasattr(op, "gen_schema"):
+    elif op in _EFFECTFUL_HOPS_WITH_SCHEMA:
         extra_kwargs = kwargs or {}
         return op.gen_schema(*args, **extra_kwargs)
     else:
