@@ -320,8 +320,10 @@ Constants
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ======================================= ===========================================
+``e``                                       The mathematical constant *e* = 2.718281..., Euler's number. Alias for :attr:`math.e`.
 ``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
 ``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+``pi``                                      The mathematical constant *π* = 3.141592..., the ratio of a circle's circumference to its diameter. Alias for :attr:`math.pi`.
 ======================================= ===========================================
 
 Pointwise Ops
