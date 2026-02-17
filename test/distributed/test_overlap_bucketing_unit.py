@@ -462,6 +462,83 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             "split_with_sizes"
         ).check_count("%mm", 2).run(graph_str)
 
+    def test_no_cross_type_bucketing_ar_and_rs(self):
+        """
+        Test that all_reduce and reduce_scatter on the same PG with
+        matching reduce_op and dtype are NOT bucketed together.
+
+        bucket_key() returns (group_name, reduce_op, dtype) for both
+        all_reduce and reduce_scatter. Without the collective type in
+        the key, they would be incorrectly grouped together.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 2
+
+            ar1 = torch.ops._c10d_functional.all_reduce(a, "sum", group_name)
+            ar2 = torch.ops._c10d_functional.all_reduce(b, "sum", group_name)
+
+            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                a, "sum", group_size, group_name
+            )
+            rs2 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                b, "sum", group_size, group_name
+            )
+
+            ar1_out = torch.ops._c10d_functional.wait_tensor(ar1)
+            ar2_out = torch.ops._c10d_functional.wait_tensor(ar2)
+            rs1_out = torch.ops._c10d_functional.wait_tensor(rs1)
+            rs2_out = torch.ops._c10d_functional.wait_tensor(rs2)
+
+            return ar1_out.sum() + ar2_out.sum() + rs1_out.sum() + rs2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+            traced = make_fx(func)(a, b)
+
+        ar1, ar2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        rs1, rs2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+
+        # No hiding — all exposed
+        hiding_annotations = {}
+
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            scheduled,
+            bucket_only_internode_comms=False,
+        )
+        bucketer.bucket_collectives()
+
+        # all_reduce ops should be bucketed together (1 bucketed all_reduce)
+        ar_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        self.assertEqual(len(ar_nodes), 1)
+
+        # reduce_scatter ops should be bucketed together (1 bucketed reduce_scatter)
+        rs_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        self.assertEqual(len(rs_nodes), 1)
+
     def test_can_bucket_multidtype_collectives(self):
         """
         Test that all_gathers with different dtypes CAN bucket together.
