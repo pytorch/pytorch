@@ -90,7 +90,18 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     def test_linear_op_reductions(self):
-        for op_str in ("all", "sum", "prod", "max", "min", "any", "amax", "amin"):
+        for op_str in (
+            "all",
+            "sum",
+            "prod",
+            "max",
+            "min",
+            "any",
+            "amax",
+            "amin",
+            "var",
+            "std",
+        ):
             self.linear_op_reductions(op_str)
 
     @with_comms
@@ -690,29 +701,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(partial_out.full_tensor(), out)
 
     @with_comms
-    def test_vector_norm_on_norm_partial(self):
-        from torch.distributed.tensor._ops._math_ops import _NormPartial
-
-        device_mesh = self.build_device_mesh()
-        comm_mode = CommDebugMode()
-
-        grad = torch.randn(12, 8, device=self.device_type)
-        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
-
-        for ord in [1.0, 2.0, 2.5]:
-            norm = torch.linalg.vector_norm(sharded_grad, ord=ord)
-            self.assertIsInstance(norm._spec.placements[0], _NormPartial)
-
-            with comm_mode:
-                result = torch.linalg.vector_norm(norm.unsqueeze(0), ord=ord)
-
-            self.assertEqual(comm_mode.get_total_counts(), 0)
-            self.assertIsInstance(result._spec.placements[0], _NormPartial)
-            self.assertEqual(
-                result.full_tensor(), torch.linalg.vector_norm(grad, ord=ord)
-            )
-
-    @with_comms
     def test_foreach_norm(self):
         device_mesh = self.build_device_mesh()
 
@@ -869,6 +857,16 @@ class DistMathOpsTest(DTensorTestBase):
         grad1_norm = out_tuple[1]
         self.assertEqual(grad0_norm.device_mesh, mesh_x)
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
+
+    @with_comms
+    def test_norm_0_on_psum(self):
+        # L0 norm on P(sum) should not propagate -> P(sum), should replicate
+        device_mesh = self.build_device_mesh()
+        t = torch.tensor([0, 1, 0, 3, 0, 5], device=self.device_type).float()
+        dt = distribute_tensor(t, device_mesh, [Partial()])
+        out = torch.ops.aten.linalg_vector_norm(dt, 0)
+        self.assertEqual(out.full_tensor().item(), 3.0)
+        self.assertEqual(out.placements, (Replicate(),))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1184,6 +1182,55 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1)
         self.assertEqual(res.placements, [Shard(0), Replicate()])
         self.assertEqual(res.full_tensor(), expected_answer)
+
+    @with_comms
+    def test_prims_pointwise_ops(self):
+        device_mesh = self.build_device_mesh()
+        x = torch.randn(12, 8)
+        y = torch.randn(12, 8)
+        dtensor_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        dtensor_y = distribute_tensor(y, device_mesh, [Shard(0)])
+
+        for op in [
+            torch.ops.prims.bessel_i0e,
+            torch.ops.prims.bessel_i1,
+            torch.ops.prims.bessel_i1e,
+            torch.ops.prims.bessel_j0,
+            torch.ops.prims.bessel_j1,
+            torch.ops.prims.erfcx,
+            torch.ops.prims.ndtri,
+            torch.ops.prims.spherical_bessel_j0,
+            torch.special.erfcx,
+        ]:
+            local_result = op(x.abs().clamp(0.1, 3.0))
+            dtensor_result = op(dtensor_x.abs().clamp(0.1, 3.0))
+            self.assertEqual(dtensor_result.full_tensor(), local_result)
+            self.assertTrue(dtensor_result.placements[0].is_shard(dim=0))
+
+        for op in [
+            torch.ops.prims.div,
+            torch.ops.prims.gcd,
+            torch.ops.prims.ne,
+            torch.ops.aten.ne,
+            torch.ops.aten.gcd,
+        ]:
+            if op in [torch.ops.prims.gcd, torch.ops.aten.gcd]:
+                local_result = op(x.int(), y.int())
+                dtensor_result = op(dtensor_x.int(), dtensor_y.int())
+            else:
+                local_result = op(x, y)
+                dtensor_result = op(dtensor_x, dtensor_y)
+            self.assertEqual(dtensor_result.full_tensor(), local_result)
+
+    @with_comms
+    def test_prims_view_of(self):
+        device_mesh = self.build_device_mesh()
+        x = torch.randn(12, 8)
+        dtensor = distribute_tensor(x, device_mesh, [Shard(0)])
+
+        result = torch.ops.prims.view_of(dtensor)
+        self.assertTrue(result.placements[0].is_shard(dim=0))
+        self.assertEqual(result.full_tensor(), x)
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(

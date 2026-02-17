@@ -1,10 +1,14 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
-#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 
 namespace c10d::nccl_extension {
+
+using namespace c10d::symmetric_memory;
 
 #define THREADS_PER_BLOCK 512
 
@@ -288,12 +292,127 @@ bool is_nccl_symmem_available() {
     return false;
 #endif
 }
+
+void nccl_put_signal(at::Tensor& tensor, const c10::intrusive_ptr<SymmetricMemory>& hdl, int64_t peer) {
+#ifdef NCCL_HAS_ONE_SIDED_API
+  // Check input arguments
+  TORCH_CHECK(tensor.is_contiguous(),
+      "nccl_put_signal op currently supports contiguous tensors only");
+  TORCH_CHECK(peer < hdl->get_world_size(), "peer must be smaller than world size");
+
+  // Context setup
+  auto device = tensor.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // Get window etc
+  auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
+  auto window = nccl_hdl->get_window();
+  TORCH_CHECK(window != nullptr, "window is nullptr");
+  auto offset = nccl_hdl->get_offset();
+  auto byte_size = tensor.numel() * tensor.element_size();
+
+  // Get the NCCL communicator
+  auto& manager = NCCLDevCommManager::get(device);
+  ncclComm_t comm = manager.get_comm(nccl_hdl->get_group_name());
+
+  // Issue the NCCL API
+  C10D_NCCL_CHECK(
+      ncclPutSignal(
+          tensor.data_ptr(), byte_size, ncclChar,
+          peer, window, offset,
+          /*sigIdx=*/0, /*ctx=*/0, /*flags=*/0, // Need to be 0 for now
+          comm, stream),
+      c10::str("ncclPutSignal failed"));
+#else
+  TORCH_CHECK(false, "NCCL one-sided API is not supported. Requires NCCL >= 2.29.0");
+#endif // NCCL_HAS_ONE_SIDED_API
+}
+
+void nccl_wait_signal(const c10::intrusive_ptr<SymmetricMemory>& hdl, int64_t peer) {
+#ifdef NCCL_HAS_ONE_SIDED_API
+  // Check input arguments
+  TORCH_CHECK(peer < hdl->get_world_size(), "peer must be smaller than world size");
+
+  // Context setup
+  auto device = hdl->get_device();
+  c10::cuda::CUDAGuard guard(device);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // Get the NCCL handle
+  auto nccl_hdl = dynamic_cast<NCCLSymmetricMemory*>(hdl.get());
+  // Get the NCCL communicator
+  auto& manager = NCCLDevCommManager::get(device);
+  ncclComm_t comm = manager.get_comm(nccl_hdl->get_group_name());
+
+  ncclWaitSignalDesc_t signalDesc;
+  signalDesc.opCnt = 1;
+  signalDesc.peer = peer;
+  signalDesc.sigIdx = 0; // Need to be 0 for now
+  signalDesc.ctx = 0; // Need to be 0 for now
+
+  C10D_NCCL_CHECK(
+      ncclWaitSignal(1, &signalDesc, comm, stream),
+      c10::str("ncclWaitSignal failed"));
+#else
+  TORCH_CHECK(false, "NCCL one-sided API is not supported. Requires NCCL >= 2.29.0");
+#endif // NCCL_HAS_ONE_SIDED_API
+}
+
 } // namespace c10d::nccl_extension
 
+
+namespace {
+// Boxed functions for the APIs that use custom class `SymmetricMemory`.
+// Why do we need boxed functions?
+// Problem:
+// `SymmetricMemory` is a custom class that needs to be TorchBind'ed first
+// before it can be supported by the dispatcher. Since both TorchBind
+// registration and m.impl registration happen in static initialization, we can
+// hit static initialization order fiasco since C++ provides no ordering
+// guarantees for static initializers across translation units.
+// Solution:
+// Use boxed kernels that operate on the IValue stack directly. The
+// makeFromBoxedFunction path never calls inferFunctionSchemaFromFunctor at all:
+// For details, see https://github.com/pytorch/pytorch/pull/174034.
+
+void nccl_put_signal_boxed(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    c10::Stack* stack) {
+  auto peer = torch::jit::pop(*stack).toInt();
+  auto hdl = torch::jit::pop(*stack).toCustomClass<
+      c10d::symmetric_memory::SymmetricMemory>();
+  auto tensor = torch::jit::pop(*stack).toTensor();
+  c10d::nccl_extension::nccl_put_signal(tensor, hdl, peer);
+}
+
+void nccl_wait_signal_boxed(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    c10::Stack* stack) {
+  auto peer = torch::jit::pop(*stack).toInt();
+  auto hdl = torch::jit::pop(*stack).toCustomClass<
+      c10d::symmetric_memory::SymmetricMemory>();
+  c10d::nccl_extension::nccl_wait_signal(hdl, peer);
+}
+} // namespace
 
 TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nccl_put", c10d::nccl_extension::nccl_put);
   m.impl("nccl_get", c10d::nccl_extension::nccl_get);
+  // APIs that accept a signal pad from user
+  // TODO: rename with more descriptive name
   m.impl("nccl_wait_for_signal", c10d::nccl_extension::nccl_wait_for_signal);
   m.impl("nccl_put_with_signal", c10d::nccl_extension::nccl_put_with_signal);
+  // API that uses internal signal mechanism and accepts handle
+  m.impl("nccl_put_signal",
+      torch::CppFunction::makeFromBoxedFunction<&nccl_put_signal_boxed>());
+}
+
+// Use CompositeExplicitAutograd as key since ops do not accept tensor as input
+TORCH_LIBRARY_IMPL(symm_mem, CompositeExplicitAutograd, m) {
+  // API that uses internal signal mechanism and accepts handle
+  m.impl("nccl_wait_signal",
+      torch::CppFunction::makeFromBoxedFunction<&nccl_wait_signal_boxed>());
 }
