@@ -3053,7 +3053,11 @@ class GuardBuilder(GuardBuilderBase):
                 )
 
                 excluded_sizes = metadata.get("excluded_sizes")
-                if excluded_sizes and any(v is not None for v in excluded_sizes):
+                if (
+                    excluded_sizes
+                    and any(v is not None for v in excluded_sizes)
+                    and config.guard_exclusion_for_automatic_dynamic
+                ):
                     # Only exclude on dimensions that are dynamic in this
                     # graph (size[i] is None). Static dimensions are already
                     # handled by the tensor match guard.
