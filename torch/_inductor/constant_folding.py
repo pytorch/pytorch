@@ -250,7 +250,13 @@ class ConstantFolder(torch.fx.Interpreter):
 
         out = self._deduce_value(node)
 
-        if isinstance(out, torch._C.ScriptObject):
+        if isinstance(
+            out,
+            (
+                torch._C.ScriptObject,
+                torch._library.fake_class_registry.FakeScriptObject,
+            ),
+        ):
             return out
 
         if out == self.unknown_value:
