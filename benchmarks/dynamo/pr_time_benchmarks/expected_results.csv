@@ -86,6 +86,10 @@ basic_NestedModule_eager,compile_time_instruction_count,5927000000,0.1
 
 
 
+deep_nested_module_cpu,compile_time_instruction_count,1508317223,0.1
+
+
+
 basic_InlineMod_eager,compile_time_instruction_count,7480000000,0.1
 
 
