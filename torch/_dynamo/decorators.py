@@ -567,26 +567,26 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     @functools.wraps(fn)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        # Not using `not torch.compiler.is_dynamo_compiling()` here so eager code still go to
-        # `fn(*args, **kwargs)` directly.
-        if get_proxy_mode() is not None or detect_fake_mode(args) is not None:
-            # Call python wrapper to support make_fx tracing
-            if inner._torchdynamo_leaf_fake_fn is None:  # type: ignore[attr-defined]
+        if inner._torchdynamo_leaf_fake_fn is None:  # type: ignore[attr-defined]
+            if (
+                get_proxy_mode() is not None
+                or detect_fake_mode(args) is not None
+                or torch.compiler.is_dynamo_compiling()
+            ):
                 raise ValueError(
-                    f"leaf_function '{getattr(fn, '__name__', fn)}' "
+                    f"Tracing/compiling leaf_function '{getattr(fn, '__name__', fn)}' "
                     "requires a fake implementation. Please provide one using the @<func>.register_fake "
                     "decorator. See the leaf_function docstring for details."
                 )
 
+        # pyrefly: ignore [bad-argument-type]
+        return _invoke_leaf_function_python(
+            fn,
             # pyrefly: ignore [bad-argument-type]
-            return _invoke_leaf_function_python(
-                fn,
-                # pyrefly: ignore [bad-argument-type]
-                inner._torchdynamo_leaf_fake_fn,
-                args,
-                kwargs,
-            )  # type: ignore[attr-defined]
-        return fn(*args, **kwargs)
+            inner._torchdynamo_leaf_fake_fn,
+            args,
+            kwargs,
+        )  # type: ignore[attr-defined]
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
