@@ -5931,6 +5931,40 @@ Done""",
 
                 out.backward()
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_forward_traceback_preserves_exception_with_checkpoint(self):
+        # Regression test: gatherForwardTraceback() must not clear a pending
+        # Python exception.
+        #
+        # Non-reentrant checkpoint raises _StopRecomputationError for early
+        # stopping during backward recomputation.  This exception propagates
+        # through C++ as python_error (default ctor, which does NOT persist
+        # the exception -- it stays pending in the thread state).
+        #
+        # With CUDA memory history recording enabled, every CUDA allocation
+        # triggers CapturedTraceback::gather() → gatherForwardTraceback().
+        # That function looks up ANOMALY_TRACE_KEY in the backward node's
+        # metadata dict.  When anomaly mode is off the dict is empty, so the
+        # key is not found.  On Python < 3.13 the compat shim for
+        # PyDict_GetItemRef checks PyErr_Occurred() to distinguish "not found"
+        # from "error" -- a pending _StopRecomputationError is misread as a
+        # lookup error and then cleared, causing:
+        #   SystemError: ... returned NULL without setting an exception
+        #
+        # The fix (PyErr_Fetch/PyErr_Restore in gatherForwardTraceback) saves
+        # and restores the exception state around all Python C-API calls.
+
+        def fn(x):
+            return x.sigmoid()
+
+        try:
+            torch.cuda.memory._record_memory_history("all", stacks="python")
+            x = torch.randn(4, device="cuda", requires_grad=True)
+            y = checkpoint(fn, x, use_reentrant=False)
+            y.sum().backward()
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
         class MyFunc(Function):
