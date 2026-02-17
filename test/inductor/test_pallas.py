@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import unittest
-from unittest import mock
 
 import torch
 import torch._dynamo
@@ -53,24 +52,18 @@ except ImportError:
 test_classes = {}
 
 
-def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
+def make_pallas(cls):
     """Create a test class variant that uses Pallas backend.
 
     Args:
         cls: The test class to create a Pallas variant of.
-        _debug_cpu_to_tpu_pallas: If True, route CPU operations to TPU.
     """
     patches = [
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
     ]
-    if _debug_cpu_to_tpu_pallas:
-        cls_prefix = "PallasTpu"
-        suffix = "_pallas_tpu"
-        patches.append((config, "_debug_cpu_to_tpu_pallas", True))
-    else:
-        cls_prefix = "Pallas"
-        suffix = "_pallas"
+    cls_prefix = "Pallas"
+    suffix = "_pallas"
 
     # Mark tests based on sentinel files in pallas_expected_failures/ and pallas_skip_tests/
     for name in cls.__dict__:
@@ -117,9 +110,7 @@ def _skip_if(condition_fn, reason):
     return decorator
 
 
-skip_if_tpu = _skip_if(
-    lambda self: config._debug_cpu_to_tpu_pallas, "Not yet working on TPU"
-)
+skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu", "Not yet working on TPU")
 skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
 skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
 
@@ -161,7 +152,12 @@ class PallasTestsMixin:
                 pass
 
     def _compile(self, fn):
-        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
+        device_to_backend_key = {
+            "cuda": "cuda_backend",
+            "cpu": "cpu_backend",
+            "tpu": "tpu_backend",
+        }
+        key = device_to_backend_key[self.DEVICE]
         return torch.compile(fn, backend="inductor", options={key: "pallas"})
 
     def test_simple_add(self):
@@ -318,14 +314,7 @@ class PallasTestsMixin:
     def test_compile_options(self):
         """Test that Pallas backend is properly configured."""
 
-        @torch.compile(
-            backend="inductor",
-            options={
-                ("cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"): "pallas"
-            },
-        )
-        def pallas_fn(a, b):
-            return a.sin() + b.cos()
+        pallas_fn = self._compile(lambda a, b: a.sin() + b.cos())
 
         _, (code,) = run_and_get_code(
             pallas_fn,
@@ -340,11 +329,7 @@ class PallasTestsMixin:
     def test_jax_jit_wrapper_is_emitted(self):
         """Ensure generated Pallas code wraps pl.pallas_call in jax.jit."""
 
-        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
-
-        @torch.compile(backend="inductor", options={key: "pallas"})
-        def pallas_fn(a, b):
-            return a + b
+        pallas_fn = self._compile(lambda a, b: a + b)
 
         _, (code,) = run_and_get_code(
             pallas_fn,
@@ -750,6 +735,7 @@ class PallasTestsMixin:
         expected = fn(x, row_indices)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex64_mul(self):
         """Test complex64 multiplication."""
 
@@ -764,6 +750,7 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_conj(self):
         """Test complex conjugate."""
 
@@ -777,6 +764,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_real(self):
         """Test extracting real part of complex tensor."""
 
@@ -790,6 +778,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_imag(self):
         """Test extracting imaginary part of complex tensor."""
 
@@ -803,6 +792,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_abs(self):
         """Test complex absolute value (magnitude)."""
 
@@ -816,6 +806,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex128_conj(self):
         """Test complex128 conjugate operation."""
 
@@ -829,6 +820,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_mul_scalar(self):
         """Test complex multiplication with scalar."""
 
@@ -842,6 +834,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_conj_mul(self):
         """Test conjugate followed by multiplication."""
 
@@ -914,6 +907,7 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_sign(self):
         """Test sign operation."""
 
@@ -1044,6 +1038,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
+    @skip_if_tpu
     def test_softmax_two_pass(self):
         """Test two-pass softmax (max reduction + sum reduction)."""
 
@@ -1058,6 +1053,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
+    @skip_if_tpu
     def test_rms_norm(self):
         """Test RMS normalization (mean-of-squares reduction + rsqrt)."""
 
@@ -1075,6 +1071,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
+    @skip_if_tpu
     def test_welford(self):
         """Test Welford variance/mean computation (two-pass fallback)."""
 
@@ -1090,6 +1087,7 @@ class PallasTestsMixin:
         self.assertEqual(var_result, var_expected)
 
     @skip_if_cuda
+    @skip_if_tpu
     def test_layer_norm(self):
         """Test layer normalization (mean + variance reduction, normalize, scale + shift)."""
 
@@ -1497,7 +1495,8 @@ class PallasTestsMixin:
         expected = fn(*ws, x)
         self.assertEqual(result, expected)
 
-    @skip_if_cuda  # Mosaic GPU backend doesn't support axis-based reductions needed for softmax
+    @skip_if_cuda
+    @skip_if_tpu
     def test_nanogpt(self):
         """Test a minimal NanoGPT-style transformer block.
 
@@ -1598,28 +1597,14 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
+    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
 
-    @config.patch({"_debug_cpu_to_tpu_pallas": True})
+    tpu_api.tpu_device()  # initialize TPU runtime
+
     class PallasTestsTPU(PallasTestsMixin, TestCase):
-        DEVICE = "cpu"
+        DEVICE = "tpu"
 
-        @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
-        def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
-            def fn(a, b):
-                return a + b
-
-            with self.assertRaisesRegex(
-                RuntimeError,
-                (
-                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                    "Please make sure that you have a TPU available and that JAX is configured correctly."
-                ),
-            ):
-                torch.compile(
-                    fn, backend="inductor", options={"cpu_backend": "pallas"}
-                )(torch.randn(16), torch.randn(16))
-
-    make_pallas(test_torchinductor.SweepInputsTpuTest, _debug_cpu_to_tpu_pallas=True)
+    make_pallas(test_torchinductor.SweepInputsTpuTest)
 
 
 if __name__ == "__main__":

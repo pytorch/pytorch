@@ -24,33 +24,6 @@ public:
   c10::cuda::CUDAStream hip_stream() const { return *this; }
 };
 
-HIPStreamMasqueradingAsCUDA
-inline getStreamFromPoolMasqueradingAsCUDA(const bool isHighPriority = false, DeviceIndex device = -1) {
-  return HIPStreamMasqueradingAsCUDA(c10::cuda::getStreamFromPool(isHighPriority, device));
-}
-
-HIPStreamMasqueradingAsCUDA
-inline getStreamFromPoolMasqueradingAsCUDA(const int priority, DeviceIndex device = -1) {
-  return HIPStreamMasqueradingAsCUDA(c10::cuda::getStreamFromPool(priority, device));
-}
-
-HIPStreamMasqueradingAsCUDA
-inline getStreamFromExternalMasqueradingAsCUDA(hipStream_t ext_stream, DeviceIndex device) {
-  return HIPStreamMasqueradingAsCUDA(c10::cuda::getStreamFromExternal(ext_stream, device));
-}
-
-inline HIPStreamMasqueradingAsCUDA getDefaultHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {
-  return HIPStreamMasqueradingAsCUDA(c10::cuda::getDefaultCUDAStream(device_index));
-}
-
-inline HIPStreamMasqueradingAsCUDA getCurrentHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {
-  return HIPStreamMasqueradingAsCUDA(c10::cuda::getCurrentCUDAStream(device_index));
-}
-
-inline void setCurrentHIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA stream) {
-  c10::cuda::setCurrentCUDAStream(stream.hip_stream());
-}
-
 inline std::ostream& operator<<(std::ostream& stream, const HIPStreamMasqueradingAsCUDA& s) {
   stream << s.hip_stream() << " (masquerading as CUDA)";
   return stream;
