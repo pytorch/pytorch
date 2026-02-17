@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/ops/clamp.h>
 #include <ATen/core/Reduction.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
@@ -19,6 +18,7 @@
 #include <ATen/ops/binary_cross_entropy_backward_native.h>
 #include <ATen/ops/binary_cross_entropy_native.h>
 #include <ATen/ops/binary_cross_entropy_with_logits_native.h>
+#include <ATen/ops/clamp.h>
 #include <ATen/ops/clamp_min.h>
 #include <ATen/ops/cosine_embedding_loss_native.h>
 #include <ATen/ops/empty.h>
@@ -348,12 +348,6 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 }
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& pos_weight_opt, int64_t reduction) {
-  // Binary cross entropy with logits tensor is defined by the equation:
-  // L = -w (p y ln(sigma(x)) + (1-y) ln(1-sigma(x)))
-  // Which can be simplified to
-  // L = -w (x (1-y) - ln(sigma(x))(1+y(p-1))
-  // => L = -w (x (1-y) - ln(sigma(x)), when p==1.
-
   // // Threshold when ln(sigma(x)) or ln(1-sigma(x)) < -100 to be consistent with binary_cross_entropy
   // // Note: ln(sigma(x)) ~= x if x < -100 and ln(1-sigma(x)) ~= -x for x > 100
   Tensor input_clamped = at::clamp(input, -100, 100);
