@@ -494,7 +494,7 @@ class OverlapScheduler:
             self.node_estimations = dict(node_runtime_estimations)
         else:
             self.node_estimations, _ = gather_node_runtime_estimations(
-                gm, custom_runtime_estimation
+                gm, custom_runtime_estimation, log_estimations=True
             )
 
         # Add fusion region costs to estimations (call_module nodes from collapse)
@@ -1449,7 +1449,7 @@ def gather_node_runtime_estimations(
     | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     enable_fusion_regions: bool = False,
-    log_estimations: bool = True,
+    log_estimations: bool = False,
 ) -> tuple[dict[fx.Node, float], dict[fx.Node, Any]]:
     """Gather runtime estimations for all nodes without scheduling.
 
