@@ -45,6 +45,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
@@ -94,6 +95,7 @@ register_op_strategy(
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
+        prims.view_of.default,
     ]
 )(propagate_single_input_strategy)
 
@@ -271,7 +273,11 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
 
 @register_op_strategy(aten.bucketize.Tensor)
 def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
-    """Just propagate input sharding, but expect replicated for boundaries input."""
+    """
+    Propagate input sharding to output, but expect replicated for boundaries input.
+    For Partial inputs, convert to Replicate since bucketize returns indices
+    which cannot be meaningfully combined with sum/avg reductions.
+    """
     mesh = op_schema.get_mesh_from_args()
     input_strategy, boundaries_strategy = op_schema.args_schema
     bucketize_strategy = OpStrategy([])
@@ -280,9 +286,15 @@ def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
     if not isinstance(boundaries_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(boundaries_strategy)}")
     for arg_strategy in input_strategy.strategies:
+        # Convert Partial placements to Replicate - bucketize returns indices
+        # which cannot be combined with sum/avg reductions
+        placements = tuple(
+            Replicate() if isinstance(p, Partial) else p
+            for p in arg_strategy.output_spec.placements
+        )
         arg_spec = DTensorSpec(
             mesh,
-            arg_strategy.output_spec.placements,
+            placements,
             arg_strategy.output_spec.tensor_meta,
         )
         replica_spec = DTensorSpec(
@@ -788,8 +800,9 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     first_input_strategy = input_strategies[0]
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
-    # normalize the dim to be within the common input ndim
-    dim = normalize_dim(dim, common_input_ndim)
+    # normalize the dim to be within the output ndim (input ndim + 1),
+    # since stack inserts a new dimension
+    dim = normalize_dim(dim, common_input_ndim + 1)
 
     mesh = first_input_strategy.mesh
 
@@ -851,7 +864,9 @@ def cat_single_dim_strategy(
     for i in range(common_ndim):
         if i != cat_dim:
             single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+    # pyrefly: ignore [bad-argument-type]
     single_dim_strategies.append([Partial("sum")] * (1 + num_inputs))
+    # pyrefly: ignore [bad-return]
     return single_dim_strategies
 
 
