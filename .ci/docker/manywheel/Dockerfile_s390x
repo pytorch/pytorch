@@ -61,7 +61,8 @@ RUN yum install -y \
   libxml2-devel \
   openssl-devel \
   valgrind \
-  ninja-build
+  ninja-build \
+  patchelf
 
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
@@ -76,13 +77,7 @@ RUN git config --global --add safe.directory "*"
 RUN /bin/rm -rf /opt/_internal /opt/python /usr/local/*/*
 
 # EPEL for cmake
-FROM base as patchelf
-# Install patchelf
-ADD ./common/install_patchelf.sh install_patchelf.sh
-RUN bash ./install_patchelf.sh && rm install_patchelf.sh
-RUN cp $(which patchelf) /patchelf
-
-FROM patchelf as python
+FROM base as python
 # build python
 COPY manywheel/build_scripts /build_scripts
 ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
@@ -93,7 +88,6 @@ FROM base as final
 COPY --from=python             /opt/python                           /opt/python
 COPY --from=python             /opt/_internal                        /opt/_internal
 COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel  /usr/local/bin/auditwheel
-COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/bin/patchelf
 
 RUN alternatives --set python /usr/bin/python3.12
 RUN alternatives --set python3 /usr/bin/python3.12
