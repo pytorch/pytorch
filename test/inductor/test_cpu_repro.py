@@ -145,6 +145,23 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
+    @unittest.skipUnless(torch._C.has_lapack, "LAPACK not available")
+    def test_linalg_pinv_rcond_tensor_shape(self):
+        def fn(x, rcond):
+            return torch.linalg.pinv(x, rcond=rcond)
+
+        x = torch.randn(8, 3, dtype=torch.float64)
+        rcond = torch.tensor([0.1], dtype=torch.float64)
+
+        expected = fn(x, rcond)
+
+        compiled = torch.compile(fn, backend="inductor")
+        actual = compiled(x, rcond)
+
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual.shape, torch.Size([3, 8]))
+        torch.testing.assert_close(actual, expected)
+
     @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:

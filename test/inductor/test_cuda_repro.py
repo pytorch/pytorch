@@ -141,6 +141,24 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    @unittest.skipUnless(
+        torch.cuda.is_available() and (torch.cuda.has_magma or not torch.version.hip),
+        "Requires CUDA with MAGMA or cuSOLVER",
+    )
+    def test_linalg_pinv_rcond_tensor_shape(self):
+        def fn(x, rcond):
+            return torch.linalg.pinv(x, rcond=rcond)
+
+        x = torch.randn(8, 3, dtype=torch.float64, device="cuda")
+        rcond = torch.tensor([0.1], dtype=torch.float64, device="cuda")
+
+        expected = fn(x, rcond)
+        compiled = torch.compile(fn, backend="inductor")
+        actual = compiled(x, rcond)
+
+        self.assertEqual(actual.shape, torch.Size([3, 8]))
+        torch.testing.assert_close(actual, expected)
+
     def test_view_replay_padding_issue_163328(self):
         class ReproModule(nn.Module):
             def __init__(self):
