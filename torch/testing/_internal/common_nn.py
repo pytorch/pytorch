@@ -2543,7 +2543,8 @@ def get_new_module_tests():
             check_gradgrad=False,
             desc='gelu_activation',
             with_tf32=True,
-            tf32_precision=0.08 if SM90OrLater else 0.05,
+            # ROCm TF32 has slightly different precision characteristics than CUDA
+            tf32_precision=0.15 if TEST_WITH_ROCM else (0.08 if SM90OrLater else 0.05),
             default_dtype=torch.double,
         ),
         dict(
