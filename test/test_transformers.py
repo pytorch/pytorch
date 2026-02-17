@@ -1595,19 +1595,14 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
-    def test_invalid_sequence_lengths(self, device, kernel: SDPBackend):
-        with sdpa_kernel(backends=[kernel]):
-            # Passing in a q,k,v with 0 length sequences will error
-            dtype = torch.float16
-            make_tensor = partial(torch.rand, device=device, dtype=dtype)
-            size = SdpaShape(2, 2, 0, 8)
-            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            with self.assertWarnsRegex(UserWarning, "All fused kernels do not support zero seq_len_q or seq_len_kv."):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+    def test_zero_sequence_lengths(self, device):
+        dtype = torch.float16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype)
+        size = SdpaShape(2, 2, 0, 8)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+        self.assertEqual(out.shape, (2, 2, 0, 8))
+        self.assertEqual(out, torch.zeros(2, 2, 0, 8, dtype=dtype, device=device))
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
