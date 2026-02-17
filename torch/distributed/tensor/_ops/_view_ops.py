@@ -24,6 +24,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -428,15 +429,21 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     return tuple(dimmap)
 
 
-def dim_squeeze(shape: Shape, dim: int | None = None) -> DimMap:
-    # FIXME: this is wrong when dim=None and one of the dimensions
-    # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
-    # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
-    # removal of a dimension that is not actually a singleton.
+def dim_squeeze(shape: Shape, dim: DimsType | None = None) -> DimMap:
+    # Note: This function operates on local shape, but sharding_prop rewrites
+    # squeeze ops to squeeze.dims with only globally-singleton dims before
+    # this is called. See _adjust_squeeze_to_global_singletons in sharding_prop.py.
+    ndim = len(shape)
+    # Normalize dim to set of target dimensions to squeeze
+    if dim is None:
+        target_dims = set(range(ndim))
+    elif isinstance(dim, int):
+        target_dims = {normalize_dim(dim, ndim)}
+    else:
+        target_dims = set(normalize_dims(dim, ndim))
+    # Keep dimensions that are either size > 1, or not targeted for squeeze
     return tuple(
-        InputDim(i)
-        for i, s in enumerate(shape)
-        if s > 1 or (dim is not None and i != normalize_dim(dim, len(shape)))
+        InputDim(i) for i, s in enumerate(shape) if s > 1 or i not in target_dims
     )
 
 
@@ -499,6 +506,33 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
     torch.view_as_complex: lambda input: dim_flatten(input.ndim, input.ndim - 2),
     torch.view_as_real: lambda input: dim_view_as_real(input.shape),
 }
+
+
+def _dim_size(spec: DimSpec, input_shape: Shape) -> int:
+    """Compute the size of an output dimension from a DimSpec."""
+    if isinstance(spec, Singleton):
+        return 1
+    elif isinstance(spec, InputDim):
+        return input_shape[spec.input_dim]
+    elif isinstance(spec, Broadcast):
+        return spec.dim_size
+    elif isinstance(spec, NewDim):
+        return spec.size
+    elif isinstance(spec, Repeat):
+        return _dim_size(spec.input_dim, input_shape) * spec.times
+    elif isinstance(spec, Flatten):
+        return prod(_dim_size(d, input_shape) for d in spec.input_dims)
+    elif isinstance(spec, Split):
+        return spec.group_shape[spec.split_id]
+    else:
+        raise ValueError(f"Unknown DimSpec type: {type(spec)}")
+
+
+def _output_numel(rule: DimMap, input_shape: Shape) -> int:
+    """Compute total number of elements in output tensor from rule."""
+    if len(rule) == 0:
+        return 1
+    return prod(_dim_size(spec, input_shape) for spec in rule)
 
 
 def propagate_shape_and_sharding(
@@ -654,12 +688,25 @@ def propagate_shape_and_sharding(
         if in_dim is not None:
             shard_dim_map[in_dim.input_dim] = dim
 
+    # When output numel=1, P(max) and P(min) reduce to Replicate: with only one
+    # element, all ranks compute the same max/min result. Trigger via redistribution.
+    output_numel = _output_numel(rule, global_input_shape)
+
+    def _maybe_reduce_partial(p: Placement) -> Placement:
+        if (
+            output_numel == 1
+            and isinstance(p, Partial)
+            and p.reduce_op in ("max", "min")
+        ):
+            return Replicate()
+        return p
+
     input_tgt_placements = [
         (
             Replicate()
             if isinstance(p, Shard | _StridedShard)
             and not shardable_dims[p.dim][mesh_dim]
-            else p
+            else _maybe_reduce_partial(p)
         )
         for mesh_dim, p in enumerate(input_src_placements)
     ]
@@ -758,6 +805,7 @@ def register_op_strategy_map(
 
 
 register_op_strategy_map(aten.squeeze.default, torch.squeeze)
+register_op_strategy_map(aten.squeeze_.default, torch.squeeze)
 register_op_strategy_map(
     aten.squeeze_.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )

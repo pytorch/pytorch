@@ -206,7 +206,6 @@ dtensor_fails = {
     xfail("searchsorted"),
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
-    xfail("squeeze", "multiple"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
     xfail("signal.windows.cosine"),
@@ -267,7 +266,6 @@ dtensor_fails = {
     skip("_segment_reduce", "lengths"),
     skip("_segment_reduce", "offsets"),
     # TODO: fix the following ops
-    skip("squeeze"),
     skip("empty"),
     skip("empty_strided"),
     skip("empty_like"),
@@ -940,6 +938,7 @@ ops_unbacked_dtensor_dde = {
     xfail("split", "list_args"),
     xfail("split_with_sizes"),
     xfail("split_with_sizes_copy"),
+    # Unbacked fails due to s > 1 guard in dim_squeeze
     xfail("squeeze"),
     xfail("squeeze", "multiple"),
     xfail("stack"),
