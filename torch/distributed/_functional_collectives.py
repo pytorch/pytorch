@@ -30,6 +30,7 @@ except Exception:
 
     def is_torchdynamo_compiling():  # type: ignore[misc]
         return False
+        # pyrefly: ignore [unreachable]
         return False
 
 
@@ -1151,7 +1152,6 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        # TODO: it should run collective in the whole mesh instead of dim 0
         pg = group.get_group()
         rankset = dist.get_process_group_ranks(pg)
         group_size = len(rankset)
@@ -1191,6 +1191,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
         # - so use a cast instead (the actual newtype representation is
         # literally the underlying type so this is fine). I haven't been able to
         # reproduce it in isolation (see T247631668).
+        # pyrefly: ignore [redundant-cast]
         return cast(c10d.GroupName, group)  # c10d.GroupName(group)
     elif isinstance(group, DeviceMesh):
         if group.ndim != 1:
