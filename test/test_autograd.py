@@ -5934,36 +5934,57 @@ Done""",
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_forward_traceback_preserves_exception_with_checkpoint(self):
         # Regression test: gatherForwardTraceback() must not clear a pending
-        # Python exception.
+        # Python exception.  See combined_traceback.cpp for the fix.
         #
-        # Non-reentrant checkpoint raises _StopRecomputationError for early
-        # stopping during backward recomputation.  This exception propagates
-        # through C++ as python_error (default ctor, which does NOT persist
-        # the exception -- it stays pending in the thread state).
+        # Ingredients: (1) CUDA memory history recording with context="all"
+        # so allocator callbacks fire on free, (2) a custom library op whose
+        # forward goes through THPFunction_apply (via Generated in
+        # torch._library.autograd), (3) non-reentrant checkpoint.
         #
-        # With CUDA memory history recording enabled, every CUDA allocation
-        # triggers CapturedTraceback::gather() → gatherForwardTraceback().
-        # That function looks up ANOMALY_TRACE_KEY in the backward node's
-        # metadata dict.  When anomaly mode is off the dict is empty, so the
-        # key is not found.  On Python < 3.13 the compat shim for
-        # PyDict_GetItemRef checks PyErr_Occurred() to distinguish "not found"
-        # from "error" -- a pending _StopRecomputationError is misread as a
-        # lookup error and then cleared, causing:
-        #   SystemError: ... returned NULL without setting an exception
-        #
-        # The fix (PyErr_Fetch/PyErr_Restore in gatherForwardTraceback) saves
-        # and restores the exception state around all Python C-API calls.
+        # During backward recomputation, _StopRecomputationError is raised
+        # from the checkpoint pack_hook inside _save_variables.  The exception
+        # stays pending in Python thread state while C++ stack-unwinds (the
+        # default python_error ctor does not persist).  Destroying the output
+        # THPObjectPtr during unwinding frees the recomputed output tensor's
+        # CUDA storage, triggering the allocator callback ->
+        # CapturedTraceback::gather() -> gatherForwardTraceback().  On
+        # Python < 3.13, without the PyErr_Fetch/PyErr_Restore fix, the
+        # PyDict_GetItemRef compat shim clears the pending exception ->
+        # SystemError.
+        with torch.library._scoped_library("_test_autograd", "FRAGMENT"):
 
-        def fn(x):
-            return x.sigmoid()
+            @torch.library.custom_op(
+                "_test_autograd::sin_op", mutates_args=()
+            )
+            def sin_op(x: torch.Tensor) -> torch.Tensor:
+                return x.sin()
 
-        try:
-            torch.cuda.memory._record_memory_history("all", stacks="python")
-            x = torch.randn(4, device="cuda", requires_grad=True)
-            y = checkpoint(fn, x, use_reentrant=False)
-            y.sum().backward()
-        finally:
-            torch.cuda.memory._record_memory_history(None)
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
+
+            torch.library.register_autograd(
+                "_test_autograd::sin_op",
+                backward,
+                setup_context=setup_context,
+            )
+
+            def fn(x):
+                return torch.ops._test_autograd.sin_op(x)
+
+            try:
+                torch.cuda.memory._record_memory_history(
+                    "all", stacks="python"
+                )
+                x = torch.randn(4, device="cuda", requires_grad=True)
+                y = checkpoint(fn, x, use_reentrant=False)
+                y.sum().backward()
+            finally:
+                torch.cuda.memory._record_memory_history(None)
 
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
