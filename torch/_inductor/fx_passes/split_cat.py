@@ -12,6 +12,7 @@ from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_or_false
 from torch.utils._ordered_set import OrderedSet
 
+from ..fx_utils import find_next_users
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -399,15 +400,6 @@ def normalize_stack_default(match: Match, *args, **kwargs):
     new_node.meta.update(node.meta)
     graph.erase_node(node)
     counters[backend]["normalization_pass"] += 1
-
-
-def find_next_users(split_node: torch.fx.Node) -> list[torch.fx.Node]:
-    next_users = []
-    for getitem_node in split_node.users:
-        for getitem_user in getitem_node.users:
-            if getitem_user not in next_users:
-                next_users.append(getitem_user)
-    return next_users
 
 
 @register_graph_pattern(

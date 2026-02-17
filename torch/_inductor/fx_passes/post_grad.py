@@ -25,7 +25,13 @@ from torch.utils._ordered_set import OrderedSet
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
-from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
+from ..fx_utils import (
+    FakeTensorUpdater,
+    apply_pass_to_subgraphs,
+    get_fake_args_kwargs,
+    get_node_storage,
+    same_meta,
+)
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -990,27 +996,6 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
-def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
-    """True if two nodes have the same metadata"""
-    val1 = node1.meta.get("val")
-    val2 = node2.meta.get("val")
-    return (
-        val1 is not None
-        and val2 is not None
-        and statically_known_true(sym_eq(val1.size(), val2.size()))
-        and val1.layout == val2.layout
-        and val1.dtype == val2.dtype
-        and val1.device == val2.device
-        and (
-            val1.layout != torch.strided
-            or statically_known_true(sym_eq(val1.stride(), val2.stride()))
-        )
-        # Check conjugate and negative bits - a clone that resolves these is not a no-op
-        and val1.is_conj() == val2.is_conj()
-        and val1.is_neg() == val2.is_neg()
-    )
-
-
 noop_registry: dict[Any, Any] = {}
 
 
@@ -1202,19 +1187,6 @@ def remove_assert_ops(graph: torch.fx.Graph):
         op="call_function", target=torch.ops.aten._assert_tensor_metadata.default
     ):
         graph.erase_node(node)
-
-
-def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph):
-    """Recursively apply a pass function to all subgraphs referenced by get_attr nodes."""
-    gm = graph.owning_module
-    if gm is None:
-        return
-    subgraph_names: OrderedSet[str] = OrderedSet(
-        x.target for x in graph.find_nodes(op="get_attr")
-    )
-    for child_name, child_mod in gm.named_children():
-        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
-            pass_fn(child_mod.graph)
 
 
 def decompose_triton_kernel_wrapper_functional(graph):

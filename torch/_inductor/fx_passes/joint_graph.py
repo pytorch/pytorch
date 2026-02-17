@@ -24,6 +24,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..fx_utils import is_mutation_op, stable_topological_sort
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -33,7 +34,6 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
-    stable_topological_sort,
 )
 from .decompose_mem_bound_mm import check_device
 from .replace_random import replace_random_passes
@@ -83,18 +83,6 @@ def remove_no_ops(
                     return False
             return True
 
-        def is_mutated(n):
-            """Check if a node is mutated by any in-place operation."""
-            for user in n.users:
-                if user.op != "call_function" or not hasattr(user.target, "_schema"):
-                    continue
-                for i, arg in enumerate(user.args):
-                    if arg is n:
-                        schema_arg = user.target._schema.arguments[i]
-                        if schema_arg.alias_info and schema_arg.alias_info.is_write:
-                            return True
-            return False
-
         def replace_no_op(node, replace_input_index):
             replacement = node.args[replace_input_index]
 
@@ -108,7 +96,7 @@ def remove_no_ops(
             # Don't replace if the replacement value is mutated in-place.
             # The original node acts as an implicit copy; removing it would
             # cause users to observe the post-mutation value instead.
-            if is_mutated(replacement):
+            if any(is_mutation_op(user) for user in replacement.users):
                 return
 
             if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):

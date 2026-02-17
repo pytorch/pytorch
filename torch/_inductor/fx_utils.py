@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import contextlib
 import operator
+import re
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any, Optional
 
 import sympy
@@ -17,6 +18,7 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
     sym_eq,
 )
+from torch.fx.graph_module import _get_attr
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
@@ -344,3 +346,194 @@ def countable_fx(node: torch.fx.Node) -> bool:
         return target in flop_registry
     packet = target.overloadpacket
     return packet in flop_registry
+
+
+def get_arg_value(
+    node: torch.fx.Node, arg_number: int, kwarg_name: Optional[str] = None
+) -> Any:
+    if len(node.args) > arg_number:
+        return node.args[arg_number]
+    elif kwarg_name is None:
+        return None
+    else:
+        return node.kwargs.get(kwarg_name)
+
+
+def filter_nodes(nodes: Iterable[torch.fx.Node], fn: Any) -> list[torch.fx.Node]:
+    fns = [fn]
+    if isinstance(fn, torch._ops.OpOverloadPacket):
+        fns.extend([getattr(fn, overload) for overload in fn.overloads()])
+
+    return [node for node in nodes if node.target in fns]
+
+
+def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
+    """For call_function and call_method, we directly use the target function;
+    For call_module, the target is string, and we treat the module class
+     as a function.
+    """
+    if node.op == "call_module":
+        assert isinstance(node.target, str)
+        return _get_attr(node.graph.owning_module, node.target).__class__
+    return node.target
+
+
+def _args(n: torch.fx.Node) -> list[torch.fx.node.Argument]:
+    args: list[torch.fx.node.Argument] = []
+    torch.fx.map_arg((n.args, n.kwargs), args.append)
+    return args
+
+
+def stable_topological_sort(graph: torch.fx.Graph) -> None:
+    # Nodes are in exactly one of these three collections:
+
+    # - Nodes in `pending` are waiting to be processed (in reverse order):
+    pending = list(reversed(graph.nodes))
+
+    # - Nodes in `ready` have been processed and are already in the correct
+    #   order.
+    ready = OrderedSet[torch.fx.Node]()
+
+    # - `waiting` is a mapping from a dependency to nodes which depend on that
+    #   dependency.
+    waiting = defaultdict(list)
+
+    # The cursor indicates the last processed node so we can add new nodes
+    # after it.
+    cursor = None
+    while pending:
+        node = pending.pop()
+        waiting_for = [x for x in _args(node) if x not in ready]
+        if waiting_for:
+            # We have unprocessed input nodes. Might as well wait for the last
+            # arg so an already sorted list will only recheck this node once.
+            waiting[waiting_for[-1]].append(node)
+        else:
+            ready.add(node)
+            if cursor and cursor.next is not node:
+                cursor.append(node)
+            cursor = node
+            # Mark the nodes that have been waiting for this node to finish as
+            # ready to check again.
+            pending.extend(reversed(waiting.pop(node, ())))
+
+    assert not waiting and len(ready) == len(graph.nodes)
+
+
+def is_start_of_fx_graph(graph: torch.fx.Graph, node: torch.fx.Node) -> bool:
+    # first node in the graph
+    return node is next(iter(graph.nodes))
+
+
+# match: copy_, relu_, _set_grad_enabled, manual_seed, _enter_autocast, etc
+# doesn't match: __rshift__, etc
+_mutation_op_re = re.compile(r"(?<!_)(_$|_[.]|(\b|_)(set|enter|exit|seed)(\b|_))(?!_)")
+
+
+def fixme_incorrect_inductor_schema_op(op: torch._ops.OpOverload) -> bool:
+    if op.namespace != "inductor":
+        return False
+
+    # TODO - fix schema
+    # Dont add any more !
+    return op in (
+        torch.ops.inductor.accumulate_grad_.default,
+        torch.ops.inductor.resize_storage_bytes_.default,
+    )
+
+
+def is_mutation_op(node: torch.fx.Node) -> bool:
+    if isinstance(
+        node.target, torch._ops.OpOverload
+    ) and not fixme_incorrect_inductor_schema_op(node.target):
+        return node.target._schema.is_mutable
+    elif isinstance(
+        node.target, torch._higher_order_ops.auto_functionalize.AutoFunctionalized
+    ):
+        return False
+    if node.op == "call_function":
+        assert callable(node.target)
+        if _mutation_op_re.search(node.target.__name__):
+            return True
+    elif node.op == "call_method":
+        assert isinstance(node.target, str)
+        if _mutation_op_re.search(node.target):
+            return True
+    return node.kwargs.get("out") is not None
+
+
+def same_mutation_regions(a: torch.fx.Node, b: torch.fx.Node) -> bool:
+    assert "mutation_region_id" in a.meta
+    assert "mutation_region_id" in b.meta
+    return a.meta["mutation_region_id"] == b.meta["mutation_region_id"]
+
+
+def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
+    n = node
+    while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
+        n = n.prev
+    mutation_region_id = n.meta.get("mutation_region_id", 0)
+    while n is not node:
+        n = n.next
+        if is_mutation_op(n):
+            mutation_region_id += 1
+        n.meta["mutation_region_id"] = mutation_region_id
+    return mutation_region_id
+
+
+def should_compute_mutation_region_ids(graph: torch.fx.Graph) -> bool:
+    return "mutation_region_id" not in next(iter(graph.nodes)).meta
+
+
+def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
+    mutation_region_id = 0
+    for nd in graph.nodes:
+        if is_mutation_op(nd):
+            mutation_region_id += 1
+        nd.meta["mutation_region_id"] = mutation_region_id
+
+
+def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
+    """True if two nodes have the same metadata"""
+    val1 = node1.meta.get("val")
+    val2 = node2.meta.get("val")
+    return (
+        val1 is not None
+        and val2 is not None
+        and statically_known_true(sym_eq(val1.size(), val2.size()))
+        and val1.layout == val2.layout
+        and val1.dtype == val2.dtype
+        and val1.device == val2.device
+        and (
+            val1.layout != torch.strided
+            or statically_known_true(sym_eq(val1.stride(), val2.stride()))
+        )
+        # Check conjugate and negative bits - a clone that resolves these is not a no-op
+        and val1.is_conj() == val2.is_conj()
+        and val1.is_neg() == val2.is_neg()
+    )
+
+
+def apply_pass_to_subgraphs(
+    pass_fn: Callable[[torch.fx.Graph], None], graph: torch.fx.Graph
+):
+    """Recursively apply a pass function to all subgraphs referenced by get_attr nodes."""
+    gm = graph.owning_module
+    if gm is None:
+        return
+    subgraph_names: OrderedSet[str] = OrderedSet(
+        x.target for x in graph.find_nodes(op="get_attr")
+    )
+    for child_name, child_mod in gm.named_children():
+        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
+            pass_fn(child_mod.graph)
+
+
+def find_next_users(node: torch.fx.Node) -> list[torch.fx.Node]:
+    """For a multi-output node, look through getitem users to find actual consumers."""
+    next_users = []
+    for getitem_node in node.users:
+        for getitem_user in getitem_node.users:
+            if getitem_user not in next_users:
+                next_users.append(getitem_user)
+    return next_users
