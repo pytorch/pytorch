@@ -1733,7 +1733,10 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             FlexConfig(128, 32, 2, 16),
             FlexConfig(128, 32, 2, 8),
         ]
-        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = []
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            FlexBwDConfig(32, 32, 32, 32, 2, 4),
+            FlexBwDConfig(64, 64, 64, 64, 2, 4),
+        ]
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
 
         if not bool(os.getenv("CI")):
@@ -1800,7 +1803,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             if head_dim == 64:
                 default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             elif head_dim == 128:
-                default_config = FlexBwDConfig(64, 128, 64, 128, 1, 8)
+                default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             else:
                 default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
         else:  # modest hardware or extremely large head_dim
