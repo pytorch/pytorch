@@ -96,7 +96,7 @@ cond_op = CondOp()
 def cond(
     pred: Union[bool, int, float, torch.Tensor],
     true_fn: Callable,
-    false_fn: Callable,
+    false_fn: Optional[Callable],
     operands: Union[tuple, list] = (),
 ) -> Any:
     r"""
@@ -127,12 +127,14 @@ def cond(
         true_fn (Callable): A callable function (a -> b) that is within the
           scope that is being traced.
 
-        false_fn (Callable): A callable function (a -> b) that is within the
-          scope that is being traced. The true branch and false branch must
+        false_fn (Optional[Callable]): A callable function (a -> b) that is within the
+          scope that is being traced, or ``None``. The true branch and false branch must
           have consistent input and outputs, meaning the inputs have to be
           the same, and the outputs have to be the same type and shape. Int
           output is also allowed. We'll make the output dynamic by turning it
-          into a symint.
+          into a symint. If ``None``, the false branch returns uninitialized
+          tensors (via ``torch.empty_strided``) with the same metadata (shape,
+          stride, dtype, device) as the true branch outputs.
 
         operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the
           true/false functions. It can be empty if true_fn/false_fn doesn't require input. Defaults to ().
@@ -148,6 +150,17 @@ def cond(
 
 
         return cond(x.shape[0] > 4, true_fn, false_fn, (x,))
+
+    Example with ``false_fn=None`` (no-op false branch)::
+
+        def true_fn(x: torch.Tensor):
+            return x.cos()
+
+
+        # When pred is True, returns x.cos().
+        # When pred is False, returns an uninitialized tensor with the same
+        # shape, dtype, and device as x.cos() would produce.
+        return cond(x.shape[0] > 4, true_fn, None, (x,))
 
     Restrictions:
         - The conditional statement (aka `pred`) must meet one of the following constraints:
@@ -185,6 +198,21 @@ def cond(
         if pred:
             return true_fn(*operands)
         else:
+            # We don't want cond to fail when pred is False but false_fn is None.
+            if false_fn is None:
+                true_outs = true_fn(*operands)
+                flat_outs, spec = pytree.tree_flatten(true_outs)
+                return pytree.tree_unflatten(
+                    [
+                        torch.empty_strided(
+                            o.shape, o.stride(), dtype=o.dtype, device=o.device
+                        )
+                        if isinstance(o, torch.Tensor)
+                        else o
+                        for o in flat_outs
+                    ],
+                    spec,
+                )
             return false_fn(*operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
@@ -196,7 +224,7 @@ def cond(
                 f"Expected pred to be bool or single-element tensor, but got {pred}."
             )
 
-        if not callable(true_fn) or not callable(false_fn):
+        if not callable(true_fn) or (false_fn is not None and not callable(false_fn)):
             raise RuntimeError("Expect both branches to be callable.")
 
         if not isinstance(operands, (tuple, list)) or pytree.tree_any(
