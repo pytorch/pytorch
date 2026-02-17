@@ -57,43 +57,39 @@ def should_exclude_lib(filename: str) -> bool:
         return True
     if re.match(r"_C\.cpython.*", filename):
         return True
-    if filename.endswith(".py") or filename.endswith(".pyc"):
+    if filename.endswith((".py", ".pyc")):
         return True
     if filename == "__init__.py":
         return True
     return False
 
 
+def _is_lib_file(name: str, platform: str) -> bool:
+    """Return True if the file looks like a library or header to include."""
+    if platform == "linux":
+        return ".so" in name or name.endswith(".a")
+    elif platform == "macos":
+        return name.endswith((".dylib", ".a"))
+    elif platform == "windows":
+        return name.endswith((".dll", ".lib", ".pdb"))
+    return False
+
+
 def copy_libraries(torch_dir: Path, libtorch_lib: Path, platform: str) -> None:
-    """Copy shared libraries from torch/lib/ to libtorch/lib/."""
+    """Copy libraries from torch/lib/ to libtorch/lib/."""
     torch_lib = torch_dir / "lib"
     if not torch_lib.is_dir():
         raise FileNotFoundError(f"torch/lib/ not found at {torch_lib}")
 
-    if platform == "linux":
-        extensions = (".so", ".so.*")
-    elif platform == "macos":
-        extensions = (".dylib",)
-    elif platform == "windows":
-        extensions = (".dll", ".lib", ".pdb")
-    else:
-        raise ValueError(f"Unknown platform: {platform}")
-
     for item in torch_lib.iterdir():
         if item.is_dir():
+            # Copy subdirectories (e.g. libshm/) as-is
+            shutil.copytree(item, libtorch_lib / item.name, dirs_exist_ok=True)
             continue
         if should_exclude_lib(item.name):
             continue
-        # Check extension: for .so files, we need to handle .so.1, .so.2 etc.
-        if platform == "linux":
-            if ".so" in item.name:
-                shutil.copy2(item, libtorch_lib / item.name)
-        elif platform == "macos":
-            if item.suffix == ".dylib":
-                shutil.copy2(item, libtorch_lib / item.name)
-        elif platform == "windows":
-            if item.suffix in extensions:
-                shutil.copy2(item, libtorch_lib / item.name)
+        if _is_lib_file(item.name, platform):
+            shutil.copy2(item, libtorch_lib / item.name)
 
     # On macOS, also copy delocated dylibs from torch/.dylibs/ if present
     if platform == "macos":
@@ -138,17 +134,20 @@ def write_metadata(libtorch_dir: Path, version: str, git_hash: str) -> None:
     (libtorch_dir / "build-hash").write_text(git_hash + "\n")
 
 
-def get_git_hash() -> str:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
+def get_git_hash(torch_dir: Path) -> str:
+    """Read git_version from the wheel's torch/version.py."""
+    version_file = torch_dir / "version.py"
+    if not version_file.exists():
         return "unknown"
+    from ast import literal_eval
+
+    for line in version_file.read_text().splitlines():
+        if line.strip().startswith("git_version"):
+            try:
+                return literal_eval(line.partition("=")[2].strip())
+            except Exception:
+                pass
+    return "unknown"
 
 
 def split_debug_symbols(
@@ -213,22 +212,6 @@ def split_debug_symbols(
     print(f"Debug symbols zip: {debug_zip}")
 
 
-def get_libtorch_abi(desired_cuda: str) -> str:
-    """Determine the libtorch ABI prefix for zip naming.
-
-    This matches the existing naming convention used by the standalone
-    libtorch build scripts.
-    """
-    if desired_cuda == "cpu":
-        return "cxx11-abi-"
-    elif desired_cuda.startswith("cu"):
-        return "cxx11-abi-"
-    elif desired_cuda.startswith("rocm"):
-        return "cxx11-abi-"
-    else:
-        return ""
-
-
 def create_libtorch_zip(
     libtorch_dir: Path,
     output_dir: Path,
@@ -242,9 +225,9 @@ def create_libtorch_zip(
                 filepath = Path(root) / f
                 arcname = filepath.relative_to(libtorch_dir.parent)
                 zf.write(filepath, arcname)
-    # Create latest symlink/copy
+    # Create latest symlink
     latest_zip = output_dir / f"{zip_prefix}-latest.zip"
-    shutil.copy2(zip_path, latest_zip)
+    latest_zip.symlink_to(zip_path.name)
 
     print(f"Libtorch zip: {zip_path}")
     print(f"Libtorch latest zip: {latest_zip}")
@@ -254,19 +237,16 @@ def create_libtorch_zip(
 def compute_zip_prefix(platform: str, desired_cuda: str, libtorch_variant: str) -> str:
     """Compute the zip filename prefix matching existing naming conventions.
 
-    Linux:  libtorch-cxx11-abi-shared-with-deps
+    Linux:  libtorch-shared-with-deps
     macOS:  libtorch-macos-arm64
     Windows: libtorch-win-shared-with-deps (or libtorch-win-arm64-shared-with-deps)
     """
     if platform == "macos":
-        # macOS uses a different naming scheme
         return "libtorch-macos-arm64"
     elif platform == "windows":
         return f"libtorch-win-{libtorch_variant}"
     else:
-        # Linux
-        abi = get_libtorch_abi(desired_cuda)
-        return f"libtorch-{abi}{libtorch_variant}"
+        return f"libtorch-{libtorch_variant}"
 
 
 def main() -> None:
@@ -331,7 +311,7 @@ def main() -> None:
         copy_bin(torch_dir, libtorch_dir / "bin", args.platform)
 
         # Write metadata
-        git_hash = args.git_hash or get_git_hash()
+        git_hash = args.git_hash or get_git_hash(torch_dir)
         write_metadata(libtorch_dir, version, git_hash)
 
         # Compute zip prefix
