@@ -1838,6 +1838,7 @@ def bytecode_from_template(
                     new_insts.append(inst)
             insts = new_insts
 
+        # pyrefly: ignore [implicit-any]
         returns = []
         for inst in insts:
             if inst.opname == "RETURN_VALUE":

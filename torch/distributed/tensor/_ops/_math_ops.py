@@ -38,6 +38,7 @@ from torch.distributed.tensor.placement_types import (
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 class Reduction(Enum):
@@ -229,6 +230,9 @@ def map_placements_after_reduction(
 
 def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
     if isinstance(reduction_op, NormReduction):
+        if reduction_op.norm_type == 0:
+            # return P(sum) for easier reduction_linear handling.
+            return Partial("sum")
         return _NormPartial(norm_type=reduction_op.norm_type)
     return Partial(reduction_op)
 
@@ -305,13 +309,16 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.all.dim: "product",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
+    prims.sum.default: "sum",
     aten.any.default: "sum",
     aten.any.dim: "sum",
+    aten.any.dims: "sum",
     aten.any.out: "sum",
     # These are only valid when there is no padding
     aten.prod.default: "product",
     aten.prod.dim_int: "product",
     aten.prod.int_out: "product",
+    prims.prod.default: "product",
     # avg is only linear when there is no padding
     aten.mean.default: "avg",
     aten.mean.dim: "avg",
@@ -379,6 +386,9 @@ def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
         aten.std.correction_out,
         aten.var.correction,
         aten.var.correction_out,
+        aten.var_mean.correction,
+        aten.var_mean.correction_out,
+        prims.var.default,
     ],
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
@@ -402,22 +412,22 @@ def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
 def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
     """Get the reduction op for vector/foreach norm based on norm_type.
 
-    For inf/-inf/0 norms, returns simple reduction ops ("max", "min", "sum").
-    For other p-norms, returns NormReduction which produces _NormPartial.
+    For inf/-inf norms, returns simple reduction ops ("max", "min").
+    For other norms (including 0), returns NormReduction which produces the
+    appropriate Partial placement via get_placement_from_reduction_op.
     """
     if norm_type in (float("inf"), "inf"):
         return "max"
     elif norm_type in (float("-inf"), "-inf"):
         return "min"
-    elif norm_type == 0:
-        return "sum"
     else:
         assert isinstance(norm_type, (int, float))
         return NormReduction(norm_type)
 
 
 @register_op_strategy(
-    [aten.linalg_vector_norm.default], schema_info=RuntimeSchemaInfo(1)
+    [aten.linalg_vector_norm.default, aten.norm.Scalar],
+    schema_info=RuntimeSchemaInfo(1),
 )
 def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
@@ -436,7 +446,6 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
-        reduction_linear=norm_type != 0,  # norm 0 should not propagate
         reduction_op=_get_norm_reduction_op(norm_type),
     )
 
@@ -462,7 +471,6 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=norm_type != 0,  # norm 0 should not propagate
             reduction_op=_get_norm_reduction_op(norm_type),
         )
         output_tuple_strategy_children.append(output_strategy)
