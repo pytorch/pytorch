@@ -33,6 +33,7 @@ from torch._C._functorch import (
 )
 from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.compiler import is_compiling
 from torch.fx.experimental import const_fold
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils import _pytree as pytree
@@ -384,6 +385,16 @@ def _vjp_with_argnums(
     #
     # Returns the same two elements as :func:`vjp` but the function returned, vjp_fn, returns a tuple of VJPs
     # for only the primal elements given by argnums.
+
+    # NOTE [Compiling vjp functions]
+    # When vjp_fn is compiled separately, captured outputs lose their grad_fn during
+    # AOT tracing. We re-run forward to restore the autograd graph. Must capture
+    # func/primals BEFORE wrapping to preserve tensor identity. The flag distinguishes
+    # cases where vjp is already compiled and tensors are valid
+    captured_func = func
+    captured_primals = primals
+    vjp_called_inside_compile = is_compiling()
+
     with grad_increment_nesting() as level:
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
@@ -438,9 +449,30 @@ def _vjp_with_argnums(
                     f"cotangents: {treespec_pprint(cotangents_spec)}, "
                     f"primal output: {treespec_pprint(primals_out_spec)}"
                 )
+
+            # See NOTE [Compiling vjp functions]
+            outputs = flat_primals_out
+            inputs = flat_diff_primals
+            if is_compiling() and not vjp_called_inside_compile:
+                with torch.enable_grad():
+                    fresh_primals_out = captured_func(*captured_primals)
+                    if has_aux:
+                        fresh_primals_out, _ = fresh_primals_out
+                outputs, _ = tree_flatten(fresh_primals_out)
+                source = (
+                    captured_primals
+                    if argnums is None
+                    else _slice_argnums(captured_primals, argnums, as_tuple=False)
+                )
+                inputs = [
+                    p
+                    for p in pytree.tree_leaves(source)
+                    if isinstance(p, torch.Tensor) and p.requires_grad
+                ]
+
             result = _autograd_grad(
-                flat_primals_out,
-                flat_diff_primals,
+                outputs,
+                inputs,
                 flat_cotangents,
                 retain_graph=retain_graph,
                 create_graph=create_graph,
