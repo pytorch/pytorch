@@ -1043,7 +1043,6 @@ class DistArgMaxArgMinTest(DTensorTestBase):
 
 DistArgMaxArgMinTestWithLocalTensor = create_local_tensor_test_class(
     DistArgMaxArgMinTest,
-    skipped_tests=["test_argmax_argmin_with_placements"],
 )
 
 DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(

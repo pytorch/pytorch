@@ -143,15 +143,17 @@ def _convert_to_global_idxs(
     )
 
     if dim is None:
-        local_coord = torch.unravel_index(local_idx, local_shape)
-        global_coord = torch.stack(local_coord)
+        # Convert flat local index → flat global index using arithmetic ops
+        # instead of torch.unravel_index, which doesn't support SymInt shapes.
+        gathered_idxs = torch.zeros_like(local_idx)
+        remaining = local_idx
+        for i in range(len(local_shape)):
+            local_stride = reduce(operator.mul, local_shape[i + 1 :], 1)
+            global_stride = reduce(operator.mul, global_shape[i + 1 :], 1)
+            coord = remaining // local_stride
+            remaining = remaining % local_stride
+            gathered_idxs = gathered_idxs + (coord + global_offset[i]) * global_stride
         gather_dim = 0
-        for i, offset in enumerate(global_offset):
-            global_coord[i] += offset
-        # compute with proper striding
-        gathered_idxs = torch.tensor(0, device=local_idx.device, dtype=torch.long)
-        for i, coord in enumerate(global_coord):
-            gathered_idxs += coord * reduce(operator.mul, global_shape[i + 1 :], 1)
     else:
         gather_dim = dim
         gathered_idxs = local_idx + global_offset[dim]
@@ -206,15 +208,6 @@ def argminmax_handler(
     if op_call not in _ARGMINMAX_REDUCTION_OPS:
         raise NotImplementedError(f"Unsupported reduction op: {op_call}")
 
-    from torch.distributed._local_tensor import local_tensor_mode
-
-    if local_tensor_mode() is not None:
-        # The gather-based approach below uses compute_local_shape_and_global_offset
-        # which returns SymInts in LocalTensor mode. These SymInts are incompatible
-        # with torch.unravel_index and tensor indexing. Redistribute to Replicate
-        # and compute directly instead.
-        return _argminmax_replicate_fallback(op_call, args, kwargs)
-
     local_tensor, global_shape, device_mesh, placements, dim, keepdim = _prep_arguments(
         str(op_call), args, kwargs
     )
@@ -255,42 +248,6 @@ def argminmax_handler(
     return dtensor.DTensor._op_dispatcher.wrap(
         final_idx.reshape(expected_shape), output_sharding.output_spec
     )
-
-
-def _argminmax_replicate_fallback(
-    op_call: torch._ops.OpOverload,
-    args: tuple[object, ...],
-    kwargs: dict[str, object],
-) -> object:
-    """Fallback for LocalTensor mode: redistribute to Replicate and compute directly."""
-    input_dtensor = cast(dtensor.DTensor, args[0])
-    device_mesh = input_dtensor.device_mesh
-    replicated = input_dtensor.redistribute(
-        device_mesh, [Replicate()] * len(input_dtensor.placements)
-    )
-    local_tensor = replicated._local_tensor
-
-    dim: Optional[int] = None
-    keepdim: bool = False
-    if len(args) > 1:
-        dim = cast(Optional[int], args[1])
-    if len(args) > 2:
-        keepdim = cast(bool, args[2])
-    if kwargs:
-        if "dim" in kwargs:
-            dim = cast(Optional[int], kwargs["dim"])
-        if "keepdim" in kwargs:
-            keepdim = cast(bool, kwargs["keepdim"])
-
-    if dim is not None:
-        result = op_call(local_tensor, dim, keepdim)
-    elif keepdim:
-        result = op_call(local_tensor, None, keepdim)
-    else:
-        result = op_call(local_tensor)
-
-    output_sharding = _get_output_sharding(op_call, args, kwargs)
-    return dtensor.DTensor._op_dispatcher.wrap(result, output_sharding.output_spec)
 
 
 def minmax_dim_handler(
