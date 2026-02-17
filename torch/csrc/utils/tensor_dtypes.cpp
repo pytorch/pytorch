@@ -21,7 +21,7 @@ void initializeDtypes() {
   for (at::ScalarType scalarType : all_scalar_types) {
     auto [primary_name, legacy_name] = c10::getDtypeNames(scalarType);
     PyObject* dtype = THPDtype_New(scalarType, primary_name);
-    torch::registerDtypeObject((THPDtype*)dtype, scalarType);
+    torch::registerDtypeObject(reinterpret_cast<THPDtype*>(dtype), scalarType);
     Py_INCREF(dtype);
     if (PyModule_AddObject(torch_module.get(), primary_name.c_str(), dtype) !=
         0) {

@@ -1280,7 +1280,8 @@ void Node::assignTopoPosition() {
       predicted_future_insertions = graph_->predicted_insert_count_++;
     }
     topo_position_ = prevPos +
-        std::max(int64_t(1), remaining / (2 + predicted_future_insertions));
+        std::max(static_cast<int64_t>(1),
+                 remaining / (2 + predicted_future_insertions));
     AT_ASSERT(prevPos < topo_position_ && topo_position_ < nextPos);
   }
 }

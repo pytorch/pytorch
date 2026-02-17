@@ -228,7 +228,7 @@ class ExprEval {
         std::vector<unsigned char> ret_val_arg(1);
         call_args_extended.emplace_back(ret_val_arg.data());
         codegen_->call(call_args_extended);
-        ret_value_ = InterpValue((bool)ret_val_arg[0]);
+        ret_value_ = InterpValue(static_cast<bool>(ret_val_arg[0]));
       } break;
       default:
         throw unsupported_dtype();
@@ -253,7 +253,7 @@ class ExprEval {
         std::vector<unsigned char> ret_val_arg(1);
         args_extended.push_back(ret_val_arg.data());
         codegen_->call_raw(args_extended);
-        ret_value_ = InterpValue((bool)ret_val_arg[0]);
+        ret_value_ = InterpValue(static_cast<bool>(ret_val_arg[0]));
       } break;
       default:
         throw unsupported_dtype();

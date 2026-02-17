@@ -66,7 +66,7 @@ OpCode parseOpCode(const char* str) {
   const int n = sizeof(strOpCode) / sizeof(strOpCode[0]);
   for (const auto i : c10::irange(n)) {
     if (strcmp(strOpCode[i], str) == 0)
-      return (OpCode)i;
+      return static_cast<OpCode>(i);
   }
   return OP;
 }

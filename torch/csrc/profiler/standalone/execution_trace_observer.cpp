@@ -401,8 +401,8 @@ static void dumpTensorData2File(
     size_t tensor_nbyte = tensor_impl->numel() * tensor_impl->itemsize();
 
     fs.write(
-        (const char*)tensor_impl->storage().data() + tensor_offset,
-        (long)tensor_nbyte);
+        static_cast<const char*>(tensor_impl->storage().data()) + tensor_offset,
+        static_cast<long>(tensor_nbyte));
   }
 }
 

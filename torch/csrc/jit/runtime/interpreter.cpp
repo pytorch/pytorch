@@ -838,7 +838,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 auto line = range->starting_line_no() +
                     range->lineno_for_offset(node->sourceRange().start());
                 c10::SourceLocation location{
-                    "", range->filename()->c_str(), uint32_t(line)};
+                    "", range->filename()->c_str(), static_cast<uint32_t>(line)};
                 // Sends the warning to the warning handler with the
                 // "verbatim" flag. This flag ensures the warning handler
                 // will print the exception as configured.

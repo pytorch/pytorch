@@ -171,7 +171,7 @@ TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor) {
   if (!tensor.key_set().has(DispatchKey::FuncTorchGradWrapper)) {
     return nullptr;
   }
-  return (TensorWrapper*)(tensor.unsafeGetTensorImpl());
+  return static_cast<TensorWrapper*>(tensor.unsafeGetTensorImpl());
 }
 
 static void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {

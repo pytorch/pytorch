@@ -169,7 +169,8 @@ inline bool parseTraceValue(
   try {
     std::vector<uint8_t> traceValue = store->get(key);
     std::memcpy(&seq, traceValue.data(), sizeof(seq));
-    std::string colName((char*)traceValue.data() + sizeof(seq));
+    std::string colName(
+        reinterpret_cast<char*>(traceValue.data()) + sizeof(seq));
     col = colName;
     return true;
   } catch (...) {

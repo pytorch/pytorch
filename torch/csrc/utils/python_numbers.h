@@ -67,7 +67,7 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
       value <= std::numeric_limits<int32_t>::max() &&
           value >= std::numeric_limits<int32_t>::min(),
       "Overflow when unpacking long");
-  return (int32_t)value;
+  return static_cast<int32_t>(value);
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
@@ -77,7 +77,7 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw python_error();
   }
   TORCH_CHECK_VALUE(overflow == 0, "Overflow when unpacking long long");
-  return (int64_t)value;
+  return static_cast<int64_t>(value);
 }
 
 inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
@@ -88,7 +88,7 @@ inline uint32_t THPUtils_unpackUInt32(PyObject* obj) {
   TORCH_CHECK_VALUE(
       value <= std::numeric_limits<uint32_t>::max(),
       "Overflow when unpacking long long");
-  return (uint32_t)value;
+  return static_cast<uint32_t>(value);
 }
 
 inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {
@@ -96,7 +96,7 @@ inline uint64_t THPUtils_unpackUInt64(PyObject* obj) {
   if (PyErr_Occurred()) {
     throw python_error();
   }
-  return (uint64_t)value;
+  return static_cast<uint64_t>(value);
 }
 
 bool THPUtils_checkIndex(PyObject* obj);
@@ -174,7 +174,7 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
   }
 #endif
   if (PyFloat_Check(obj)) {
-    return (bool)PyFloat_AS_DOUBLE(obj);
+    return static_cast<bool>(PyFloat_AS_DOUBLE(obj));
   }
 
   if (PyComplex_Check(obj)) {
@@ -190,7 +190,7 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
   }
   // No need to check overflow, because when overflow occurred, it should
   // return true in order to keep the same behavior of numpy.
-  return (bool)value;
+  return static_cast<bool>(value);
 }
 
 inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
@@ -204,7 +204,7 @@ inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
       value <= std::numeric_limits<c10::DeviceIndex>::max() &&
           value >= std::numeric_limits<c10::DeviceIndex>::min(),
       "Overflow when unpacking DeviceIndex");
-  return (c10::DeviceIndex)value;
+  return static_cast<c10::DeviceIndex>(value);
 }
 
 template <typename T>

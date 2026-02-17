@@ -656,7 +656,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     for (const auto& i : metadata) {
       const auto nnz = i.nnz();
       const auto numel = denseNumel * nnz;
-      auto tensorShape = std::vector<int64_t>({(int64_t)nnz});
+      auto tensorShape = std::vector<int64_t>({static_cast<int64_t>(nnz)});
       std::copy(
           valueShape.begin(),
           valueShape.end(),

@@ -842,7 +842,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
       buf_ptrs.push_back(iter->second);
       buf_ranks.push_back(b->dims().size());
-      buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
+      buf_dtypes.push_back(static_cast<int8_t>(b->dtype().scalar_type()));
       for (const ExprPtr& dim_expr : b->dims()) {
         dim_expr->accept(this);
         buf_dims.push_back(value().intValue());
@@ -912,7 +912,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       buf_ptrs[bufs_out_size + i] = iter->second;
       // @lint-ignore CLANGTIDY
       buf_ranks.push_back(b->dims().size());
-      buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
+      buf_dtypes.push_back(static_cast<int8_t>(b->dtype().scalar_type()));
       for (const auto& dim_expr : b->dims()) {
         dim_expr->accept(this);
         buf_dims.push_back(value().intValue());

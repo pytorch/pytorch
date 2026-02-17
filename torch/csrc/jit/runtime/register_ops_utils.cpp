@@ -128,8 +128,8 @@ void checkImplicitTensorToNum(const at::Tensor& t, bool toInt) {
 
 void checkDoubleInRange(double a) {
   if (std::isnan(a) || std::isinf(a) ||
-      a > double(std::numeric_limits<int64_t>::max()) ||
-      a < double(std::numeric_limits<int64_t>::min())) {
+      a > static_cast<double>(std::numeric_limits<int64_t>::max()) ||
+      a < static_cast<double>(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
         "Cannot convert float " + std::to_string(a) + " to integer");
     return;
@@ -138,9 +138,9 @@ void checkDoubleInRange(double a) {
 
 int64_t partProduct(int n, int m) {
   if (m <= (n + 1))
-    return (int64_t)n;
+    return static_cast<int64_t>(n);
   if (m == (n + 2))
-    return (int64_t)n * m;
+    return static_cast<int64_t>(n) * m;
   auto k = n + (m - n) / 2; // Overflow-safe midpoint
   if ((k & 1) != 1)
     k = k - 1;
@@ -156,7 +156,7 @@ void loop(int n, int64_t& p, int64_t& r) {
 }
 
 int nminussumofbits(int v) {
-  long w = (long)v;
+  long w = static_cast<long>(v);
   w -= (0xaaaaaaaa & w) >> 1; // NOLINT
   w = (w & 0x33333333) + ((w >> 2) & 0x33333333); // NOLINT
   w = (w + (w >> 4)) & 0x0f0f0f0f; // NOLINT

@@ -58,7 +58,8 @@ struct MemFile {
     n_bytes_ = s.st_size;
     UNWIND_CHECK(
         n_bytes_ > sizeof(Elf64_Ehdr), "empty shared library: {}", filename_);
-    mem_ = (char*)mmap(nullptr, n_bytes_, PROT_READ, MAP_SHARED, fd_, 0);
+    mem_ = static_cast<char*>(
+        mmap(nullptr, n_bytes_, PROT_READ, MAP_SHARED, fd_, 0));
     if (MAP_FAILED == mem_) {
       close(fd_);
       UNWIND_CHECK(
@@ -67,7 +68,7 @@ struct MemFile {
           filename_,
           c10::utils::str_error(errno));
     }
-    ehdr_ = (Elf64_Ehdr*)mem_;
+    ehdr_ = reinterpret_cast<Elf64_Ehdr*>(mem_);
 #define ELF_CHECK(cond) UNWIND_CHECK(cond, "not an ELF file: {}", filename_)
     ELF_CHECK(ehdr_->e_ident[EI_MAG0] == ELFMAG0);
     ELF_CHECK(ehdr_->e_ident[EI_MAG1] == ELFMAG1);
@@ -84,7 +85,7 @@ struct MemFile {
         ehdr_->e_shoff + sizeof(Elf64_Shdr) * ehdr_->e_shnum,
         n_bytes_,
         ehdr_->e_shnum);
-    shdr_ = (Elf64_Shdr*)(mem_ + ehdr_->e_shoff);
+    shdr_ = reinterpret_cast<Elf64_Shdr*>(mem_ + ehdr_->e_shoff);
     UNWIND_CHECK(
         ehdr_->e_shstrndx < ehdr_->e_shnum, "invalid strtab section offset");
     auto& strtab_hdr = shdr_[ehdr_->e_shstrndx];
@@ -107,7 +108,7 @@ struct MemFile {
 
   ~MemFile() {
     if (mem_) {
-      munmap((void*)mem_, n_bytes_);
+      munmap(reinterpret_cast<void*>(mem_), n_bytes_);
     }
     if (fd_ >= 0) {
       close(fd_);

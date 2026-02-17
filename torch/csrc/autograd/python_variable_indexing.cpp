@@ -53,7 +53,8 @@ Py_ssize_t THPVariable_length(PyObject* self) {
   }
   // TODO: Maybe this should return a SymInt directly?
   // Add the guard to get a nice error message if/when we will hit this.
-  return (Py_ssize_t)self_.sym_size(0).guard_int(__FILE__, __LINE__);
+  return static_cast<Py_ssize_t>(
+      self_.sym_size(0).guard_int(__FILE__, __LINE__));
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -181,7 +182,7 @@ inline Variable valueToTensor(
 }
 
 static void recordSliceTrace(PyObject* obj) {
-  PySliceObject* sliceobj = (PySliceObject*)obj;
+  PySliceObject* sliceobj = reinterpret_cast<PySliceObject*>(obj);
   if (THPVariable_Check(sliceobj->start)) {
     torch::jit::tracer::ArgumentStash::stashValue(
         std::string("start"),

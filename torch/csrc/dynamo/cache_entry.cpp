@@ -61,7 +61,7 @@ void CacheEntry::update_diff_guard_root_manager() {
 }
 
 PyCodeObject* CacheEntry_get_code(CacheEntry* e) {
-  return (PyCodeObject*)e->code.ptr();
+  return reinterpret_cast<PyCodeObject*>(e->code.ptr());
 }
 
 const char* CacheEntry_get_trace_annotation(CacheEntry* e) {

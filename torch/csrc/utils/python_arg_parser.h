@@ -792,16 +792,16 @@ inline at::ScalarType PythonArgs::scalartypeWithDefault(
 }
 
 inline at::ScalarType toScalarType(PyObject* obj) {
-  if (obj == (PyObject*)&PyFloat_Type) {
+  if (obj == reinterpret_cast<PyObject*>(&PyFloat_Type)) {
     return at::ScalarType::Double;
   }
-  if (obj == (PyObject*)&PyBool_Type) {
+  if (obj == reinterpret_cast<PyObject*>(&PyBool_Type)) {
     return at::ScalarType::Bool;
   }
-  if (obj == (PyObject*)&PyLong_Type) {
+  if (obj == reinterpret_cast<PyObject*>(&PyLong_Type)) {
     return at::ScalarType::Long;
   }
-  if (obj == (PyObject*)&PyComplex_Type) {
+  if (obj == reinterpret_cast<PyObject*>(&PyComplex_Type)) {
     return at::ScalarType::ComplexDouble;
   }
   return reinterpret_cast<THPDtype*>(obj)->scalar_type;
@@ -1182,9 +1182,11 @@ inline c10::Stream PythonArgs::stream(int i) {
             "expected Stream object. Got '{}'", Py_TYPE(args[i])->tp_name));
   }
   return c10::Stream::unpack3(
-      ((THPStream*)args[i])->stream_id,
-      static_cast<c10::DeviceIndex>(((THPStream*)args[i])->device_index),
-      static_cast<c10::DeviceType>(((THPStream*)args[i])->device_type));
+      (reinterpret_cast<THPStream*>(args[i]))->stream_id,
+      static_cast<c10::DeviceIndex>(
+          (reinterpret_cast<THPStream*>(args[i]))->device_index),
+      static_cast<c10::DeviceType>(
+          (reinterpret_cast<THPStream*>(args[i]))->device_type));
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {

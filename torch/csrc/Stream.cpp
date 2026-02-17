@@ -118,7 +118,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
 }
 
 static void THPStream_dealloc(THPStream* self) {
-  PyObject_ClearWeakRefs((PyObject*)self);
+  PyObject_ClearWeakRefs(reinterpret_cast<PyObject*>(self));
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 

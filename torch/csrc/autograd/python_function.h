@@ -155,5 +155,6 @@ TORCH_PYTHON_API extern PyObject* THPFunctionClass;
 TORCH_PYTHON_API extern PyObject* THPGradientEdgeClass;
 
 inline bool THPFunction_Check(PyObject* obj) {
-  return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);
+  return PyObject_IsInstance(
+      obj, reinterpret_cast<PyObject*>(&THPFunctionType));
 }

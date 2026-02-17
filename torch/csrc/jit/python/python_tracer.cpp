@@ -217,7 +217,7 @@ void initPythonTracerBindings(PyObject* module) {
           "__repr__",
           [](const TracingState& s) {
             std::ostringstream ss;
-            ss << "<TracingState " << (const void*)&s << '>';
+            ss << "<TracingState " << reinterpret_cast<const void*>(&s) << '>';
             return ss.str();
           })
       .def(

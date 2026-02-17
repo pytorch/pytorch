@@ -233,7 +233,8 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 
       // grab schema size
       if (op.size() > 2) {
-        result.emplace(op_name, OperatorInfo{(int)op.at(2).toInt()});
+        result.emplace(
+            op_name, OperatorInfo{static_cast<int>(op.at(2).toInt())});
       } else { // no schema information use default
         result.emplace(op_name, OperatorInfo{});
       }

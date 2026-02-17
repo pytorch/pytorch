@@ -103,8 +103,8 @@ int load_nnapi_model(
     int32_t* out_output_count,
     size_t* out_bytes_consumed) {
   int64_t required_size = 0;
-  const uint8_t* next_pointer = (const uint8_t*)serialized_model;
-  const uint8_t* end_of_buf = (const uint8_t*)serialized_model + model_length;
+  const uint8_t* next_pointer = static_cast<const uint8_t*>(serialized_model);
+  const uint8_t* end_of_buf = static_cast<const uint8_t*>(serialized_model) + model_length;
 
   required_size += sizeof(SerializedModel);
   CAFFE_ENFORCE(model_length >= required_size, "Model is too small.  Size = ", model_length);
@@ -122,19 +122,19 @@ int load_nnapi_model(
 
   required_size += sizeof(SerializedOperand) * ser_model->operand_count;
   CAFFE_ENFORCE(model_length >= required_size, "Model is too small.  Size = ", model_length);
-  const SerializedOperand* operands = (const SerializedOperand*)next_pointer;
+  const SerializedOperand* operands = reinterpret_cast<const SerializedOperand*>(next_pointer);
   next_pointer = (uint8_t*)serialized_model + required_size;
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
   required_size += sizeof(SerializedValue) * ser_model->value_count;
   CAFFE_ENFORCE(model_length >= required_size, "Model is too small.  Size = ", model_length);
-  const SerializedValue* values = (const SerializedValue*)next_pointer;
+  const SerializedValue* values = reinterpret_cast<const SerializedValue*>(next_pointer);
   next_pointer = (uint8_t*)serialized_model + required_size;
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
   required_size += sizeof(SerializedOperation) * ser_model->operation_count;
   CAFFE_ENFORCE(model_length >= required_size, "Model is too small.  Size = ", model_length);
-  const SerializedOperation* operations = (const SerializedOperation*)next_pointer;
+  const SerializedOperation* operations = reinterpret_cast<const SerializedOperation*>(next_pointer);
   next_pointer = (uint8_t*)serialized_model + required_size;
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
@@ -161,7 +161,7 @@ int load_nnapi_model(
     operand.scale = operands[i].scale;
     operand.zeroPoint = operands[i].zero_point;
     operand.dimensionCount = operands[i].dimension_count;
-    operand.dimensions = operands[i].dimension_count ? (const uint32_t*)next_pointer : nullptr;
+    operand.dimensions = operands[i].dimension_count ? reinterpret_cast<const uint32_t*>(next_pointer) : nullptr;
 
     next_pointer += 4 * operands[i].dimension_count;
     CAFFE_ENFORCE(next_pointer <= end_of_buf);
@@ -176,7 +176,7 @@ int load_nnapi_model(
     const void* value_pointer = nullptr;
     size_t value_length = 0;
 
-    switch ((SourceType)values[i].source_type) {
+    switch (static_cast<SourceType>(values[i].source_type)) {
       case SOURCE_IMMEDIATE:
         {
           value_pointer = stored_pointer;
@@ -217,10 +217,10 @@ int load_nnapi_model(
   }
 
   for (const auto i : c10::irange(ser_model->operation_count)) {
-    const uint32_t* inputs = (const uint32_t*)next_pointer;
+    const uint32_t* inputs = reinterpret_cast<const uint32_t*>(next_pointer);
     next_pointer += 4 * operations[i].input_count;
     CAFFE_ENFORCE(next_pointer <= end_of_buf);
-    const uint32_t* outputs = (const uint32_t*)next_pointer;
+    const uint32_t* outputs = reinterpret_cast<const uint32_t*>(next_pointer);
     next_pointer += 4 * operations[i].output_count;
     CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
@@ -234,10 +234,10 @@ int load_nnapi_model(
     NNAPI_CHECK(result);
   }
 
-  const uint32_t* model_inputs = (const uint32_t*)next_pointer;
+  const uint32_t* model_inputs = reinterpret_cast<const uint32_t*>(next_pointer);
   next_pointer += 4 * ser_model->input_count;
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
-  const uint32_t* model_outputs = (const uint32_t*)next_pointer;
+  const uint32_t* model_outputs = reinterpret_cast<const uint32_t*>(next_pointer);
   next_pointer += 4 * ser_model->output_count;
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
 
@@ -256,7 +256,7 @@ int load_nnapi_model(
   CAFFE_ENFORCE(next_pointer <= end_of_buf);
   CAFFE_ENFORCE(next_pointer == (const uint8_t*)serialized_model + required_size);
   if (out_bytes_consumed != nullptr) {
-    *out_bytes_consumed = next_pointer - (const uint8_t*)serialized_model;
+    *out_bytes_consumed = next_pointer - static_cast<const uint8_t*>(serialized_model);
   }
 
   return 0;

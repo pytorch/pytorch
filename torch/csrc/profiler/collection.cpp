@@ -75,7 +75,8 @@ struct TagToIOType {
   InputOutputEncoder::IOType io_type;
 };
 
-constexpr int tagCount = ((int)InputOutputEncoder::Tag::TERMINATOR) + 1;
+constexpr int tagCount =
+    (static_cast<int>(InputOutputEncoder::Tag::TERMINATOR)) + 1;
 constexpr std::array<TagToIOType, tagCount> tag_map = {{
     {InputOutputEncoder::Tag::Tensor, InputOutputEncoder::IOType::Shapes},
     {InputOutputEncoder::Tag::UndefinedTensor,
@@ -91,12 +92,12 @@ constexpr std::array<TagToIOType, tagCount> tag_map = {{
 
 constexpr bool allTagsMapped(int idx = 0) {
   return tag_map[idx].tag == InputOutputEncoder::Tag::TERMINATOR ||
-      ((idx == (int)tag_map[idx].tag) && allTagsMapped(idx + 1));
+      ((idx == static_cast<int>(tag_map[idx].tag)) && allTagsMapped(idx + 1));
 }
 static_assert(allTagsMapped(), "tag_map is out of order");
 
 constexpr InputOutputEncoder::IOType tagToIOType(InputOutputEncoder::Tag tag) {
-  return tag_map[(int)tag].io_type;
+  return tag_map[static_cast<int>(tag)].io_type;
 }
 } // namespace
 
