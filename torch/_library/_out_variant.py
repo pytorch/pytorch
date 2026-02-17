@@ -62,35 +62,6 @@ def _has_valid_out_variant_returns(
     return True
 
 
-def get_out_arg_count(out_op: torch._ops.OpOverload) -> int:
-    """Get the number of out arguments for an out variant op."""
-    schema = out_op._schema
-    return sum(1 for arg in schema.arguments if _is_mutable_arg(arg))
-
-
-def get_out_arg_names(out_op: torch._ops.OpOverload) -> list[str]:
-    """Get the names of out arguments for an out variant op."""
-    schema = out_op._schema
-    return [arg.name for arg in schema.arguments if _is_mutable_arg(arg)]
-
-
-def _is_tensor_list_return(schema: torch._C.FunctionSchema) -> bool:
-    """
-    Check if the schema returns Tensor[] (a single list-of-tensor return).
-
-    Tensor[] has len(schema.returns) == 1 with a ListType element type of
-    TensorType, but the .out variant may have N out args for the N tensors
-    in the list. This helper lets to_out_variant() skip the strict count
-    check for list returns.
-    """
-    if len(schema.returns) != 1:
-        return False
-    ret_type = schema.returns[0].type
-    return isinstance(
-        ret_type, torch.ListType
-    ) and ret_type.getElementType().isSubtypeOf(torch.TensorType.get())
-
-
 def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     """
     Given a functional operator overload, return its corresponding out variant.
@@ -121,26 +92,19 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
         if not _signatures_match(schema, candidate_schema):
             continue
 
+        # We assume that all mutable args are used for out
         mutable_args = [
             arg for arg in candidate_schema.arguments if _is_mutable_arg(arg)
         ]
-        # For Tensor[] return type, schema.returns has length 1 (a single
-        # list-of-tensor return) but the .out variant may have N out args for
-        # the N tensors in the list. Skip the strict count check in that case.
-        if not _is_tensor_list_return(schema) and len(mutable_args) != len(
-            schema.returns
-        ):
+        if len(mutable_args) != len(schema.returns):
             continue
 
         if not _has_valid_out_variant_returns(candidate_schema, mutable_args):
-            # For Tensor[] returns, the out variant may also return Tensor[]
-            # (not individual aliased args), so skip strict validation.
-            if not _is_tensor_list_return(candidate_schema):
-                raise RuntimeError(
-                    f"Out variant {candidate} has invalid returns. "
-                    f"Expected either no returns or returns that alias the mutable args, "
-                    f"got: {candidate_schema}"
-                )
+            raise RuntimeError(
+                f"Out variant {candidate} has invalid returns. "
+                f"Expected either no returns or returns that alias the mutable args, "
+                f"got: {candidate_schema}"
+            )
 
         return candidate
 
