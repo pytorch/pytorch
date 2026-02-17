@@ -26,9 +26,15 @@ from collections.abc import Iterable, Sequence
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._pytree import MappingKey
 
 from .. import graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_call_method,
+    create_dup_top,
+    create_instruction,
+)
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
@@ -231,13 +237,12 @@ class ConstDictVariable(VariableTracker):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
     def debug_repr(self) -> str:
-        return (
-            "{"
-            + ", ".join(
-                f"{k.vt.debug_repr()}: {v.debug_repr()}" for k, v in self.items.items()
-            )
-            + "}"
-        )
+        items: list[str] = []
+        for k, v in self.items.items():
+            key_str = repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+            val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+            items.append(f"{key_str}: {val_str}")
+        return "{" + ", ".join(items) + "}"
 
     def as_python_constant(self) -> dict[Any, Any]:
         return {
@@ -311,6 +316,60 @@ class ConstDictVariable(VariableTracker):
             mutation_type=ValueMutationNew(),
         )
 
+    def call_tree_map_with_path_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+        keypath: tuple[Any, ...],
+    ) -> VariableTracker:
+        other_dicts: list[ConstDictVariable] = []
+        for candidate in rest:
+            candidate = candidate.realize()
+            if not isinstance(candidate, ConstDictVariable) or len(
+                candidate.items
+            ) != len(self.items):
+                return self._tree_map_with_path_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+                )
+            other_dicts.append(candidate)
+
+        new_items_hashed = type(self.items)()
+        for key_tracker, value in self.items.items():
+            sibling_leaves: list[VariableTracker] = []
+            for candidate in other_dicts:
+                try:
+                    sibling_leaves.append(candidate.items[key_tracker])
+                except KeyError:
+                    return self._tree_map_with_path_fallback(
+                        tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+                    )
+            key_const = key_tracker.vt.as_python_constant()
+            child_keypath = keypath + (MappingKey(key_const),)
+            new_items_hashed[key_tracker] = value.call_tree_map_with_path(
+                tx,
+                tree_map_fn,
+                map_fn,
+                sibling_leaves,
+                tree_map_kwargs,
+                child_keypath,
+            )
+
+        updated_original_items = {
+            key_tracker.vt: new_items_hashed[key_tracker]
+            for key_tracker in new_items_hashed
+        }
+
+        return self.clone(
+            items=new_items_hashed,
+            original_items=updated_original_items,
+            should_reconstruct_all=True,
+            source=None,
+            mutation_type=ValueMutationNew(),
+        )
+
     def len(self) -> int:
         return sum(
             not isinstance(x, variables.DeletedVariable) for x in self.items.values()
@@ -353,10 +412,41 @@ class ConstDictVariable(VariableTracker):
                     ]
                 )
             )
-            self.reconstruct_kvs_into_new_dict(codegen)
-            codegen.extend_output(create_call_function(1, False))
+            if self._contains_self_reference():
+                codegen.extend_output(
+                    [
+                        *create_call_function(0, False),
+                        create_dup_top(),
+                    ]
+                )
+                codegen.add_cache(self)
+
+                codegen.append_output(create_dup_top())
+                codegen.load_method("update")
+                self.reconstruct_kvs_into_new_dict(codegen)
+                codegen.extend_output(
+                    [
+                        *create_call_method(1),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+            else:
+                self.reconstruct_kvs_into_new_dict(codegen)
+                codegen.extend_output(create_call_function(1, False))
         else:
-            self.reconstruct_kvs_into_new_dict(codegen)
+            if self._contains_self_reference():
+                codegen.extend_output(
+                    [
+                        create_instruction("BUILD_MAP", arg=0),
+                        create_dup_top(),
+                    ]
+                )
+                codegen.add_cache(self)
+                self.reconstruct_kvs_into_new_dict(codegen)
+                codegen.append_output(create_instruction("DICT_UPDATE", arg=1))
+            else:
+                # Non-self-referential: use simple codegen
+                self.reconstruct_kvs_into_new_dict(codegen)
 
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -1050,8 +1140,23 @@ class DefaultDictVariable(ConstDictVariable):
             )
         )
         codegen(self.default_factory)
+        codegen.extend_output(
+            [
+                *create_call_function(1, False),
+                create_dup_top(),
+            ]
+        )
+        codegen.add_cache(self)
+
+        codegen.append_output(create_dup_top())
+        codegen.load_method("update")
         self.reconstruct_kvs_into_new_dict(codegen)
-        codegen.extend_output(create_call_function(2, False))
+        codegen.extend_output(
+            [
+                *create_call_method(1),
+                create_instruction("POP_TOP"),
+            ]
+        )
 
 
 # TODO: Implementing this via inheritance rather than composition is a
@@ -1077,6 +1182,7 @@ class SetVariable(ConstDictVariable):
                 realized_items.append(item)
             else:
                 # VariableTracker - realize to install guards
+                # pyrefly: ignore [bad-argument-type]
                 realized_items.append(item.realize())
         # pyrefly: ignore[bad-assignment]
         items = dict.fromkeys(realized_items, SetVariable._default_value())
@@ -1087,7 +1193,12 @@ class SetVariable(ConstDictVariable):
         if not self.items:
             return "set()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
+            items: list[str] = []
+            for v in self.items:
+                vt = v.vt if isinstance(v, ConstDictVariable._HashableTracker) else v
+                val_str = repr(vt.value) if hasattr(vt, "value") else vt.debug_repr()
+                items.append(val_str)
+            return "{" + ",".join(items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1431,6 +1542,7 @@ class OrderedSetClassVariable(VariableTracker):
             )
 
         if len(args) == 0:
+            # pyrefly: ignore [implicit-any]
             items = []
         else:
             items = args[0].force_unpack_var_sequence(tx)
@@ -1442,9 +1554,13 @@ class OrderedSetVariable(SetVariable):
         if not self.items:
             return "OrderedSet([])"
         else:
-            return (
-                "OrderedSet([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
-            )
+            items: list[str] = []
+            for k, v in self.items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                items.append(key_str)
+            return "OrderedSet([" + ",".join(items) + "])"
 
     def as_python_constant(self) -> OrderedSet[Any]:
         return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
@@ -1470,7 +1586,13 @@ class FrozensetVariable(SetVariable):
         if not self.items:
             return "frozenset()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
+            items: list[str] = []
+            for k in self.items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                items.append(key_str)
+            return "{" + ",".join(items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1550,9 +1672,13 @@ class DictKeySetVariable(SetVariable):
         if not self.items:
             return "dict_keys([])"
         else:
-            return (
-                "dict_keys([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
-            )
+            items: list[str] = []
+            for k in self.items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                items.append(key_str)
+            return "dict_keys([" + ",".join(items) + "])"
 
     def install_dict_keys_match_guard(self) -> None:
         # Already EQUALS_MATCH guarded
@@ -1670,11 +1796,13 @@ class DictKeysVariable(DictViewVariable):
         if not self.view_items:
             return "dict_keys([])"
         else:
-            return (
-                "dict_keys(["
-                + ",".join(f"{k.vt.debug_repr()}" for k in self.view_items)
-                + "])"
-            )
+            items: list[str] = []
+            for k in self.view_items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
+                )
+                items.append(key_str)
+            return "dict_keys([" + ",".join(items) + "])"
 
     def call_method(
         self,
@@ -1724,11 +1852,11 @@ class DictValuesVariable(DictViewVariable):
         if not self.view_items:
             return "dict_values([])"
         else:
-            return (
-                "dict_values(["
-                + ",".join(f"{v.debug_repr()}" for v in self.view_items)
-                + "])"
-            )
+            items: list[str] = []
+            for v in self.view_items:
+                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+                items.append(val_str)
+            return "dict_values([" + ",".join(items) + "])"
 
 
 class DictItemsVariable(DictViewVariable):
@@ -1746,14 +1874,14 @@ class DictItemsVariable(DictViewVariable):
         if not self.view_items:
             return "dict_items([])"
         else:
-            return (
-                "dict_items(["
-                + ",".join(
-                    f"({k.vt.debug_repr()}, {v.debug_repr()})"
-                    for k, v in self.view_items
+            items: list[str] = []
+            for k, v in self.view_items:
+                key_str = (
+                    repr(k.vt.value) if hasattr(k.vt, "value") else k.vt.debug_repr()
                 )
-                + "])"
-            )
+                val_str = repr(v.value) if hasattr(v, "value") else v.debug_repr()
+                items.append(f"({key_str}, {val_str})")
+            return "dict_items([" + ",".join(items) + "])"
 
     def call_method(
         self,

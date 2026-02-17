@@ -273,7 +273,6 @@ from ._einsum_strategy import EinsumDims
 def gen_single_dim_einsum_strategies(
     equation: str,
     *,
-    linearity: bool = False,
     bias_shape: torch.Size | None = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """
@@ -293,8 +292,9 @@ def gen_single_dim_einsum_strategies(
         2.2: Shard on lhs only dim or rhs only dim: both output and lhs or rhs
         input should shard on this free dim.
 
-    3. Linearity (Partial): If enabled, set Partial on output and inputs over
-       the same device mesh dim.
+    3. Per-input linearity (Partial): Since matmul is linear in each input
+       independently, one input can remain Partial while others are Replicate,
+       producing a Partial output.
 
     4. Bias input (optional): If bias_shape is provided, a bias placement
        is inserted after the output placement. The bias placement is derived from
@@ -404,19 +404,21 @@ def gen_single_dim_einsum_strategies(
         ]
         strategies_over_one_mesh_dim.append(_maybe_add_bias(rhs_placement_list))
 
-    # linearity strategy
-    if linearity:
-        linearity_placement_list: list[Placement | _ShardingPlaceholder] = [Partial()]
-        for _ in input_dims:
-            linearity_placement_list.append(Partial())
-        strategies_over_one_mesh_dim.append(_maybe_add_bias(linearity_placement_list))
+    # Per-input linearity: matmul is linear in each input independently.
+    # One input Partial, the other Replicate → output Partial.
+    for reduce_op in Partial.LINEAR_REDUCE_OPS:
+        output_placement = Partial(reduce_op)
+        strategies_over_one_mesh_dim.append(
+            _maybe_add_bias([output_placement, Partial(reduce_op), Replicate()])
+        )
+        strategies_over_one_mesh_dim.append(
+            _maybe_add_bias([output_placement, Replicate(), Partial(reduce_op)])
+        )
 
     return strategies_over_one_mesh_dim
 
 
-# TODO enable in a separate PR along with more extensive validation.
-# currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
-# @register_single_dim_strategy(aten.mm.default)
+@register_single_dim_strategy(aten.mm.default, allow_unbacked_sharding=True)
 def mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -429,7 +431,7 @@ def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.addmm.default)
+@register_single_dim_strategy(aten.addmm.default, allow_unbacked_sharding=True)
 def addmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -444,13 +446,20 @@ def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
+@register_single_dim_strategy(aten.bmm.default, allow_unbacked_sharding=True)
+def bmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return gen_single_dim_einsum_strategies("bmk,bkn->bmn")
+
+
 @register_op_strategy(aten.baddbmm.default)
 def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.baddbmm.default)
+@register_single_dim_strategy(aten.baddbmm.default, allow_unbacked_sharding=True)
 def baddbmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:

@@ -22,11 +22,14 @@ from typing import Any, Literal, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
     create_build_tuple,
     create_call_function,
+    create_call_method,
+    create_dup_top,
     create_instruction,
     create_rot_n,
 )
@@ -174,6 +177,53 @@ class BaseListVariable(VariableTracker):
                     map_fn,
                     sibling_leaves,
                     tree_map_kwargs,
+                )
+            )
+
+        return self.clone(
+            items=new_items,
+            source=None,
+            mutation_type=ValueMutationNew(),
+        )
+
+    def call_tree_map_with_path_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+        keypath: tuple[Any, ...],
+    ) -> VariableTracker:
+        if not isinstance(self, (ListVariable, TupleVariable)):
+            return self._tree_map_with_path_fallback(
+                tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+            )
+
+        other_lists: list[BaseListVariable] = []
+        for candidate in rest:
+            if (
+                not isinstance(candidate, BaseListVariable)
+                or len(candidate.items) != len(self.items)
+                or self.python_type() != candidate.python_type()
+            ):
+                return self._tree_map_with_path_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+                )
+            other_lists.append(candidate)
+
+        new_items: list[VariableTracker] = []
+        for idx, item in enumerate(self.items):
+            sibling_leaves = [candidate.items[idx] for candidate in other_lists]
+            child_keypath = keypath + (SequenceKey(idx),)
+            new_items.append(
+                item.call_tree_map_with_path(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    sibling_leaves,
+                    tree_map_kwargs,
+                    child_keypath,
                 )
             )
 
@@ -401,7 +451,11 @@ class RangeVariable(BaseListVariable):
         super().__init__([start, stop, step], **kwargs)
 
     def debug_repr(self) -> str:
-        return self.debug_repr_helper("range(", ")")
+        repr = f"range({self.start()}, {self.stop()}"
+        if self.step() != 1:
+            repr += f", {self.step()}"
+        repr += ")"
+        return repr
 
     def python_type(self) -> type:
         return range
@@ -898,8 +952,27 @@ class ListVariable(CommonListMethodsVariable):
         return self.debug_repr_helper("[", "]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.foreach(self.items)
-        codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
+        if self._contains_self_reference():
+            # Self-referential list: create empty, cache, then extend
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_LIST", arg=0),
+                    create_dup_top(),
+                ]
+            )
+            codegen.add_cache(self)
+
+            codegen.foreach(self.items)
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_LIST", arg=len(self.items)),
+                    create_instruction("LIST_EXTEND", arg=1),
+                ]
+            )
+        else:
+            # Non-self-referential: use simple codegen
+            codegen.foreach(self.items)
+            codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
 
     def call_method(
         self,
@@ -1086,15 +1159,33 @@ class DequeVariable(CommonListMethodsVariable):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # To deal with self-referential sets
         codegen.add_push_null(
             lambda: codegen.append_output(
                 codegen.create_load_python_module(collections.deque)  # type: ignore[arg-type]
             )
         )
-        codegen.foreach(self.items)
-        codegen.extend_output([create_instruction("BUILD_LIST", arg=len(self.items))])
+        codegen.append_output(create_instruction("BUILD_LIST", arg=0))
         codegen(self.maxlen)
-        codegen.extend_output(codegen.create_call_function_kw(2, ("maxlen",), False))
+        codegen.extend_output(
+            [
+                *codegen.create_call_function_kw(2, ("maxlen",), False),
+                create_dup_top(),
+            ]
+        )
+        codegen.add_cache(self)
+
+        codegen.append_output(create_dup_top())
+        codegen.load_method("extend")
+
+        codegen.foreach(self.items)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_LIST", arg=len(self.items)),
+                *create_call_method(1),
+                create_instruction("POP_TOP"),
+            ]
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "maxlen":
@@ -1335,6 +1426,7 @@ class SizeVariable(TupleVariable):
         from .tensor import SymNodeVariable
 
         const_result = 1
+        # pyrefly: ignore [implicit-any]
         sym_sizes = []
 
         for v in self.items:
@@ -1431,6 +1523,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def __init__(
         self,
         items: list[VariableTracker],
+        # pyrefly: ignore [implicit-any]
         tuple_cls: type[tuple],
         dynamic_attributes: Optional[dict[str, VariableTracker]] = None,
         tuple_vt: Optional[TupleVariable] = None,
@@ -1560,6 +1653,82 @@ class NamedTupleVariable(UserDefinedTupleVariable):
                     map_fn,
                     sibling_leaves,
                     tree_map_kwargs,
+                )
+            )
+
+        return NamedTupleVariable(
+            new_items,
+            self.tuple_cls,
+            mutation_type=ValueMutationNew(),
+        )
+
+    def call_tree_map_with_path(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+        keypath: tuple[Any, ...],
+    ) -> VariableTracker:
+        is_leaf_var = tree_map_kwargs.get("is_leaf")
+        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
+            pred_result = is_leaf_var.call_function(tx, [self], {})
+            try:
+                leaf_decision = pred_result.as_python_constant()
+            except NotImplementedError:
+                # For namedtuples, they're always pytree containers, so is_leaf
+                # should return False. Assume False and proceed with fast path.
+                leaf_decision = False
+            if leaf_decision:
+                keypath_var = variables.TupleVariable(
+                    [VariableTracker.build(tx, k) for k in keypath]
+                )
+                return map_fn.call_function(tx, [keypath_var, self, *rest], {})
+
+        return self.call_tree_map_with_path_branch(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+            keypath,
+        )
+
+    def call_tree_map_with_path_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+        keypath: tuple[Any, ...],
+    ) -> VariableTracker:
+        other_tuples: list[NamedTupleVariable] = []
+        for candidate in rest:
+            if (
+                not isinstance(candidate, NamedTupleVariable)
+                or len(candidate.items) != len(self.items)
+                or candidate.tuple_cls is not self.tuple_cls
+            ):
+                return self._tree_map_with_path_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+                )
+            other_tuples.append(candidate)
+
+        fields = self.fields()
+        new_items: list[VariableTracker] = []
+        for idx, item in enumerate(self.items):
+            sibling_leaves = [candidate.items[idx] for candidate in other_tuples]
+            child_keypath = keypath + (GetAttrKey(fields[idx]),)
+            new_items.append(
+                item.call_tree_map_with_path(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    sibling_leaves,
+                    tree_map_kwargs,
+                    child_keypath,
                 )
             )
 
@@ -1797,6 +1966,7 @@ class ListIteratorVariable(IteratorVariable):
         if not self.is_exhausted:
             remaining_items = self.items[self.index :]
         else:
+            # pyrefly: ignore [implicit-any]
             remaining_items = []
         codegen.foreach(remaining_items)
         codegen.extend_output(
