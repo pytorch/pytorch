@@ -241,6 +241,12 @@ inplace_buffers = True
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
 
+# Lower functional custom ops to their out-variant at inductor lowering time.
+# This routes ops through ExternKernelOut (should_allocate=True) instead of
+# FallbackKernel (ExternKernelAlloc, should_allocate=False), enabling buffer
+# reuse via AllocateLine.plan().
+lower_custom_ops_to_out_variant = False
+
 # Enable pooled allocations for non-output tensors
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
