@@ -64,9 +64,11 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
+    MI200_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     skipIfRocm,
+    skipIfRocmArch,
     TEST_WITH_ROCM,
     TEST_XPU,
 )
@@ -860,6 +862,9 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm=True,
     )
     @parametrize("device", ("cpu", GPU_TYPE))
+    @skipIfRocm(
+        msg="Temporary skip due to regression in triton 3.7 - CPU failure on ROCm"
+    )
     def test_matmul_dropout(self, device):
         def fwd(a, b):
             x = a @ b
@@ -2476,6 +2481,60 @@ class TestMaxAutotune(TestCase):
         self.assertObjectIn(k, (15, 16))
         self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "force_pointwise_cat": True,
+        }
+    )
+    @parametrize("epilogue", (True, False))
+    @skipIfRocmArch(
+        MI200_ARCH
+    )  # Temporary skip due to regression in triton 3.7 - MI200 specific failure
+    def test_deferred_layout_constraint_cat_fusion(self, epilogue):
+        def mm_with_cat(a, b1, b2, d):
+            catted_b = torch.cat([b1, b2], dim=1)
+            catted_b_add = catted_b + 1.0
+
+            # Not padded at lowering time
+            catted_bf16 = catted_b_add.to(torch.bfloat16)
+
+            # bmm1 as output -> no padding occurs, however after fusion
+            # the buffer is padded, layout constraint violated
+            bmm1 = torch.bmm(a.to(torch.bfloat16), catted_bf16)
+            fused = catted_bf16 - d
+            if epilogue:
+                bmm1_fp32 = bmm1.to(torch.float32)
+                return bmm1, bmm1_fp32, fused
+
+            return bmm1, fused
+
+        batch = 32
+        m = 512
+        k1, k2 = 256, 256
+        n = 1490  # Would normally trigger padding (1490 -> 1536)
+
+        a = torch.randn(batch, m, k1 + k2, device=GPU_TYPE)
+        b1 = torch.randn(batch, k1, n, device=GPU_TYPE)
+        b2 = torch.randn(batch, k2, n, device=GPU_TYPE)
+        d = torch.cat([b1, b2], dim=1).to(torch.bfloat16)
+
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+        ):
+            compiled = torch.compile(mm_with_cat, mode="max-autotune-no-cudagraphs")
+            _, code = run_and_get_code(compiled, a, b1, b2, d)
+
+            # Despite Triton being 10x faster in benchmarks, the layout conflict
+            # should force fallback to extern_kernels.bmm
+            FileCheck().check_not("triton_tem").run(code[0])
+
 
 @instantiate_parametrized_tests
 class TestTemplateConfigPruning(TestCase):
@@ -2974,6 +3033,9 @@ class TestMaxAutotuneSubproc(TestCase):
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     @parametrize("dynamic", (False, True))
+    @skipIfRocm(
+        msg="Temporary skip due to regression in triton 3.7 - Gemm related failure"
+    )
     def test_max_autotune_addmm(self, search_space, dynamic=False):
         """
         Make sure autotuning addmm in sub processes work without crashes.
@@ -3774,6 +3836,9 @@ class TestPrologueFusion(TestCase):
         "generated code is different in native matmul",
     )
     @parametrize("use_async_compile", (True, False))
+    @skipIfRocmArch(
+        MI200_ARCH
+    )  # Temporary skip due to regression in triton 3.7 - MI200 specific failure
     def test_lazy_template_fusion_multiple_candidates(self, use_async_compile: bool):
         """
         Test lazy evaluation of template fusions with multiple templates,
@@ -4003,6 +4068,9 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         ],
     )
     @parametrize("use_async_compile", (True, False))
+    @skipIfRocm(
+        msg="Temporary skip due to regression in triton 3.7 - codegen def error"
+    )
     def test_template_epilogue_fusion_static_analysis(
         self, test_case: str, use_async_compile: bool
     ):

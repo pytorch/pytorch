@@ -3474,6 +3474,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm(msg="Temporary skip due to regression in triton 3.7 - misc failure")
     def test_repeated_calling(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
