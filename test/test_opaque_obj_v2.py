@@ -18,12 +18,15 @@ from torch._dynamo.testing import (
     InductorAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import counters as dynamo_counters
+from torch._dynamo.utils import counters, counters as dynamo_counters
+from torch._functorch import config as functorch_config
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
     aot_export_module,
 )
+from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
@@ -267,6 +270,37 @@ class NestedValueSize(OpaqueBase):
         )
 
         return repr_str, all_globals
+
+
+class HoistedString(torch._opaque_base.OpaqueBase):
+    def __init__(self, val):
+        self.val = val
+
+    def __eq__(self, other):
+        return self.val == other.val
+
+    def __hash__(self):
+        return hash(self.val)
+
+    def __fx_repr__(self):
+        return (f"HoistedString('{self.val}')", {"HoistedString": HoistedString})
+
+
+register_opaque_type(HoistedString, typ="value", hoist=True)
+
+
+@torch.library.custom_op("mylib::op_with_string", mutates_args=())
+def op_with_string(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+    if s.val == "double":
+        return x * 2
+    elif s.val == "square":
+        return x**2
+    raise AssertionError("expected double or square")
+
+
+@op_with_string.register_fake
+def _(x, s):
+    return torch.empty_like(x)
 
 
 register_opaque_type(OpaqueQueue, typ="reference")
@@ -1953,6 +1987,68 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
     apply_color_scale = torch.ops._TestOpaqueObject.apply_color_scale(g_color_green, l_x_);  g_color_green = l_x_ = None
     return (apply_color_scale,)""",  # noqa: B950
         )
+
+    def test_hoist_basic(self):
+        def f(x):
+            return op_with_string(x, HoistedString("double"))
+
+        x = torch.tensor(3.0)
+
+        # backend = "eager"
+        backend = EagerAndRecordGraphs()
+        _ = torch.compile(f, fullgraph=True, backend=backend)(x)
+        graph = backend.graphs[0]
+        self.assertNotIn("double", str(graph))
+
+        # backend = "aot_eager"
+        backend = AotEagerAndRecordGraphs()
+        _ = torch.compile(f, fullgraph=True, backend=backend)(x)
+        graph = backend.graphs[0]
+        self.assertNotIn("double", str(graph))
+
+        # backend = "inductor"
+        y = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(y, 2 * x)
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_hoist_cache_hits(self):
+        torch._dynamo.reset()
+        AOTAutogradCache.clear()
+        torch._inductor.codecache.FxGraphCache.clear()
+        counters.clear()
+
+        # Because HoistedString should not be in the graph, the following
+        # two functions should share AOTAutogradCache and FXGraphCache entries
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return op_with_string(x, HoistedString("double"))
+
+        @torch.compile(fullgraph=True)
+        def g(x):
+            return op_with_string(x, HoistedString("square"))
+
+        x = torch.tensor(3.0)
+
+        f(x)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+        g(x)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
 
     def test_opaque_class_literal_attribute_inlined(self):
         """Test that literal attributes on opaque classes are inlined without source tracking.
