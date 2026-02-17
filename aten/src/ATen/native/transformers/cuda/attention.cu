@@ -1187,13 +1187,13 @@ _flash_attention_forward(
   TORCH_CHECK(
     !k_cache.has_value() && !v_cache.has_value() &&
     !cache_seqlens.has_value() && !cache_batch_idx.has_value() &&
-    !page_table.has_value() && !_out.has_value(),
-    "KV cache parameters (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table, out) ",
+    !page_table.has_value(),
+    "KV cache parameters (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table) ",
     "are not supported by the default Flash Attention 2 implementation. ",
     "Please install FA3 and activate using torch.nn.attention.activate_flash_attention_impl('FA3').");
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).expect_float();
-  std::optional<Tensor> out = std::nullopt;
+  std::optional<Tensor> out = _out;
 
   std::optional<Tensor> seqused_k = _seqused_k;
   std::optional<at::Tensor> block_table = std::nullopt;  // we are not using the block table yet
