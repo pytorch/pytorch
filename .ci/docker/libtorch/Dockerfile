@@ -5,7 +5,7 @@ FROM ${GPU_IMAGE} as base
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get clean && apt-get update
-RUN apt-get install -y curl locales g++ git-all autoconf automake make cmake wget unzip sudo
+RUN apt-get install -y curl locales g++ git-all autoconf automake make cmake wget unzip sudo patchelf
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
 
@@ -106,9 +106,6 @@ RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
 
 FROM ${BASE_TARGET} as final
 COPY --from=openssl            /opt/openssl           /opt/openssl
-# Install patchelf
-ADD ./common/install_patchelf.sh install_patchelf.sh
-RUN bash ./install_patchelf.sh && rm install_patchelf.sh
 # Install Anaconda
 COPY --from=conda /opt/conda /opt/conda
 # Install python
