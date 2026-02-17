@@ -4,6 +4,10 @@
 #include <memory>
 #include <string>
 
+namespace torch {
+struct CapturedTraceback;
+}
+
 namespace torch::autograd {
 
 // forward declaration of Node from function.h
@@ -16,14 +20,22 @@ struct TORCH_API AnomalyMode {
   static bool should_check_nan() {
     return _check_nan;
   }
-  static void set_enabled(bool enabled, bool check_nan = true) {
+  static bool should_use_mixed_stack() {
+    return _mixed_stack;
+  }
+  static void set_enabled(
+      bool enabled,
+      bool check_nan = true,
+      bool mixed_stack = false) {
     _enabled = enabled;
     _check_nan = check_nan;
+    _mixed_stack = mixed_stack;
   }
 
  private:
   static bool _enabled;
   static bool _check_nan;
+  static bool _mixed_stack;
 };
 
 /// A RAII guard that enables Anomaly Detection Mode.
@@ -50,11 +62,12 @@ struct TORCH_API AnomalyMode {
 /// @endcode
 class TORCH_API DetectAnomalyGuard {
  public:
-  DetectAnomalyGuard(bool check_nan = true);
+  DetectAnomalyGuard(bool check_nan = true, bool mixed_stack = false);
   ~DetectAnomalyGuard();
 
  private:
   bool prev_check_nan_;
+  bool prev_mixed_stack_;
 };
 
 struct TORCH_API AnomalyMetadata {
@@ -62,6 +75,7 @@ struct TORCH_API AnomalyMetadata {
   virtual void store_stack();
   virtual void print_stack(const std::string& current_node_name);
   virtual void assign_parent(const std::shared_ptr<Node>& parent_node);
+  virtual std::shared_ptr<torch::CapturedTraceback> captured_traceback() const;
 
  private:
   std::string traceback_;

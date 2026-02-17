@@ -5931,6 +5931,68 @@ Done""",
 
                 out.backward()
 
+    def test_anomaly_mode_mixed_stack(self):
+        # Test that mixed_stack option can be set and retrieved
+        self.assertFalse(torch.is_anomaly_mixed_stack_enabled())
+
+        with torch.autograd.detect_anomaly(check_nan=False, mixed_stack=True):
+            self.assertTrue(torch.is_anomaly_enabled())
+            self.assertFalse(torch.is_anomaly_check_nan_enabled())
+            self.assertTrue(torch.is_anomaly_mixed_stack_enabled())
+
+        # State is restored after context manager exits
+        self.assertFalse(torch.is_anomaly_mixed_stack_enabled())
+
+    def test_anomaly_mode_mixed_stack_nesting(self):
+        # Test nested detect_anomaly with different mixed_stack settings
+        self.assertFalse(torch.is_anomaly_mixed_stack_enabled())
+
+        with torch.autograd.detect_anomaly(check_nan=False, mixed_stack=True):
+            self.assertTrue(torch.is_anomaly_mixed_stack_enabled())
+
+            with torch.autograd.detect_anomaly(check_nan=True, mixed_stack=False):
+                # Inner context should override
+                self.assertTrue(torch.is_anomaly_check_nan_enabled())
+                self.assertFalse(torch.is_anomaly_mixed_stack_enabled())
+
+            # After inner context exits, should restore to outer's settings
+            self.assertFalse(torch.is_anomaly_check_nan_enabled())
+            self.assertTrue(torch.is_anomaly_mixed_stack_enabled())
+
+        self.assertFalse(torch.is_anomaly_mixed_stack_enabled())
+
+    def test_anomaly_mixed_stack_captures_traceback(self):
+        # Test that mixed_stack mode captures traceback during forward
+        # and properly prints it when an error occurs in backward
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                raise RuntimeError("Error in backward")
+
+        def run_fn(a):
+            out = MyFunc.apply(a)
+            return out.sum()
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            with torch.autograd.detect_anomaly(check_nan=False, mixed_stack=True):
+                inp = torch.rand(10, 10, requires_grad=True)
+                out = run_fn(inp)
+                with self.assertRaisesRegex(RuntimeError, "Error in backward"):
+                    out.backward()
+
+            # Check that a warning was issued with forward traceback info
+            warning_messages = [str(warning.message) for warning in w]
+            # Should have at least one warning about the error detection
+            self.assertTrue(
+                any("Error detected in" in msg for msg in warning_messages),
+                f"Expected 'Error detected in' warning, got: {warning_messages}",
+            )
+
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
         class MyFunc(Function):

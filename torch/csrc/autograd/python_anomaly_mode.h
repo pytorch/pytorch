@@ -2,6 +2,7 @@
 
 #include <pybind11/pybind11.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -27,6 +28,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
   void store_stack() override;
   void print_stack(const std::string& current_node_name) override;
   void assign_parent(const std::shared_ptr<Node>& parent_node) override;
+  std::shared_ptr<torch::CapturedTraceback> captured_traceback() const override;
 
   PyObject* dict() {
     return dict_;
@@ -34,6 +36,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
 
  private:
   PyObject* dict_{nullptr};
+  std::shared_ptr<torch::CapturedTraceback> captured_traceback_;
 };
 void _print_stack(
     PyObject* trace_stack,

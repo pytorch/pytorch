@@ -1255,11 +1255,11 @@ static PyObject* set_anomaly_mode_enabled(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "set_anomaly_enabled(bool enabled, bool check_nan=True)",
+      "set_anomaly_enabled(bool enabled, bool check_nan=True, bool mixed_stack=False)",
   });
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  AnomalyMode::set_enabled(r.toBool(0), r.toBool(1));
+  AnomalyMode::set_enabled(r.toBool(0), r.toBool(1), r.toBool(2));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1279,6 +1279,18 @@ static PyObject* is_anomaly_check_nan_enabled(
     PyObject* arg) {
   HANDLE_TH_ERRORS
   if (AnomalyMode::should_check_nan()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_anomaly_mixed_stack_enabled(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (AnomalyMode::should_use_mixed_stack()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -1612,6 +1624,10 @@ static PyMethodDef methods[] = {
     {"is_anomaly_enabled", is_anomaly_mode_enabled, METH_NOARGS, nullptr},
     {"is_anomaly_check_nan_enabled",
      is_anomaly_check_nan_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"is_anomaly_mixed_stack_enabled",
+     is_anomaly_mixed_stack_enabled,
      METH_NOARGS,
      nullptr},
     {"_is_multithreading_enabled",
