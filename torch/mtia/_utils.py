@@ -35,4 +35,9 @@ def _get_device_index(
     if not torch.jit.is_scripting():
         if isinstance(device, torch.mtia.device):
             return device.idx
+
+    if device is None and optional:
+        # Avoid the overhead of calling CUDA is_available by explicitly returning MTIA current device
+        return torch._C._accelerator_hooks_get_current_device()
+
     return _torch_get_device_index(device, optional, allow_cpu)
