@@ -5504,6 +5504,44 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(out.shape, (B, H, S, D))
 
+    @supported_platform
+    def test_callable_class_mask_mod(self, device):
+        # Test that callable class instances work as mask_mod with flex_attention
+
+        B, H, S, D = 1, 8, 64, 64
+
+        class CausalOrWindowMask:
+            __name__ = "causal_or_window"
+
+            def __init__(self, window_size):
+                self.window_size = window_size
+
+            def __call__(self, b, h, q_idx, kv_idx):
+                causal = q_idx >= kv_idx
+                in_window = (kv_idx - q_idx) < self.window_size
+                return causal | in_window
+
+            def __eq__(self, other):
+                if not isinstance(other, CausalOrWindowMask):
+                    return NotImplemented
+                return self.window_size == other.window_size
+
+            def __hash__(self):
+                return hash(self.window_size)
+
+        mask_mod = CausalOrWindowMask(window_size=64)
+
+        query = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        key = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        value = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+
+        @torch.compile(fullgraph=True)
+        def f(q, k, v):
+            block_mask = create_block_mask(mask_mod, B, H, S, S, device=q.device)
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        _ = f(query, key, value)
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):

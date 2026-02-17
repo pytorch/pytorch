@@ -253,6 +253,16 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
             defaults = fn.__defaults__ or ()
         num_defaults = len(defaults)
         num_positional_args = num_positional_total - num_defaults
+    elif callable(fn):
+        # Callable class instance: use __call__.__code__ and subtract 1 for self
+        call = fn.__call__
+        code = call.__code__
+        num_positional_total = code.co_argcount - 1
+        defaults = ()
+        if hasattr(call, "__defaults__"):
+            defaults = call.__defaults__ or ()
+        num_defaults = len(defaults)
+        num_positional_args = num_positional_total - num_defaults
     else:
         num_positional_args = sum(
             1
