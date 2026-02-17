@@ -633,6 +633,42 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_embedding_backward_dynamic_shapes_large_grid(self, device):
+        """Test _check_max_grid_x correctly applies platform-specific grid limits.
+
+        On CUDA: uses num_blocks only (not num_blocks * num_warps * warp_size).
+        On ROCm: uses num_blocks * num_warps * warp_size (total threads limit).
+        """
+        from torch._inductor.runtime.triton_heuristics import (
+            _check_max_grid_x,
+            _num_warps,
+        )
+
+        size_hints = {"x": 600_000_000}
+        x = 64
+        num_warps = _num_warps(8)
+
+        result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+
+        max_grid_x = 2147483647
+        if torch.version.hip:
+            warp_size = 64  # TODO: query warp size once #129663 is merged
+            # ROCm limits total threads (num_blocks * num_warps * warp_size)
+            self.assertLessEqual(
+                result_num_blocks * num_warps * warp_size,
+                max_grid_x,
+                "ROCm total-threads grid limit should be satisfied",
+            )
+        else:
+            # CUDA limits number of blocks only — 600M/64 ≈ 9.4M blocks,
+            # well within 2^31-1, so no scaling should occur
+            self.assertEqual(result_x, 64, f"XBLOCK should remain 64 (got {result_x})")
+            self.assertLessEqual(result_num_blocks, max_grid_x)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
         @torch.library.custom_op("test_dynamic_stride_nobreak::foo", mutates_args=())
