@@ -177,6 +177,10 @@ class _DebugContext:
         """Get all code objects that have been tracked by the debugger."""
         return list(self._code_info.keys())
 
+    @staticmethod
+    def is_programmatic_breakpoint(inst: Instruction) -> bool:
+        return inst.opname == "LOAD_CONST" and inst.argval is BREAKPOINT_MARKER
+
     def _get_or_create_code_info(self, code: types.CodeType) -> CodeInfo:
         """Get or create CodeInfo for a code object."""
         if code not in self._code_info:
@@ -206,10 +210,11 @@ class _DebugContext:
             )
 
             # Pre-populate breakpoints from BREAKPOINT_MARKER instructions
-            programmatic_breakpoints: set[int] = set()
-            for i, inst in enumerate(instructions):
-                if inst.opname == "LOAD_CONST" and inst.argval is BREAKPOINT_MARKER:
-                    programmatic_breakpoints.add(i)
+            programmatic_breakpoints: set[int] = {
+                i
+                for i, inst in enumerate(instructions)
+                if self.is_programmatic_breakpoint(inst)
+            }
 
             self._code_info[code] = CodeInfo(
                 code=code,
@@ -296,11 +301,31 @@ class _DebugContext:
                 print(self._format_instruction(state, inst.offset))
         print()
 
-    def _print_stack(self, state: DebuggerState) -> None:
+    def _safe_stack_depth(self, state: DebuggerState, is_current_frame: bool) -> int:
+        """Compute a safe stack depth for reading frame values.
+
+        For parent frames suspended at a CALL instruction, CPython has already
+        popped (and DECREF'd) the call arguments.  The tracked depth still
+        includes those consumed entries, so reading them would dereference
+        dangling pointers.  Adjust by the current instruction's stack_effect.
+        """
+        depth = state.current_stack_depth
+        if not is_current_frame and state.current_offset >= 0:
+            inst = state.offset_to_inst.get(state.current_offset)
+            if inst is not None:
+                try:
+                    effect = dis.stack_effect(inst.opcode, inst.arg)
+                    if effect < 0:
+                        depth = max(0, depth + effect)
+                except (ValueError, TypeError):
+                    pass
+        return depth
+
+    def _print_stack(self, state: DebuggerState, is_current_frame: bool = True) -> None:
         """Print the current value stack."""
         from torch._C._dynamo.eval_frame import _get_frame_value_stack_with_depth
 
-        depth = state.current_stack_depth
+        depth = self._safe_stack_depth(state, is_current_frame)
         try:
             stack = _get_frame_value_stack_with_depth(state.frame, depth)
         except Exception as e:
@@ -382,21 +407,25 @@ class _DebugContext:
         print("Note: Debugger stops on exceptions and shows the failing instruction.")
         print()
 
-    def _get_stack_for_eval(self, state: DebuggerState) -> list[Any]:
+    def _get_stack_for_eval(
+        self, state: DebuggerState, is_current_frame: bool = True
+    ) -> list[Any]:
         """Get the current stack for use in expression evaluation."""
         from torch._C._dynamo.eval_frame import _get_frame_value_stack_with_depth
 
-        depth = state.current_stack_depth
+        depth = self._safe_stack_depth(state, is_current_frame)
         try:
             return _get_frame_value_stack_with_depth(state.frame, depth)
         except Exception:
             return []
 
-    def _build_eval_locals(self, state: DebuggerState) -> dict[str, Any]:
+    def _build_eval_locals(
+        self, state: DebuggerState, is_current_frame: bool = True
+    ) -> dict[str, Any]:
         """Build locals dict for expression evaluation, including user-defined variables."""
         eval_locals = dict(state.frame.f_locals)
         eval_locals.update(state.user_locals)
-        eval_locals["__stack__"] = self._get_stack_for_eval(state)
+        eval_locals["__stack__"] = self._get_stack_for_eval(state, is_current_frame)
         return eval_locals
 
     def _interactive_prompt(self, state: DebuggerState) -> None:
@@ -590,34 +619,35 @@ class _DebugContext:
                 self._print_globals(view_state, arg if arg else None)
 
             elif action == "stack":
-                self._print_stack(view_state)
+                is_current = view_state is frame_stack[-1]
+                self._print_stack(view_state, is_current_frame=is_current)
 
             elif action == "b":
                 if arg:
                     try:
                         index = int(arg)
-                        num_instructions = len(state.instructions)
+                        num_instructions = len(view_state.instructions)
                         if index < 0 or index >= num_instructions:
                             print(
                                 f"Invalid instruction number: {index} "
                                 f"(must be 0-{num_instructions - 1})"
                             )
                         else:
-                            state.breakpoints.add(index)
+                            view_state.breakpoints.add(index)
                             print(f"Breakpoint set at instruction {index}")
                     except ValueError:
                         print(f"Invalid instruction number: {arg}")
                 else:
                     print("\nBreakpoints:")
-                    if not state.breakpoints:
+                    if not view_state.breakpoints:
                         print("  (none)")
                     else:
-                        for bp_index in sorted(state.breakpoints):
-                            if bp_index < len(state.instructions):
-                                inst = state.instructions[bp_index]
+                        for bp_index in sorted(view_state.breakpoints):
+                            if bp_index < len(view_state.instructions):
+                                inst = view_state.instructions[bp_index]
                                 if inst.offset is not None:
                                     print(
-                                        f"  {self._format_instruction(state, inst.offset, mark_current=False)}"
+                                        f"  {self._format_instruction(view_state, inst.offset, mark_current=False)}"
                                     )
                     print()
 
@@ -625,14 +655,14 @@ class _DebugContext:
                 if arg:
                     try:
                         index = int(arg)
-                        num_instructions = len(state.instructions)
+                        num_instructions = len(view_state.instructions)
                         if index < 0 or index >= num_instructions:
                             print(
                                 f"Invalid instruction number: {index} "
                                 f"(must be 0-{num_instructions - 1})"
                             )
-                        elif index in state.breakpoints:
-                            state.breakpoints.discard(index)
+                        elif index in view_state.breakpoints:
+                            view_state.breakpoints.discard(index)
                             print(f"Breakpoint cleared at instruction {index}")
                         else:
                             print(f"No breakpoint at instruction {index}")
@@ -642,8 +672,11 @@ class _DebugContext:
             elif action == "p":
                 if arg:
                     try:
+                        is_current = view_state is frame_stack[-1]
                         frame_globals = view_state.frame.f_globals
-                        eval_locals = self._build_eval_locals(view_state)
+                        eval_locals = self._build_eval_locals(
+                            view_state, is_current_frame=is_current
+                        )
                         result = eval(arg, frame_globals, eval_locals)
                         print(f"{arg} = {result!r}")
                     except Exception as e:
@@ -660,8 +693,11 @@ class _DebugContext:
 
             else:
                 # Try to execute as Python code (like pdb)
+                is_current = view_state is frame_stack[-1]
                 frame_globals = view_state.frame.f_globals
-                eval_locals = self._build_eval_locals(view_state)
+                eval_locals = self._build_eval_locals(
+                    view_state, is_current_frame=is_current
+                )
 
                 try:
                     # First try as expression (eval)
@@ -794,10 +830,8 @@ class _DebugContext:
         should_stop = state.step_mode or hit_breakpoint or hit_return_target
         if should_stop:
             if hit_breakpoint:
-                is_programmatic = (
-                    inst is not None
-                    and inst.opname == "LOAD_CONST"
-                    and inst.argval is BREAKPOINT_MARKER
+                is_programmatic = inst is not None and self.is_programmatic_breakpoint(
+                    inst
                 )
                 if is_programmatic:
                     print("Breakpoint hit (programmatic)")
@@ -1077,7 +1111,7 @@ def debug() -> Generator[_DebugContext, None, None]:
     Any Dynamo-generated code executed within this context will trigger
     the interactive bytecode debugger.
 
-    Example:
+    Example:  # doctest: +SKIP
         >>> import torch
         >>>
         >>> @torch.compile
