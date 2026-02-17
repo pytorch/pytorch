@@ -157,9 +157,11 @@ async def run1(coroutine_id):
         gpuid = coroutine_id % GPUS
     else:
         gpu_assignments = args.gpus.split(":")
-        assert args.nproc == len(gpu_assignments), (
-            "Please specify GPU assignment for each process, separated by :"
-        )
+        if args.nproc != len(gpu_assignments):
+            raise AssertionError(
+                f"Please specify GPU assignment for each process, separated by : "
+                f"(got {len(gpu_assignments)} assignments for {args.nproc} processes)"
+            )
         gpuid = gpu_assignments[coroutine_id]
 
     while progress < len(ALL_TESTS):
