@@ -741,7 +741,7 @@ def debug() -> Generator[_DebugContext, None, None]:
     Any Dynamo-generated code executed within this context will trigger
     the interactive bytecode debugger.
 
-    Example:
+    Example:  # doctest: +SKIP
         >>> import torch
         >>>
         >>> @torch.compile
