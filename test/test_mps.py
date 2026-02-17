@@ -423,7 +423,8 @@ class TestPixelShuffle(TestCaseMPS):
 
                 if num_input_dims == 1:
                     input = torch.rand(channels, requires_grad=True, device='mps')
-                    assert is_contiguous
+                    if not is_contiguous:
+                        raise AssertionError("1D input should be contiguous")
                 elif num_input_dims == 2:
                     input = torch.rand(width, height, requires_grad=True, device='mps').T
                     if is_contiguous:
@@ -436,7 +437,8 @@ class TestPixelShuffle(TestCaseMPS):
                         input = input.contiguous()
 
                 if not is_contiguous and len(input.reshape(-1)) > 0:
-                    assert not input.is_contiguous()
+                    if input.is_contiguous():
+                        raise AssertionError("expected non-contiguous input")
 
                 input = input.detach().clone()
                 input.requires_grad = True
@@ -697,7 +699,8 @@ class MPSLeakyReluTest(TestCaseMPS):
             # Transposing will make the tensor non-contiguous
             cpu_x = cpu_x.transpose(0, 1)
             mps_x = mps_x.transpose(0, 1)
-            assert not mps_x.is_contiguous()
+            if mps_x.is_contiguous():
+                raise AssertionError("expected non-contiguous tensor")
 
         cpu_x.requires_grad_()
         mps_x.requires_grad_()
@@ -716,7 +719,8 @@ class MPSLeakyReluTest(TestCaseMPS):
         mps_leaky_relu.backward(gradient=mps_grad)
         cpu_leaky_relu.backward(gradient=cpu_grad)
 
-        assert cpu_x.grad is not None  # Check that the grad is well-populated
+        if cpu_x.grad is None:
+            raise AssertionError("expected cpu_x.grad to be populated")
         self.assertEqual(cpu_x.grad, mps_x.grad)
 
     def testNumbersCPU(self):
@@ -848,6 +852,17 @@ class TestMPS(TestCaseMPS):
                          f"  (up to {allowed_uncertainty:.3e} allowed)")
             raise AssertionError(error_msg)
 
+    def _helper_kl_divergence(self, cpu_tensor, mps_tensor):
+        """Helper for checking whether 2 distributions match or not"""
+        mps_tensor = mps_tensor.cpu()
+        all_vals = torch.cat([cpu_tensor, mps_tensor])
+        min_val, max_val = all_vals.min().item(), all_vals.max().item()
+        cpu_hist = torch.histc(cpu_tensor.float(), bins=50, min=min_val, max=max_val) + 1e-10
+        mps_hist = torch.histc(mps_tensor.float(), bins=50, min=min_val, max=max_val) + 1e-10
+        p = cpu_hist / cpu_hist.sum()
+        q = mps_hist / mps_hist.sum()
+        kl_div = F.kl_div(q.log(), p, reduction='sum').item()
+        self.assertLess(kl_div, 0.03)
 
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
@@ -1071,7 +1086,8 @@ class TestMPS(TestCaseMPS):
             d.backward(dist_grad)
             # Check that the backward pass does not contain invalid
             # values such as nan or inf
-            assert torch.isfinite(x.grad).all()
+            if not torch.isfinite(x.grad).all():
+                raise AssertionError("expected x.grad to be finite")
 
 
     def _brute_cdist(self, x, y, p=2):
@@ -4214,8 +4230,10 @@ class TestMPS(TestCaseMPS):
         inputs = torch.tensor([[0, 0], [3, 1], [2, 1], [1, 1], [3, 4]], device=device, dtype=torch.int32)
         weights = torch.tensor([[.1, 1], [.2, 2], [.3, 3], [.4, 4], [.5, 5]], device=device)
         for i in [0, 1]:
-            assert not inputs[:, i].is_contiguous(), "Inputs are supposed to be non-contiguous"
-            assert not weights[:, i].is_contiguous(), "Weights are supposed to be non-contiguous"
+            if inputs[:, i].is_contiguous():
+                raise AssertionError("Inputs are supposed to be non-contiguous")
+            if weights[:, i].is_contiguous():
+                raise AssertionError("Weights are supposed to be non-contiguous")
         # inputs are non-contiguous but weights are contiguous
         self.assertEqual(inputs[:, 0].bincount(), torch.tensor([1, 1, 1, 2]))
         # inputs and weights are non-contiguous
@@ -6528,7 +6546,8 @@ class TestMPS(TestCaseMPS):
                 # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
-                assert not x.is_contiguous()
+                if x.is_contiguous():
+                    raise AssertionError("expected non-contiguous tensor")
 
             cpu_x.requires_grad_()
             x.requires_grad_()
@@ -6684,7 +6703,8 @@ class TestMPS(TestCaseMPS):
                 # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
-                assert not x.is_contiguous()
+                if x.is_contiguous():
+                    raise AssertionError("expected non-contiguous tensor")
 
             cpu_x.requires_grad_()
             x.requires_grad_()
@@ -6703,7 +6723,8 @@ class TestMPS(TestCaseMPS):
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
 
-            assert x.grad is not None  # Check that the grad is well-populated
+            if x.grad is None:
+                raise AssertionError("expected x.grad to be populated")
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
@@ -6724,7 +6745,8 @@ class TestMPS(TestCaseMPS):
                 # Transposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
                 x = x.transpose(0, 1)
-                assert not x.is_contiguous()
+                if x.is_contiguous():
+                    raise AssertionError("expected non-contiguous tensor")
 
             cpu_x.requires_grad_()
             x.requires_grad_()
@@ -6742,7 +6764,8 @@ class TestMPS(TestCaseMPS):
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(mish_result, mish_result_cpu.to(dtype), atol=atol, rtol=rtol)
 
-            assert x.grad is not None  # Check that the grad is well-populated
+            if x.grad is None:
+                raise AssertionError("expected x.grad to be populated")
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
@@ -7982,6 +8005,8 @@ class TestMPS(TestCaseMPS):
             ("random_with_to", lambda t: t.random_(10)),
             ("random_with_range", lambda t: t.random_(0, 10)),
             ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
+            ("cauchy_", lambda t: t.cauchy_()),
+            ("geometric_", lambda t: t.geometric_(p=0.9)),
         ]
 
         for name, op_func in ops:
@@ -8006,23 +8031,6 @@ class TestMPS(TestCaseMPS):
         self.assertFalse(result.is_contiguous(), "rand_like result should be non-contiguous")
         self.assertNotEqual(result.max().item(), 0.0, "rand_like should generate non-zero values")
 
-    # Test exponential
-    @unittest.skip("This does not test anything")
-    def test_exponential(self):
-        def helper(shape, lambda_, dtype=torch.float32):
-
-            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
-            mps_out.exponential_(lambda_)
-
-            print(mps_out.to('cpu').float().mean(), 1 / lambda_)
-            print(mps_out.to('cpu').float().std() ** 2, 1 / (lambda_**2))
-
-        for dtype in [torch.float32, torch.float16]:
-            helper([100, 100], 2, dtype)
-            helper([100, 100], 1, dtype)
-            helper([100, 100], 3, dtype)
-            helper([100, 100], 0.5, dtype)
-
     def test_exponential_1(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -8039,20 +8047,28 @@ class TestMPS(TestCaseMPS):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
 
-    def test_log_normal(self):
-        # test with kl divergence
-        cpu_a = torch.zeros(50, 50).log_normal_(mean=1.0, std=2.0).flatten()
-        mps_a = torch.zeros(50, 50, device="mps").log_normal_(mean=1.0, std=2.0).cpu().flatten()
-
-        all_vals = torch.cat([cpu_a, mps_a])
-        min_val, max_val = all_vals.min().item(), all_vals.max().item()
-
-        cpu_hist = torch.histc(cpu_a, bins=50, min=min_val, max=max_val) + 1e-10
-        mps_hist = torch.histc(mps_a, bins=50, min=min_val, max=max_val) + 1e-10
-
-        p, q = cpu_hist / cpu_hist.sum(), mps_hist / mps_hist.sum()
-        kl_div = (p * (p / q).log()).sum().item()
-        self.assertLess(kl_div, 0.05)
+    def test_distributions(self):
+        ops = [
+            ("normal_", lambda t: t.normal_(0, 1), []),
+            ("uniform_", lambda t: t.uniform_(0, 1), []),
+            ("exponential_", lambda t: t.exponential_(1.0), []),
+            ("bernoulli_", lambda t: t.bernoulli_(0.5), []),
+            ("random_", lambda t: t.random_(), []),
+            ("random_with_to", lambda t: t.random_(10), []),
+            ("random_with_range", lambda t: t.random_(0, 10), []),
+            ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0), []),
+            ("cauchy_", lambda t: t.cauchy_(), []),
+            ("geometric_", lambda t: t.geometric_(p=0.2), [torch.int32, torch.int16, torch.int8, torch.uint8]),
+        ]
+        for name, op_func, extra_dtypes in ops:
+            with self.subTest(operation=name):
+                cpu_tensor = op_func(torch.zeros(100, 100)).flatten()
+                mps_tensor = op_func(torch.zeros(100, 100)).flatten()
+                self._helper_kl_divergence(cpu_tensor, mps_tensor)
+            for extra_dtype in extra_dtypes:
+                cpu_tensor = op_func(torch.zeros(100, 100, dtype=extra_dtype)).flatten()
+                mps_tensor = op_func(torch.zeros(100, 100, dtype=extra_dtype)).flatten()
+                self._helper_kl_divergence(cpu_tensor, mps_tensor)
 
     # Test add
     def test_add_sub(self):
@@ -8933,10 +8949,14 @@ class TestNNMPS(NNTestCase):
 
     def test_requires_grad_(self):
         m = self._create_basic_net()[-1]
-        assert len(list(m.buffers())) > 0, 'invalid test'
-        assert all(not b.requires_grad for b in m.buffers()) > 0, 'invalid test'
-        assert len(list(m.parameters())) > 0, 'invalid test'
-        assert all(p.requires_grad for p in m.parameters()) > 0, 'invalid test'
+        if len(list(m.buffers())) <= 0:
+            raise AssertionError('invalid test: expected buffers')
+        if not all(not b.requires_grad for b in m.buffers()):
+            raise AssertionError('invalid test: buffers should not require grad')
+        if len(list(m.parameters())) <= 0:
+            raise AssertionError('invalid test: expected parameters')
+        if not all(p.requires_grad for p in m.parameters()):
+            raise AssertionError('invalid test: parameters should require grad')
         for requires_grad in (False, True):
             self.assertIs(m.requires_grad_(requires_grad), m)
             for p in m.parameters():
@@ -11143,12 +11163,14 @@ class TestConvolutionMPS(TestCaseMPS):
 
                     def get_grid(device='cpu', data=None):
                         if data is not None:
-                            assert list(data.shape) == grid_shape
+                            if list(data.shape) != grid_shape:
+                                raise AssertionError(f"data.shape mismatch: {list(data.shape)} != {grid_shape}")
                             data = data.permute(grid_dim_contig_order).to(device)
                         else:
                             data = torch.randn(grid_init_shape, device=device)
                         grid = data.permute(grid_fwd_permute)
-                        assert grid.permute(grid_dim_contig_order).is_contiguous()
+                        if not grid.permute(grid_dim_contig_order).is_contiguous():
+                            raise AssertionError("expected grid to be contiguous after permute")
                         return grid
 
                     input_cpu = torch.randn(C, N, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
@@ -12287,7 +12309,8 @@ class TestRNNMPS(TestCaseMPS):
             inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
 
             output, (hx_out, cx_out) = rnn(inp, (hx, cx))
-            assert output_grad_presented or states_grad_presented, "At least some outputs must be used"
+            if not output_grad_presented and not states_grad_presented:
+                raise AssertionError("At least some outputs must be used")
 
             f = 0
             if output_grad_presented:
@@ -12544,7 +12567,7 @@ class TestNoRegression(TestCase):
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 
-def transform_opinfo_sample_to_cpu(sample):
+def transform_opinfo_sample_to_cpu(sample, dtype=None):
     """Transforms opinfo.core.SampleInput from MPS to CPU"""
     def transform_sample(x):
         if not isinstance(x, torch.Tensor):
@@ -12552,6 +12575,8 @@ def transform_opinfo_sample_to_cpu(sample):
         requires_grad = x.requires_grad
         conjugated = x.is_conj()
         rc = x.detach()
+        if dtype:
+            rc = rc.to(dtype=dtype)
         rc = rc.cpu() if not conjugated else x.conj().cpu().conj()
         return rc.requires_grad_(x.requires_grad)
 
@@ -12615,7 +12640,6 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.softmin',
         'cross', 'linalg.cross',
         'prod', 'masked.prod',
-        'nextafter',
         'native_layer_norm',
         'nn.functional.layer_norm',
         'nn.functional.interpolate',
@@ -12672,68 +12696,71 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
+    def _run_op(self, op, mps_sample, dtype=None):
+        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            mps_out = op(mps_sample.input, *mps_sample.args, **mps_sample.kwargs)
+            try:
+                cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+            except NotImplementedError:
+                # TODO: Handle list inputs later
+                if not isinstance(mps_out, torch.Tensor):
+                    raise
+                if mps_sample.input.dtype not in [torch.float16, torch.bfloat16]:
+                    raise
+                dtype = torch.float32
+
+                # Often CPU ops are not implemented for low precision dtypes
+                # In that case, upcast to higher precision and try again
+                cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+
+        if dtype is not None:
+            cpu_out = cpu_out.to(dtype=mps_out.dtype)
+
+        return mps_out, cpu_out, cpu_sample
+
+
     @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "mps:0")
         include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
 
-        def get_samples():
-            return op.sample_inputs(
+        for mps_sample in op.sample_inputs(
                 device,
                 dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
                 include_conjugated_inputs=include_conjugated_inputs,
-                set_seed=True,
-            )
+                set_seed=True):
 
-        for mps_sample in get_samples():
-            #
-            # Forward check
-            #
-            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
-
-            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-            cpu_kwargs = cpu_sample.kwargs
-            mps_args = [mps_sample.input] + list(mps_sample.args)
-            mps_kwargs = mps_sample.kwargs
-
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
-                mps_args[1] = cpu_args[1]
-
-            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
-            # not normalized
-            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
-                mps_args[3] = F.normalize(mps_args[3])
-                cpu_args[3] = F.normalize(cpu_args[3])
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                cpu_out = op(*cpu_args, **cpu_kwargs)
-                mps_out = op(*mps_args, **mps_kwargs)
+            opt_dtype = None
+            # CPU implementation is less precise than MPS one so compare MPS to full fp32
+            if dtype in [torch.float16, torch.bfloat16] and op.name in ["grid_sampler_2d", "grid_sampler_3d"]:
+                opt_dtype = torch.float32
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
-               cpu_kwargs.get("mode") == "bilinear" and
-               cpu_kwargs.get("recompute_scale_factor") is True and
-               cpu_kwargs.get("scale_factor") == 1.7):
+               mps_sample.kwargs.get("mode") == "bilinear" and
+               mps_sample.kwargs.get("recompute_scale_factor") is True and
+               mps_sample.kwargs.get("scale_factor") == 1.7):
                 # For 1/3, 2/3 scale factors results will not match CPU ones
                 # As MPS compute scales in floats, but CPU always used doubles, which results
                 # in slight numerical differences
                 atol, rtol = 1, 0
 
-            if op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"] and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
+            if (op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"]
+               and mps_sample.kwargs.get("scale_factors") == [1.7, 0.9]):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
-
-            if op.name in ["grid_sampler_3d", "asinh"]:
-                atol, rtol = 1e-4, 1e-4
 
             if op.name == "kthvalue":
                 self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
                 # kthvalue is non-deterministic if input has repeated values
-                dim = cpu_args[2] if len(cpu_args) > 2 else -1
-                keep_dim = cpu_args[3] if len(cpu_args) > 3 else False
+                dim = mps_sample.args[1] if len(mps_sample.args) > 1 else -1
+                keep_dim = mps_sample.args[2] if len(mps_sample.args) > 2 else False
                 values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
                 self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
                 continue
@@ -12744,42 +12771,16 @@ class TestConsistency(TestCaseMPS):
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "mps:0")
 
-        def get_samples():
-            return op.sample_inputs(
-                device,
-                dtype,
+        for mps_sample in op.sample_inputs(
+                device, dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
-                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-                set_seed=False,
-            )
-
-        for mps_sample in get_samples():
+                set_seed=True):
             #
             # Forward check
             #
-            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
 
-            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-            cpu_kwargs = cpu_sample.kwargs
-            mps_args = [mps_sample.input] + list(mps_sample.args)
-            mps_kwargs = mps_sample.kwargs
-
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
-                mps_args[1] = cpu_args[1]
-
-            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
-            # not normalized
-            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
-                mps_args[3] = F.normalize(mps_args[3])
-                cpu_args[3] = F.normalize(cpu_args[3])
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                cpu_out = op(*cpu_args, **cpu_kwargs)
-                mps_out = op(*mps_args, **mps_kwargs)
-
-            if op.name == "unique" and cpu_kwargs["sorted"] is False:
+            if op.name == "unique" and cpu_sample.kwargs["sorted"] is False:
                 continue
 
             atol, rtol = self._compute_tolerances(op, dtype)
@@ -12792,6 +12793,8 @@ class TestConsistency(TestCaseMPS):
             #
             # Backward check
             #
+            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            mps_args = [mps_sample.input] + list(mps_sample.args)
             cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
             mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
 
@@ -12800,8 +12803,8 @@ class TestConsistency(TestCaseMPS):
 
             diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
             diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_kwargs)) if req_grad(t))
-            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_kwargs)) if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_sample.kwargs)) if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_sample.kwargs)) if req_grad(t))
             self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
             self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 
@@ -12839,7 +12842,13 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 5e-3, 5e-3
             if op.name == "nn.functional.embedding_bag" and dtype == torch.float16:
                 atol, rtol = 5e-3, 5e-3
-            self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
+
+            if isinstance(cpu_sample.input, torch.Tensor):
+                equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
+            else:
+                # TODO: Handle list inputs later
+                equal_input_types = True
+            self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol, exact_dtype=equal_input_types)
 
     # The CPU impl of grid_sampler_3d gives a large amount of error for half
     # precision types. So instead of testing MPS-vs-CPU outputs, test
@@ -12881,6 +12890,32 @@ class TestConsistency(TestCaseMPS):
         out_mps = torch.grid_sampler_3d(input.to(device), grid_nan.to(device), 0, 0, True)
         self.assertEqual(out_mps, out_cpu)
 
+    def test_householder_product_race(self, device):
+        # Regression testing for https://github.com/pytorch/pytorch/issues/173972
+        # Check correctness for input matrices that have more elements than the
+        # maximum number of threads per threadgroup. Before the issue was fixed,
+        # this test would fail due to a race.
+        max_threads_per_threadgroup = torch.mps.compile_shader("kernel void foo() {}").foo.max_threads_per_threadgroup
+        m0 = int(max_threads_per_threadgroup**(0.5))
+
+        for m in range(m0, 5 * m0, m0):
+            for num_batches in range(1, 11):
+                A = torch.eye(m, m).repeat(num_batches, 1, 1)
+                # Set one random non-diagonal element of each identity matrix to
+                # 1. This is better than using a fully random matrix, because
+                # that can cause fairly large errors for CPU vs MPS due to
+                # normal floating point error.
+                for i in range(num_batches):
+                    j = random.randint(0, m - 1)
+                    k = j
+                    while k == j:
+                        k = random.randint(0, m - 1)
+                    A[i, j, k] = 1
+                tau = torch.randn(num_batches, m)
+                r_cpu = torch.orgqr(A, tau)
+                r_mps = torch.orgqr(A.to('mps'), tau.to('mps'))
+                self.assertEqual(r_cpu, r_mps)
+
     def test_fmax_mixed_dtypes(self, device):
         # Regression testing for https://github.com/pytorch/pytorch/issues/149951
         # fmax and fmin are implemented as binary metal shaders and they were implemented
@@ -12897,7 +12932,6 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
 
 
-
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
 
@@ -12909,24 +12943,10 @@ class TestErrorInputs(TestCase):
     )
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
-
-        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        mps_samples = op.error_inputs(device, set_seed=False)
-
-        for mps_sample in mps_samples:
-            mps_sample_input = mps_sample.sample_input
-            error_type = mps_sample.error_type
-            error_regex = mps_sample.error_regex
-
-            mps_args = [mps_sample_input.input] + list(mps_sample_input.args)
-            mps_kwargs = mps_sample_input.kwargs
-
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                mps_args[1] = mps_args[1].cpu()
-
-            with self.assertRaisesRegex(error_type, error_regex):
-                op(*mps_args, **mps_kwargs)
+        for sample in op.error_inputs(device, set_seed=True):
+            sample_input = sample.sample_input
+            with self.assertRaisesRegex(sample.error_type, sample.error_regex):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs)
 
     def test_index_put_out_of_bounds(self, device):
         x = torch.rand(10, 1, 10, device=device)
@@ -12986,7 +13006,8 @@ class TestCommon(TestCase):
                 fmt_str = opinfo.utils.str_format_dynamic_dtype(op)
                 err_msg += "\n" + fmt_str
 
-            assert len(filtered_ops) == 0, err_msg
+            if len(filtered_ops) != 0:
+                raise AssertionError(err_msg)
 
     # This is the MPS equivalent of `test_numpy_ref` from `test_ops.py`. It lives over here while
     # MPS still requires some fairly heavy special casing in the test framework.

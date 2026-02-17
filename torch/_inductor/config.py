@@ -6,7 +6,12 @@ from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-from torch.utils._config_module import Config, get_tristate_env, install_config_module
+from torch.utils._config_module import (
+    Config,
+    get_tristate_env,
+    inherit_fields_from,
+    install_config_module,
+)
 
 
 if TYPE_CHECKING:
@@ -91,7 +96,9 @@ worker_log_path = (
 )
 
 # precompilation timeout
-precompilation_timeout_seconds: int = 60 * 60
+precompilation_timeout_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_PRECOMPILATION_TIMEOUT_SECONDS", 60 * 5)
+)
 
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
@@ -531,6 +538,16 @@ graph_partition: bool = (
 # "namespace::kernel_name.overload" (e.g., aten::mm.default).
 custom_should_partition_ops: list[str] = []
 
+# register ops whose OUTPUT unbacked symints should cause partition. Any tensors or ops
+# that use these output unbacked symints (e.g. in their shapes, strides, or offsets)
+# will be excluded from cudagraph partitions. This is useful for operators that produce
+# data-dependent unbacked symints (e.g., from a custom op that returns a SymInt).
+# Note: Input symints to these ops remain cudagraph-safe; only the output symints are
+# marked as cudagraph-unsafe. Name format should be "namespace::kernel_name"
+# (e.g., mylib::get_split_point) for op overload packet, or
+# "namespace::kernel_name.overload" for specific overloads.
+cudagraph_unsafe_unbacked_ops: list[str] = []
+
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
@@ -562,6 +579,19 @@ multi_kernel_hints: list[int] = []
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
+
+
+# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
+# in max_autotune. By default it's 5, to keep compile time reasonable.
+# Set to None (or env var "none"/"all") to tune all configs.
+def _nvgemm_max_profiling_configs_default() -> Optional[int]:
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
+    if env_val.lower() in ("none", "all"):
+        return None
+    return int(env_val)
+
+
+nvgemm_max_profiling_configs: Optional[int] = _nvgemm_max_profiling_configs_default()
 
 
 # As above, specify candidate backends for conv autotune.
@@ -859,6 +889,12 @@ combo_kernel_allow_mixed_sizes = 1
 combo_kernel_foreach_dynamic_shapes = True
 # Maximum number of arguments (read/write buffers) allowed in a combo kernel
 combo_kernel_max_num_args = 250
+# When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
+# allowing different sub-kernels to use different tile sizes based on their heuristics.
+# When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
+combo_kernel_per_subkernel_blocks = False
+# When True, only pointwise kernels are eligible for combo kernel fusion.
+combo_kernels_pointwise_only = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -883,6 +919,15 @@ optimize_scatter_upon_const_tensor = (
 # options in caffe2/torch/_inductor/fx_passes/pre_grad.py
 add_pre_grad_passes: Optional[str] = None
 remove_pre_grad_passes: Optional[str] = None
+
+# Comma-separated list of pass names to disable. Passes disabled via this config
+# will be skipped when they go through GraphTransformObserver.
+# Can be set via TORCHINDUCTOR_DISABLED_PASSES env var.
+# Use uppercase pass names (e.g., "PASS1,PASS2").
+disabled_passes: str = Config(
+    env_name_force="TORCHINDUCTOR_DISABLED_PASSES",
+    default="",
+)
 
 
 # The multiprocessing start method to use for inductor workers in the codecache.
@@ -944,6 +989,22 @@ _fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
 _micro_pipeline_tp: bool = False
 
 
+# Enable/disable partitioned scatter optimization for atomic add kernels
+# this will improve kernel performance at cost of memory usage.
+partitioned_scatter_enabled = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+)
+
+# Min partitions for scatter optimization
+partitioned_scatter_min_partitions: int = 2
+
+# Max partitions for scatter optimization
+partitioned_scatter_max_partitions: int = 128
+
+# Memory budget fraction for scatter buffers
+partitioned_scatter_memory_budget: float = 0.10
+
+
 class _collective:
     auto_select: bool = False
     one_shot_all_reduce_threshold_bytes: int = 128 * 1024
@@ -993,13 +1054,19 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
-    # Bucket exposed collectives first
-    bucket_exposed_first: bool = True
+    # Bucket exposed collectives first (None means auto)
+    bucket_exposed_first: bool | None = None
+
+    # Experimental setting to bucket only internode communications
+    bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
+
+    # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
+    prioritize_bucketing_during_scheduling: bool = True
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1270,13 +1337,6 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
 
 enable_autograd_for_aot: bool = False
-
-_debug_cpu_to_tpu_pallas: bool = Config(
-    env_name_force="PALLAS_TARGET_TPU", default=False
-)
-pallas_take_first_jax_device_only: bool = Config(
-    env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
-)
 
 
 def get_worker_log_path() -> Optional[str]:
@@ -1732,6 +1792,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
     )
+    # If set to true, will skip some non-critical checks in the mix order reduction
+    # this could be helpful to avoid recompilations in some cases
+    mix_order_reduction_non_strict_mode = False
 
     enable_tlx_templates: bool = (
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
@@ -1906,6 +1969,8 @@ class aot_inductor:
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
+    # For XPU, this means generating SPIR-V files for kernels, and the SPIR-V files
+    # will be compiled to target different XPU architectures at runtime.
     emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
@@ -1956,27 +2021,12 @@ class aot_inductor_mode:
     compile_standalone: bool = False
 
 
-class cuda:
-    """Settings for cuda backend, today this consists of cutlass"""
+class cutlass:
+    """
+    Config specific to cutlass backend.
+    """
 
-    # CUDA arch to use for CUDA template kernel compilation.
-    # e.g. "70", "75", "80", "90", etc.
-    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
-    arch: Optional[str] = None
-
-    # CUDA version to use for CUDA template kernel compilation.
-    # e.g. "11.4", "12.1", etc.
-    # When version is None, Inductor uses torch.version.cuda.
-    version: Optional[str] = None
-
-    # Optimization level for the host compiler.
     compile_opt_level: Literal["-O0", "-O1", "-O2", "-O3", "-OS"] = "-O1"
-
-    # Whether to enable device LTO (link-time-optimization).
-    enable_cuda_lto = False
-
-    # Whether to keep intermediate files dring compilation.
-    enable_ptxas_info = False
 
     # Whether to enable debug info, e.g. line number, cutlass debug info.
     enable_debug_info = False
@@ -1989,7 +2039,10 @@ class cuda:
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
-            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
+            os.path.join(
+                os.path.dirname(torch.__file__),
+                "../third_party/cutlass/",
+            ),
         )
     )
 
@@ -1997,10 +2050,6 @@ class cuda:
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
-
-    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
-    # By default it's 5, to keep compile time to a reasonable level.
-    nvgemm_max_profiling_configs: Optional[int] = 5
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
@@ -2032,14 +2081,6 @@ class cuda:
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
-
-    # Path to CUDA NVCC.
-    # NVCC search order:
-    # 1) cuda_cxx set in this config
-    # 2) CUDACXX environment variable
-    # 3) CUDA_HOME environment variable
-    # 4) default system search PATH.
-    cuda_cxx: Optional[str] = None
 
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
@@ -2108,6 +2149,47 @@ class cuda:
 
     # Enable caching codegen of cuda templates.
     enable_caching_codegen: bool = True
+
+
+@inherit_fields_from(cutlass)
+class cuda(cutlass):
+    # CUDA arch to use for CUDA template kernel compilation.
+    # e.g. "70", "75", "80", "90", etc.
+    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
+    arch: Optional[str] = None
+
+    # CUDA version to use for CUDA template kernel compilation.
+    # e.g. "11.4", "12.1", etc.
+    # When version is None, Inductor uses torch.version.cuda.
+    version: Optional[str] = None
+
+    # Path to CUDA NVCC.
+    # NVCC search order:
+    # 1) cuda_cxx set in this config
+    # 2) CUDACXX environment variable
+    # 3) CUDA_HOME environment variable
+    # 4) default system search PATH.
+    cuda_cxx: Optional[str] = None
+
+    # Whether to enable device LTO (link-time-optimization).
+    enable_cuda_lto = False
+
+    # Whether to keep intermediate files dring compilation.
+    enable_ptxas_info = False
+
+    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
+    # By default it's 5, to keep compile time to a reasonable level.
+    nvgemm_max_profiling_configs: Optional[int] = 5
+
+
+@inherit_fields_from(cutlass)
+class xpu(cutlass):
+    # Xe arch to use for SYCL kernel compilation.
+    # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
+    arch: Optional[str] = None
+    # oneAPI version to use for SYCL kernel compilation.
+    # e.g. "20250201".
+    version: Optional[str] = None
 
 
 class rocm:
@@ -2189,6 +2271,9 @@ cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 # Backend to use for CUDA codegen either
 # "triton", "halide" (experimental) or "pallas" (experimental)
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
+
+# Backend to use for TPU codegen
+tpu_backend: Literal["pallas"] = "pallas"
 
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"
@@ -2319,6 +2404,8 @@ _cache_config_ignore_prefix: list[str] = [
     "trace",
     # uses absolute path
     "cuda.cutlass_dir",
+    "cutlass.cutlass_dir",
+    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",
@@ -2368,8 +2455,15 @@ class test_configs:
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
-    autotune_choice_name_regex: Optional[str] = None
-    autotune_choice_desc_regex: Optional[str] = None
+    # Can be set via TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX and
+    # TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX environment variables
+
+    autotune_choice_name_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX"
+    )
+    autotune_choice_desc_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX"
+    )
 
     graphsafe_rng_func_ignores_fallback_random = False
 

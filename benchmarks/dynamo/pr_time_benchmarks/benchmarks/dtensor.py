@@ -84,14 +84,14 @@ class BenchmarkAddBackward(BenchmarkDTensorDispatch):
     def _prepare_once(self) -> None:
         super()._prepare_once()
         self.a = DTensor.from_local(
-            torch.ones(2, 512, device=self.device(), requires_grad=True),
+            torch.ones(512, 512, device=self.device(), requires_grad=True),
             self.mesh,
-            [Shard(0)],
+            [Replicate()],
         )
         self.b = DTensor.from_local(
-            torch.ones(512, 2, device=self.device(), requires_grad=True),
+            torch.ones(512, 512, device=self.device(), requires_grad=True),
             self.mesh,
-            [Shard(1)],
+            [Replicate()],
         )
 
     def _work(self) -> None:

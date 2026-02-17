@@ -573,7 +573,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  std::unordered_map<size_t, std::string> param_to_name_mapping,
                  int64_t first_bucket_bytes_cap,
                  bool skip_all_reduce_unused_params,
-                 bool use_python_reducer) {
+                 bool use_python_reducer,
+                 std::vector<int64_t> bucket_bytes_cap_list) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -589,7 +590,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     std::move(param_to_name_mapping),
                     first_bucket_bytes_cap,
                     skip_all_reduce_unused_params,
-                    use_python_reducer);
+                    use_python_reducer,
+                    std::move(bucket_bytes_cap_list));
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -603,7 +605,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::unordered_map<size_t, std::string>(),
           py::arg("first_bucket_bytes_cap") = ::c10d::kDefaultFirstBucketBytes,
           py::arg("skip_all_reduce_unused_params") = false,
-          py::arg("use_python_reducer") = false)
+          py::arg("use_python_reducer") = false,
+          py::arg("bucket_bytes_cap_list") = std::vector<int64_t>())
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -1186,6 +1189,15 @@ This class does not support ``__members__`` property.)");
           })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
       .def_property_readonly("offset", &SymmetricMemory::get_offset)
+      .def_property_readonly("device", &SymmetricMemory::get_device)
+      // Convert the pybind `_SymmetricMemory` object into the TorchBind custom
+      // class object (`__torch__.torch.classes.c10d.SymmetricMemory`) so it can
+      // be passed to dispatcher ops that expect the TorchBind type.
+      .def(
+          "boxed",
+          [](c10::intrusive_ptr<SymmetricMemory> self) {
+            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+          })
       .def(
           "get_buffer",
           &SymmetricMemory::get_buffer,
@@ -3251,7 +3263,13 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("backend"),
               py::arg("gloo_backend"))
           .def_property_readonly(
-              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg);
+              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg)
+          .def_property_readonly(
+              "options", &::c10d::ProcessGroupWrapper::getBackendOptions)
+          .def(
+              "get_error",
+              &::c10d::ProcessGroupWrapper::getError,
+              py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL
