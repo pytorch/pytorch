@@ -3839,12 +3839,17 @@ def check_verbose(
         not is_inlined_call
         and frame is not None
         and isinstance(obj, types.CodeType)
-        and is_inbuilt_nn_module_forward(obj)
+        and obj.co_name == "forward"
     ):
         from .utils import nnmodule_has_hooks
 
         module = frame.f_locals.get("self")
-        if module is not None and nnmodule_has_hooks(module, check_forward_hooks=True):
+        if (
+            module is not None
+            and isinstance(module, torch.nn.Module)
+            and module.__class__.__module__.startswith(("torch.nn.", "torch.ao."))
+            and nnmodule_has_hooks(module, check_forward_hooks=True)
+        ):
             return SkipResult(
                 False,
                 "inbuilt nn.Module.forward allowed - module has hooks",
@@ -3912,34 +3917,6 @@ def check_verbose(
 
 def check(obj: Any, is_inlined_call: bool = False, frame: Optional[Any] = None) -> bool:
     return check_verbose(obj, is_inlined_call, frame).skipped
-
-
-@functools.cache
-def _nn_modules_dir() -> Optional[str]:
-    """Get the directory path for torch.nn.modules."""
-    import torch.nn.modules
-
-    return _module_dir(torch.nn.modules)
-
-
-def is_inbuilt_nn_module_forward(code: types.CodeType) -> bool:
-    """
-    Check if a code object is a forward method from an inbuilt nn.Module.
-
-    This is used by the eval frame callback to allow tracing of nn.Module.forward
-    methods even when they're in skipfiles. This enables Dynamo to capture
-    operations after a frame skip (e.g., from FSDP hooks causing graph breaks).
-
-    Returns True if:
-    - The function is named "forward"
-    - It's defined in torch/nn/modules/
-    """
-    if code.co_name != "forward":
-        return False
-    nn_modules_path = _nn_modules_dir()
-    if nn_modules_path is None:
-        return False
-    return code.co_filename.startswith(nn_modules_path)
 
 
 # skip common third party libs

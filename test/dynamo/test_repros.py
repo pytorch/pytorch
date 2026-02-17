@@ -49,6 +49,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
     expectedFailureDynamic,
+    normalize_gm,
     rand_strided,
     same,
     skipIfNotPy312,
@@ -6099,8 +6100,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/167009
     def test_inbuilt_nn_module_forward_after_hook_graph_break(self):
-        # When a @dynamo.disable hook is on an inbuilt nn.Module, the module's
-        # forward should still be traced after the hook causes a graph break.
+        # When a hook causes a graph break on an inbuilt nn.Module, the module's
+        # forward should still be traced after the graph break.
 
         @torch._dynamo.disable
         def my_hook(module, inp):
@@ -6124,14 +6125,19 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         output = compiled(torch.randn(3, 10))
 
         self.assertEqual(output.shape, torch.Size([3, 5]))
-        self.assertGreater(len(backend.graphs), 0)
-        linear_found = any(
-            "linear" in gm.print_readable(print_output=False).lower()
-            for gm in backend.graphs
-        )
-        self.assertTrue(
-            linear_found,
-            "Linear operations should be captured in compiled graphs",
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_self_parameters_weight_: "f32[5, 10]", L_self_parameters_bias_: "f32[5]", L_input_: "f32[3, 10]"):
+        l_self_parameters_weight_ = L_self_parameters_weight_
+        l_self_parameters_bias_ = L_self_parameters_bias_
+        l_input_ = L_input_
+
+        linear: "f32[3, 5]" = torch._C._nn.linear(l_input_, l_self_parameters_weight_, l_self_parameters_bias_);  l_input_ = l_self_parameters_weight_ = l_self_parameters_bias_ = None
+        return (linear,)
+""",  # noqa: B950
         )
 
     def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
