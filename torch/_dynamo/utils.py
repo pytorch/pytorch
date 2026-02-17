@@ -90,6 +90,7 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
@@ -153,6 +154,7 @@ try:
     else:
         NP_SUPPORTED_MODULES = ()
 
+        # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
@@ -1121,6 +1123,21 @@ if sys.version_info >= (3, 12):
     )
 
 
+def get_inputs_devices(
+    inputs: collections.abc.Sequence[object],
+    model: torch.fx.GraphModule,
+) -> list[Optional[torch.device]]:
+    all_inputs = pytree.tree_flatten(inputs)[0] + [
+        node.meta["val"] for node in list(model.graph.nodes) if "val" in node.meta
+    ]
+    devices: list[Optional[torch.device]] = list(
+        OrderedSet([i.device for i in all_inputs if hasattr(i, "device")])
+    )
+    return [
+        i for i in devices if (isinstance(i, torch.device) and i.type != "meta")
+    ] + [None]
+
+
 if sys.version_info >= (3, 14):
     _builtin_final_typing_classes += (typing.Union,)
 
@@ -2034,6 +2051,7 @@ class ChromiumEventLogger:
             event_metadata = all_event_data[event_name]
             del all_event_data[event_name]
         else:
+            # pyrefly: ignore [implicit-any]
             event_metadata = {}
         # Add the passed in metadata
         event_metadata.update(metadata)
@@ -2602,6 +2620,10 @@ common_constant_types: set[type] = {
     torch.iinfo,
     torch.nn.attention.SDPBackend,
     torch.cuda._CudaDeviceProperties,
+    # Pytree key types (frozen dataclasses used in tree_map_with_path)
+    torch.utils._pytree.SequenceKey,
+    torch.utils._pytree.MappingKey,
+    torch.utils._pytree.GetAttrKey,
 }
 
 if has_triton_package():
@@ -3650,7 +3672,9 @@ def _get_fake_value_impl(
             id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
         }
     else:
+        # pyrefly: ignore [implicit-any]
         flat_args_kwargs = []
+        # pyrefly: ignore [implicit-any]
         id_to_initial_version = {}
 
     nnmodule = None

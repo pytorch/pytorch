@@ -1743,7 +1743,7 @@ class TestSparseCSR(TestCase):
         mat[mat.real < 0] = 0
         sparse_mat = mat.to_sparse_csr()
         mvec = torch.randn((mat.size(1),), dtype=dtype, device=device)
-        avec = torch.randn((mat.size(0),), dtype=torch.float64, device=device)
+        avec = torch.randn((mat.size(0),), dtype=dtype, device=device)
         ref_output = torch.addmv(avec, mat, mvec)
         output = torch.addmv(avec, sparse_mat, mvec)
         self.assertEqual(ref_output, output)
