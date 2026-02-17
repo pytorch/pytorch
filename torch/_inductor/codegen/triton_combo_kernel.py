@@ -722,18 +722,19 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
-        triton_meta[
-            "enable_fp_fusion"
-        ] = not config.emulate_precision_casts  # pyrefly: ignore[unsupported-operation]
+        triton_meta["enable_fp_fusion"] = (
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
+            not config.emulate_precision_casts
+        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
 
         if TritonKernel._enable_pdl_codegen():
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
             triton_meta["launch_pdl"] = True
 
         mutated_args = self.get_mutated_args_sub_kernels()

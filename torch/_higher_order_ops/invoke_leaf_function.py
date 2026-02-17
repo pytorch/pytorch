@@ -309,20 +309,23 @@ def _make_forward(
                     for inp in inputs
                 )
 
-                state["outputs"] = tuple(
-                    GradientInfo(
-                        edge=get_gradient_edge(out),
-                        size=out.size(),
-                        stride=out.stride(),
-                        dtype=out.dtype,
-                        device=out.device,
+                if outputs is None:
+                    state["outputs"] = ()
+                else:
+                    state["outputs"] = tuple(
+                        GradientInfo(
+                            edge=get_gradient_edge(out),
+                            size=out.size(),
+                            stride=out.stride(),
+                            dtype=out.dtype,
+                            device=out.device,
+                        )
+                        if isinstance(out, torch.Tensor)
+                        and out.requires_grad
+                        and out.grad_fn is not None
+                        else None
+                        for out in outputs
                     )
-                    if isinstance(out, torch.Tensor)
-                    and out.requires_grad
-                    and out.grad_fn is not None
-                    else None
-                    for out in outputs
-                )
 
         return pytree.tree_map_only(
             torch.Tensor,
@@ -343,6 +346,32 @@ class InvokeLeafFunction(HigherOrderOperator):
         fake_fn_spec: pytree.TreeSpec for the fake function that's wrapped in dynamo
         """
         return super().__call__(real_fn_spec, fake_fn_spec, *flat_args)  # type: ignore[attr-defined]
+
+    # pyrefly: ignore [bad-override]
+    def gen_schema(self, real_fn_spec, fake_fn_spec, *flat_args):
+        from torch._higher_order_ops.schema import HopSchemaGenerator
+        from torch._higher_order_ops.utils import _maybe_fake_prop_ignore_unbacked
+
+        fake_fn = unwrap_fn_spec(fake_fn_spec)
+        fake_outputs = _maybe_fake_prop_ignore_unbacked(fake_fn, flat_args)
+
+        gen = HopSchemaGenerator(self)
+        gen.add_arg("real_fn_spec", real_fn_spec)
+        gen.add_arg("fake_fn_spec", fake_fn_spec)
+        for i, arg in enumerate(flat_args):
+            gen.add_arg(f"arg{i}", arg)
+
+        if isinstance(fake_outputs, tuple):
+            for out in fake_outputs:
+                gen.add_output(out)
+        else:
+            if fake_outputs is not None:
+                raise AssertionError(
+                    f"Expected fake_outputs to be a tuple or None, got {type(fake_outputs)}"
+                )
+            gen.add_output(fake_outputs)
+
+        return gen.gen_schema()
 
 
 invoke_leaf_function = InvokeLeafFunction()
@@ -458,9 +487,15 @@ def invoke_leaf_function_autograd(real_fn_spec, fake_fn_spec, *flat_args):
 # TODO: allow user annotated mutation and aliasing info
 @invoke_leaf_function.py_functionalize_impl
 def invoke_leaf_function_functionalization(ctx, *all_args):
-    unwrapped_args = ctx.unwrap_tensors(all_args)
-    with ctx.redispatch_to_next():
-        return ctx.wrap_tensors(invoke_leaf_function(*unwrapped_args))
+    from torch._higher_order_ops.effects import handle_effects
+
+    return handle_effects(
+        ctx.mode._allow_token_discovery,
+        ctx.mode._tokens,
+        invoke_leaf_function,
+        all_args,
+        {},
+    )
 
 
 @invoke_leaf_function.py_impl(ProxyTorchDispatchMode)
