@@ -796,6 +796,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size2 = remaining[current_group + 1]
                     size3 = FloorDiv(size, size1 * size2)
                     return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
                         make_combined(
                             [size2, size3],
                             [
@@ -833,6 +834,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
                         make_combined(
                             [size2],
                             [
@@ -844,6 +846,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 else:
                     if current_group < len(remaining):
                         return_getters.append(
+                            # pyrefly: ignore [bad-argument-type]
                             operator.itemgetter(add_range(current_group, size))
                         )
             return_getters_groups.append(return_getters)
@@ -851,6 +854,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
             f"failed to set ranges {remaining} {lengths}"
         )
+        # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
     @classmethod
@@ -1641,9 +1645,6 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
-        if not V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel)):
-            return self._codegen_mix_order_reduction(node2, node1)
-
         def _pick_split_size():
             # the overridden has highest priority
             if config.triton.mix_order_reduction_split_size is not None:
@@ -1664,8 +1665,6 @@ class SIMDScheduling(BaseScheduling):
 
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
-
-        assert V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel))
 
         # split epilogue out of node2
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
@@ -2130,7 +2129,7 @@ class SIMDScheduling(BaseScheduling):
                     partial_code.finalize_hook("<DEF_KERNEL>")
                 partial_code.finalize_hook("<ARGDEFS>", strict=False)
 
-            # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
 
             for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
@@ -2280,6 +2279,7 @@ class SIMDScheduling(BaseScheduling):
                         if size_hint is None
                         else self._make_shape_cache_key(template_node.node, size_hint)
                     )
+                    # pyrefly: ignore [unsupported-operation]
                     kernels[shape_cache_key] = kernel
 
             if only_gen_src_code:
@@ -2408,6 +2408,7 @@ class SIMDScheduling(BaseScheduling):
                     )
                     with V.set_kernel_handler(kernel):
                         src_code = kernel.codegen_kernel()
+                    # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
                 # Multi-node: create ComboKernel with combo subkernels
@@ -2431,7 +2432,9 @@ class SIMDScheduling(BaseScheduling):
                     )
 
                 src_code = kernel.codegen_kernel()
+                # pyrefly: ignore [bad-argument-type]
                 kernel_code_list.append((src_code, kernel, node_group))
+        # pyrefly: ignore [bad-return]
         return kernel_code_list
 
     def codegen_combo_kernel(self, combo_kernel_node):
