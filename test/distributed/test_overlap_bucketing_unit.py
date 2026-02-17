@@ -721,6 +721,54 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         f.check("pre_bucket_all_gather").check("all_gather_into_tensor_out")
         f.run(graph_str)
 
+    def test_dead_fusible_code_no_crash(self):
+        """
+        Test that dead fusible code (fusion regions with no external outputs)
+        does not crash collapse_fusion_regions.
+
+        Regression test for the bug where dead code created a fusion region
+        with no external outputs, causing fuse_by_partitions to crash with
+        "AssertionError: last_output_node is None".
+        """
+
+        def func_with_dead_fusible_code(x, y):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                x, group_size, group_name
+            )
+
+            # Dead fusible chain - not consumed by output
+            dead1 = x + 1.0
+            dead2 = dead1 * 2.0
+            dead3 = dead2 + dead1  # noqa: F841
+
+            # Live fusible chain
+            live1 = y + 1.0
+            live2 = live1 * 2.0
+
+            mm_result = torch.mm(y, y)
+            live3 = mm_result + 1.0
+
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return (live2 + live3 + ag_out).sum()
+
+        from torch._inductor.fx_passes.fusion_regions import (
+            build_fusion_regions,
+            collapse_fusion_regions,
+        )
+
+        with FakeTensorMode():
+            x = torch.randn(16, 16)
+            y = torch.randn(16, 16)
+            gm = make_fx(func_with_dead_fusible_code)(x, y)
+
+        region_of = build_fusion_regions(gm)
+        # Should not crash
+        collapse_fusion_regions(gm, region_of)
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
