@@ -490,23 +490,15 @@ class TestVarlenAttention(NNTestCase):
 
         def run_varlen_out(q, k, v, cu_seq, max_len):
             out_buf = torch.empty_like(q)
-            varlen_attn_out(
-                out_buf, q, k, v, cu_seq, cu_seq, max_len, max_len
-            )
+            varlen_attn_out(out_buf, q, k, v, cu_seq, cu_seq, max_len, max_len)
             return out_buf
 
-        compiled_out = torch.compile(
-            run_varlen_out, backend="eager", fullgraph=True
-        )
+        compiled_out = torch.compile(run_varlen_out, backend="eager", fullgraph=True)
         with OpLoggingMode() as out_mode:
             compiled_out(q, k, v, cu_seq, shape.max_seq_len)
 
-        if not any(
-            "torch_attn._varlen_attn_out" in op for op in out_mode.called_ops
-        ):
-            raise AssertionError(
-                "custom _varlen_attn_out op should have been called"
-            )
+        if not any("torch_attn._varlen_attn_out" in op for op in out_mode.called_ops):
+            raise AssertionError("custom _varlen_attn_out op should have been called")
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

@@ -507,10 +507,19 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
 
     if any(
         p is not None
-        for p in (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table, seqused_k)
+        for p in (
+            k_cache,
+            v_cache,
+            cache_seqlens,
+            cache_batch_idx,
+            page_table,
+            seqused_k,
+        )
     ):
         raise RuntimeError(
-            "Inference-only parameters (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table, seqused_k) do not support autograd"
+            "Inference-only parameters \
+            (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table, seqused_k)\
+            do not support autograd"
         )
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
