@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 Expr = sympy.Expr
 
 
@@ -780,6 +781,15 @@ def flex_attention_backward(*args, **kwargs):
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
                 "is not yet implemented. Running non-deterministic backward.",
             )
+        # TODO: Implement dLSE support in flash-attention backward by folding
+        # grad_logsumexp into the dPsum preprocess step.
+        if grad_logsumexp is not None:
+            raise NotImplementedError(
+                "FLASH backend backward does not support differentiating through "
+                "logsumexp (dLSE). This happens when the loss depends on the LSE "
+                "output of flex_attention. "
+                "Use BACKEND='TRITON' or avoid differentiating through logsumexp."
+            )
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
@@ -816,13 +826,18 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     # Create delta which will is needed for the bwd's kernel
-    grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
     mul_delta = lowerings[aten.mul](out, grad_out)
     delta = lowerings[aten.sum](mul_delta, axis=-1)
-    delta = lowerings[aten.sub](delta, grad_lse_exp2)
-    delta = ExternKernel.require_contiguous(delta)
-
-    grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
+    delta = lowerings[prims.convert_element_type](delta, torch.float32)
+    if grad_logsumexp is not None:
+        grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
+        grad_lse_exp2 = ExternKernel.require_contiguous(grad_lse_exp2)
+        delta = lowerings[aten.sub](delta, grad_lse_exp2)
+        delta = ExternKernel.require_contiguous(delta)
+        delta, grad_lse_exp2 = maybe_realize([delta, grad_lse_exp2])
+    else:
+        delta = ExternKernel.require_contiguous(delta)
+        (delta,) = maybe_realize([delta])
 
     # # see NOTE:[TritonTemplates with multiple outputs]
     query_size = [Bq, Hq, seq_len_q, qk_head_dim]
@@ -905,6 +920,12 @@ def flex_attention_backward(*args, **kwargs):
             cur_kernel_options.setdefault(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
+
+        # Intel GPU enables TMA by default
+        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
         cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)

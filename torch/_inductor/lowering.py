@@ -739,6 +739,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if not isinstance(input, (list, tuple)):
                 broadcast_inputs.append([input] * len(a_list_input))
             else:
+                # pyrefly: ignore [bad-argument-type]
                 broadcast_inputs.append(input)
 
         groups = group_foreach_args(zip(*broadcast_inputs))
@@ -6357,8 +6358,7 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
 
 def use_two_step_variance(x, axis, keepdim):
-    # two-step algorithm can get better performance in small reductions size
-    # while it can accumulate more numerical error than Welford algorithm.
+    # Instead of unrolling welford, just unroll the simpler two-step var
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -6366,16 +6366,9 @@ def use_two_step_variance(x, axis, keepdim):
 
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
-    device = x.get_device()
-    if not (device and device.type == "cpu"):
-        threshold = config.unroll_reductions_threshold
-    else:
-        # 1024 is a default value to pass all the UTs about accuracy.
-        # A larger threshold can still get performance benefits.
-        threshold = config.cpp.use_two_step_variance_threshold
     return (
         isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) <= threshold
+        and int(reduction_numel) < config.unroll_reductions_threshold
         and sympy_product(ranges) != 1
     )
 
