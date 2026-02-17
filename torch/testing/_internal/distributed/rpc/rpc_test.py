@@ -6017,8 +6017,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def _return_tensor_view(i):
         device = torch.device("cuda:0")
         with torch.cuda.stream(torch.cuda.current_stream(device)):
-            x = torch.ones(1000, 200, device=device) * i
+            x = torch.ones(1000, 200).cuda(0) * i
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            # serialization of the return value will create a new tensor from the
+            # view, which is done outside of the user function.
             return x.split(100)[0]
 
     @skip_if_lt_x_gpu(1)
