@@ -7617,7 +7617,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         mat = torch.rand([2, 3], dtype=torch.complex128)
         vec = torch.rand([3], dtype=torch.complex128)
         self.assertRaises(RuntimeError, lambda: torch.addmv(ten, mat, vec))
-    
+
     @dtypesIfCUDA(*floating_types_and(torch.bfloat16))
     @dtypes(torch.float, torch.double)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
