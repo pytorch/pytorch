@@ -408,6 +408,11 @@ class InvokeLeafFunction(HigherOrderOperator):
 
 invoke_leaf_function = InvokeLeafFunction()
 
+from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+
+_register_effectful_op(invoke_leaf_function, _EffectType.ORDERED)
+
 
 # NOTE: [Autograd support for invoke_leaf_function]
 #
@@ -536,13 +541,18 @@ def invoke_leaf_function_functionalization(ctx, *all_args):
 
     from torch._higher_order_ops.effects import handle_effects
 
-    return handle_effects(
+    result = handle_effects(
         ctx.mode._allow_token_discovery,
         ctx.mode._tokens,
         invoke_leaf_function,
         all_args,
         {},
     )
+    if isinstance(result, torch.Tensor):
+        return (result,)
+    if isinstance(result, (list, tuple)):
+        return tuple(result)
+    return result
 
 
 @invoke_leaf_function.py_impl(ProxyTorchDispatchMode)

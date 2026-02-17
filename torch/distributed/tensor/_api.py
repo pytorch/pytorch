@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
-import hashlib
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -367,15 +366,6 @@ class DTensor(torch.Tensor):
             # pyrefly: ignore [unexpected-keyword]
             requires_grad=requires_grad,
         )
-
-    def _stable_hash_for_caching(self) -> str:
-        """
-        Return a stable hash for AOT autograd caching.
-        [See note: Tensor subclass stable hashing for AOT autograd cache]
-        """
-        # Combine spec's stable hash with requires_grad
-        cache_data = self._spec._stable_hash() + str(self.requires_grad)
-        return hashlib.blake2b(cache_data.encode(), digest_size=16).hexdigest()
 
     def __coerce_tangent_metadata__(self):
         if not any(isinstance(p, Partial) for p in self.placements):
