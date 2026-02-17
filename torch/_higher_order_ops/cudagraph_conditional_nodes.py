@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -92,15 +91,6 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
             return func(*args, **kwargs)
 
 
-def _is_boolean_scalar_cuda_tensor(pred: Any) -> bool:
-    return (
-        isinstance(pred, torch.Tensor)
-        and pred.size() == torch.Size([])
-        and pred.dtype == torch.bool
-        and pred.is_cuda
-    )
-
-
 @contextmanager
 def _if_body(pred: torch.Tensor) -> Generator[None, None, None]:
     current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
@@ -116,7 +106,8 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
         raise ValueError(
             "Conditions must be on a cuda device to use conditional node in cuda graphs"
         )
-    # if-else is not supported yet in CUDA 12.4. Therefore, we use two if conditions, where one evaluates !pred
+    # if-else is not supported until CUDA 12.8. Therefore, we use two
+    # if conditions, where one evaluates !pred
     outs = []
 
     for lazy_pred, fn in [
@@ -125,10 +116,12 @@ def if_else_node(pred: torch.Tensor, true_fn, false_fn, operands):
     ]:
         with _if_body(lazy_pred()):
             outs.append(fn(*operands))
-            # Copy these two outputs into a new output buffer. Well,
-            # actually, what we would like is to be able to merge these two
-            # tensors into the same tensor... Is there an obvious way to do
-            # that?
+
+            # The output of the else branch gets copied into the
+            # output of the if branch. This is done because the rest
+            # of the cudagraph after the conditional node has fixed
+            # inputs, so we need to merge the two outputs into a
+            # single output.
             if len(outs) == 2:
                 for if_out, else_out in zip(
                     pytree.tree_iter(outs[0]), pytree.tree_iter(outs[1])
