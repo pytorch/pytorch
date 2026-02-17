@@ -632,7 +632,13 @@ def _extract_rules_from_op_strategy(
     input_shapes: tuple[tuple[int, ...], ...],
     output_shape: tuple[int, ...],
 ) -> set[ComboKey]:
-    """Extract normalized sharding rules from an OpStrategy."""
+    """Extract normalized sharding rules from an OpStrategy.
+
+    Called during rule comparison to collect DTensor's claimed-valid placement
+    combinations. These are compared against ground truth (brute-force
+    validation) to find false positives (DTensor claims valid but wrong) and
+    false negatives (valid but DTensor has no rule).
+    """
     rules: set[ComboKey] = set()
     if not isinstance(op_strategy, OpStrategy):
         return rules
@@ -641,8 +647,15 @@ def _extract_rules_from_op_strategy(
             continue
         if isinstance(spec.output_specs, tuple):
             first_output_spec = spec.output_specs[0]
+            # output_specs tuple can contain None for non-tensor outputs
+            # (e.g. SDPA's philox_seed/offset, layer norm backward with
+            # output_mask). The validator doesn't support mixed outputs.
             if first_output_spec is None:
-                continue
+                raise NotImplementedError(
+                    f"Strategy has None in output_specs, indicating mixed "
+                    f"tensor/non-tensor outputs which the validator does not "
+                    f"support. output_specs: {spec.output_specs}"
+                )
             output_plc = first_output_spec.placements[0]
         else:
             output_plc = spec.output_spec.placements[0]
@@ -840,7 +853,14 @@ def _is_tensor_output(result: Any) -> bool:
     if isinstance(result, torch.Tensor):
         return True
     if isinstance(result, (list, tuple)):
-        return all(isinstance(t, torch.Tensor) for t in result)
+        has_tensor = any(isinstance(t, torch.Tensor) for t in result)
+        all_tensor = all(isinstance(t, torch.Tensor) for t in result)
+        if has_tensor and not all_tensor:
+            raise NotImplementedError(
+                f"Mixed tensor/non-tensor tuple outputs are not supported by the "
+                f"validator. Got types: {[type(t).__name__ for t in result]}"
+            )
+        return all_tensor
     return False
 
 
