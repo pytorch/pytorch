@@ -222,6 +222,9 @@ class ShardingPropagator:
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
+        from torch.distributed.tensor._decompositions import DecompShardingStrategy
+
+        self.decomp_strategy = DecompShardingStrategy(self)
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
         self.op_to_shape_and_stride_idx: dict[OpOverload, int | tuple[int, int]] = {
@@ -589,10 +592,10 @@ class ShardingPropagator:
             )
             if not has_cia and DecompShardingStrategy.has_decomp(op_schema.op):
                 # Ensure schema_info is registered for proper cache key computation
-                DecompShardingStrategy.ensure_schema_info(op_schema.op, self)
+                self.decomp_strategy.ensure_schema_info(op_schema.op)
                 try:
-                    op_strategy = DecompShardingStrategy.propagate_strategy(
-                        op_schema, self
+                    op_strategy = self.decomp_strategy.propagate_strategy(
+                        op_schema,
                     )
                 except Exception as e:
                     decomp_exception = e
