@@ -848,9 +848,17 @@ class SweepInputs2:
     def kernel(a, b):
         return (a + b,)
 
+    # Input gen types unsupported by specific backends. Subclasses or wrapper
+    # test classes can set this to skip tests that use these input types.
+    _unsupported_input_gen_types: set[str] = set()
+
     @classmethod
     def gen_template(cls, name1, name2):
         def test(self):
+            unsupported = type(self)._unsupported_input_gen_types
+            for name in (name1, name2):
+                if name in unsupported:
+                    self.skipTest(f"{name} inputs not supported by this backend")
             check_model(
                 self,
                 cls.kernel,
