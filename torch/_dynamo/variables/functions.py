@@ -387,6 +387,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def has_self(self) -> bool:
         raise NotImplementedError
 
+    def get_module(self) -> str:
+        return self.get_globals()["__name__"]
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -704,28 +707,53 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             tree_map_args = args
             tree_map_kwargs = kwargs
 
-        if not (
+        is_tree_map = (
             isinstance(tree_map_fn, UserFunctionVariable)
             and tree_map_fn._is_tree_map_function()
-            and not ({*tree_map_kwargs} - _SUPPORTED_TREE_MAP_KWARGS)
-            and len(tree_map_args) >= 2
-        ):
+        )
+        is_tree_map_with_path = (
+            isinstance(tree_map_fn, UserFunctionVariable)
+            and tree_map_fn._is_tree_map_with_path_function()
+        )
+
+        if not (is_tree_map or is_tree_map_with_path):
+            return None
+        if {*tree_map_kwargs} - _SUPPORTED_TREE_MAP_KWARGS:
+            return None
+        if len(tree_map_args) < 2:
             return None
 
         map_fn = tree_map_args[0]
         first_tree = tree_map_args[1]
         rest = tree_map_args[2:]
-        return first_tree.call_tree_map(
-            tx,
-            tree_map_fn,
-            map_fn,
-            rest,
-            tree_map_kwargs,
-        )
+
+        if is_tree_map_with_path:
+            return first_tree.call_tree_map_with_path(
+                tx,
+                tree_map_fn,
+                map_fn,
+                rest,
+                tree_map_kwargs,
+                keypath=(),
+            )
+        else:
+            return first_tree.call_tree_map(
+                tx,
+                tree_map_fn,
+                map_fn,
+                rest,
+                tree_map_kwargs,
+            )
 
     def _is_tree_map_function(self) -> bool:
         return (
             getattr(self.fn, "__name__", None) == "tree_map"
+            and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
+        )
+
+    def _is_tree_map_with_path_function(self) -> bool:
+        return (
+            getattr(self.fn, "__name__", None) == "tree_map_with_path"
             and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
         )
 
