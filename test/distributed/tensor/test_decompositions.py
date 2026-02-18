@@ -68,7 +68,7 @@ class TestDecompSharding(TestCase):
             return op2(x, y) * 1.0
 
         def op2(x, y):
-            return torch.mm(x, y)
+            return x @ y
 
         We also test that sharding prop caching kicks in for decompositions;
         1) calling op1 twice should cache hit
@@ -83,11 +83,11 @@ class TestDecompSharding(TestCase):
 
             @torch.library.impl(my_lib, "op1", "CPU")
             def op1_impl(x, y):
-                return torch.mm(x, y) * 1.0
+                return x @ y * 1.0
 
             @torch.library.impl(my_lib, "op2", "CPU")
             def op2_impl(x, y):
-                return torch.mm(x, y)
+                return x @ y
 
             @register_decomposition(torch.ops.sharding_decomps.op1.default)
             def op1_decomp(x, y):
@@ -95,15 +95,15 @@ class TestDecompSharding(TestCase):
 
             @register_decomposition(torch.ops.sharding_decomps.op2.default)
             def op2_decomp(x, y):
-                return torch.mm(x, y)
+                return x @ y
 
             @torch.library.register_fake("sharding_decomps::op1")
             def op1_meta(x, y):
-                return torch.mm(torch.empty_like(x), torch.empty_like(y))
+                return torch.empty_like(x) @ torch.empty_like(y)
 
             @torch.library.register_fake("sharding_decomps::op2")
             def op2_meta(x, y):
-                return torch.mm(torch.empty_like(x), torch.empty_like(y))
+                return torch.empty_like(x) @ torch.empty_like(y)
 
             mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(-1, 2))
             x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(0), Shard(1)])

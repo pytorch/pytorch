@@ -108,28 +108,26 @@ class PlacementTrackingMode(TorchDispatchMode):
         else:
             output_sharding = self.sharding_prop.propagate_op_sharding(op_schema)
 
-        if output_sharding.needs_redistribute:  # pyrefly: ignore [missing-attribute]
-            # Shape/stride adjustment for view ops sets needs_redistribute=True
-            # with use_val_from_redistribute_schema=True, but doesn't require
-            # actual tensor redistribution (placements are unchanged). During
-            # decomposition tracing on meta tensors at global shape, the shape
-            # adjustment is irrelevant — only reject true redistribution.
-            if (
-                not output_sharding.use_val_from_redistribute_schema  # pyrefly: ignore [missing-attribute]
+        if (
+            output_sharding.needs_redistribute  # pyrefly: ignore [missing-attribute]
+            and (
+                redistribute_schema
+                := output_sharding.redistribute_schema  # pyrefly: ignore [missing-attribute]
+            )
+            is not None
+        ):
+            # a pure .needs_redistribute check is too broad; we want to ban redistribution,
+            # but this flag is set for view ops that convert global shape -> local shape args.
+            # During decomposition tracing on meta tensors at global shape, the shape adjustment
+            # is irrelevant — only reject true redistribution.
+            for orig, desired in zip(
+                op_schema.args_spec,
+                redistribute_schema.args_spec,  # pyrefly: ignore [missing-attribute]
             ):
-                raise RuntimeError(f"Decomposition requires redistribution for {func}")
-            elif (
-                output_sharding.redistribute_schema  # pyrefly: ignore [missing-attribute]
-                is not None
-            ):
-                for orig, desired in zip(
-                    op_schema.args_spec,
-                    output_sharding.redistribute_schema.args_spec,  # pyrefly: ignore [missing-attribute]
-                ):
-                    if orig.placements != desired.placements:
-                        raise RuntimeError(
-                            f"Decomposition requires redistribution for {func}"
-                        )
+                if orig.placements != desired.placements:
+                    raise RuntimeError(
+                        f"Decomposition requires redistribution for {func}"
+                    )
 
         out = func(*args, **kwargs)
         # pyrefly: ignore [missing-attribute]
