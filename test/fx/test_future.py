@@ -41,16 +41,20 @@ ref = torch.add(x, x)
 
 traced1 = symbolic_trace(M1())
 res1 = traced1(x, A())
-assert torch.all(torch.eq(ref, res1))
+if not torch.all(torch.eq(ref, res1)):
+    raise AssertionError("res1 does not match ref")
 
 traced2 = symbolic_trace(M2())
 res2 = traced2(x, A())
-assert torch.all(torch.eq(ref, res2))
+if not torch.all(torch.eq(ref, res2)):
+    raise AssertionError("res2 does not match ref")
 
 traced3 = symbolic_trace(M3())
 res3 = traced3([x], A())
-assert torch.all(torch.eq(ref, res3))
+if not torch.all(torch.eq(ref, res3)):
+    raise AssertionError("res3 does not match ref")
 
 traced4 = symbolic_trace(M4())
 res4 = traced4([x], A())
-assert torch.all(torch.eq(ref, res4))
+if not torch.all(torch.eq(ref, res4)):
+    raise AssertionError("res4 does not match ref")

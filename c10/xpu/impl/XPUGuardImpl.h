@@ -87,6 +87,11 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return old_stream.unwrap();
   }
 
+  void* getStreamNativeHandle(const Stream s) const override {
+    const XPUStream stream{s};
+    return reinterpret_cast<void*>(&(stream.queue()));
+  }
+
   DeviceIndex deviceCount() const noexcept override {
     return c10::xpu::device_count();
   }
