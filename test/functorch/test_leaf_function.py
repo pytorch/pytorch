@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as config
-from functorch.compile import aot_function, nop
+from functorch.compile import aot_function, make_boxed_func, nop
 from torch._dynamo.decorators import leaf_function
 from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.effects import with_effects
@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
-    return fx_g
+    return make_boxed_func(fx_g)
 
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
@@ -476,11 +476,11 @@ class GraphModule(torch.nn.Module):
         def my_fn(x, y):
             z = x @ y
             print(z)
-            return (x,)
+            return None
 
         @my_fn.register_fake
         def my_fn_fake(x, y):
-            return (x,)
+            return None
 
         def f(x, y):
             my_fn(x, y)
@@ -493,6 +493,7 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(1, 1, requires_grad=True)
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
+        z = x @ y
 
         compiled_f = aot_function(
             f,
@@ -509,6 +510,8 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(printed), 2)
         self.assertIsInstance(printed[0][0], torch.Tensor)
         self.assertIsInstance(printed[1][0], torch.Tensor)
+        self.assertEqual(printed[0][0], z)
+        self.assertEqual(printed[1][0], z)
 
         out_eager.sum().backward()
         out_compiled.sum().backward()
@@ -521,12 +524,11 @@ class GraphModule(torch.nn.Module):
         _tree_spec_constant0 = self._tree_spec_constant0
         _tree_spec_constant1 = self._tree_spec_constant1
         _tree_spec_constant2 = self._tree_spec_constant2
-        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, primals_2, primals_3, requires_grad_indices = (0, 1));  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_2 = primals_3 = None
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, primals_2, primals_3, requires_grad_indices = (0, 1));  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_3 = None
 
-        getitem: "f32[0]" = with_effects[0]
-        getitem_1: "f32[1, 1]" = with_effects[1];  with_effects = None
+        getitem: "f32[0]" = with_effects[0];  with_effects = None
 
-        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(primals_2);  primals_2 = None
         return (getitem, sum_1)
 """,  # noqa: B950
         )

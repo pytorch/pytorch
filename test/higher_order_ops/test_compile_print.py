@@ -177,8 +177,9 @@ class TestCompilePrint(TestCase):
         self.assertEqual(eager.bwd_count, 1)
 
         compiled = run_compile(make_fn, inputs)
-        self.assertTrue(compiled.fwd_count >= 1)
-        self.assertTrue(compiled.bwd_count >= 1)
+        self.assertEqual(compiled.fwd_count, 1)
+        self.assertEqual(compiled.bwd_count, 1)
+        self.assertEqual(eager.output, compiled.output)
         self.assertEqual(eager.grads[0], compiled.grads[0])
 
         fx = run_make_fx(make_fn, inputs)
@@ -186,8 +187,9 @@ class TestCompilePrint(TestCase):
         self.assertEqual(fx.fwd_count, 1)
 
         aot = run_aot_function(make_fn, inputs)
-        self.assertTrue(aot.fwd_count >= 1)
-        self.assertTrue(aot.bwd_count >= 1)
+        self.assertEqual(aot.fwd_count, 1)
+        self.assertEqual(aot.bwd_count, 1)
+        self.assertEqual(eager.output, aot.output)
         self.assertEqual(eager.grads[0], aot.grads[0])
 
     def test_multiple_tensors(self):
@@ -208,8 +210,9 @@ class TestCompilePrint(TestCase):
         self.assertEqual(eager.bwd_count, 2)
 
         compiled = run_compile(make_fn, inputs)
-        self.assertTrue(compiled.fwd_count >= 2)
-        self.assertTrue(compiled.bwd_count >= 2)
+        self.assertEqual(compiled.fwd_count, 2)
+        self.assertEqual(compiled.bwd_count, 2)
+        self.assertEqual(eager.output, compiled.output)
         self.assertEqual(eager.grads[0], compiled.grads[0])
         self.assertEqual(eager.grads[1], compiled.grads[1])
 
@@ -218,8 +221,9 @@ class TestCompilePrint(TestCase):
         self.assertEqual(fx.fwd_count, 2)
 
         aot = run_aot_function(make_fn, inputs)
-        self.assertTrue(aot.fwd_count >= 2)
-        self.assertTrue(aot.bwd_count >= 2)
+        self.assertEqual(aot.fwd_count, 2)
+        self.assertEqual(aot.bwd_count, 2)
+        self.assertEqual(eager.output, aot.output)
         self.assertEqual(eager.grads[0], aot.grads[0])
         self.assertEqual(eager.grads[1], aot.grads[1])
 
@@ -238,36 +242,16 @@ class TestCompilePrint(TestCase):
         self.assertEqual(eager.bwd_count, 0)
 
         compiled = run_compile(make_fn, inputs, backward=False)
-        self.assertTrue(compiled.fwd_count >= 1)
+        self.assertEqual(compiled.fwd_count, 1)
+        self.assertEqual(eager.output, compiled.output)
 
         fx = run_make_fx(make_fn, inputs)
         self.assertTrue(_has_invoke_leaf_function_node(fx.gm))
         self.assertEqual(fx.fwd_count, 1)
 
         aot = run_aot_function(make_fn, inputs, backward=False)
-        self.assertTrue(aot.fwd_count >= 1)
-
-    def test_computation_uses_original_tensors(self):
-        def make_fn(cp):
-            def f(x, y):
-                cp(x, y)
-                return (x * y).sum()
-
-            return f
-
-        inputs = [
-            torch.randn(3, 3, requires_grad=True),
-            torch.randn(3, 3, requires_grad=True),
-        ]
-
-        eager = run_eager(make_fn, inputs)
-        compiled = run_compile(make_fn, inputs)
-        aot = run_aot_function(make_fn, inputs)
-
-        self.assertEqual(eager.grads[0], compiled.grads[0])
-        self.assertEqual(eager.grads[1], compiled.grads[1])
-        self.assertEqual(eager.grads[0], aot.grads[0])
-        self.assertEqual(eager.grads[1], aot.grads[1])
+        self.assertEqual(aot.fwd_count, 1)
+        self.assertEqual(eager.output, aot.output)
 
     def test_make_fx_graph_has_opaque_node(self):
         def make_fn(cp):
@@ -281,6 +265,21 @@ class TestCompilePrint(TestCase):
         fx = run_make_fx(make_fn, inputs)
 
         self.assertTrue(_has_invoke_leaf_function_node(fx.gm))
+        self.assertExpectedInline(
+            normalize_gm(fx.gm.print_readable(print_output=False)),
+            """\
+class f(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]"):
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        _tree_spec_constant2 = self._tree_spec_constant2
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, x_1, '', None, requires_grad_indices = ());  _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = None
+        getitem: "f32[]" = invoke_leaf_function[0];  invoke_leaf_function = getitem = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(x_1);  x_1 = None
+        return sum_1
+""",  # noqa: B950
+        )
+
         # Re-execution produces correct results
         x = torch.randn(3, 3)
         self.assertEqual(fx.gm(x), x.sum())
@@ -453,9 +452,11 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(eager.grads[0], torch.ones(3, 3))
 
         compiled = run_compile(make_fn, inputs)
+        self.assertEqual(eager.output, compiled.output)
         self.assertEqual(compiled.grads[0], torch.ones(3, 3))
 
         aot = run_aot_function(make_fn, inputs)
+        self.assertEqual(eager.output, aot.output)
         self.assertEqual(aot.grads[0], torch.ones(3, 3))
 
     def test_print_tensor_repr(self):
