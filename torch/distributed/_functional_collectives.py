@@ -30,6 +30,7 @@ except Exception:
 
     def is_torchdynamo_compiling():  # type: ignore[misc]
         return False
+        # pyrefly: ignore [unreachable]
         return False
 
 
@@ -97,9 +98,6 @@ RANK_TYPES = Union[
     tuple["dist.tensor.DeviceMesh", int],
     c10d.GroupName,
 ]
-
-
-from torch._utils import _chunk_or_narrow_cat  # noqa: F401
 
 
 """
@@ -280,7 +278,8 @@ def reduce_scatter_tensor(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
         )
     if scatter_dim != 0:
-        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
+        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
+        self = torch.cat(tensor_list)
 
     tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
         self,
@@ -319,7 +318,8 @@ def reduce_scatter_tensor_autograd(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
         )
     if scatter_dim != 0:
-        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
+        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
+        self = torch.cat(tensor_list)
 
     tensor = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
         self,
@@ -1191,6 +1191,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
         # - so use a cast instead (the actual newtype representation is
         # literally the underlying type so this is fine). I haven't been able to
         # reproduce it in isolation (see T247631668).
+        # pyrefly: ignore [redundant-cast]
         return cast(c10d.GroupName, group)  # c10d.GroupName(group)
     elif isinstance(group, DeviceMesh):
         if group.ndim != 1:
