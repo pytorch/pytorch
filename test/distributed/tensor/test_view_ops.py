@@ -835,6 +835,28 @@ class TestViewOps(DTensorTestBase):
         result = view_groups([4, u9], [4, u10])
         self.assertEqual(result, (InputDim(0), InputDim(1)))
 
+        # Multi-dim fallback with concrete prefix
+        u11 = fresh_sym()
+        u12 = fresh_sym()
+        u13 = fresh_sym()
+        u14 = fresh_sym()
+        result = view_groups([4, u11, u12], [4, u13, u14])
+        self.assertEqual(result[0], InputDim(0))
+        # remaining dims fall back to flatten-split
+        self.assertIsInstance(result[1], Split)
+        self.assertIsInstance(result[2], Split)
+        self.assertIsInstance(result[1].input_dim, Flatten)
+
+        # Multi-dim fallback
+        u15 = fresh_sym()
+        u16 = fresh_sym()
+        u17 = fresh_sym()
+        result = view_groups([u15, u16, u17], [u17, u16, u15])
+        for x in result:
+            self.assertIsInstance(x, Split)
+            self.assertIsInstance(x.input_dim, Flatten)
+            self.assertEqual(len(x.input_dim.input_dims), 3)
+
     def test_view_groups_unbacked_sharding_propagation(self):
         """Test that sharding is correctly propagated through view_groups with symbolic shapes."""
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -903,6 +925,19 @@ class TestViewOps(DTensorTestBase):
             input_placements, from_shape, rule, mesh_sizes
         )
         self.assertEqual(out_plc, [Replicate(), Replicate()])
+
+        # Unflatten [u*16] -> [u, 16] with Shard(0) on the fused dim:
+        u5 = fresh_sym()
+        for ms in mesh_sizes:  # needed for sharding
+            torch._check(u5 % ms == 0)
+        from_shape = (u5 * 16,)
+        to_shape = (u5, 16)
+        rule = view_groups(from_shape, to_shape)
+        input_placements = [Shard(0), Replicate()]
+        inp_tgt, out_plc = propagate_shape_and_sharding(
+            input_placements, from_shape, rule, mesh_sizes
+        )
+        self.assertEqual(out_plc, [Shard(0), Replicate()])
 
 
 TestViewOpsWithLocalTensor = create_local_tensor_test_class(

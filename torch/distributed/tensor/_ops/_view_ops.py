@@ -336,6 +336,37 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     return sizes
 
 
+def _partial_fallback_view_groups(
+    resolved: list[DimSpec],
+    from_size: Shape,
+    to_size: Shape,
+    from_idx: int,
+    to_idx: int,
+    from_group_dim: list[int],
+    to_group_shape: list,
+) -> DimMap:
+    """
+    Flatten-then-split fallback helper for view_groups when it's unclear how to find a input -> output dimension mapping.
+    This is valid because we assume (and assert) the number of input & output shape elements are equal.
+
+    For example, if we see: randn(u0, u1, u2).reshape(u3, u4, u5)
+    And know: u0*u1*u2 == u3*u4*u5
+    One valid mapping is to flatten(u0, u1, u2) -> (u0*u1*u2,), then split to (u3, u4, u5).
+
+    This step only figures out the underlying decomposition; it doesn't guarantee DTensor can legally perform this view,
+    as it may or may not require redistribution.
+    """
+    remaining_from = list(from_group_dim) + list(range(from_idx, len(from_size)))
+    remaining_to = list(to_group_shape) + list(to_size[to_idx:])
+    if remaining_to:
+        flattened = Flatten.new(tuple(InputDim(fi) for fi in remaining_from))
+        resolved += [
+            Split.new(flattened, tuple(remaining_to), i)
+            for i in range(len(remaining_to))
+        ]
+    return tuple(resolved)
+
+
 def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     """
     Decompose a reshape operation into forwarding, flattening, or splitting dimensions for each output dimension.
@@ -410,19 +441,37 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
             from_group_dim = []
         else:
             # produces ([1], [1]),  ([2], [2]), ([2,3], [6])
+            dim_map_success = True
             while guard_or_true(f != t):
-                if (
-                    t % f == 0 or t > f
+                if guard_or_false(t % f == 0) or guard_or_false(
+                    t > f
                 ):  # for easier symbolic comparisons, e.g. u0*u1 > u0
+                    if from_idx >= from_len:
+                        dim_map_success = False
+                        break
                     nf = from_size[from_idx]
                     from_group_dim.append(from_idx)
                     from_idx += 1
                     f *= nf
                 else:
+                    if to_idx >= to_len:
+                        dim_map_success = False
+                        break
                     nt = to_size[to_idx]
                     to_group_shape.append(nt)
                     to_idx += 1
                     t *= nt
+
+            if not dim_map_success:
+                return _partial_fallback_view_groups(
+                    result_pp,
+                    from_size,
+                    to_size,
+                    from_idx,
+                    to_idx,
+                    from_group_dim,
+                    to_group_shape,
+                )
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
