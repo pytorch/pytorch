@@ -4072,6 +4072,14 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         if index is not None and index.get_dtype() in (torch.bool, torch.uint8):
             return index_put_fallback(self, indices, values, accumulate)
 
+    # Fallback for accumulate with potential duplicate indices
+    # The scatter implementation with atomic_add doesn't handle duplicate indices correctly
+    if accumulate:
+        for index in indices:
+            if index is not None and index.get_numel() > 1:
+                # Multiple index values could be duplicates, fallback to correct implementation
+                return index_put_fallback(self, indices, values, accumulate)
+
     x_size = self.get_size()
     x_ndim = len(x_size)
 
