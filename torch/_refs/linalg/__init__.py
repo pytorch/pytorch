@@ -169,7 +169,7 @@ def vector_norm(
         if dim == []:
             dim = None
 
-        if (dim is None and guard_or_false(x.numel() == 1)) or (
+        if (dim is None and x.numel() == 1) or (
             dim is not None
             and (x.ndim > 0 and all(guard_or_false(x.shape[d] == 1) for d in dim))
         ):
