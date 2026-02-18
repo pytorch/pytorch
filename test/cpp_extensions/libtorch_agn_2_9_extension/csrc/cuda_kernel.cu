@@ -43,6 +43,6 @@ Tensor mv_tensor_accessor_cuda(Tensor m, Tensor v) {
   return res;
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_9, CUDA, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CUDA, m) {
   m.impl("mv_tensor_accessor", TORCH_BOX(&mv_tensor_accessor_cuda));
 }

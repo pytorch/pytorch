@@ -8,6 +8,8 @@
 #include <aotriton/util.h>
 #include <aotriton/config.h>
 #include <ATen/native/transformers/hip/aotriton_versions.h>
+#include <tuple>
+#include <optional>
 
 ////////////////////////////////////////////////////////////////////////////////
 // Common macros copied from cuda/mem_eff_attention/gemm_kernel_utils.h
@@ -167,6 +169,23 @@ auto mklazy_fp32zeros(LazyTensorContext* cookie)
 {
   return mklazy_common<kRank, true>(cookie);
 }
+
+inline auto parse_window_size(std::optional<int64_t> window_size_left,
+                              std::optional<int64_t> window_size_right)
+{
+  const int fa_left = window_size_left.value_or(-1);
+  const int fa_right = window_size_right.value_or(-1);
+  auto get_window_value = [](const int window) -> std::optional<int64_t> {
+    if (window < 0) {
+      return std::nullopt;
+    }
+    return window;
+  };
+  const auto window_left = get_window_value(fa_left);
+  const auto window_right = get_window_value(fa_right);
+  return std::make_tuple(window_left, window_right);
+}
+
 
 #endif  // >= 0.11
 

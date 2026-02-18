@@ -16,7 +16,8 @@ kernel void cauchy(
   // Clamp to avoid tan(+- pi / 2) singularities
   u = clamp(u, eps, 1.0f - eps);
   // Cauchy inverse CDF: median + sigma * tan(pi * (u - 0.5))
-  float result = params.x + params.y * tan(M_PI_F * (u - 0.5f));
+  float result =
+      params.x + params.y * ::metal::precise::tan(M_PI_F * (u - 0.5f));
   output[tid] = static_cast<T>(result);
 }
 
@@ -30,8 +31,9 @@ kernel void log_normal(
   float u1 =
       clamp(c10::metal::rand(seed_base_offset.x, offset), eps, 1.0f - eps);
   float u2 = c10::metal::rand(seed_base_offset.x, offset + 1);
-  float z = sqrt(-2.0f * log(u1)) * cos(2.0f * M_PI_F * u2);
-  float result = exp(params.x + params.y * z);
+  float z = ::metal::precise::sqrt(-2.0f * ::metal::precise::log(u1)) *
+      ::metal::precise::cos(2.0f * M_PI_F * u2);
+  float result = ::metal::precise::exp(params.x + params.y * z);
   output[tid] = static_cast<T>(result);
 }
 
@@ -43,7 +45,7 @@ kernel void geometric(
     uint tid [[thread_position_in_grid]]) {
   float u = c10::metal::rand(seed_base_offset.x, seed_base_offset.y + tid);
   u = clamp(u, eps, 1.0f - eps);
-  float result = ceil(log(u) / params.x);
+  float result = ceil(::metal::precise::log(u) / params.x);
   output[tid] = static_cast<T>(result);
 }
 

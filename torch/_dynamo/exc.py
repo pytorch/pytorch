@@ -132,7 +132,14 @@ class SkipFrame(TorchDynamoException):
 
 
 class TorchRuntimeError(TorchDynamoException):
-    pass
+    def __init__(self, msg: str, real_stack: StackSummary | None = None) -> None:
+        super().__init__(msg)
+        self.msg = msg
+        self.real_stack = (
+            real_stack
+            if real_stack is not None
+            else torch._guards.TracingContext.extract_stack()
+        )
 
 
 class InvalidBackend(TorchDynamoException):
@@ -552,6 +559,7 @@ def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
             registry = json.load(f)
     except Exception:
         log.exception("Error accessing the registry file")
+        # pyrefly: ignore [implicit-any]
         registry = {}
 
     mapping = {}
