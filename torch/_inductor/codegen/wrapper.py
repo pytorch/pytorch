@@ -728,7 +728,7 @@ class EfficientPeakEstimate:
 
     def _get_size(self, node: BufferLike) -> int:
         return V.graph.sizevars.optimization_hint(
-            V.graph.get_allocation_storage_size(node)
+            V.graph.get_allocation_storage_size(node), fallback=0
         ) * get_dtype_size(node.get_dtype())
 
     def peak_between(self, line_a: FreeIfNotReusedLine, line_b: AllocateLine):
@@ -3151,6 +3151,8 @@ class PythonWrapperCodegen(CodeGen):
                     self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
+                if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
+                    arg_str += ".item()"
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             # Make sure kernel launch under a device guard because models don't always run on device 0

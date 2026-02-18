@@ -35,7 +35,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
-from .constant import ConstantVariable, EnumVariable
+from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable, EnumVariable
 
 
 if TYPE_CHECKING:
@@ -237,7 +237,7 @@ class PlacementVariable(DistributedVariable):
             except AttributeError:
                 method = None
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}

@@ -384,6 +384,7 @@ def export_for_aoti_minifier(
                 return None
         raise AOTIMinifierError(e) from e
     # we should never reach here
+    # pyrefly: ignore [unreachable]
     return None
 
 

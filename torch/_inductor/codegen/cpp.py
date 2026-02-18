@@ -2379,7 +2379,8 @@ class CppKernel(Kernel):
 
     def size_hint(self):
         assert self.call_ranges is not None
-        return V.graph.sizevars.optimization_hint(sympy_product(self.call_ranges))
+        expr = sympy_product(self.call_ranges)
+        return V.graph.sizevars.optimization_hint(expr)
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         assert isinstance(self, CppKernelProxy)

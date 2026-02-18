@@ -583,6 +583,7 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
             return PropagateStatus.FAIL
 
         orig_chunk_dim = input_meta.chunk_dim
+        # pyrefly: ignore [bad-argument-type, bad-assignment]
         reverse_lookup: dict[int, int] = {v: k for k, v in enumerate(order)}
         new_chunk_dim = reverse_lookup[orig_chunk_dim]
 
