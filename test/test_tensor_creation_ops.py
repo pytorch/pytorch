@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     IS_ARM64,
     parametrize,
+    TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
@@ -382,6 +383,7 @@ class TestTensorCreation(TestCase):
             ):
                 torch.block_diag(torch.ones(2, 2).cpu(), torch.ones(2, 2, device=device))
 
+    @skipCPUIf(TEST_WITH_TORCHDYNAMO, "test doesn't currently work with dynamo on CPU")
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_block_diag_scipy(self, device):
         import scipy.linalg

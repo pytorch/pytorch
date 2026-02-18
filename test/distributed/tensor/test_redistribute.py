@@ -984,6 +984,34 @@ class RedistributeTest(DTensorTestBase):
             "Planner should collect all reduce ops from both src and dst",
         )
 
+    @with_comms
+    def test_redistribute_zero_size_shards(self):
+        # Adding this test to ensure sharding works when tensor size < mesh size.
+        # Tests correct redistribution with world size = 4, tensor dim size = 2,
+        # ranks 2 & 3 have empty local shards.
+        mesh = self.build_device_mesh()
+
+        full_tensor = torch.randn(2, 8, device=self.device_type)
+        dt = distribute_tensor(full_tensor, mesh, [Shard(0)])
+
+        # Verify some ranks have zero-size local tensors
+        if not self.is_local_tensor_enabled:
+            if self.rank < 2:
+                self.assertEqual(dt._local_tensor.shape, (1, 8))
+            else:
+                self.assertEqual(dt._local_tensor.shape, (0, 8))
+
+        # Test Shard(0) -> Replicate()
+        dt_rep = dt.redistribute(mesh, [Replicate()])
+        self.assertEqual(dt_rep._local_tensor.shape, (2, 8))
+        self.assertEqual(dt_rep.full_tensor(), dt.full_tensor())
+
+        # Test Shard(0) -> Shard(1)
+        dt_shard1 = dt.redistribute(mesh, [Shard(1)])
+        # With mesh=4 and dim 1 size=8, each rank has local shape (2, 2)
+        self.assertEqual(dt_shard1._local_tensor.shape, (2, 2))
+        self.assertEqual(dt_shard1.full_tensor(), dt.full_tensor())
+
 
 instantiate_parametrized_tests(RedistributeTest)
 
@@ -1731,7 +1759,7 @@ class DistributeWithStridedShardTest(DTensorTestBase):
             elif idx == 2:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]_S(0, 3)[1]S(0)[2]->S(0)[0]_S(0, 3)[1]R->S(0)RR->RRR->_S(0, 3)RR->_S(0, 3)[0]S(0)[1]R""",
+                    """S(0)[1]_S(0, 3)[0]S(0)[2]->S(0)[1]_S(0, 3)[0]R->R_S(0, 3)R->RRR->_S(0, 3)RR->_S(0, 3)[0]S(0)[1]R""",
                 )
             elif idx == 3:
                 self.assertExpectedInline(
