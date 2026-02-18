@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
-    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
@@ -145,7 +144,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
-    @skipIfRocm
+    @torch._inductor.config.patch({"layout_optimization": True})
+    @patch("torch.cuda.is_available", lambda: False)
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -5719,6 +5719,38 @@ class CPUReproTests(TestCase):
         FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
             code
         )
+
+    @config.patch(freezing=True)
+    def test_add_layernorm(self):
+        """
+        Original PR: https://github.com/pytorch/pytorch/pull/141766
+        """
+        from torch.testing._internal.common_quantization import (
+            _static_reference_quantized_linear_module,
+        )
+
+        class Model(torch.nn.Module):
+            def __init__(self, example_input):
+                super().__init__()
+                self.dense = _static_reference_quantized_linear_module(
+                    N=768, K=768, bias=True, example_input=example_input
+                )
+                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
+
+            def forward(self, context_layer, hidden_states):
+                attention_output = self.dense(context_layer)
+                hidden_states = attention_output + hidden_states
+                layer_output = self.layernorm(hidden_states)
+                return layer_output
+
+        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
+        model = Model(example_batch[0]).eval()
+        model = torch.export.export(model, example_batch, strict=True).module()
+
+        with torch.no_grad():
+            metrics.reset()
+            torch.compile(model)(*example_batch)
+            check_metrics_vec_kernel_count(3)
 
     def test_dropout(self):
         class Model(nn.Module):
