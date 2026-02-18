@@ -2506,6 +2506,11 @@ class eager_numerics:
 
     disable_ftz: bool = False
 
+    # Use inline PTX pow that matches CUDA's powf exactly.
+    # Triton's libdevice.pow uses FTZ (flush-to-zero) instructions which
+    # cause 1-3 ULP differences compared to CUDA's powf.
+    pow_precision: bool = False
+
 
 # Mode to emulate PyTorch eager numerics when doing lower precision compute
 # (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
