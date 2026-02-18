@@ -27,8 +27,6 @@ from ._fsdp_common import (
     DataParallelMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
-    resolve_shard_placement,
-    ShardPlacementFnResult,
 )
 
 
@@ -229,11 +227,12 @@ class FSDPParam:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
+        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
         self._module_info: ParamModuleInfo = module_info
+        self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         # pyrefly: ignore [read-only]
         self.device = device
@@ -243,7 +242,7 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        self._init_sharded_param(param, device, shard_placement_fn, mesh_info)
+        self._init_sharded_param(param, device, shard_placement_fn)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
@@ -263,19 +262,8 @@ class FSDPParam:
         self,
         param: nn.Parameter,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
-        mesh_info: DataParallelMeshInfo,
+        shard_placement_fn: Callable | None,
     ):
-        if callable(shard_placement_fn):
-            shard_result = resolve_shard_placement(
-                shard_placement_fn(param),
-                cast(FSDPMeshInfo, mesh_info),
-            )
-            self.mesh_info = shard_result.mesh_info
-            fsdp_placement = shard_result.placement
-        else:
-            self.mesh_info = mesh_info  # pyrefly: ignore[bad-assignment]
-            fsdp_placement = None
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
@@ -284,6 +272,7 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
+        fsdp_placement = shard_placement_fn(param) if shard_placement_fn else None
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
