@@ -3067,18 +3067,12 @@ class GuardBuilder(GuardBuilderBase):
                         if v is not None and i < len(size) and size[i] is None
                     ]
 
-                    # Only add the exclusion if the current input doesn't
-                    # match all excluded dims. If it does, this graph was
-                    # compiled to handle that input and the exclusion would
-                    # reject the compilation's own input.
-                    if dims_and_values and not all(
-                        value.size(d) == v for d, v in dims_and_values
-                    ):
+                    if dims_and_values:
 
                         def check_exclusion(x, dvs=dims_and_values):
                             return not all(x.size(d) == v for d, v in dvs)
 
-                        guard_manager.add_lambda_guard(
+                        guard_manager.add_exclusion_guard(
                             check_exclusion,
                             get_verbose_code_parts(
                                 f"excluded_sizes({excluded_sizes})", guard

@@ -154,6 +154,8 @@ void lookup(
     }
   }
 
+  CacheEntry* fallback = nullptr;
+
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
@@ -188,10 +190,23 @@ void lookup(
       }
     }
     if (valid) {
-      found = &cache_entry;
-      break;
+      // Check if an exclusion guard fired during evaluation.
+      // If so, remember this entry as a fallback and keep looking
+      // for a better (e.g. static) match.
+      if (torch::dynamo::get_root_guard_manager_exclusion_flag(
+              cache_entry.root_mgr)) {
+        if (!fallback) {
+          fallback = &cache_entry;
+        }
+      } else {
+        found = &cache_entry;
+        break;
+      }
     }
     ++index;
+  }
+  if (!found && fallback) {
+    found = fallback;
   }
   if (found) {
     if (use_lru) {
