@@ -61,6 +61,18 @@ quantized = torch.ops.quantized
 _quantized = torch.ops._quantized
 quantized_decomposed = torch.ops.quantized_decomposed
 
+# Ops that skip decomposition when emulate_precision_casts is enabled
+# to use the inductor lowering which preserves FMA semantics
+emulate_precision_decomps_to_exclude: OrderedSet[Any] = OrderedSet(
+    [
+        aten.addcmul,
+        aten.addcdiv,
+        aten.addcdiv_,
+        aten._foreach_addcmul.Scalar,
+        aten._foreach_addcdiv.Scalar,
+    ]
+)
+
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
@@ -131,6 +143,10 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
     aten.baddbmm,  # upcasts to fp32, perf issue
+    # FMA ops - we have lowerings that use FMA to match eager CUDA behavior
+    aten.lerp,
+    aten._foreach_lerp.Scalar,
+    aten._foreach_lerp.ScalarList,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -854,26 +870,6 @@ def _foreach_addcdiv_scalar(
     )
 
 
-@register_decomposition(aten._foreach_lerp.Scalar)
-def _foreach_lerp_scalar(
-    start_tensors: list[torch.Tensor],
-    end_tensors: list[torch.Tensor],
-    weight: torch.types.Number,
-) -> list[torch.Tensor]:
-    # Use inductor lowering which uses FMA to match eager CUDA behavior
-    return NotImplemented
-
-
-@register_decomposition(aten._foreach_lerp.ScalarList)
-def _foreach_lerp_scalarlist(
-    start_tensors: list[torch.Tensor],
-    end_tensors: list[torch.Tensor],
-    scalars: list[torch.types.Number],
-) -> list[torch.Tensor]:
-    # Use inductor lowering which uses FMA to match eager CUDA behavior
-    return NotImplemented
-
-
 @aten.miopen_batch_norm.default.py_impl(torch._C.DispatchKey.Autograd)
 @register_decomposition(aten.miopen_batch_norm)
 def miopen_batch_norm(
@@ -923,43 +919,18 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         return decompositions
     result = fast_random_decomps()
 
-    # Always skip lerp decompositions - we have a lowering that uses FMA to match
-    # eager CUDA behavior
-    ops_to_skip = OrderedSet(
-        [
-            aten.lerp,
-            aten._foreach_lerp.Scalar,
-            aten._foreach_lerp.ScalarList,
-        ]
-    )
-
     if config.emulate_precision_casts:
-        # When emulating precision casts, also skip decomposition of addcmul ops
-        # so that we use the inductor lowering which preserves FMA semantics.
-        # For _foreach_addcdiv, we use the native CUDA kernel.
-        # The decomposed version uses separate mul+add/div+add ops which don't match
-        # eager's FMA rounding behavior.
-        # We also skip addcdiv_ (inplace) to use the ATen kernel.
-        ops_to_skip.update(
-            [
-                aten.addcmul,
-                aten.addcdiv,
-                aten.addcdiv_,
-                aten._foreach_addcmul.Scalar,
-                aten._foreach_addcdiv.Scalar,
-            ]
-        )
+        # Skip decomposition for addcmul/addcdiv ops to use the inductor lowering
+        # which preserves FMA semantics
+        def should_skip(op: Any) -> bool:
+            if op in emulate_precision_decomps_to_exclude:
+                return True
+            if hasattr(op, "overloadpacket"):
+                return op.overloadpacket in emulate_precision_decomps_to_exclude
+            return False
 
-    def should_skip(op: Any) -> bool:
-        # Check if op is directly in the skip set
-        if op in ops_to_skip:
-            return True
-        # For OpOverload, also check if its OpOverloadPacket is in the skip set
-        if hasattr(op, "overloadpacket"):
-            return op.overloadpacket in ops_to_skip
-        return False
+        result = {k: v for k, v in result.items() if not should_skip(k)}
 
-    result = {k: v for k, v in result.items() if not should_skip(k)}
     return result
 
 

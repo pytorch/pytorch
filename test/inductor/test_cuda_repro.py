@@ -2718,15 +2718,28 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         weight = 0.1
         self.common(fn, [start, end, weight])
 
-    def test_pow_scalar_tensor_precision(self):
-        # Test that pow(scalar, tensor) matches eager. This works because
+    @config.patch({"compile_threads": 1})
+    def test_pow_scalar_tensor_precision_no_subprocess(self):
+        """Test pow precision without subprocess compilation (compile_threads=1)."""
+        self._test_pow_scalar_tensor_precision()
+
+    @config.patch({"compile_threads": 4, "worker_start_method": "fork"})
+    def test_pow_scalar_tensor_precision_with_subprocess(self):
+        """Test pow precision with subprocess compilation."""
+        self._test_pow_scalar_tensor_precision()
+
+    def _test_pow_scalar_tensor_precision(self):
+        # Test that pow(scalar, tensor) matches eager bitwise. This works because
         # inductor auto-detects and uses CUDA toolkit's libdevice instead of
         # Triton's bundled version, ensuring Triton's pow matches CUDA's powf.
         def fn(exp):
             return torch.pow(0.9, exp)
 
         exp = torch.arange(1, 101, device="cuda", dtype=torch.float32)
-        self.common(fn, [exp])
+
+        eager_result = fn(exp)
+        compiled_result = torch.compile(fn)(exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
     @config.patch("eager_numerics.division_rounding", True)
     def test_div_precision_rounding(self):
