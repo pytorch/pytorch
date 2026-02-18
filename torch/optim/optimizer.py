@@ -8,7 +8,7 @@ from collections.abc import Callable, Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
 from typing import Any, cast, overload, TypeAlias, TypeVar
-from typing_extensions import ParamSpec, Self
+from typing_extensions import deprecated, ParamSpec, Self
 
 import torch
 import torch.utils.hooks as hooks
@@ -494,6 +494,11 @@ class Optimizer:
                     stacklevel=2,
                 )
                 self._warned_capturable_if_run_uncaptured = True
+
+    # Backward compatibility alias for internal callers still using the old name.
+    _cuda_graph_capture_health_check = deprecated(
+        "Use _accelerator_graph_capture_health_check instead",
+    )(_accelerator_graph_capture_health_check)
 
     def _optimizer_step_code(self) -> None:
         """Entry point for `torch.profile.profiler`.
