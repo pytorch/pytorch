@@ -5362,6 +5362,10 @@ if not HAS_CUDA_AND_TRITON:
 if IS_S390X:
     skipped_tests.add("test_deep_reentrant")
 
+# clear_saved_tensors_on_access is incompatible with compiled autograd
+skipped_tests.add("test_clear_saved_tensors_on_access")
+skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
+
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")

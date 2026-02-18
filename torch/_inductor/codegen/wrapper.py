@@ -641,6 +641,7 @@ class KernelCallLine(WrapperLine):
     arg_types: list[str]
     triton: bool
     triton_meta: dict[str, Any]
+    inductor_meta: Optional[dict[str, Any]]
     device: torch.device
     graph_name: str
     original_fxnode_name: str
@@ -654,6 +655,7 @@ class KernelCallLine(WrapperLine):
             raw_keys=self.raw_keys,
             raw_args=self.raw_args,
             triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
             device=self.device,
             graph_name=self.graph_name,
             original_fxnode_name=self.original_fxnode_name,
@@ -1230,7 +1232,9 @@ class PythonWrapperCodegen(CodeGen):
         self.move_end = ")" if V.graph.cpp_wrapper else ""
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.user_defined_kernel_cache: dict[tuple[Any, ...], tuple[str, Any]] = {}
+        self.user_defined_kernel_cache: dict[
+            tuple[Any, ...], tuple[str, Any, dict[str, Any]]
+        ] = {}
         self.unbacked_symbol_decls: OrderedSet[str] = (
             OrderedSet()
         )  # str of sympy.Symbol
@@ -2471,6 +2475,8 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"{node.get_name()} = None")
 
     def benchmark_compiled_module(self, output):
+        """Write out codegen for benchmarking the output code"""
+
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
@@ -2496,14 +2502,12 @@ class PythonWrapperCodegen(CodeGen):
                     f'raise TypeError("Failed to pickle opaque type {type(value)} for variable {name}: {str(e)}")'
                 )
 
-        output.writelines(
-            ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
-        )
+        # Generate get_args() to create input tensors separately from benchmarking
+        output.writelines(["", "", "def get_args():"])
         with output.indent():
             output.splice(
                 """
                 from torch._dynamo.testing import rand_strided
-                from torch._inductor.utils import print_performance
                 """,
                 strip=True,
             )
@@ -2568,9 +2572,21 @@ class PythonWrapperCodegen(CodeGen):
                         value.get_dtype(),
                     )
 
-            call_str = f"call([{', '.join(V.graph.graph_inputs.keys())}])"
-            output.writeline(f"fn = lambda: {call_str}")
-            output.writeline("return print_performance(fn, times=times, repeat=repeat)")
+            output.writeline(f"return [{', '.join(V.graph.graph_inputs.keys())}]")
+
+        # Generate benchmark_compiled_module() that takes args as parameter
+        output.writelines(
+            ["", "", "def benchmark_compiled_module(args, times=10, repeat=10):"]
+        )
+        with output.indent():
+            output.splice(
+                """
+                from torch._inductor.utils import print_performance
+                fn = lambda: call(list(args))
+                return print_performance(fn, times=times, repeat=repeat)
+                """,
+                strip=True,
+            )
 
     def add_benchmark_harness(self, output):
         """
@@ -2586,7 +2602,11 @@ class PythonWrapperCodegen(CodeGen):
             output.writelines(
                 [
                     "from torch._inductor.wrapper_benchmark import compiled_module_main",
-                    f"compiled_module_main('{get_benchmark_name()}', benchmark_compiled_module)",
+                    "args = get_args()",
+                    (
+                        f"compiled_module_main('{get_benchmark_name()}', "
+                        "lambda times, repeat: benchmark_compiled_module(args, times=times, repeat=repeat))"
+                    ),
                 ]
             )
 
@@ -2875,8 +2895,13 @@ class PythonWrapperCodegen(CodeGen):
         cache_key.extend(str(inductor_meta))
         cache_key = tuple(cache_key)
         if cache_key in self.user_defined_kernel_cache:
+            name, triton_meta, cached_inductor_meta = self.user_defined_kernel_cache[
+                cache_key
+            ]
             return (
-                *self.user_defined_kernel_cache[cache_key],
+                name,
+                triton_meta,
+                cached_inductor_meta,
                 extra_launcher_call_args,
             )
 
@@ -2926,8 +2951,8 @@ class PythonWrapperCodegen(CodeGen):
             metadata,
         )
         # Add to the cache for the next use
-        self.user_defined_kernel_cache[cache_key] = (name, triton_meta)
-        return name, triton_meta, extra_launcher_call_args
+        self.user_defined_kernel_cache[cache_key] = (name, triton_meta, inductor_meta)
+        return name, triton_meta, inductor_meta, extra_launcher_call_args
 
     def generate_numel_expr(self, kernel_name: str, tree, suffix: Optional[str] = None):
         sym_name = f"{kernel_name}_{tree.prefix}numel"
@@ -3149,6 +3174,7 @@ class PythonWrapperCodegen(CodeGen):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        inductor_meta=None,
         original_fxnode_name=None,
     ):
         """
@@ -3183,6 +3209,7 @@ class PythonWrapperCodegen(CodeGen):
                 triton=triton,
                 # pyrefly: ignore [bad-argument-type]
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 device=device,
                 graph_name=V.graph.name,
                 # pyrefly: ignore [bad-argument-type]
@@ -3201,6 +3228,7 @@ class PythonWrapperCodegen(CodeGen):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
     ):
@@ -3347,6 +3375,8 @@ class PythonWrapperCodegen(CodeGen):
                     self.kernel_autotune_example_args[arg] = (arg_str, kernel_name)
                 else:
                     arg_str = self.generate_example_arg_value(arg, arg_type, raw_arg)
+                if isinstance(arg, str) and should_unwrap_unspec_arg(arg):
+                    arg_str += ".item()"
                 all_args.append(arg_str if key is None else f"{key}={arg_str}")
 
             # Make sure kernel launch under a device guard because models don't always run on device 0
