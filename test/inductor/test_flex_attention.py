@@ -225,11 +225,7 @@ class SubstringSet:
         return item in self.items
 
 
-DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
-    [
-        "cuda",
-    ]
-)
+DEVICE_SUPPORTS_BACKWARDS = SubstringSet(["cuda", "xpu"])
 
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
@@ -969,7 +965,6 @@ class TestFlexAttention(InductorTestCase):
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
-
         if requires_grad:
             backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=device)
             golden_out1.backward(backward_grad1.to(torch.float64))
@@ -1448,6 +1443,60 @@ class TestFlexAttention(InductorTestCase):
 
         for seqlen in [a, b]:
             create_block_mask_from_seqlens(seqlen, seqlen)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_create_block_mask_recompile_persistent_reduction_oob(self, device):
+        """Recompiling create_block_mask with a much smaller Q_LEN must not OOB.
+
+        When Q_LEN shrinks enough that (Q_LEN+15)//16 == 1 for all guarded
+        values, _get_persistent_RBLOCK must return R0_BLOCK=1 (not 2) so
+        the constant all-True mask does not read out of bounds.
+        """
+        compiled_create_block_mask = torch.compile(create_block_mask)
+
+        def causal(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        KV_LEN = 2048
+
+        compiled_create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=7896,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+
+        compiled_bm = compiled_create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=2,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+        eager_bm = create_block_mask(
+            causal,
+            B=None,
+            H=None,
+            Q_LEN=2,
+            KV_LEN=KV_LEN,
+            device=device,
+            BLOCK_SIZE=(16, 16),
+        )
+
+        torch.testing.assert_close(
+            compiled_bm.full_q_num_blocks,
+            eager_bm.full_q_num_blocks,
+        )
+        torch.testing.assert_close(
+            compiled_bm.q_num_blocks,
+            eager_bm.q_num_blocks,
+        )
 
     @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
@@ -5294,11 +5343,13 @@ class GraphModule(torch.nn.Module):
     @skip_on_cpu
     @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
     def test_tma_with_customer_kernel_options(self, device):
+        requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         make_tensor = functools.partial(
             torch.ones,
             (1, 1, 256, 128),
             device=device,
             dtype=torch.bfloat16,
+            requires_grad=requires_grad,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
@@ -5317,6 +5368,40 @@ class GraphModule(torch.nn.Module):
 
         # vanilla compiled vs TMA compiled
         torch.testing.assert_close(out_tma_compiled, out_compiled, atol=2e-1, rtol=2e-1)
+
+        if requires_grad:
+            grad_output = torch.randn_like(out_compiled)
+
+            out_compiled.backward(grad_output)
+            compiled_grads = [query.grad, key.grad, value.grad]
+            query.grad = None
+            key.grad = None
+            value.grad = None
+
+            out_tma_compiled.backward(grad_output)
+            tma_grads = [query.grad, key.grad, value.grad]
+            query.grad = None
+            key.grad = None
+            value.grad = None
+
+            torch.testing.assert_close(
+                compiled_grads[0],
+                tma_grads[0],
+                atol=2e-1,
+                rtol=2e-1,
+            )
+            torch.testing.assert_close(
+                compiled_grads[1],
+                tma_grads[1],
+                atol=2e-1,
+                rtol=2e-1,
+            )
+            torch.testing.assert_close(
+                compiled_grads[2],
+                tma_grads[2],
+                atol=2e-1,
+                rtol=2e-1,
+            )
 
     @supported_platform
     @skip_on_cpu
@@ -6867,7 +6952,8 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 supports_learnable_bias = unittest.skipUnless(
     (
-        (torch.cuda.is_available() and has_triton())
+        (torch.xpu.is_available() and has_triton())
+        or (torch.cuda.is_available() and has_triton())
         and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
     ),
     "Requires Triton + A100 or Triton + ROCm",
@@ -7656,22 +7742,39 @@ class TestLearnableBiases(InductorTestCase):
                 self.assertIsInstance(log_data, list)
                 self.assertEqual(len(log_data), 2)
 
-                keys_seen = [next(iter(entry.keys())) for entry in log_data]
+                # Check that we have both forward and backward entries
+                kernel_types_seen = [entry["kernel_type"] for entry in log_data]
+                self.assertIn("forward", kernel_types_seen)
+                self.assertIn("backward", kernel_types_seen)
 
-                expected_fwd_key = "('forward', 1, 2, 2, 128, 128, 64, 64)"
-                expected_bwd_key = "('backward', 1, 2, 2, 128, 128, 64, 64)"
-
-                self.assertIn(expected_fwd_key, keys_seen)
-                self.assertIn(expected_bwd_key, keys_seen)
+                # Expected values from the test inputs
+                expected_query_shape = "[1, 2, 128, 64]"
+                expected_key_shape = "[1, 2, 128, 64]"
+                expected_value_shape = "[1, 2, 128, 64]"
+                expected_B = 1
+                expected_Hq = 2
+                expected_Hkv = 2
+                expected_seq_len_q = 128
+                expected_seq_len_kv = 128
+                expected_qk_head_dim = 64
+                expected_v_head_dim = 64
 
                 for entry in log_data:
                     self.assertIsInstance(entry, dict)
-                    self.assertEqual(len(entry), 1)
+                    # New format has: query_shape, key_shape, value_shape, kernel_type, choices
+                    self.assertIn("kernel_type", entry)
+                    self.assertIn("choices", entry)
+                    self.assertIn("query_shape", entry)
+                    self.assertIn("key_shape", entry)
+                    self.assertIn("value_shape", entry)
 
-                    dims_key = next(iter(entry.keys()))
-                    choices = entry[dims_key]
+                    # Check shape values
+                    self.assertEqual(entry["query_shape"], expected_query_shape)
+                    self.assertEqual(entry["key_shape"], expected_key_shape)
+                    self.assertEqual(entry["value_shape"], expected_value_shape)
 
-                    kernel_type = eval(dims_key)[0]
+                    kernel_type = entry["kernel_type"]
+                    choices = entry["choices"]
 
                     self.assertIsInstance(choices, list)
                     self.assertGreater(len(choices), 0)
@@ -7683,6 +7786,25 @@ class TestLearnableBiases(InductorTestCase):
                         if choice["type"] == "triton":
                             self.assertIn("num_warps", choice)
                             self.assertIn("num_stages", choice)
+
+                            # Check numerical values in each choice
+                            self.assertIn("B", choice)
+                            self.assertIn("Hq", choice)
+                            self.assertIn("Hkv", choice)
+                            self.assertIn("seq_len_q", choice)
+                            self.assertIn("seq_len_kv", choice)
+                            self.assertIn("qk_head_dim", choice)
+                            self.assertIn("v_head_dim", choice)
+
+                            self.assertEqual(choice["B"], expected_B)
+                            self.assertEqual(choice["Hq"], expected_Hq)
+                            self.assertEqual(choice["Hkv"], expected_Hkv)
+                            self.assertEqual(choice["seq_len_q"], expected_seq_len_q)
+                            self.assertEqual(choice["seq_len_kv"], expected_seq_len_kv)
+                            self.assertEqual(
+                                choice["qk_head_dim"], expected_qk_head_dim
+                            )
+                            self.assertEqual(choice["v_head_dim"], expected_v_head_dim)
 
                             if kernel_type == "forward":
                                 self.assertIn("BLOCK_M", choice)

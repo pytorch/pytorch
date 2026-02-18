@@ -33,6 +33,7 @@ from torch._inductor.codecache import (
     get_hash,
     PyCodeCache,
 )
+from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.utils import (
     do_bench_using_profiling,
     get_gpu_type,
@@ -43,6 +44,12 @@ from torch._inductor.utils import (
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
 
+
+# Inactivity timeout for AutotuneProcessPool in seconds.
+# Default: 600 seconds (10 minutes). Set to 0 to disable.
+AUTOTUNE_POOL_INACTIVITY_TIMEOUT = int(
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_POOL_INACTIVITY_TIMEOUT", "600")
+)
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -805,7 +812,7 @@ class ExternKernelCPUBenchmarkRequest(
     pass
 
 
-class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     """
     A class to handle CUDA (CUTLASS) benchmark requests. This class is for
     managing the lifecycle of a CUDA kernel benchmark, including compiling
@@ -822,6 +829,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
+        device_type: str = "cuda",
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
@@ -831,7 +839,12 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
-        self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+        self.device_type = device_type
+        self.codecache_cls = CUDACodeCache
+        self.device_interface = get_interface_for_device(device_type)
+        self.hash_key, self.source_file = self.codecache_cls.write(
+            self.source_code, "so"
+        )
 
     def precompile(self):
         """
@@ -846,7 +859,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
         """
-        Create a function to run the CUDA kernel with the given input and output tensors.
+        Create a function to run the CUDA/XPU kernel with the given input and output tensors.
         """
 
         self.ensure_dll_loaded()
@@ -861,7 +874,8 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             args,
             self.extra_args,
         )
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+        current_stream = self.device_interface.current_stream()
+        stream_ptr = c_void_p(current_stream.cuda_stream)  # type: ignore[attr-defined]
         run_method = getattr(self.DLL, self.kernel_name)
         workspace_ptr = c_void_p(0)
         if self.workspace_size > 0:
@@ -904,7 +918,8 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+        current_stream = self.device_interface.current_stream()
+        stream_ptr = c_void_p(current_stream.cuda_stream)  # type: ignore[attr-defined]
 
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
@@ -918,7 +933,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             None,  # null workspace ptr
             stream_ptr,
         )
-        torch.cuda.synchronize()  # shake out any CUDA errors
+        self.device_interface.synchronize()  # shake out any device errors
         self.workspace_size = c_workspace_size.value
         autotuning_log.debug(
             "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",  # noqa: B950
@@ -934,7 +949,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
 
     def ensure_dll_loaded(self):
         if self.DLL is None:
-            self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
+            self.DLL, self.hash_key, self.source_file = self.codecache_cls.load(
                 self.source_code, "so"
             )
 
@@ -1073,11 +1088,13 @@ class AutotuneProcessPool:
 
     _instance: Optional[AutotuneProcessPool] = None
     _lock: threading.Lock = threading.Lock()
+    _shutdown_for_inactivity: bool = False
 
     def __init__(self):
         self._pool: ProcessPoolExecutor | None = self._init_pool()
         self._warmup_future: Future[Any] | None = None
         self._warmup_start_time: float | None = None
+        self._timer: Timer | None = self._init_timer()
 
     @classmethod
     def get_instance(cls):
@@ -1092,9 +1109,39 @@ class AutotuneProcessPool:
     @property
     def pool(self):
         """Get the process pool."""
+        assert config.pipeline_max_autotune_gemm, (
+            "To use AutotuneProcessPool, pipeline_max_autotune_gemm must be enabled"
+        )
         if self._pool is None:
             self._pool = self._init_pool()
+            self._timer = self._init_timer()
         return self._pool
+
+    def _init_timer(self) -> Timer | None:
+        if AUTOTUNE_POOL_INACTIVITY_TIMEOUT > 0:
+            return Timer(AUTOTUNE_POOL_INACTIVITY_TIMEOUT, self._on_inactivity_timeout)
+        return None
+
+    def _record_activity(self) -> None:
+        if self._timer is not None:
+            self._timer.record_call()
+
+    def _on_inactivity_timeout(self) -> None:
+        autotuning_log.info(
+            "AutotuneProcessPool shutting down due to inactivity (timeout=%ds)",
+            AUTOTUNE_POOL_INACTIVITY_TIMEOUT,
+        )
+
+        with self._lock:
+            if self._pool is not None:
+                self._pool.shutdown(wait=False)
+                self._pool = None
+            self._timer = None
+
+            # Mark that the pool was shut down for inactivity.
+            # This prevents the pool from being recreated on recompiles
+            # which likely do not require large amounts of autotuning.
+            AutotuneProcessPool._shutdown_for_inactivity = True
 
     def _init_pool(self):
         """
@@ -1144,7 +1191,7 @@ class AutotuneProcessPool:
 
         try:
             result = future.result()
-            autotuning_log.error(
+            autotuning_log.info(
                 "AutotuneProcessPool warmup completed successfully in %.4f seconds: %s",
                 warmup_elapsed_time,
                 result,
@@ -1158,10 +1205,16 @@ class AutotuneProcessPool:
 
     def submit(self, fn, *args, **kwargs) -> Future[Any]:
         """Submit a job to the pool and return a Future."""
-        return self.pool.submit(fn, *args, **kwargs)
+        future = self.pool.submit(fn, *args, **kwargs)
+        if self._timer is not None:
+            future.add_done_callback(lambda _: self._record_activity())
+        return future
 
     def _shutdown(self):
         """Shutdown the pool on exit."""
+        if self._timer is not None:
+            self._timer.quit()
+            self._timer = None
         if self._pool is not None:
             self._pool.shutdown(wait=False)
             self._pool = None
@@ -1174,6 +1227,13 @@ class AutotuneProcessPool:
                 if cls._instance is not None:
                     cls._instance._shutdown()
                     cls._instance = None
+
+
+def use_pipelined_autotuning() -> bool:
+    return (
+        config.pipeline_max_autotune_gemm
+        and not AutotuneProcessPool._shutdown_for_inactivity
+    )
 
 
 def _init_autotune_subprocess(allow_tf32: bool) -> bool:
