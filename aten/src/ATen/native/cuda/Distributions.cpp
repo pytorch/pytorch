@@ -28,6 +28,14 @@ Tensor _s_poisson_cuda(const Tensor& lambda, std::optional<Generator> gen_) {
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor _s_binomial_cuda(const Tensor& count, const Tensor& prob, std::optional<Generator> gen_) {
+  TORCH_CHECK_VALUE(
+      at::isFloatingType(count.scalar_type()),
+      "binomial only supports floating-point dtypes for count, got: ",
+      count.scalar_type());
+  TORCH_CHECK_VALUE(
+      at::isFloatingType(prob.scalar_type()),
+      "binomial only supports floating-point dtypes for prob, got: ",
+      prob.scalar_type());
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
   Tensor ret = at::empty(count.sizes(), count.options());
   at::TensorIterator iter = at::TensorIteratorConfig()
