@@ -170,6 +170,7 @@ from .variables.user_defined import UserDefinedDictVariable
 if TYPE_CHECKING:
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._inductor import _CudagraphAnnotation
     from torch.multiprocessing.reductions import StorageWeakRef
 
 log = logging.getLogger(__name__)
@@ -627,13 +628,10 @@ class OutputGraph(OutputGraphCommon):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # Cudagraph annotation: check if the top-level function has the attribute.
-        # For inlined functions, this is set during inlining in
-        # InliningInstructionTranslator.build_inline_tracer.
-        self.cudagraph_annotation = None
-        fn = global_scope.get(f_code.co_name)
-        if fn is not None and hasattr(fn, "_cudagraph_annotation"):
-            self.cudagraph_annotation = fn._cudagraph_annotation
+        # Cudagraph annotation is set during inlining in
+        # InliningInstructionTranslator.build_inline_tracer when a decorated
+        # function is inlined.
+        self.cudagraph_annotation: Optional[_CudagraphAnnotation] = None
 
         self.region_tracker = GraphRegionTracker()
 

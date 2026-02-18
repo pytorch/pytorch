@@ -885,6 +885,12 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
 
+        # Only include cudagraph annotation when it could change behavior
+        if config.triton.cudagraphs:
+            self.cudagraph_annotation = (
+                gm.meta.get("cudagraph_annotation") if gm is not None else None
+            )
+
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()

@@ -1343,6 +1343,46 @@ def error_on_graph_break(
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
 
 
+class CudagraphDisableContextManager:
+    """Context manager that disables cudagraph recording during tracing."""
+
+    def __init__(self, fwd: bool = True, bwd: bool = True) -> None:
+        self.fwd = fwd
+        self.bwd = bwd
+
+    __call__ = wrap_dunder_call_ctx_manager
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        pass
+
+
+def disable_cudagraphs(
+    fwd: bool = True, bwd: bool = True
+) -> CudagraphDisableContextManager:
+    """
+    Context manager/decorator to disable cudagraph recording for compiled graphs.
+
+    When used as a context manager, disables cudagraphs for all graph segments
+    within the block (including across graph breaks).
+
+    When used as a decorator, marks a function so that any compiled graph
+    inlining it will have cudagraphs disabled.
+
+    Args:
+        fwd: If True, disable cudagraphs for forward pass
+        bwd: If True, disable cudagraphs for backward pass
+    """
+    return CudagraphDisableContextManager(fwd=fwd, bwd=bwd)
+
+
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
     """
     Check if a method is marked as `dynamo_disable` recursively. It returns:

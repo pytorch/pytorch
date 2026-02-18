@@ -447,7 +447,6 @@ def standalone_compile(
 
 
 import dataclasses
-from collections.abc import Callable
 
 
 @dataclasses.dataclass
@@ -455,32 +454,3 @@ class _CudagraphAnnotation:
     mode: str
     fwd: bool
     bwd: bool
-
-
-class _disable_cudagraphs:
-    """Decorator to disable cudagraph recording for compiled graphs.
-
-    When a compiled function inlines a call to a decorated function, the
-    containing graph segment will skip cudagraph recording.  This is
-    per-graph: other graph segments (e.g. after a graph break) are
-    unaffected unless they also inline a decorated function.
-
-    Example::
-
-        @torch._inductor._disable_cudagraphs()
-        def my_fn(x):
-            return x + 1
-
-        @torch.compile(mode="reduce-overhead")
-        def model(x):
-            y = my_fn(x)       # this graph segment skips cudagraphs
-            torch._dynamo.graph_break()
-            return y * 2        # this graph segment uses cudagraphs
-    """
-
-    def __init__(self, *, fwd: bool = True, bwd: bool = True) -> None:
-        self._annotation = _CudagraphAnnotation(mode="disable", fwd=fwd, bwd=bwd)
-
-    def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
-        fn._cudagraph_annotation = self._annotation  # type: ignore[attr-defined]
-        return fn
