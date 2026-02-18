@@ -40,7 +40,7 @@ void sortKeyValueInplace(
       sortCommon<idx_unsigned_t>(SmallBitonicSort{}, key, value, dim, descending);
   #if HAS_WARP_MERGE_SORT()
     } else if (sort_size <= 128) {
-      sortCommon<idx_unsigned_t>(WarpMergeSort<128>{}, key, value_viewed, dim, descending);
+      sortCommon<idx_unsigned_t>(WarpMergeSort<128>{}, key, value, dim, descending);
   #endif
     } else {
       sortCommon<idx_unsigned_t>(MediumRadixSort{}, key, value, dim, descending);
