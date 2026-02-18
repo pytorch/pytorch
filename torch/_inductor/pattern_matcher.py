@@ -64,7 +64,6 @@ from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
-from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.traceback import preserve_node_meta
@@ -76,8 +75,8 @@ from .._functorch.partitioners import default_partition
 from .._subclasses import FakeTensor, FakeTensorMode
 from ..fx import Transformer
 from . import config
-from .fx_utils import (
-    _args,
+from .decomposition import select_decomp_table
+from .fx_utils import (  # noqa: F401
     compute_mutation_region_ids,
     extract_target,
     filter_nodes,
@@ -89,7 +88,6 @@ from .fx_utils import (
     should_compute_mutation_region_ids,
     stable_topological_sort,
 )
-from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
 
 

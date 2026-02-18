@@ -26,8 +26,8 @@ from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import (
-    FakeTensorUpdater,
     apply_pass_to_subgraphs,
+    FakeTensorUpdater,
     get_fake_args_kwargs,
     get_node_storage,
     same_meta,
