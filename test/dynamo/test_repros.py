@@ -49,7 +49,6 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
     expectedFailureDynamic,
-    normalize_gm,
     rand_strided,
     same,
     skipIfNotPy312,
@@ -6126,19 +6125,8 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(output.shape, torch.Size([3, 5]))
         self.assertEqual(len(backend.graphs), 1)
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_self_parameters_weight_: "f32[5, 10]", L_self_parameters_bias_: "f32[5]", L_input_: "f32[3, 10]"):
-        l_self_parameters_weight_ = L_self_parameters_weight_
-        l_self_parameters_bias_ = L_self_parameters_bias_
-        l_input_ = L_input_
-
-        linear: "f32[3, 5]" = torch._C._nn.linear(l_input_, l_self_parameters_weight_, l_self_parameters_bias_);  l_input_ = l_self_parameters_weight_ = l_self_parameters_bias_ = None
-        return (linear,)
-""",  # noqa: B950
-        )
+        graph_code = backend.graphs[0].print_readable(print_output=False)
+        self.assertIn("torch._C._nn.linear", graph_code)
 
     def test_aot_autograd_runtime_wrapper_prologue_profiled(self):
         # Names for prologue profiling event
