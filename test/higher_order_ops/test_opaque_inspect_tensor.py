@@ -1,5 +1,5 @@
 # Owner(s): ["module: higher order operators"]
-"""Tests for compile_print and make_compile_print."""
+"""Tests for opaque_inspect_tensor and make_opaque_inspect_tensor_fn."""
 
 from collections.abc import Callable
 from contextlib import redirect_stdout
@@ -12,12 +12,13 @@ import torch
 import torch.distributed as dist
 from functorch.compile import aot_function, make_boxed_func
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch._higher_order_ops.compile_print_wrapper import (
-    compile_print,
-    make_compile_print,
-)
 from torch._higher_order_ops.effects import with_effects
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
+from torch._higher_order_ops.opaque_inspect_tensor import (
+    make_opaque_inspect_tensor_fn,
+    opaque_inspect_tensor,
+)
+from torch.autograd import Function
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -63,7 +64,7 @@ def run_eager(
 ) -> RunResult:
     fwd_rec: list[torch.Size] = []
     bwd_rec: list[torch.Size] = []
-    cp = make_compile_print(
+    cp = make_opaque_inspect_tensor_fn(
         fwd_f=lambda t: fwd_rec.append(t.shape),
         bwd_f=lambda t: bwd_rec.append(t.shape),
     )
@@ -84,7 +85,7 @@ def run_compile(
 ) -> RunResult:
     fwd_rec: list[torch.Size] = []
     bwd_rec: list[torch.Size] = []
-    cp = make_compile_print(
+    cp = make_opaque_inspect_tensor_fn(
         fwd_f=lambda t: fwd_rec.append(t.shape),
         bwd_f=lambda t: bwd_rec.append(t.shape),
     )
@@ -105,7 +106,7 @@ def run_compile(
 def run_make_fx(make_fn: MakeFn, inputs: list[torch.Tensor]) -> RunResult:
     fwd_rec: list[torch.Size] = []
     bwd_rec: list[torch.Size] = []
-    cp = make_compile_print(
+    cp = make_opaque_inspect_tensor_fn(
         fwd_f=lambda t: fwd_rec.append(t.shape),
         bwd_f=lambda t: bwd_rec.append(t.shape),
     )
@@ -130,7 +131,7 @@ def run_aot_function(
 ) -> RunResult:
     fwd_rec: list[torch.Size] = []
     bwd_rec: list[torch.Size] = []
-    cp = make_compile_print(
+    cp = make_opaque_inspect_tensor_fn(
         fwd_f=lambda t: fwd_rec.append(t.shape),
         bwd_f=lambda t: bwd_rec.append(t.shape),
     )
@@ -160,8 +161,8 @@ def run_aot_function(
     )
 
 
-@skipIfTorchDynamo("compile_print tests manage their own compilation")
-class TestCompilePrint(TestCase):
+@skipIfTorchDynamo("opaque_inspect_tensor tests manage their own compilation")
+class TestOpaqueInspectTensor(TestCase):
     def test_single_tensor(self):
         def make_fn(cp):
             def f(x):
@@ -274,7 +275,7 @@ class f(torch.nn.Module):
         _tree_spec_constant1 = self._tree_spec_constant1
         _tree_spec_constant2 = self._tree_spec_constant2
         invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, x_1, '', None, requires_grad_indices = ());  _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = None
-        getitem: "f32[]" = invoke_leaf_function[0];  invoke_leaf_function = getitem = None
+        getitem = invoke_leaf_function[0];  invoke_leaf_function = getitem = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(x_1);  x_1 = None
         return sum_1
 """,  # noqa: B950
@@ -329,7 +330,7 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_compile_graph_has_opaque_node(self):
-        cp = make_compile_print(
+        cp = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: None,
             bwd_f=lambda t: None,
         )
@@ -377,7 +378,7 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_compile_graph_has_opaque_node_in_bw(self):
-        cp = make_compile_print(
+        cp = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: None,
             bwd_f=lambda t: None,
         )
@@ -471,7 +472,7 @@ class GraphModule(torch.nn.Module):
 
         # Eager mode: fwd and bwd both call print(tensor)
         inputs = [torch.randn(3, 3, requires_grad=True)]
-        cp = make_compile_print(
+        cp = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: print("fwd", t),
             bwd_f=lambda t: print("bwd", t),
         )
@@ -486,7 +487,7 @@ class GraphModule(torch.nn.Module):
 
         # torch.compile mode
         inputs = [torch.randn(3, 3, requires_grad=True)]
-        cp = make_compile_print(
+        cp = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: print("fwd", t),
             bwd_f=lambda t: print("bwd", t),
         )
@@ -504,7 +505,7 @@ class GraphModule(torch.nn.Module):
 
         # aot_function mode
         inputs = [torch.randn(3, 3, requires_grad=True)]
-        cp = make_compile_print(
+        cp = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: print("fwd", t),
             bwd_f=lambda t: print("bwd", t),
         )
@@ -516,8 +517,8 @@ class GraphModule(torch.nn.Module):
         self.assertIn("bwd", output)
         self.assertGreaterEqual(output.count("tensor("), 2)
 
-    def test_multiple_compile_prints(self):
-        """Two separate make_compile_print instances in the same function."""
+    def test_multiple_opaque_inspect_tensors(self):
+        """Two separate make_opaque_inspect_tensor_fn instances in the same function."""
 
         def make_fn(cp1, cp2):
             def f(x, y):
@@ -535,11 +536,11 @@ class GraphModule(torch.nn.Module):
         # Eager
         fwd1, bwd1 = [], []
         fwd2, bwd2 = [], []
-        cp1 = make_compile_print(
+        cp1 = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: fwd1.append(t.shape),
             bwd_f=lambda t: bwd1.append(t.shape),
         )
-        cp2 = make_compile_print(
+        cp2 = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: fwd2.append(t.shape),
             bwd_f=lambda t: bwd2.append(t.shape),
         )
@@ -555,11 +556,11 @@ class GraphModule(torch.nn.Module):
 
         # Compile
         fwd1, bwd1, fwd2, bwd2 = [], [], [], []
-        cp1 = make_compile_print(
+        cp1 = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: fwd1.append(t.shape),
             bwd_f=lambda t: bwd1.append(t.shape),
         )
-        cp2 = make_compile_print(
+        cp2 = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: fwd2.append(t.shape),
             bwd_f=lambda t: bwd2.append(t.shape),
         )
@@ -577,11 +578,11 @@ class GraphModule(torch.nn.Module):
 
         # aot_function
         fwd1, bwd1, fwd2, bwd2 = [], [], [], []
-        cp1 = make_compile_print(
+        cp1 = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: fwd1.append(t.shape),
             bwd_f=lambda t: bwd1.append(t.shape),
         )
-        cp2 = make_compile_print(
+        cp2 = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: fwd2.append(t.shape),
             bwd_f=lambda t: bwd2.append(t.shape),
         )
@@ -603,7 +604,7 @@ class GraphModule(torch.nn.Module):
 
     def test_tag_printing(self):
         """tag kwarg prints [tag][fwd] and [tag][bwd] labels."""
-        cp = make_compile_print(
+        cp = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: None,
             bwd_f=lambda t: None,
         )
@@ -635,7 +636,7 @@ class GraphModule(torch.nn.Module):
 
     def test_multiple_tags(self):
         """Two cp calls with different tags in the same function."""
-        cp = make_compile_print(
+        cp = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: None,
             bwd_f=lambda t: None,
         )
@@ -672,17 +673,99 @@ class GraphModule(torch.nn.Module):
         self.assertIn("[A][bwd]", output)
         self.assertIn("[B][bwd]", output)
 
+    def test_phase_in_autograd_function(self):
+        """phase='bwd' inside autograd Function.backward uses bwd_f and tags [bwd]."""
+        fwd_rec: list[torch.Size] = []
+        bwd_rec: list[torch.Size] = []
+        cp = make_opaque_inspect_tensor_fn(
+            fwd_f=lambda t: fwd_rec.append(t.shape),
+            bwd_f=lambda t: bwd_rec.append(t.shape),
+        )
 
-@skipIfTorchDynamo("compile_print tests manage their own compilation")
-class TestCompilePrintEagerOnly(TestCase):
+        class MyReLU(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                out = x.clamp(min=0)
+                cp(x, tag="my_relu", phase="fwd")
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                cp(grad_output, tag="my_relu", phase="bwd")
+                return grad_output * (x > 0).float()
+
+        def fn(x):
+            return MyReLU.apply(x).sum()
+
+        inputs = [torch.randn(3, 3, requires_grad=True)]
+
+        # Eager
+        fwd_rec.clear()
+        bwd_rec.clear()
+        x = inputs[0].clone().detach().requires_grad_(True)
+        buf = StringIO()
+        with redirect_stdout(buf):
+            eager_out = fn(x)
+            eager_out.backward()
+        output = buf.getvalue()
+        self.assertIn("[my_relu][fwd]", output)
+        self.assertIn("[my_relu][bwd]", output)
+        self.assertEqual(len(fwd_rec), 1)
+        # bwd_rec gets 1 from the explicit phase="bwd" call only;
+        # phase="fwd" does not register backward hooks.
+        self.assertEqual(len(bwd_rec), 1)
+        eager_grad = x.grad.clone()
+
+        # torch.compile
+        fwd_rec.clear()
+        bwd_rec.clear()
+        x2 = inputs[0].clone().detach().requires_grad_(True)
+        buf = StringIO()
+        with redirect_stdout(buf):
+            compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            compiled_out = compiled_fn(x2)
+            compiled_out.backward()
+        output = buf.getvalue()
+        self.assertIn("[my_relu][fwd]", output)
+        self.assertIn("[my_relu][bwd]", output)
+        self.assertEqual(len(fwd_rec), 1)
+        self.assertEqual(len(bwd_rec), 1)
+        self.assertEqual(eager_out.detach(), compiled_out.detach())
+        self.assertEqual(eager_grad, x2.grad)
+
+        # aot_function
+        fwd_rec.clear()
+        bwd_rec.clear()
+        x3 = inputs[0].clone().detach().requires_grad_(True)
+        compiled_fn = aot_function(fn, fw_compiler=lambda g, _: make_boxed_func(g))
+        # First call triggers tracing
+        fwd_rec.clear()
+        bwd_rec.clear()
+        buf = StringIO()
+        with redirect_stdout(buf):
+            aot_out = compiled_fn(x3)
+            aot_out.backward()
+        output = buf.getvalue()
+        self.assertIn("[my_relu][fwd]", output)
+        self.assertIn("[my_relu][bwd]", output)
+        self.assertEqual(len(fwd_rec), 1)
+        self.assertEqual(len(bwd_rec), 1)
+        self.assertEqual(eager_out.detach(), aot_out.detach())
+        self.assertEqual(eager_grad, x3.grad)
+
+
+@skipIfTorchDynamo("opaque_inspect_tensor tests manage their own compilation")
+class TestOpaqueInspectTensorEagerOnly(TestCase):
     def test_returns_none(self):
-        cp = make_compile_print(fwd_f=lambda t: None, bwd_f=lambda t: None)
+        cp = make_opaque_inspect_tensor_fn(fwd_f=lambda t: None, bwd_f=lambda t: None)
         result = cp(torch.randn(3, 3))
         self.assertIsNone(result)
 
-    def test_convenience_compile_print(self):
+    def test_convenience_opaque_inspect_tensor(self):
         recorded = []
-        result = compile_print(
+        result = opaque_inspect_tensor(
             lambda t: recorded.append(t.shape),
             lambda t: None,
             torch.randn(2, 2),
@@ -691,8 +774,8 @@ class TestCompilePrintEagerOnly(TestCase):
         self.assertEqual(len(recorded), 1)
 
 
-@skipIfTorchDynamo("compile_print tests manage their own compilation")
-class TestCompilePrintDistributed(TestCase):
+@skipIfTorchDynamo("opaque_inspect_tensor tests manage their own compilation")
+class TestOpaqueInspectTensorDistributed(TestCase):
     """Tests for rank-aware tag printing using the fake distributed backend.
 
     Each test runs for both rank 0 and rank 1 via subTest, reinitializing
@@ -713,7 +796,9 @@ class TestCompilePrintDistributed(TestCase):
         for rank in range(2):
             with self.subTest(rank=rank):
                 self._init_fake_pg(rank)
-                cp = make_compile_print(fwd_f=lambda t: None, bwd_f=lambda t: None)
+                cp = make_opaque_inspect_tensor_fn(
+                    fwd_f=lambda t: None, bwd_f=lambda t: None
+                )
 
                 x = torch.randn(3, 3, requires_grad=True)
                 buf = StringIO()
@@ -732,7 +817,7 @@ class TestCompilePrintDistributed(TestCase):
                 self._init_fake_pg(rank)
                 fwd_rec: list[torch.Size] = []
                 bwd_rec: list[torch.Size] = []
-                cp = make_compile_print(
+                cp = make_opaque_inspect_tensor_fn(
                     fwd_f=lambda t: fwd_rec.append(t.shape),
                     bwd_f=lambda t: bwd_rec.append(t.shape),
                 )
@@ -757,7 +842,7 @@ class TestCompilePrintDistributed(TestCase):
                 other_rank = 1 - rank
                 fwd_rec: list[torch.Size] = []
                 bwd_rec: list[torch.Size] = []
-                cp = make_compile_print(
+                cp = make_opaque_inspect_tensor_fn(
                     fwd_f=lambda t: fwd_rec.append(t.shape),
                     bwd_f=lambda t: bwd_rec.append(t.shape),
                 )
@@ -779,7 +864,7 @@ class TestCompilePrintDistributed(TestCase):
             with self.subTest(rank=rank):
                 self._init_fake_pg(rank)
                 fwd_rec: list[torch.Size] = []
-                cp = make_compile_print(
+                cp = make_opaque_inspect_tensor_fn(
                     fwd_f=lambda t: fwd_rec.append(t.shape),
                     bwd_f=lambda t: None,
                 )
@@ -795,7 +880,7 @@ class TestCompilePrintDistributed(TestCase):
             with self.subTest(rank=rank):
                 self._init_fake_pg(rank)
                 fwd_rec: list[torch.Size] = []
-                cp = make_compile_print(
+                cp = make_opaque_inspect_tensor_fn(
                     fwd_f=lambda t: fwd_rec.append(t.shape),
                     bwd_f=lambda t: None,
                 )
