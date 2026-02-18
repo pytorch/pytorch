@@ -84,7 +84,6 @@ from .ctx_manager import (
     ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
-from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
@@ -2434,6 +2433,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
+        from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
             func_to_graphable,
@@ -2453,14 +2453,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # then tree_flatten them, we just let Dynamo symbolically interpret
         # `tree_flatten((args, kwargs))`. This saves us from having to
         # worry about the reconstruction logic, side effects, and guards.
-        packed_input_vt = TupleVariable.build(
-            tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
+        args_with_states, kwargs_with_states = self._extract_nn_module_states(
+            tx, args, kwargs
         )
-        out_vt = SourcelessBuilder.create(tx, tree_flatten).call_function(  # type: ignore[arg-type]
-            tx, [packed_input_vt], {}
-        )
-        assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
-        flat_args_vts, input_spec_vt = out_vt.items
+        flat_args_vts, input_spec_vt = _make_inlined(tx, tree_flatten)(
+            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+        ).unpack_var_sequence(tx)
         assert isinstance(flat_args_vts, ListVariable)
 
         # Handle the case when the input contains a non-graphable type.
@@ -2653,11 +2651,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         """
         import torch.utils._pytree as pytree
         from torch._dynamo.graph_bytecode_inputs import register_user_object
+        from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.invoke_leaf_function import (
             convert_modules_to_states,
         )
 
-        from .higher_order_ops import _make_inlined
         from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
         def is_module_variable(
@@ -2711,14 +2709,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
+        from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import (
             invoke_leaf_function,
-            wrap_impl_for_leaf_module_state,
+            make_leaf_function_wrappers,
         )
 
         from .builder import wrap_fx_proxy
-        from .higher_order_ops import _make_inlined
 
         decorated_fn = self.value
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
@@ -2740,12 +2738,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         flat_arg_proxies = [
             arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
         ]
-        input_spec = (
-            input_spec_var.as_python_constant()
-        )  # pyrefly: ignore [unbound-name]
+        input_spec = input_spec_var.as_python_constant()
 
-        wrapped_real_impl = wrap_impl_for_leaf_module_state(real_impl, input_spec)
-        wrapped_fake_impl = wrap_impl_for_leaf_module_state(fake_impl, input_spec)
+        # Single-element mutable list so the wrappers can write back the output
+        # TreeSpec. Read captured_out_spec[0] after the wrappers have been called.
+        captured_out_spec: list[pytree.TreeSpec | None] = [None]
+        wrapped_real_impl, wrapped_fake_impl = make_leaf_function_wrappers(
+            real_impl, fake_impl, captured_out_spec
+        )
 
         _, real_impl_spec = func_to_graphable(wrapped_real_impl)
         _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
@@ -2757,16 +2757,26 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
         fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
+            input_spec_proxy,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
             "call_function", invoke_leaf_function, invoke_args, {}
         )
-        return wrap_fx_proxy(tx, result_proxy)
+
+        flat_output_vt = wrap_fx_proxy(tx, result_proxy)
+
+        assert captured_out_spec[0] is not None, (
+            "Output spec was not captured during fake tensor propagation. "
+            "This should not happen - please report a bug."
+        )
+        out_spec_vt = VariableTracker.build(tx, captured_out_spec[0])
+        return _make_inlined(tx, _pytree.tree_unflatten)(flat_output_vt, out_spec_vt)
 
     def _call_ntuple(
         self,
