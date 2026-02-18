@@ -3830,7 +3830,7 @@ class TestSDPACudaOnly(NNTestCase):
         value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
 
-        higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+        higher_precision_dtype = torch.float64
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
         is_dropout = dropout_p > 0.0
