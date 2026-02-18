@@ -16,7 +16,20 @@ if TYPE_CHECKING:
 
 
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "itemgetter", "methodcaller", "countOf"]
+__all__ = ["attrgetter", "concat", "iconcat", "itemgetter", "methodcaller", "countOf"]
+
+
+# Reference: https://docs.python.org/3/library/operator.html#operator.concat
+@substitute_in_graph(operator.concat, can_constant_fold_through=True)  # type: ignore[arg-type]
+def concat(a: Any, b: Any, /) -> Any:
+    return a + b
+
+
+# Reference: https://docs.python.org/3/library/operator.html#operator.iconcat
+@substitute_in_graph(operator.iconcat)  # type: ignore[arg-type]
+def iconcat(a: Any, b: Any, /) -> Any:
+    a += b
+    return a
 
 
 _T = TypeVar("_T")
