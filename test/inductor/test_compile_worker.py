@@ -163,6 +163,35 @@ class TestTimer(TestCase):
         t.quit()
 
 
+class TestSetTritonLibdevicePath(TestCase):
+    def test_sets_cuda_libdevice_path(self):
+        """Test that _set_triton_libdevice_path sets the CUDA toolkit's libdevice."""
+        from torch._inductor.runtime.compile_tasks import _set_triton_libdevice_path
+        from torch.utils.cpp_extension import CUDA_HOME
+
+        # Clear any cached result and env var
+        _set_triton_libdevice_path.cache_clear()
+        env_backup = os.environ.pop("TRITON_LIBDEVICE_PATH", None)
+        try:
+            _set_triton_libdevice_path()
+
+            if CUDA_HOME is not None:
+                expected = os.path.join(
+                    CUDA_HOME, "nvvm", "libdevice", "libdevice.10.bc"
+                )
+                if os.path.isfile(expected):
+                    self.assertEqual(
+                        os.environ.get("TRITON_LIBDEVICE_PATH"), expected
+                    )
+        finally:
+            # Restore original state
+            _set_triton_libdevice_path.cache_clear()
+            if env_backup is not None:
+                os.environ["TRITON_LIBDEVICE_PATH"] = env_backup
+            else:
+                os.environ.pop("TRITON_LIBDEVICE_PATH", None)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
