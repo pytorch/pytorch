@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_HPU,
     TEST_PRIVATEUSE1,
+    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
@@ -70,7 +71,10 @@ else:
     DEVICE_TYPE = "cpu"
     PG_BACKEND = "gloo"
 
-NUM_DEVICES = 4
+if TEST_WITH_ROCM:
+    NUM_DEVICES = min(4, max(2, torch.cuda.device_count()))
+else:
+    NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
 if (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) and DEVICE_COUNT > 1:
@@ -376,9 +380,14 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         # Set device before initializing process group to ensure
-        # each rank is bound to the correct GPU
+        # each rank is bound to the correct GPU. However, if world_size > device_count,
+        # we skip the test.
         if torch.accelerator.is_available():
-            torch.accelerator.set_device_index(rank)
+            if world_size > torch.accelerator.device_count():
+                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+            else:
+                torch.accelerator.set_device_index(rank)
+
         # Call parent's _init_pg to do the actual process group initialization
         super()._init_pg(rank, world_size, rdvz_file)
 

@@ -296,10 +296,12 @@ class ONNXRegistry:
                 max_opset = max(d.opset_introduced for d in decomps)
 
                 # Keep all decompositions with the maximum opset_introduced
+                # pyrefly: ignore [unsupported-operation]
                 cleaned_functions[target_or_name] = [
                     d for d in decomps if d.opset_introduced == max_opset
                 ]
 
+        # pyrefly: ignore [bad-assignment]
         self.functions = cleaned_functions
 
     def __repr__(self) -> str:
