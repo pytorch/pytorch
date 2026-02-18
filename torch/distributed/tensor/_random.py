@@ -125,26 +125,22 @@ class _PhiloxState:
         return self._state
 
     @property
-    def offset(self) -> int:
-        return int(self._state[8:].view(dtype=torch.int64).item())
+    def offset(self) -> torch.Tensor:
+        return self._state[8:].view(dtype=torch.int64)
 
     @offset.setter
-    def offset(self, offset: int) -> None:
-        offset_tensor = torch.tensor([offset], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        self._state[8:] = offset_tensor
+    def offset(self, offset: torch.Tensor) -> None:
+        assert offset.numel() == 1
+        self._state[8:] = offset.view(torch.uint8)
 
     @property
-    def seed(self) -> int:
-        return int(self._state[:8].view(dtype=torch.uint64).item())
+    def seed(self) -> torch.Tensor:
+        return self._state[:8].view(dtype=torch.uint64)
 
     @seed.setter
-    def seed(self, seed: int) -> None:
-        seed_tensor = torch.tensor([seed], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        self._state[:8] = seed_tensor
+    def seed(self, seed: torch.Tensor) -> None:
+        assert seed.numel() == 1
+        self._state[:8] = seed.view(torch.uint8)
 
 
 class _RNGStateTracker:
@@ -265,7 +261,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self.distribute_region_enabled:
             if self._device.type == "hpu":
                 self._device_handle.set_rng_ctx("philox")
-            old_offset = state.offset
+            old_offset = state.offset.clone()
             self._set_pre_op_offset(state, spec)
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
@@ -368,7 +364,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         state.offset = current_offset + offset_incr
 
     def _set_post_op_offset(
-        self, state: _PhiloxState, spec: DTensorSpec, old_offset: int
+        self, state: _PhiloxState, spec: DTensorSpec, old_offset: torch.Tensor
     ) -> None:
         """Sets the RNG to a synchronized state after running the local random op. Every
         rank should set its RNG offset to `old_offset + DTensor.numel()` where old_offset is
