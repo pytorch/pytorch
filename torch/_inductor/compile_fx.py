@@ -2266,13 +2266,13 @@ def create_compiler_config_extra(
         if annotation is not None and annotation.mode == "disable":
             if annotation.fwd:
                 cudagraphs = BoxedBool(False)
-                perf_hint_log.info(
-                    "Disabling cudagraphs for forward due to disable_cudagraphs annotation"
+                log_cudagraph_skip_and_bump_counter(
+                    "skipping cudagraphs for forward due to disable_cudagraphs annotation"
                 )
             if annotation.bwd:
                 disable_cudagraphs_for_bwd = True
-                perf_hint_log.info(
-                    "Disabling cudagraphs for backward due to disable_cudagraphs annotation"
+                log_cudagraph_skip_and_bump_counter(
+                    "skipping cudagraphs for backward due to disable_cudagraphs annotation"
                 )
 
     # TODO: The modern style is to use CompileId from TracingContext to
