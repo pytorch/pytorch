@@ -296,7 +296,7 @@ class InputObserverInfo:
             not to run the model.
         args_name_and_position: Name of parameter `*args`
             and its position if it exists.
-        kwargs_name: Name of parameter `**kwargs` if it exists.
+        kwargs_name: Name of the variable keyword parameter `**kwargs` if it exists.
 
     This is used by class :class:`InputObserver`.
     """
