@@ -1,5 +1,5 @@
 # Owner(s): ["module: higher order operators"]
-"""Tests for opaque_inspect_tensor and make_opaque_inspect_tensor_fn."""
+"""Tests for make_opaque_inspect_tensor_fn."""
 
 from collections.abc import Callable
 from contextlib import redirect_stdout
@@ -14,10 +14,7 @@ from functorch.compile import aot_function, make_boxed_func
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 from torch._higher_order_ops.effects import with_effects
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
-from torch._higher_order_ops.opaque_inspect_tensor import (
-    make_opaque_inspect_tensor_fn,
-    opaque_inspect_tensor,
-)
+from torch._higher_order_ops.opaque_inspect_tensor import make_opaque_inspect_tensor_fn
 from torch.autograd import Function
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
@@ -330,9 +327,11 @@ class GraphModule(torch.nn.Module):
         )
 
     def test_compile_graph_has_opaque_node(self):
+        fwd_rec: list[torch.Size] = []
+        bwd_rec: list[torch.Size] = []
         cp = make_opaque_inspect_tensor_fn(
-            fwd_f=lambda t: None,
-            bwd_f=lambda t: None,
+            fwd_f=lambda t: fwd_rec.append(t.shape),
+            bwd_f=lambda t: bwd_rec.append(t.shape),
         )
 
         def f(x):
@@ -343,7 +342,9 @@ class GraphModule(torch.nn.Module):
         compiled_f = torch.compile(f, backend=backend, fullgraph=True)
         x = torch.randn(3, 3, requires_grad=True)
         out = compiled_f(x)
+        self.assertEqual(len(fwd_rec), 1)
         out.backward()
+        self.assertEqual(len(bwd_rec), 1)
 
         self.assertEqual(len(backend.fw_graphs), 1)
         self.assertEqual(len(backend.bw_graphs), 1)
@@ -482,7 +483,6 @@ class GraphModule(torch.nn.Module):
         output = buf.getvalue()
         self.assertIn("fwd", output)
         self.assertIn("bwd", output)
-        # print(tensor) includes "tensor(" in its repr
         self.assertGreaterEqual(output.count("tensor("), 2)
 
         # torch.compile mode
@@ -762,16 +762,6 @@ class TestOpaqueInspectTensorEagerOnly(TestCase):
         cp = make_opaque_inspect_tensor_fn(fwd_f=lambda t: None, bwd_f=lambda t: None)
         result = cp(torch.randn(3, 3))
         self.assertIsNone(result)
-
-    def test_convenience_opaque_inspect_tensor(self):
-        recorded = []
-        result = opaque_inspect_tensor(
-            lambda t: recorded.append(t.shape),
-            lambda t: None,
-            torch.randn(2, 2),
-        )
-        self.assertIsNone(result)
-        self.assertEqual(len(recorded), 1)
 
 
 @skipIfTorchDynamo("opaque_inspect_tensor tests manage their own compilation")
