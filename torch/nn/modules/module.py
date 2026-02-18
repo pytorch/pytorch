@@ -94,7 +94,7 @@ class _WrappedHook:
     def __getstate__(self) -> dict:
         result = {"hook": self.hook, "with_module": self.with_module}
         if self.with_module:
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
             result["module"] = self.module()
 
         return result
