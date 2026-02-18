@@ -13,11 +13,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed.device_mesh import (
-    _mesh_resources,
-    _register_distributed_opaque_types,
-    DeviceMesh,
-)
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
@@ -1059,7 +1055,10 @@ def distribute_module(
             if param is not None and not isinstance(param, DTensor):
                 m.register_parameter(
                     key,
-                    nn.Parameter(distribute_tensor(param.data, mesh, full_replicate)),
+                    nn.Parameter(
+                        distribute_tensor(param.data, mesh, full_replicate),
+                        requires_grad=param.requires_grad,
+                    ),
                 )
         for key, buffer in m._buffers.items():
             if buffer is not None and not isinstance(buffer, DTensor):
@@ -1460,6 +1459,3 @@ def zeros(  # type: ignore[no-untyped-def]
         device_mesh=device_mesh,
         placements=placements,
     )
-
-
-_register_distributed_opaque_types()
