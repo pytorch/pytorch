@@ -15,7 +15,9 @@ class _PrintGradFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs: torch.Tensor):  # type: ignore[override]
-        builtins.print(f"[backward] {ctx.format_str.format(*grad_outputs)}")
+        # Use the print HOP (not builtins.print) so this gets properly traced
+        # into the backward graph during AOT compilation.
+        print("[backward] " + ctx.format_str, *grad_outputs)
         return (None,) + grad_outputs
 
 
