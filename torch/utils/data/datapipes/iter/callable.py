@@ -118,7 +118,6 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
                 for idx in sorted(self.input_col[1:], reverse=True):
                     del data[idx]
             else:
-                # pyrefly: ignore [unsupported-operation]
                 data[self.input_col] = res
         else:
             if self.output_col == -1:
@@ -134,6 +133,7 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
             yield self._apply_fn(data)
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

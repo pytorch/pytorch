@@ -87,10 +87,17 @@ class NestedTensor(torch.Tensor):
         ks = ks.add(DispatchKey.AutogradNestedTensor)
 
         # Only support jagged for now.
-        assert offsets is not None
-        assert offsets.ndim == 1
-        assert not isinstance(values, NestedTensor)
-        assert values.device == offsets.device
+        if offsets is None:
+            raise AssertionError("offsets must not be None")
+        if offsets.ndim != 1:
+            raise AssertionError(f"offsets must be 1D, but got {offsets.ndim}D")
+        if isinstance(values, NestedTensor):
+            raise AssertionError("values must not be a NestedTensor")
+        if values.device != offsets.device:
+            raise AssertionError(
+                f"values and offsets must be on the same device, but got "
+                f"values.device={values.device} and offsets.device={offsets.device}"
+            )
 
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
@@ -99,7 +106,11 @@ class NestedTensor(torch.Tensor):
         _ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         if lengths is not None:
-            assert B == lengths.shape[0]
+            if B != lengths.shape[0]:
+                raise AssertionError(
+                    f"offsets and lengths batch sizes must match: "
+                    f"offsets.shape[0] - 1 = {B}, lengths.shape[0] = {lengths.shape[0]}"
+                )
 
         # subtract 1 to convert to values dim space
         r = _ragged_idx - 1
@@ -263,7 +274,8 @@ class NestedTensor(torch.Tensor):
         # See Note [Tensor Subclass custom size/stride caching strategy]
         self._clear_non_serializable_cached_data()
         # SymNodes are not serializable
-        assert "_size" in state and "_strides" in state
+        if "_size" not in state or "_strides" not in state:
+            raise AssertionError("state must contain '_size' and '_strides'")
         state = dict(state)
         del state["_size"]
         del state["_strides"]
@@ -299,7 +311,10 @@ class NestedTensor(torch.Tensor):
         from torch._subclasses.fake_tensor import FakeTensor
 
         # inner tensors: _values, _offsets, [_lengths], [_min_seqlen], [_max_seqlen]
-        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 5
+        if not (len(inner_tensors) >= 2 and len(inner_tensors) <= 5):
+            raise AssertionError(
+                f"Expected 2-5 inner tensors, but got {len(inner_tensors)}"
+            )
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
         lengths = inner_tensors.get("_lengths", None)
@@ -540,9 +555,10 @@ def jagged_from_tensor_and_lengths(
         )
 
     # Calculate jagged offsets
-    assert len(tensor.shape) >= 2, (
-        "tensor must at least be 2D for the nested narrow op to work"
-    )
+    if len(tensor.shape) < 2:
+        raise AssertionError(
+            "tensor must at least be 2D for the nested narrow op to work"
+        )
     max_seq_len = tensor.shape[1]
     offset_lengths = max_seq_len * torch.arange(
         0, batch_size, dtype=torch.int64, device=tensor.device

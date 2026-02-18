@@ -2,7 +2,7 @@
 
 import dataclasses
 from collections.abc import Sequence
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -44,7 +44,7 @@ from torch.distributed.remote_device import _remote_device
 from torch.distributed.tensor import DTensor
 
 
-STATE_DICT_2D_LAYOUT = dict[str, tuple[Optional[Sequence[int]], Sequence[int]]]
+STATE_DICT_2D_LAYOUT = dict[str, tuple[Sequence[int] | None, Sequence[int]]]
 
 
 # TODO: Update docstrings for optimizer.py
@@ -65,7 +65,7 @@ def _gen_rank_device(global_rank: int, device_type: str = "cuda") -> str:
 
 
 def _create_colwise_spec(
-    pg: Optional[dist.ProcessGroup] = None,
+    pg: dist.ProcessGroup | None = None,
 ) -> ChunkShardingSpec:
     pg_device_type = dist.distributed_c10d._get_pg_default_device(pg).type
     if pg is None:
@@ -80,7 +80,7 @@ def _create_colwise_spec(
         ]
     return ChunkShardingSpec(
         dim=0,
-        placements=cast(list[Union[_remote_device, str]], placements),
+        placements=cast(list[_remote_device | str], placements),
     )
 
 
@@ -121,7 +121,7 @@ def _alloc_tensor(
 
 def _get_state_dict_2d_layout(
     state_dict: STATE_DICT_TYPE,
-) -> tuple[STATE_DICT_2D_LAYOUT, Optional[dist.ProcessGroup]]:
+) -> tuple[STATE_DICT_2D_LAYOUT, dist.ProcessGroup | None]:
     """
     Load the right TP slice of the optimizer state.
 
@@ -133,7 +133,7 @@ def _get_state_dict_2d_layout(
     N.B. The state_dict *MUST* come from FSDP.sharded_state_dict.
     """
     specs: STATE_DICT_2D_LAYOUT = {}
-    dp_pg: Optional[dist.ProcessGroup] = None
+    dp_pg: dist.ProcessGroup | None = None
     for key, value in state_dict.items():
         specs[key] = (None, value.size())
         if _is_nested_tensor(value):
@@ -219,7 +219,7 @@ def load_sharded_optimizer_state_dict(
     model_state_dict: STATE_DICT_TYPE,
     optimizer_key: str,
     storage_reader: StorageReader,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner | None = None,
 ) -> STATE_DICT_TYPE:
     """
     Load a state_dict in conjunction with FSDP sharded optimizer state.

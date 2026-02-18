@@ -1,5 +1,0 @@
-ERROR
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/torch/_inductor/codegen/pallas.py", line 893, in _generate_index_array
-    raise Unsupported(
-torch._inductor.exc.InductorError: Unsupported: Pallas backend does not yet support complex indexing pattern: Abs(x0 - 3)

@@ -198,8 +198,10 @@ struct DumpPipe {
   DumpPipe(int rank) {
     std::string fileStem =
         getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
+    // NOTE: This default value (2000) is duplicated in FlightRecorder.hpp.
+    // Keep in sync. See FlightRecorder.hpp for details.
     if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
+        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 2000) <= 0) {
       return;
     }
     TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
@@ -515,6 +517,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(bool is_high_priority_stream = false);
+    Options(const Options&) = default;
+    Options(Options&&) noexcept = default;
+    Options& operator=(const Options&) = delete;
+    Options& operator=(Options&&) noexcept = delete;
+    ~Options() override = default;
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(

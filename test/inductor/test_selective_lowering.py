@@ -3,12 +3,18 @@
 Test selective lowering control via node metadata annotations.
 """
 
-from collections.abc import Callable
-
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    patch_custom_fallback_pass,
+)
 
 
 @instantiate_parametrized_tests
@@ -19,18 +25,8 @@ class SelectiveLoweringTest(InductorTestCase):
 
     device = GPU_TYPE
 
-    def _mark_nodes_for_fallback(
-        self, gm: torch.fx.GraphModule, predicate: Callable[[torch.fx.Node], bool]
-    ) -> torch.fx.GraphModule:
-        """
-        Helper method to mark nodes with should_fallback metadata based on a predicate.
-        """
-        for node in gm.graph.nodes:
-            if node.op == "call_function" and predicate(node):
-                node.meta["should_fallback"] = True
-        return gm
-
-    def test_basic_selective_lowering(self):
+    @parametrize("fallback", (True, False))
+    def test_basic_selective_lowering(self, fallback: bool):
         """
         Test that nodes marked for fallback use fallback handlers instead of lowerings.
         """
@@ -43,45 +39,23 @@ class SelectiveLoweringTest(InductorTestCase):
         x = torch.randn(10, device=self.device)
         y = torch.randn(10, device=self.device)
 
-        def custom_backend(gm: torch.fx.GraphModule, example_inputs):
-            # Mark all add operations for fallback
-            def should_fallback_add(node: torch.fx.Node) -> bool:
-                return node.target == torch.ops.aten.add.Tensor
+        # Mark all add operations for fallback
+        def should_fallback_add(node: torch.fx.Node) -> bool:
+            return node.target == torch.ops.aten.add.Tensor if fallback else False
 
-            self._mark_nodes_for_fallback(gm, should_fallback_add)
+        with patch_custom_fallback_pass(should_fallback_add):
+            compiled_fn = torch.compile(foo)
+            result, (code,) = run_and_get_code(compiled_fn, x, y)
 
-            from torch._inductor.compile_fx import compile_fx
-
-            return compile_fx(gm, example_inputs)
-
-        compiled_fn = torch.compile(foo, backend=custom_backend)
-        result = compiled_fn(x, y)
+        # Check numerics.
         expected = foo(x, y)
-
         self.assertTrue(torch.allclose(result, expected))
 
-    def test_no_fallback_when_unmarked(self):
-        """
-        Test that operations without fallback annotation use normal lowering.
-        """
+        # Strip comments from the code.
+        code = "\n".join(line for line in code.split("\n") if "#" not in line)
 
-        def foo(x, y):
-            return x + y
-
-        x = torch.randn(10, device=self.device)
-        y = torch.randn(10, device=self.device)
-
-        def custom_backend(gm: torch.fx.GraphModule, example_inputs):
-            # Don't mark anything - all operations should use normal lowering
-            from torch._inductor.compile_fx import compile_fx
-
-            return compile_fx(gm, example_inputs)
-
-        compiled_fn = torch.compile(foo, backend=custom_backend)
-        result = compiled_fn(x, y)
-        expected = foo(x, y)
-
-        self.assertTrue(torch.allclose(result, expected))
+        # Check for the add fallback.
+        self.assertEqual("aten.add" in code, fallback)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import inf, Tensor
@@ -65,9 +64,9 @@ class Multinomial(Distribution):
     def __init__(
         self,
         total_count: int = 1,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         if not isinstance(total_count, int):
             raise NotImplementedError("inhomogeneous total_count is not supported")

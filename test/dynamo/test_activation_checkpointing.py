@@ -410,6 +410,40 @@ class ActivationCheckpointingViaTagsTests(
         _ = torch.compile(fn, backend=backend)(x, y)
 
     @requires_cuda_and_triton
+    def test_tangent_placeholders_have_is_backward_tag(self, device):
+        """Test that tangent placeholders in the joint graph are tagged with is_backward."""
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        def partition_fn(joint_gm, *args, **kwargs):
+            # Check partitioner_tag on placeholder nodes
+            for node in joint_gm.graph.nodes:
+                if node.op == "placeholder":
+                    if "tangents" in str(node.target):
+                        self.assertTrue(
+                            "is_backward" in node.meta.get("partitioner_tag", "")
+                        )
+                    else:
+                        self.assertTrue(
+                            "is_forward" in node.meta.get("partitioner_tag", "")
+                        )
+            return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+        )
+        _ = torch.compile(fn, backend=backend)(x, y)
+
+    @requires_cuda_and_triton
     @parametrize(
         "partition_fn",
         [
@@ -1778,40 +1812,25 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         opt_fn(*args1).sum().backward()
 
         fwd_graph = aot_graphs[0]
-        op1 = torch.ops.aten._scaled_dot_product_flash_attention.default
-        op2 = torch.ops.aten._scaled_dot_product_cudnn_attention.default
-        self.assertTrue(
-            count_ops(
-                fwd_graph,
-                [],
-                freq=1,
-                op=op1,
-            )
-            or count_ops(
-                fwd_graph,
-                [],
-                freq=1,
-                op=op2,
-            )
+        # Determine which fused attention backend is expected based on the
+        # prioritization logic in sdp_utils.cpp:check_prefer_cudnn_attention.
+        dprops = torch.cuda.get_device_properties(device)
+        cudnn_version = (
+            torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         )
+        prefer_cudnn = (
+            cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
+        )
+        if prefer_cudnn:
+            sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
+        else:
+            sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
+        self.assertTrue(count_ops(fwd_graph, [], freq=1, op=sdpa_op))
         bwd_graph = aot_graphs[1]
         # Check that sin is not recomputed in the backward graph - checks percolate tags
         self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
         # Check that the sdpa op is recomputed in the backward graph
-        self.assertTrue(
-            count_ops(
-                bwd_graph,
-                [],
-                freq=1,
-                op=op1,
-            )
-            or count_ops(
-                bwd_graph,
-                [],
-                freq=1,
-                op=op2,
-            )
-        )
+        self.assertTrue(count_ops(bwd_graph, [], freq=1, op=sdpa_op))
 
     @requires_distributed()
     @requires_cuda_and_triton
@@ -2097,6 +2116,39 @@ class GraphModule(torch.nn.Module):
         finally:
             cleanup()
 
+    def test_checkpoint_with_record_function(self):
+        # Test that record_function ops are allowed inside checkpointed functions.
+        # record_function is technically "impure" but safe to duplicate during
+        # activation checkpointing recompute since it only sets up profiling spans.
+        # This test verifies:
+        # 1. No assertion error about impure ops in AC
+        # 2. Forward graph contains record_function ops
+        # 3. Code produces correct results
+        def gn(x, y):
+            with torch.profiler.record_function("matmul_region"):
+                return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+
+        # Verify record_function_enter_new appears in forward graph
+        fw_compiler = functools.partial(
+            count_ops, freq=1, op=torch.ops.profiler._record_function_enter_new.default
+        )
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            partition_fn=default_partition,
+        )
+        # Enable capture_profiler_record_function to trace record_function ops
+        with torch._dynamo.config.patch(capture_profiler_record_function=True):
+            self._validate(fn, backend, x, y)
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
@@ -2205,7 +2257,7 @@ def forward(self, arg0_1, arg1_1):
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 
-    def test_ac_rematerialize_with_no_annotations_warns_and_returns_unchanged(self):
+    def test_ac_rematerialize_with_no_annotations_returns_unchanged(self):
         x = torch.randn(4, 4, requires_grad=True)
 
         def fwd_bwd(x):
@@ -2215,21 +2267,7 @@ def forward(self, arg0_1, arg1_1):
             loss = z.sum()
             return _grad(loss, x)[0]
 
-        # Without backward annotations, the pass should warn and return unchanged
-        # We verify this by checking that remat_using_tags=True produces the same
-        # graph as remat_using_tags=False (i.e., no recomputation happens)
-        import warnings
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
-
-            # Check warning was issued
-            self.assertTrue(
-                any("no backward region" in str(warning.message) for warning in w),
-                f"Expected warning about no backward region, got: {[str(warning.message) for warning in w]}",
-            )
-
+        result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
         # Get the graph without the pass for comparison
         result_without, gm_without = self._compile_and_capture(fwd_bwd, False, (x,))
 

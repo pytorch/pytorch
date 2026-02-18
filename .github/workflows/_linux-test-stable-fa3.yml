@@ -24,7 +24,7 @@ on:
       timeout-minutes:
         required: false
         type: number
-        default: 30
+        default: 60
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
       s3-bucket:

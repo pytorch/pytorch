@@ -44,7 +44,7 @@ def get_jax_version(fallback: tuple[int, int, int] = (0, 0, 0)) -> tuple[int, in
 
 @functools.cache
 def has_jax_cuda_backend() -> bool:
-    """Check if JAX has CUDA backend support."""
+    """Check if JAX has CUDA backend support with SM90+ (required by Mosaic GPU)."""
     if not has_jax_package():
         return False
     try:
@@ -52,7 +52,16 @@ def has_jax_cuda_backend() -> bool:
 
         # Check if CUDA backend is available
         devices = jax.devices("gpu")
-        return len(devices) > 0
+        if len(devices) == 0:
+            return False
+
+        # Mosaic GPU requires SM90+ (compute capability 9.0+)
+        if torch.cuda.is_available():
+            major, minor = torch.cuda.get_device_capability()
+            if major < 9:
+                return False
+
+        return True
     except Exception:
         return False
 
@@ -73,6 +82,17 @@ def has_jax_tpu_backend() -> bool:
 
 
 @functools.cache
+def has_torch_tpu() -> bool:
+    """Check if torch_tpu is available."""
+    try:
+        import torch_tpu  # noqa: F401  # type: ignore[import-not-found]
+
+        return True
+    except ImportError:
+        return False
+
+
+@functools.cache
 def has_cpu_pallas() -> bool:
     """Checks for a full Pallas-on-CPU environment."""
     return has_pallas_package()
@@ -87,7 +107,7 @@ def has_cuda_pallas() -> bool:
 @functools.cache
 def has_tpu_pallas() -> bool:
     """Checks for a full Pallas-on-TPU environment."""
-    return has_pallas_package() and has_jax_tpu_backend()
+    return has_pallas_package() and has_torch_tpu()
 
 
 @functools.cache

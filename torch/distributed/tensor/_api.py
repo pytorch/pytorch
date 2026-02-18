@@ -21,6 +21,7 @@ from torch.distributed.tensor._redistribute import (
     redistribute_local_tensor,
 )
 from torch.distributed.tensor._utils import (
+    assert_no_mixed_partial_types,
     compute_global_tensor_info,
     compute_local_shape_and_global_offset,
     normalize_to_torch_size,
@@ -47,6 +48,25 @@ __all__ = [
 ]
 
 aten = torch.ops.aten
+
+
+def _normalize_placements_for_grad(
+    placements: tuple[Placement, ...],
+) -> tuple[Placement, ...]:
+    """
+    Normalize gradient placements by converting Partial to Replicate.
+
+    See the gradient placement guarantees documented in DTensor.from_local's docstring
+    for why Partial forward placements map to Replicate gradient placements. We do this
+    for both from_local and to_local backward.
+    """
+    normalized: list[Placement] = []
+    for p in placements:
+        if p.is_partial():
+            normalized.append(Replicate())
+        else:
+            normalized.append(p)
+    return tuple(normalized)
 
 
 # NOTE [Autograd interaction between torch.Tensor]
@@ -96,7 +116,13 @@ class _ToTorchTensor(torch.autograd.Function):
             grad_output, mesh, dtensor_spec.placements
         )
         tensor_stride = tuple(tensor_stride)
-        grad_placements = grad_placements or dtensor_spec.placements
+
+        # user should provide grad_placements as there's no guarantee on input gradient placement
+        # if grad_placement is None, we provide default placement
+        if grad_placements is None:
+            # See DTensor.from_local docstring for gradient placement guarantees
+            grad_placements = _normalize_placements_for_grad(dtensor_spec.placements)
+
         if (
             tensor_stride == dtensor_meta.stride
             and grad_placements == dtensor_spec.placements
@@ -138,8 +164,8 @@ class _FromTorchTensor(torch.autograd.Function):
         shape: torch.Size | None = None,
         stride: tuple[int, ...] | None = None,
     ) -> "DTensor":
-        ctx.previous_placement = placements
-        ctx.previous_device_mesh = device_mesh
+        ctx.forward_input_placements = placements
+        ctx.forward_input_device_mesh = device_mesh
 
         if shape and stride:
             tensor_shape, tensor_stride = shape, stride
@@ -157,7 +183,7 @@ class _FromTorchTensor(torch.autograd.Function):
                 "Please pass both shape and stride at the same time.",
             )
 
-        if device_mesh.get_coordinate() is None:
+        if not device_mesh._is_current_rank_part_of_mesh():
             # if the global rank is not participating in the device mesh, we
             # simply set the local tensor to an empty tensor
             input = input.new_empty(0, requires_grad=input.requires_grad)
@@ -200,22 +226,36 @@ class _FromTorchTensor(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
-        previous_placement = ctx.previous_placement
-        previous_device_mesh = ctx.previous_device_mesh
+        forward_input_placements = ctx.forward_input_placements
+        forward_input_device_mesh = ctx.forward_input_device_mesh
 
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
         # local gradients directly
-        if grad_output.placements != previous_placement:
-            current_spec = grad_output._spec
+        # if forward placement is partial, we always redistribute grad_input to Replicate:
+        # Partial(fwd) - Replicate(grad_output) - Replicate(grad_input): no redistribution needed
+        # Partial(fwd) - Partial(grad_output) - Replicate(grad_input): redistribute Partial to Replicate
+
+        # The second case is BC breaking:
+        # was: Partial(fwd) - Partial(grad_output) - Partial(grad_input)
+        # now: Partial(fwd) - Partial(grad_output) - Replicate(grad_input)
+        # See DTensor.from_local docstring for gradient placement guarantees
+        normalized_placements: tuple[Placement, ...] = _normalize_placements_for_grad(
+            forward_input_placements
+        )
+
+        if grad_output.placements != normalized_placements:
+            current_spec: DTensorSpec = grad_output._spec
             target_spec = DTensorSpec(
-                previous_device_mesh,
-                previous_placement,
+                forward_input_device_mesh,
+                normalized_placements,
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, is_backward=True
+                local_tensor,
+                current_spec,
+                target_spec,
             )
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.
@@ -397,6 +437,11 @@ class DTensor(torch.Tensor):
         Returns:
             A :class:`DTensor` object
 
+        Raises:
+            ValueError: If ``placements`` contains mixed :class:`Partial` reduce types
+                (e.g., both ``Partial("sum")`` and ``Partial("max")``). All Partial
+                placements must use the same reduce operation.
+
         .. note:: When ``run_check=False``, it is the user's responsibility to ensure the
             local tensor passed in is correct across ranks (i.e. the tensor is sharded for
             the ``Shard(dim)`` placement or replicated for the ``Replicate()`` placement).
@@ -404,6 +449,23 @@ class DTensor(torch.Tensor):
 
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
+
+        .. note:: During backward, ``from_local`` provides the following gradient placement
+            guarantees. For each mesh dimension, the gradient placement maps as follows:
+
+            +---------------------+--------------------+
+            | Forward Placement   | Gradient Placement |
+            +=====================+====================+
+            | ``Shard``           | ``Shard``          |
+            +---------------------+--------------------+
+            | ``Replicate``       | ``Replicate``      |
+            +---------------------+--------------------+
+            | ``Partial``         | ``Replicate``      |
+            +---------------------+--------------------+
+
+            When the forward placement is :class:`Partial`, we always redistribute the gradient
+            to :class:`Replicate` instead of keeping it :class:`Partial`. This may not be the most
+            efficient option, but it avoids ambiguity and provides clearer gradient semantics to users.
         """
         # `local_tensor` argument cannot be DTensor
         if isinstance(local_tensor, DTensor):
@@ -439,6 +501,9 @@ class DTensor(torch.Tensor):
                             )
                         elif type(placement) is Shard:
                             placements[idx] = Shard(normalized_dim)
+
+        # Validate that placements don't contain mixed Partial reduce types
+        assert_no_mixed_partial_types(placements)
 
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
@@ -739,6 +804,11 @@ def distribute_tensor(
     Returns:
         A :class:`DTensor` or ``XLAShardedTensor`` object.
 
+    Raises:
+        ValueError: If ``placements`` contains mixed :class:`Partial` reduce types
+            (e.g., both ``Partial("sum")`` and ``Partial("max")``). All Partial
+            placements must use the same reduce operation.
+
     .. note::
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_tensor``
         return `XLAShardedTensor` instead. see `this issue <https://github.com/pytorch/pytorch/issues/92909>`__
@@ -781,6 +851,9 @@ def distribute_tensor(
             f"`placements` must have the same length as `device_mesh.ndim`! "
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
+
+    # Validate that placements don't contain mixed Partial reduce types
+    assert_no_mixed_partial_types(placements)
     if isinstance(tensor, DTensor):
         # if the tensor is already a DTensor, we need to check:
         # 1. if the we can further shard this DTensor if the two device mesh belong to
@@ -982,7 +1055,10 @@ def distribute_module(
             if param is not None and not isinstance(param, DTensor):
                 m.register_parameter(
                     key,
-                    nn.Parameter(distribute_tensor(param.data, mesh, full_replicate)),
+                    nn.Parameter(
+                        distribute_tensor(param.data, mesh, full_replicate),
+                        requires_grad=param.requires_grad,
+                    ),
                 )
         for key, buffer in m._buffers.items():
             if buffer is not None and not isinstance(buffer, DTensor):
@@ -1091,7 +1167,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 
-        tensor_meta = TensorMeta(size, (0,), dtype)
+        tensor_meta = TensorMeta(size, torch_stride, dtype)
         spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:

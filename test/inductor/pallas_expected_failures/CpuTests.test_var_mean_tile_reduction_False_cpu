@@ -1,5 +1,3 @@
 ERROR
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/torch/_inductor/codegen/pallas.py", line 1373, in reduction
-    raise Unsupported(
-torch._inductor.exc.InductorError: Unsupported: Reduction type 'welford_reduce' not yet supported in Pallas backend. Supported types: ['sum', 'prod', 'max', 'min', 'any', 'argmax', 'argmin'], xor_sum
+TypeError: cannot reshape array of shape (4,) (size 4) into shape (1, 2, 4, 1) (size 8)
+Reshape mismatch in welford_reduce with tile_reduction
