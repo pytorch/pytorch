@@ -32,6 +32,7 @@ from torch._dynamo.utils import CompileEventLogger, dynamo_timed, get_metrics_co
 from torch._guards import (
     compile_context,
     CompileContext,
+    CompileId,
     detect_fake_mode,
     DuplicateInputs,
     tracing,
@@ -174,6 +175,7 @@ class RuntimeWrapper(CompilerWrapper):
         *,
         runtime_metadata: ViewAndMutationMeta,
     ) -> Callable[..., Any]:
+        compile_id = CompileContext.current_compile_id()
         return _create_runtime_wrapper(
             compiled_fn,
             runtime_metadata=runtime_metadata,
@@ -181,6 +183,7 @@ class RuntimeWrapper(CompilerWrapper):
             trace_joint=self.trace_joint,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
             disable_amp=self.disable_amp,
+            compile_id=compile_id if compile_id is not None else aot_config.aot_id,
         )
 
 
@@ -460,6 +463,26 @@ class _FirstInvocationContext:
         return nullcontext()
 
 
+class _AugmentWithCompileId:
+    __slots__ = ("compile_id", "phase")
+
+    def __init__(self, compile_id: CompileId | int, phase: str) -> None:
+        self.compile_id = compile_id
+        self.phase = phase
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(
+        self, exc_type: type | None, exc_val: BaseException | None, exc_tb: Any
+    ) -> None:
+        if isinstance(exc_val, RuntimeError) and exc_val.args:
+            exc_val.args = (
+                f"{exc_val.args[0]}\n\n(Occurred in compiled region with compile_id: {self.compile_id}, {self.phase})",
+                *exc_val.args[1:],
+            )
+
+
 def _create_runtime_wrapper(
     compiled_fn: Callable[..., Any],
     *,
@@ -468,6 +491,7 @@ def _create_runtime_wrapper(
     trace_joint: bool,
     keep_input_mutations: bool,
     disable_amp: bool,
+    compile_id: CompileId | int,
 ) -> Callable[..., Any]:
     if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
@@ -533,6 +557,10 @@ def _create_runtime_wrapper(
 
     @simple_wraps(compiled_fn)
     def runtime_wrapper(args: list[Any]) -> Any:
+        with _AugmentWithCompileId(compile_id, "forward"):
+            return _runtime_wrapper_impl(args)
+
+    def _runtime_wrapper_impl(args: list[Any]) -> Any:
         # Create context manager for profiler
         cm = record_runtime_wrapper_prologue_enter()
 
@@ -2442,6 +2470,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         pending_forwards: set[int] = set()
         saved_backward_tensor_states: dict[int, list[torch.Tensor]] = {}
 
+        _compile_id: CompileId | int = CompileContext.current_compile_id()  # type: ignore[assignment]
+        if _compile_id is None:
+            _compile_id = aot_config.aot_id
+
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
@@ -2668,6 +2700,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
+                with _AugmentWithCompileId(_compile_id, "backward"):
+                    return CompiledFunction._backward_dispatch(ctx, *flat_args)
+
+            @staticmethod
+            def _backward_dispatch(ctx: Any, *flat_args: Any) -> tuple[Any, ...]:
                 # Combine tensors from both sources:
                 # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
                 # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
