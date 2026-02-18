@@ -9372,11 +9372,7 @@ class GraphModule(torch.nn.Module):
 
 
 class TestAutoFunctionalizeControlFlow(TestCase):
-    def check(
-        self, gen_fn, args, device, dynamic
-    ) -> torch.fx.GraphModule:
-        from unittest.mock import patch
-
+    def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
         args = pytree.tree_map(lambda t: t.to(device=device), args)
 
         def _clone(args):
