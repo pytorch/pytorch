@@ -1,4 +1,6 @@
 #pragma once
+#define AT_NATIVE_CUDA_SORT_IPML_CUH
+#define TORCH_ASSERT_NO_OPERATORS
 
 #include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
@@ -12,7 +14,6 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <limits>
-#include <type_traits>
 
 namespace at::native {
 
@@ -378,5 +379,17 @@ void sortCommon(Sorter sorter, const TensorBase &key, const TensorBase &value,
     }
   });
 #undef HANDLE_SORT_CASE
+
+#if HAS_WARP_MERGE_SORT()
+  #define INSTANTIATE_WARP_SORT(TYPE) \
+    template void sortCommon<TYPE>(WarpMergeSort<128>, const TensorBase&, const TensorBase&, int, bool);
+#else
+  #define INSTANTIATE_WARP_SORT(TYPE)
+#endif
+
+#define INSTANTIATE_SORT_COMMON(TYPE) \
+  template void sortCommon<TYPE>(SmallBitonicSort, const TensorBase&, const TensorBase&, int, bool); \
+  template void sortCommon<TYPE>(MediumRadixSort, const TensorBase&, const TensorBase&, int, bool); \
+  INSTANTIATE_WARP_SORT(TYPE)
 }
 } // at::native

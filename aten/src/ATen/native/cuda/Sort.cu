@@ -1,27 +1,10 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/core/TensorBase.h>
-#include <ATen/native/cuda/SortImpl.cuh>
-#include <type_traits>
+#include <ATen/native/cuda/SortDecl.cuh>
+#include <ATen/Dispatch_v2.h>
 
 namespace at::native {
-
-extern template void sortCommon<uint8_t>(SmallBitonicSort sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint16_t>(SmallBitonicSort sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint32_t>(SmallBitonicSort sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint64_t>(SmallBitonicSort sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-
-#if HAS_WARP_MERGE_SORT()
-extern template void sortCommon<uint8_t>(WarpMergeSort<128> sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint16_t>(WarpMergeSort<128> sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint32_t>(WarpMergeSort<128> sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint64_t>(WarpMergeSort<128> sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-#endif
-
-extern template void sortCommon<uint8_t>(MediumRadixSort sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint16_t>(MediumRadixSort sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint32_t>(MediumRadixSort sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
-extern template void sortCommon<uint64_t>(MediumRadixSort sorter, const TensorBase &key, const TensorBase &value, int dim, bool descending);
 
 void sortKeyValueInplace(
     const TensorBase& key,
