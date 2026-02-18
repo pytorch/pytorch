@@ -27,6 +27,7 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_member_type,
     is_opaque_reference_type,
@@ -433,6 +434,36 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return super().as_python_constant()
 
     def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(
-            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+        try:
+            hash(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+            return True
+        except TypeError:
+            return False
+
+    def get_python_hash(self) -> int:
+        real_obj = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
         )
+        return hash(real_obj)
+
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, TorchScriptObjectVariable):
+            return False
+        real_self = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        real_other = (
+            other.value.real_obj
+            if isinstance(other.value, FakeScriptObject)
+            else other.value
+        )
+        return real_self == real_other
+
+    def get_real_value(self) -> Any:
+        if isinstance(self.value, FakeScriptObject):
+            return self.value.real_obj
+        return self.as_python_constant()
