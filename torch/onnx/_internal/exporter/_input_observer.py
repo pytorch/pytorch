@@ -88,7 +88,7 @@ def _infer_dynamic_dimensions(
     unique_ranks = {len(shape) for shape in shape_list}
     torch._check(
         len(unique_ranks) == 1,
-        lambda: "all shapes in shape_list must have the same rank",
+        lambda: f"All shapes in shape_list must have the same rank but {shape_list=}.",
     )
     rank = unique_ranks.pop()
     dynamic = []
@@ -287,7 +287,7 @@ class InputObserverInfo:
             to be the same in the ordered dictionaries `add_inputs` receive.
         default_values: Default values defined by the signature of the function,
             any value equal to that is ignored to simplify the export.
-        value_if_missing: If a named argument (in kwargs) is missing,
+        value_if_missing: If an argument is missing,
             a default value will be taken in this dictionary,
             this is used when after the prefill step, an argument
             disappears (such as `pixel_values`) and another one
@@ -305,7 +305,7 @@ class InputObserverInfo:
         self,
         signature_names: list[str],
         default_values: dict[str, int | bool | str | float],
-        value_if_missing: dict[str, Any],
+        value_if_missing: dict[str | int, Any],
         args_name_and_position: tuple[str, int] | None,
         kwargs_name: str | None,
     ):
@@ -348,21 +348,47 @@ class InputObserverInfo:
 
         # adds value_if_missing attributes
         for k, v in self.value_if_missing.items():
-            if k not in kwargs:
-                # Validate that `value_if_missing` keys are compatible
-                # with the observed signature.
-                # If the function does not accept **kwargs,
-                # all value_if_missing keys must be
-                # present in the observed signature names.
-                if k not in self.signature_names and not self.kwargs_name:
+            if isinstance(k, str):
+                if k not in kwargs:
+                    # Validate that `value_if_missing` keys are compatible
+                    # with the observed signature.
+                    # If the function does not accept **kwargs,
+                    # all value_if_missing keys must be
+                    # present in the observed signature names.
+                    if k not in self.signature_names and not self.kwargs_name:
+                        raise ValueError(
+                            f"Unexpected keyword argument {k!r} "
+                            f"provided as a value_if_missing input "
+                            "for a function that does not accept it. "
+                            f"All value_if_missing keys must "
+                            f"be in the observed signature: {tuple(self.signature_names)}."
+                        )
+                    kwargs[k] = v
+            elif isinstance(k, int):
+                if k >= len(self.signature_names):
                     raise ValueError(
-                        f"Unexpected keyword argument '{k}' "
+                        f"Unexpected keyword argument {k=} "
                         f"provided as a value_if_missing input "
                         "for a function that does not accept it. "
-                        f"All value_if_missing keys must "
+                        f"All value_if_missing indices must "
                         f"be in the observed signature: {tuple(self.signature_names)}."
                     )
-                kwargs[k] = v
+                if k >= len(args):
+                    raise NotImplementedError(
+                        f"Unexpected keyword argument {k=} "
+                        f"provided as a value_if_missing input "
+                        "for a function that does not accept it. "
+                        f"All value_if_missing indices must "
+                        f"be in the observed signature: {tuple(self.signature_names)}, "
+                        f"only {len(args)} were given."
+                    )
+                list_args = list(args)
+                list_args[k] = v
+                args = tuple(list_args)
+            else:
+                raise TypeError(
+                    f"Unexepcted type {type(k)} for a missing value. The key is {k!r}."
+                )
 
         # kwargs may come in a different order each time.
         # dictionaries are ordered and torch.export.export expects
@@ -791,7 +817,7 @@ class InputObserver:
     export arguments.
 
     Args:
-        value_if_missing: If a named argument (in kwargs) is missing,
+        value_if_missing: If an argument is missing,
             a default value will be taken in this dictionary,
             this is used when after the prefill step, an argument
             disappears (such as `pixel_values`) and another one
@@ -873,7 +899,7 @@ class InputObserver:
     .. versionadded:: 2.11.0
     """
 
-    def __init__(self, value_if_missing: dict[str, Any] | None = None):
+    def __init__(self, value_if_missing: dict[str | int, Any] | None = None):
         self.info: InputObserverInfo | None = None
         self.value_if_missing = value_if_missing or {}
 

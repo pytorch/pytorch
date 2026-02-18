@@ -935,6 +935,130 @@ class TestInputObserver(common_utils.TestCase):
         self.assertEqual(expected, shapes)
         kwargs = observer.infer_arguments()
         self.assertEqual(list(expected), list(kwargs))
+        self.assertEqual((0, 3, 112, 112), kwargs["pixel_values"].shape)
+
+    def test_infer_dynamic_shapes_missing_args(self):
+        class Model(torch.nn.Module):
+            def forward(
+                self,
+                input_ids=None,
+                pixel_values=None,
+                attention_mask=None,
+                past_key_values=None,
+            ):
+                return input_ids
+
+        inputs = [
+            (
+                torch.ones((1, 28), dtype=torch.int64),
+                torch.ones((1, 3, 112, 112), dtype=torch.int64),
+                torch.ones((1, 28), dtype=torch.int64),
+            ),
+            (
+                torch.ones((1, 1), dtype=torch.int64),
+                None,
+                torch.ones((1, 29), dtype=torch.int64),
+                torch.rand((1, 1, 28, 32)),
+            ),
+            (
+                torch.ones((1, 1), dtype=torch.int64),
+                None,
+                torch.ones((1, 30), dtype=torch.int64),
+                torch.rand((1, 1, 29, 32)),
+            ),
+        ]
+
+        model = Model()
+        observer = InputObserver(
+            value_if_missing={1: torch.empty((0, 3, 112, 112), dtype=torch.int64)}
+        )
+        with observer(model):
+            for args in inputs:
+                model(*args)
+
+        shapes = observer.infer_dynamic_shapes(set_batch_dimension_for=True)
+        cst = torch.export.Dim.DYNAMIC
+        expected = ({0: cst, 1: cst}, {0: cst}, {0: cst, 1: cst}, {0: cst, 2: cst})
+        self.assertEqual(expected, shapes)
+        args = observer.infer_arguments()
+        self.assertEqual(len(expected), len(args))
+        self.assertEqual((0, 3, 112, 112), args[1].shape)
+
+    def test_infer_dynamic_shapes_missing_kwargs_nested(self):
+        class Model(torch.nn.Module):
+            def forward(
+                self,
+                input_ids=None,
+                pixel_values=None,
+                attention_mask=None,
+                position_ids=None,
+                past_key_values=None,
+                token_type_ids=None,
+                cache_position=None,
+            ):
+                return input_ids
+
+        inputs = [
+            dict(
+                input_ids=torch.ones((1, 28), dtype=torch.int64),
+                pixel_values=(
+                    torch.ones((1, 3, 112, 112), dtype=torch.int64),
+                    torch.ones((1, 3, 112, 112), dtype=torch.int64),
+                ),
+                attention_mask=torch.ones((1, 28), dtype=torch.int64),
+                position_ids=torch.ones((1, 28), dtype=torch.int64),
+                token_type_ids=torch.ones((1, 28), dtype=torch.int64),
+                cache_position=torch.ones((28,), dtype=torch.int64),
+            ),
+            dict(
+                input_ids=torch.ones((1, 1), dtype=torch.int64),
+                attention_mask=torch.ones((1, 29), dtype=torch.int64),
+                position_ids=torch.ones((1, 1), dtype=torch.int64),
+                past_key_values=torch.rand((1, 1, 28, 32)),
+                token_type_ids=torch.ones((1, 1), dtype=torch.int64),
+                cache_position=torch.ones((1,), dtype=torch.int64),
+            ),
+            dict(
+                input_ids=torch.ones((1, 1), dtype=torch.int64),
+                attention_mask=torch.ones((1, 30), dtype=torch.int64),
+                position_ids=torch.ones((1, 1), dtype=torch.int64),
+                past_key_values=torch.rand((1, 1, 29, 32)),
+                token_type_ids=torch.ones((1, 1), dtype=torch.int64),
+                cache_position=torch.ones((1,), dtype=torch.int64),
+            ),
+        ]
+
+        model = Model()
+        observer = InputObserver(
+            value_if_missing=dict(
+                pixel_values=(
+                    torch.empty((0, 3, 112, 112), dtype=torch.int64),
+                    torch.empty((0, 3, 112, 112), dtype=torch.int64),
+                )
+            )
+        )
+        with observer(model):
+            for kwargs in inputs:
+                model(**kwargs)
+
+        shapes = observer.infer_dynamic_shapes(set_batch_dimension_for=True)
+        cst = torch.export.Dim.DYNAMIC
+        expected = {
+            "input_ids": {0: cst, 1: cst},
+            "pixel_values": ({0: cst}, {0: cst}),
+            "attention_mask": {0: cst, 1: cst},
+            "position_ids": {0: cst, 1: cst},
+            "past_key_values": {0: cst, 2: cst},
+            "token_type_ids": {0: cst, 1: cst},
+            "cache_position": {0: cst},
+        }
+        self.assertEqual(expected, shapes)
+        kwargs = observer.infer_arguments()
+        self.assertEqual(list(expected), list(kwargs))
+        self.assertIsInstance(kwargs["pixel_values"], tuple)
+        self.assertEqual(2, len(kwargs["pixel_values"]))
+        self.assertEqual((0, 3, 112, 112), kwargs["pixel_values"][0].shape)
+        self.assertEqual((0, 3, 112, 112), kwargs["pixel_values"][1].shape)
 
     def test_io_captured_kwargs_kwargs(self):
         class Model(torch.nn.Module):
