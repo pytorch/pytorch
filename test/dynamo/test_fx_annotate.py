@@ -223,7 +223,6 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
             """\
 ('placeholder', 'getitem', {'compile_inductor': 0})
 ('placeholder', 'detach_3', {'compile_inductor': 0})
-('call_function', 'zeros', {'compile_inductor': 0})
 ('call_function', 'detach', {'compile_inductor': 0})
 ('call_function', 'detach_2', {'compile_inductor': 0})
 ('get_attr', 'fw_graph0', {'compile_inductor': 0})
