@@ -5,6 +5,7 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Size.h>
+#include <torch/csrc/Storage.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/device_lazy_init.h>
@@ -106,6 +107,22 @@ std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
         "'");
     if (length == 0)
       break;
+
+    if (THPStorage_Check(seq)) {
+      // When iterating a lot of tensors in a big tensors file, the
+      // PySequence_GetItem(seq, 0) call will access the tensor data itself on
+      // the last itertion, and it would look like random file mapping access
+      // to the kernel. Because we are passing POSIX_FADV_SEQUENTIAL to
+      // fadvice, we are essentially telling the kernel we are going to do
+      // mostly sequential access. With these together, the kernel does large
+      // reads on the tensor access.
+      //
+      // Since `THPStorage_get` will always return a scalar if given a scalar
+      // index - 0, so we can avoid the `PySequence_GetItem(seq, 0)` call and
+      // avoid the kernel overhead.
+      break;
+    }
+
     PyObject* new_obj = PySequence_GetItem(seq, 0);
     // This line uses seq so we must NOT override obj before this line
     TORCH_CHECK_VALUE(
