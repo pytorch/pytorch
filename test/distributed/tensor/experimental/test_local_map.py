@@ -1,6 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import warnings
+
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed.device_mesh import init_device_mesh
@@ -13,6 +15,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
+from torch.distributed.tensor.experimental._func_map import _WARNINGS_SHOWN
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -450,6 +453,67 @@ class TestLocalMap(DTensorTestBase):
         self.assertEqual(Y_dt_shapes.full_tensor(), Y)
         for placement in Y_dt_shapes.placements:
             self.assertTrue(placement.is_shard(dim=0))
+
+    @with_comms
+    def test_local_map_uneven_sharding_warns(self):
+        """
+        Test that local_map warns when input has uneven sharding but
+        allow_uneven_sharding is False and out_shapes is not provided.
+        """
+        device_mesh = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size,)
+        )
+
+        uneven_size = self.world_size * 2 + 1  # e.g., 5 for world_size=2
+        X = torch.randn(uneven_size, 4, device=self.device_type, requires_grad=False)
+
+        X_dt = distribute_tensor(X, device_mesh, row_wise)
+
+        local_mul = local_map(
+            mul_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, None),
+            device_mesh=device_mesh,
+        )
+
+        # Should warn about uneven sharding
+        _WARNINGS_SHOWN.clear()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            local_mul(X_dt, 2.0)
+            uneven_warnings = [x for x in w if "uneven sharding" in str(x.message)]
+            self.assertGreater(len(uneven_warnings), 0)
+
+        # Should NOT warn when allow_uneven_sharding=True
+        local_mul_uneven = local_map(
+            mul_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, None),
+            device_mesh=device_mesh,
+            allow_uneven_sharding=True,
+        )
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            local_mul_uneven(X_dt, 2.0)
+            uneven_warnings = [x for x in w if "uneven sharding" in str(x.message)]
+            self.assertEqual(len(uneven_warnings), 0)
+
+        # Should NOT warn when out_shapes is provided
+        Y = torch.mul(X, 2.0)
+        local_mul_shapes = local_map(
+            mul_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, None),
+            device_mesh=device_mesh,
+            out_shapes=[Y.shape],
+        )
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            local_mul_shapes(X_dt, 2.0)
+            uneven_warnings = [x for x in w if "uneven sharding" in str(x.message)]
+            self.assertEqual(len(uneven_warnings), 0)
 
 
 class TestLocalMap4GPU(DTensorTestBase):

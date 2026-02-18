@@ -22,6 +22,15 @@ except ImportError:
 
 __all__ = ["local_map"]
 
+_WARNINGS_SHOWN: set[str] = set()
+
+
+def _warn_once(msg: str) -> None:
+    if msg not in _WARNINGS_SHOWN:
+        _WARNINGS_SHOWN.add(msg)
+        warnings.warn(msg, stacklevel=3)
+
+
 PlacementType = Optional[Sequence[Placement]]
 InputPlacements = Optional[tuple[PlacementType, ...]]
 OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
@@ -95,7 +104,7 @@ def local_map(
         allow_uneven_sharding (bool, optional):
             whether to compute global shapes via all-gather. When ``False`` (default), :meth:`local_map`
             assumes even sharding and computes global shapes locally without communication. This is
-            fast but will produce incorrect results if outputs are unevenly sharded. When ``True``,
+            fast but will warn and produce incorrect results if inputs are unevenly sharded. When ``True``,
             :meth:`local_map` computes global shapes via all-gather of local shard sizes, correctly
             handling both even and uneven sharding at the cost of additional communication overhead.
             For zero-overhead handling of uneven sharding, use ``out_shapes`` instead. Default: False.
@@ -240,12 +249,11 @@ def _allgather_global_shape_uneven_sharding(
     """
     # TODO: a CPU-side control plane for exchanging shape information would
     # avoid the GPU sync and graph break caused by this path.
-    warnings.warn(
+    _warn_once(
         "allow_uneven_sharding=True uses all-gather to compute global shapes, "
         "which introduces communication overhead and a CPU-GPU sync that will "
         "cause a graph break under torch.compile. For better performance, use "
-        "out_shapes to provide global shapes directly with zero overhead.",
-        stacklevel=3,
+        "out_shapes to provide global shapes directly with zero overhead."
     )
 
     local_shape = local_tensor.shape
@@ -317,14 +325,28 @@ def _local_map_wrapped(
     seen_dtensor_arg = False
     for idx, arg in enumerate(flat_args):
         if isinstance(arg, DTensor):
-            # Note: Uneven sharding is supported - when outputs are sharded,
-            # we compute the global shape/stride via all-gather to handle
-            # cases where local shards have different sizes.
             if device_mesh is None:  # infer device mesh from the DTensor arg
                 device_mesh = arg.device_mesh
 
             # this function is applied to at least one DTensor argument
             seen_dtensor_arg = True
+
+            # Warn if input is unevenly sharded and user hasn't opted in
+            if not allow_uneven_sharding and out_shapes is None:
+                for mesh_dim, p in enumerate(arg.placements):
+                    if (
+                        isinstance(p, Shard)
+                        and arg.shape[p.dim] % arg.device_mesh.size(mesh_dim) != 0
+                    ):
+                        _warn_once(
+                            f"Input DTensor has uneven sharding on dim {p.dim} "
+                            f"(global size {arg.shape[p.dim]} across "
+                            f"{arg.device_mesh.size(mesh_dim)} ranks). "
+                            "Output global shapes will be incorrect. Use "
+                            "allow_uneven_sharding=True or out_shapes to "
+                            "handle uneven sharding correctly."
+                        )
+                        break
 
             if in_placements is not None:
                 spec = in_placements[idx]
