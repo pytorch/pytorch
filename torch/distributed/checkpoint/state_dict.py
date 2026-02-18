@@ -922,8 +922,10 @@ def _get_optim_state_dict(
                 fqn = next(iter(fqns))
                 if param not in param_pid_mapping:
                     continue
+                # pyrefly: ignore [bad-index]
                 pid = param_pid_mapping[param]
                 fqn_pid_mapping[fqn] = pid
+                # pyrefly: ignore [unsupported-operation]
                 fqn_pid_mapping[pid] = fqn
 
             # Only convert top-level parameter IDs to FQNs, preserve nested key types
