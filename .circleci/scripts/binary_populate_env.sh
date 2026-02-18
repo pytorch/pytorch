@@ -3,7 +3,7 @@ set -eux -o pipefail
 export TZ=UTC
 
 tagged_version() {
-  GIT_DIR="${workdir}/.git"
+  GIT_DIR="${workdir}/pytorch/.git"
   GIT_DESCRIBE="git --git-dir ${GIT_DIR} describe --tags --match v[0-9]*.[0-9]*.[0-9]*"
   if [[ ! -d "${GIT_DIR}" ]]; then
     echo "Abort, abort! Git dir ${GIT_DIR} does not exists!"
@@ -17,10 +17,10 @@ tagged_version() {
 
 envfile=${BINARY_ENV_FILE:-/tmp/env}
 if [[ -n "${PYTORCH_ROOT}"  ]]; then
-  workdir=$(dirname "${PYTORCH_ROOT}")
+  workdir="${workdir}${PYTORCH_ROOT}"
 else
   # docker executor (binary builds)
-  workdir="/"
+  workdir="/pytorch"
 fi
 
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
