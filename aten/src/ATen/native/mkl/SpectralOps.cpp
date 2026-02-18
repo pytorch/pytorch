@@ -434,6 +434,12 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
   const int64_t signal_ndim = dim.size();
   const auto batch_dims = ndim - signal_ndim;
 
+  // Nothing to do for empty tensors
+  if (self.numel() == 0) {
+    out.resize_(out_sizes, MemoryFormat::Contiguous);
+    return out;
+  }
+
   // Permute dimensions so batch dimensions come first, and in stride order
   // This maximizes data locality when collapsing to a single batch dimension
   DimVector dim_permute(ndim);
