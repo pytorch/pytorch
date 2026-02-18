@@ -44,7 +44,7 @@ def replace_node_with_constant(
         if not hasattr(gm, "_frozen_param_count"):
             gm._frozen_param_count = 0  # type: ignore[assignment]
         i = gm._frozen_param_count
-
+        # pyrefly: ignore [bad-assignment]
         while True:
             qualname = f"_frozen_param{i}"
             if not hasattr(gm, qualname):

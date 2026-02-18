@@ -1140,8 +1140,11 @@ def _chunk_or_narrow_cat(
     """
     if torch.distributed.is_available():
         from torch.distributed._functional_collectives import _are_we_tracing
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
-        if _are_we_tracing():
+        # TODO(pianpwk): remove the unbacked symbols check and fix AsyncTP pattern matching
+        # for test_micro_pipeline_tp.py.
+        if _are_we_tracing() and has_free_unbacked_symbols(tensor):
             chunk_size = tensor.size(narrow_dim) // num_chunks
             chunks = [
                 torch.narrow(tensor, narrow_dim, i * chunk_size, chunk_size)

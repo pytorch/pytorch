@@ -169,11 +169,14 @@ class Shard(torch._C._distributed.Shard):
         Also handles uneven/zero-sharding cases.
         """
         from torch.distributed._functional_collectives import _are_we_tracing
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
         assert tensor.dim() > 0
         assert num_chunks > 0
 
-        if not _are_we_tracing():
+        # TODO(pianpwk): remove the unbacked symbols check and fix AsyncTP pattern matching
+        # for test_micro_pipeline_tp.py.
+        if not _are_we_tracing() or not has_free_unbacked_symbols(tensor):
             tensor_list = list(torch.chunk(tensor, num_chunks, dim=dim))
             return fill_empty_tensor_to_shards(
                 tensor_list, dim, num_chunks - len(tensor_list)
@@ -1172,6 +1175,10 @@ class Replicate(torch._C._distributed.Replicate):
 
 
 class Partial(torch._C._distributed.Partial):
+    # reduce_ops that distribute over addition, enabling per-input linearity
+    # for bilinear ops like mm: reduce_op(A_i @ B) = reduce_op(A_i) @ B
+    LINEAR_REDUCE_OPS: tuple[str, ...] = ("sum", "avg")
+
     """
     The ``Partial(reduce_op)`` placement describes the DTensor that is pending
     reduction on a specified ``DeviceMesh`` dimension, where each rank on the

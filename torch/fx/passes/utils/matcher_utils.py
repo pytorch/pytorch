@@ -138,6 +138,7 @@ class SubgraphMatcher:
             return isinstance(gn_value, torch.Tensor)
         else:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
+        # pyrefly: ignore [unreachable]
         return False
 
     def _nodes_are_equal(self, pn: Node, gn: Node, node_name_match: str = "") -> bool:

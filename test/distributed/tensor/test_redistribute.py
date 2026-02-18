@@ -1759,7 +1759,7 @@ class DistributeWithStridedShardTest(DTensorTestBase):
             elif idx == 2:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]_S(0, 3)[1]S(0)[2]->S(0)[0]_S(0, 3)[1]R->S(0)RR->RRR->_S(0, 3)RR->_S(0, 3)[0]S(0)[1]R""",
+                    """S(0)[1]_S(0, 3)[0]S(0)[2]->S(0)[1]_S(0, 3)[0]R->R_S(0, 3)R->RRR->_S(0, 3)RR->_S(0, 3)[0]S(0)[1]R""",
                 )
             elif idx == 3:
                 self.assertExpectedInline(
