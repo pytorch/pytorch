@@ -2398,6 +2398,24 @@ class VariableBuilder:
         )
         cache_real_value_when_export(self.tx, tensor_proxy, value)
 
+        # Store cudagraph shape hints on node metadata and TracingContext
+        if hasattr(value, "_cudagraph_excluded_sym_dims"):
+            tensor_proxy.node.meta["cudagraph_excluded_dims"] = value._cudagraph_excluded_sym_dims.copy()
+            # Also store on TracingContext for propagation through aot_autograd
+            tracing_ctx = torch._guards.TracingContext.try_get()
+            if tracing_ctx is not None:
+                if not hasattr(tracing_ctx, "cudagraph_excluded_dims_by_input"):
+                    tracing_ctx.cudagraph_excluded_dims_by_input = {}
+                tracing_ctx.cudagraph_excluded_dims_by_input[tensor_proxy.node.name] = value._cudagraph_excluded_sym_dims.copy()
+        if hasattr(value, "_cudagraph_included_sym_dims"):
+            tensor_proxy.node.meta["cudagraph_included_dims"] = value._cudagraph_included_sym_dims.copy()
+            # Also store on TracingContext for propagation through aot_autograd
+            tracing_ctx = torch._guards.TracingContext.try_get()
+            if tracing_ctx is not None:
+                if not hasattr(tracing_ctx, "cudagraph_included_dims_by_input"):
+                    tracing_ctx.cudagraph_included_dims_by_input = {}
+                tracing_ctx.cudagraph_included_dims_by_input[tensor_proxy.node.name] = value._cudagraph_included_sym_dims.copy()
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,

@@ -2215,6 +2215,10 @@ def clone_input(
             y.grad = clone_input(x.grad, dtype=dtype)
         if hasattr(x, "_dynamo_dynamic_indices"):
             y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
+        if hasattr(x, "_cudagraph_excluded_sym_dims"):
+            y._cudagraph_excluded_sym_dims = x._cudagraph_excluded_sym_dims.copy()  # type: ignore[attr-defined]
+        if hasattr(x, "_cudagraph_included_sym_dims"):
+            y._cudagraph_included_sym_dims = x._cudagraph_included_sym_dims.copy()  # type: ignore[attr-defined]
         return y
 
     with torch.no_grad():
@@ -2275,6 +2279,10 @@ def clone_input(
             return torch_clone(x)
         if hasattr(x, "_dynamo_dynamic_indices"):
             result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
+        if hasattr(x, "_cudagraph_excluded_sym_dims"):
+            result._cudagraph_excluded_sym_dims = x._cudagraph_excluded_sym_dims.copy()  # type: ignore[attr-defined]
+        if hasattr(x, "_cudagraph_included_sym_dims"):
+            result._cudagraph_included_sym_dims = x._cudagraph_included_sym_dims.copy()  # type: ignore[attr-defined]
         return result
 
 

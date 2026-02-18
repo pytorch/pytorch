@@ -489,6 +489,13 @@ class GraphLowering(torch.fx.Interpreter):
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: Optional[str] = None
 
+        # Symints that should be excluded from cudagraph partitions
+        # (set via cudagraph_exclude_sym_shape API)
+        self.cudagraph_excluded_symints: OrderedSet[sympy.Symbol] = OrderedSet()
+        # Symints that should be included in cudagraph partitions even when
+        # cudagraph_skip_dynamic_graphs=True (set via cudagraph_include_sym_shape API)
+        self.cudagraph_included_symints: OrderedSet[sympy.Symbol] = OrderedSet()
+
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
@@ -579,6 +586,91 @@ class GraphLowering(torch.fx.Interpreter):
         size = [sympy.Integer(i) for i in ex.size()]
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
+
+    def _extract_cudagraph_shape_hints(
+        self,
+        tensor: torch.Tensor,
+        sizes: Sequence[Union[int, Expr]],
+        strides: Optional[Sequence[Union[int, Expr]]] = None,
+    ) -> None:
+        """
+        Extract cudagraph shape hints from input tensors, node metadata, gm.meta,
+        or TracingContext. Adds excluded/included dimension symbols to the appropriate sets.
+        Also includes stride symbols for the specified dimensions.
+        """
+        # Try tensor attributes first (legacy path)
+        excluded_dims = getattr(tensor, "_cudagraph_excluded_sym_dims", None)
+        included_dims = getattr(tensor, "_cudagraph_included_sym_dims", None)
+
+        # Also check node metadata (dynamo-set)
+        if self.current_node is not None:
+            if excluded_dims is None:
+                excluded_dims = self.current_node.meta.get("cudagraph_excluded_dims")
+            if included_dims is None:
+                included_dims = self.current_node.meta.get("cudagraph_included_dims")
+
+        # Also check gm.meta["cudagraph_shape_hints"] (propagated through aot_autograd)
+        if (excluded_dims is None or included_dims is None) and self.current_node is not None:
+            shape_hints = self.module.meta.get("cudagraph_shape_hints", {})
+            node_hints = shape_hints.get(self.current_node.name)
+            if node_hints:
+                if excluded_dims is None:
+                    excluded_dims = node_hints.get("excluded_dims")
+                if included_dims is None:
+                    included_dims = node_hints.get("included_dims")
+
+        # Check TracingContext (most reliable path through aot_autograd)
+        if excluded_dims is None or included_dims is None:
+            tracing_ctx = torch._guards.TracingContext.try_get()
+            if tracing_ctx is not None and self.current_node is not None:
+                # The node names in aot_autograd are different (e.g., arg1_1 vs l_x_)
+                # Match by normalizing names: strip 'arg' prefix and underscores,
+                # or use placeholder index mapping
+                node_name = self.current_node.name.lower()
+
+                if excluded_dims is None and hasattr(tracing_ctx, "cudagraph_excluded_dims_by_input"):
+                    for orig_name, dims in tracing_ctx.cudagraph_excluded_dims_by_input.items():
+                        # Try exact match or normalized match
+                        orig_lower = orig_name.lower()
+                        if node_name == orig_lower or node_name.replace("_", "") == orig_lower.replace("_", ""):
+                            excluded_dims = dims
+                            break
+                        # For simple cases with single input, just use the first entry
+                        if len(tracing_ctx.cudagraph_excluded_dims_by_input) == 1:
+                            excluded_dims = dims
+                            break
+
+                if included_dims is None and hasattr(tracing_ctx, "cudagraph_included_dims_by_input"):
+                    for orig_name, dims in tracing_ctx.cudagraph_included_dims_by_input.items():
+                        orig_lower = orig_name.lower()
+                        if node_name == orig_lower or node_name.replace("_", "") == orig_lower.replace("_", ""):
+                            included_dims = dims
+                            break
+                        # For simple cases with single input, just use the first entry
+                        if len(tracing_ctx.cudagraph_included_dims_by_input) == 1:
+                            included_dims = dims
+                            break
+
+        def add_symbols_from_dim(
+            dim: int, target_set: OrderedSet[sympy.Symbol]
+        ) -> None:
+            """Add size and stride symbols from a given dimension."""
+            if 0 <= dim < len(sizes):
+                size_expr = sizes[dim]
+                if isinstance(size_expr, sympy.Expr):
+                    target_set.update(size_expr.free_symbols)
+            if strides is not None and 0 <= dim < len(strides):
+                stride_expr = strides[dim]
+                if isinstance(stride_expr, sympy.Expr):
+                    target_set.update(stride_expr.free_symbols)
+
+        if excluded_dims:
+            for dim in excluded_dims:
+                add_symbols_from_dim(dim, self.cudagraph_excluded_symints)
+
+        if included_dims:
+            for dim in included_dims:
+                add_symbols_from_dim(dim, self.cudagraph_included_symints)
 
     def get_allocation_size(
         self,
@@ -1213,6 +1305,9 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
+
+        # Extract cudagraph shape hints from input tensors
+        self._extract_cudagraph_shape_hints(example, sizes, strides)
 
         if (
             self.is_backward

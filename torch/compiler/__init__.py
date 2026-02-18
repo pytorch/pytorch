@@ -27,6 +27,9 @@ __all__ = [
     "set_stance",
     "set_enable_guard_collectives",
     "cudagraph_mark_step_begin",
+    "_disable_cudagraphs",
+    "_cudagraph_exclude_sym_shape",
+    "_cudagraph_include_sym_shape",
     "load_compiled_function",
     "wrap_numpy",
     "is_compiling",
@@ -401,6 +404,108 @@ def cudagraph_mark_step_begin():
     from torch._inductor import cudagraph_trees
 
     cudagraph_trees.mark_step_begin()
+
+
+def _disable_cudagraphs(fwd: bool = True, bwd: bool = True):
+    """
+    Context manager/decorator to disable cudagraphs for a region of code.
+
+    When used as a decorator on a function that gets inlined during torch.compile,
+    this disables cudagraphs for that graph segment.
+
+    When used as a context manager within compiled code, any operations inside
+    the context will not use cudagraphs.
+
+    Args:
+        fwd: If True (default), disable cudagraphs for forward pass
+        bwd: If True (default), disable cudagraphs for backward pass
+
+    Example::
+
+        @torch.compiler._disable_cudagraphs()
+        def my_function(x):
+            return x + 1
+
+        # Or as context manager:
+        with torch.compiler._disable_cudagraphs():
+            y = x + 1
+    """
+    from torch._dynamo import disable_cudagraphs
+
+    return disable_cudagraphs(fwd=fwd, bwd=bwd)
+
+
+def _cudagraph_exclude_sym_shape(
+    t: torch.Tensor, index: Union[int, list[int], tuple[int, ...]]
+) -> None:
+    """
+    Mark a tensor dimension's symbolic shape to be excluded from cudagraph partitions.
+
+    When compiling with dynamic shapes, this API excludes the specified dimension's
+    symbolic shape from being included in cudagraph partitions. Nodes using this shape
+    will be partitioned out of cudagraph regions when ``graph_partition`` is enabled,
+    or cudagraphs will be disabled for the entire graph otherwise.
+
+    Only affects dimensions that become SymInts during dynamic compilation.
+    Has no effect on static/concrete dimensions.
+
+    This API must be called before ``torch.compile``, not during tracing.
+
+    Args:
+        t: The tensor whose dimension should be excluded from cudagraphs
+        index: The dimension index (or list/tuple of indices) to exclude
+
+    Example::
+
+        x = torch.randn(8, 8, device="cuda")
+        # Exclude dimension 0 from cudagraph partitions
+        torch.compiler._cudagraph_exclude_sym_shape(x, 0)
+
+        @torch.compile(mode="reduce-overhead", dynamic=True)
+        def fn(x):
+            return x + 1
+
+        fn(x)
+    """
+    from torch._dynamo.decorators import cudagraph_exclude_sym_shape as _impl
+
+    _impl(t, index)
+
+
+def _cudagraph_include_sym_shape(
+    t: torch.Tensor, index: Union[int, list[int], tuple[int, ...]]
+) -> None:
+    """
+    Mark a tensor dimension's symbolic shape to be included in cudagraph partitions.
+
+    When ``triton.cudagraph_skip_dynamic_graphs=True`` (which normally excludes all
+    dynamic shapes from cudagraphs), this API includes the specified dimension's
+    symbolic shape in cudagraph partitions.
+
+    Only affects dimensions that become SymInts during dynamic compilation.
+    Has no effect on static/concrete dimensions.
+
+    This API must be called before ``torch.compile``, not during tracing.
+
+    Args:
+        t: The tensor whose dimension should be included in cudagraphs
+        index: The dimension index (or list/tuple of indices) to include
+
+    Example::
+
+        x = torch.randn(8, 8, device="cuda")
+        # Include dimension 0 in cudagraph partitions even with skip_dynamic_graphs
+        torch.compiler._cudagraph_include_sym_shape(x, 0)
+
+        @torch.compile(mode="reduce-overhead", dynamic=True)
+        def fn(x):
+            return x + 1
+
+        fn(x)
+    """
+    from torch._dynamo.decorators import cudagraph_include_sym_shape as _impl
+
+    _impl(t, index)
 
 
 def wrap_numpy(fn):

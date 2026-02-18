@@ -505,6 +505,11 @@ class FakeTensorConverter:
                     )
         if make_constant:
             self.add_constant_storage_mapping(out)
+        # Copy cudagraph shape hints to fake tensor
+        if hasattr(t, "_cudagraph_excluded_sym_dims"):
+            out._cudagraph_excluded_sym_dims = t._cudagraph_excluded_sym_dims.copy()
+        if hasattr(t, "_cudagraph_included_sym_dims"):
+            out._cudagraph_included_sym_dims = t._cudagraph_included_sym_dims.copy()
         # NB: meta_converter set the memo
         return out
 
