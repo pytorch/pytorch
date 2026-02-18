@@ -127,32 +127,32 @@ def reenter_make_fx(fn, subgraph_decomp_table=None):
     return wrapped
 
 
+def _maybe_make_fx_with_fake_mode(fn, subgraph_decomp_table=None):
+    @functools.wraps(fn)
+    def wrapped(*args):
+        from torch._guards import detect_fake_mode
+
+        fake_mode = detect_fake_mode(args)
+        if fake_mode is None:
+            # we creaeta a fake_mode here to make sure we could
+            # trace the graph with data-dependent calls e.g. .item()
+            return make_fx(
+                fn,
+                tracing_mode="fake",
+                decomposition_table=subgraph_decomp_table,
+            )(*args)
+        # Tracing with real if all inputs have been fakfied
+        return make_fx(fn, decomposition_table=subgraph_decomp_table)(*args)
+
+    return wrapped
+
+
 def _maybe_reenter_make_fx(fn, subgraph_decomp_table=None):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
     if _CURRENT_MAKE_FX_TRACER is not None:
         return reenter_make_fx(fn, subgraph_decomp_table=subgraph_decomp_table)
     else:
-
-        def _maybe_make_fx_with_fake_mode(fn):
-            @functools.wraps(fn)
-            def wrapped(*args):
-                from torch._guards import detect_fake_mode
-
-                fake_mode = detect_fake_mode(args)
-                if fake_mode is None:
-                    # we creaeta a fake_mode here to make sure we could
-                    # trace the graph with data-dependent calls e.g. .item()
-                    return make_fx(
-                        fn,
-                        tracing_mode="fake",
-                        decomposition_table=subgraph_decomp_table,
-                    )(*args)
-                # Tracing with real if all inputs have been fakfied
-                return make_fx(fn, decomposition_table=subgraph_decomp_table)(*args)
-
-            return wrapped
-
         return _maybe_make_fx_with_fake_mode(fn)
 
 
@@ -1230,6 +1230,8 @@ def materialize_as_graph(
 
     @torch._dynamo.disable(recursive=True, reason=None)
     def _materialize_as_graph_inner():
+        from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
         with suspend_functionalization(), disable_functional_mode():
             with disable_proxy_modes_tracing():
                 unfunc_t = [_from_fun(arg) for arg in args]
@@ -1249,9 +1251,22 @@ def materialize_as_graph(
                 # make sure the fake mode when tracing subgraph is consistent.
                 if fake_mode := detect_fake_mode(unfunc_t):
                     stack.enter_context(fake_mode)
-                return _maybe_reenter_make_fx(
-                    fn, subgraph_decomp_table=subgraph_decomp_table
-                )(*unfunc_t)
+
+                # If there is an active fake tensor mode on the dispatch stack that differs from the current make_fx tracer's fake mode
+                # (e.g., when tracing functionalized higher-order ops with make_fx), use the active fake mode to trace.
+                # This avoids errors caused by mixing fake modes during tracing.
+                if (
+                    fake_mode is not None
+                    and _CURRENT_MAKE_FX_TRACER is not None
+                    and fake_mode is not _CURRENT_MAKE_FX_TRACER.fake_tensor_mode
+                ):
+                    return _maybe_make_fx_with_fake_mode(
+                        fn, subgraph_decomp_table=subgraph_decomp_table
+                    )(*unfunc_t)
+                else:
+                    return _maybe_reenter_make_fx(
+                        fn, subgraph_decomp_table=subgraph_decomp_table
+                    )(*unfunc_t)
 
     gm = _materialize_as_graph_inner()
     if gm is None:
