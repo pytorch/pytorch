@@ -33,6 +33,32 @@ class FakeScriptObject:
             real_obj = x
         object.__setattr__(self, "real_obj", real_obj)
 
+    def __deepcopy__(self, memo: dict[int, Any]) -> "FakeScriptObject":
+        if id(self) in memo:
+            return memo[id(self)]
+        new_obj = FakeScriptObject.__new__(FakeScriptObject)
+        memo[id(self)] = new_obj
+        object.__setattr__(
+            new_obj, "wrapped_obj", copy.deepcopy(self.wrapped_obj, memo)
+        )
+        object.__setattr__(new_obj, "script_class_name", self.script_class_name)
+        new_real_obj = copy.deepcopy(self.real_obj, memo)
+        object.__setattr__(new_obj, "real_obj", new_real_obj)
+        for name, value in self.__dict__.items():
+            if name not in ("wrapped_obj", "script_class_name", "real_obj"):
+                if isinstance(value, FakeScriptMethod):
+                    object.__setattr__(
+                        new_obj,
+                        name,
+                        FakeScriptMethod(new_obj, value.method_name, value.schema),
+                    )
+                else:
+                    if hasattr(new_real_obj, name):
+                        object.__setattr__(new_obj, name, getattr(new_real_obj, name))
+                    else:
+                        object.__setattr__(new_obj, name, copy.deepcopy(value, memo))
+        return new_obj
+
     def __getattribute__(self, name):
         try:
             return super().__getattribute__(name)
