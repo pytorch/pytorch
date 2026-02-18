@@ -273,12 +273,18 @@ with patch.object(torch._C, '_xpu_getDeviceCount', counting_getDeviceCount):
     import torch._inductor.lowering
 
 print(call_count)
+print(torch.xpu.is_initialized())
 """
-        # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
-        rc = check_output(test_script).splitlines()[-1]
+        rc = check_output(test_script).splitlines()
         self.assertEqual(
-            rc, "0",
-            "Importing torch._inductor.lowering should not query XPU device count"
+            rc[0],
+            "0",
+            "Importing torch._inductor.lowering should not query XPU device count",
+        )
+        self.assertEqual(
+            rc[1],
+            "False",
+            "Importing torch._inductor.lowering should not initialize XPU",
         )
 
     def test_streams(self):
