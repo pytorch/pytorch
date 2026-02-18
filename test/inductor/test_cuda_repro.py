@@ -2718,20 +2718,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         weight = 0.1
         self.common(fn, [start, end, weight])
 
-    @config.patch({"compile_threads": 1})
-    def test_pow_scalar_tensor_precision_no_subprocess(self):
-        """Test pow precision without subprocess compilation (compile_threads=1)."""
-        self._test_pow_scalar_tensor_precision()
-
-    @config.patch({"compile_threads": 4, "worker_start_method": "fork"})
-    def test_pow_scalar_tensor_precision_with_subprocess(self):
-        """Test pow precision with subprocess compilation."""
-        self._test_pow_scalar_tensor_precision()
-
-    def _test_pow_scalar_tensor_precision(self):
-        # Test that pow(scalar, tensor) matches eager bitwise. This works because
-        # inductor auto-detects and uses CUDA toolkit's libdevice instead of
-        # Triton's bundled version, ensuring Triton's pow matches CUDA's powf.
+    @config.patch("eager_numerics.pow_precision", True)
+    def test_pow_precision(self):
+        # Test that pow(scalar, tensor) matches eager bitwise when using
+        # eager_numerics.pow_precision, which uses inline PTX to match CUDA's powf.
         def fn(exp):
             return torch.pow(0.9, exp)
 
@@ -2742,15 +2732,15 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
     @config.patch("eager_numerics.division_rounding", True)
-    def test_div_precision_rounding(self):
-        # Test that division matches eager when division_rounding is enabled.
-        # This uses div_rn (round-to-nearest) instead of reciprocal multiplication.
-        def fn(a, b):
-            return a / b
+    def test_reciprocal_precision_rounding(self):
+        # Test that reciprocal matches eager when division_rounding is enabled.
+        # This requires OpDecompositions.reciprocal to use float32 constant so
+        # that div_rn can be applied (the dtype check requires both operands float32).
+        def fn(x):
+            return torch.reciprocal(x)
 
-        a = torch.randn(1000, device="cuda", dtype=torch.float32)
-        b = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
-        self.common(fn, [a, b])
+        x = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
+        self.common(fn, [x])
 
 
 if __name__ == "__main__":
