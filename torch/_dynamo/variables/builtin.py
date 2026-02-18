@@ -2779,7 +2779,6 @@ class BuiltinVariable(VariableTracker):
             obj,
             (
                 variables.DefaultDictVariable,
-                variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
