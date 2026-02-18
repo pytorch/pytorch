@@ -2872,6 +2872,36 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(details3),
             )
 
+    def test_hash_var_to_hint_override(self):
+        """Test that different var_to_hint_override values produce different hashes."""
+        details1 = FxGraphHashDetails(None, [], {}, [])
+        details2 = FxGraphHashDetails(None, [], {}, [])
+
+        details1.var_to_hint_override = {"s0": 64}
+        details2.var_to_hint_override = {"s0": 64}
+        details3 = FxGraphHashDetails(None, [], {}, [])
+        details3.var_to_hint_override = {"s0": 99}
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        self.assertEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details2),
+        )
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details3),
+        )
+
+        # Empty vs non-empty
+        details4 = FxGraphHashDetails(None, [], {}, [])
+        details4.var_to_hint_override = {}
+        self.assertNotEqual(
+            pickler.dumps(details1),
+            pickler.dumps(details4),
+        )
+
     def test_bypass_unsupported(self):
         """
         Test _reduce_unsupported

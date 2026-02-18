@@ -1049,6 +1049,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         entry: GenericAOTAutogradResult[Any, Any],
     ) -> Optional[str]:
         """Find which field of entry is causing pickle to fail."""
+        # pyrefly: ignore [implicit-any]
         fields = []
         if hasattr(entry, "__dataclass_fields__"):
             fields = list(entry.__dataclass_fields__.keys())

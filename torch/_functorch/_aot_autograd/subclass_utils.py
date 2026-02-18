@@ -401,6 +401,7 @@ def wrap_tensor_subclasses(
     is_runtime: bool = False,
     make_subclass_override: Callable[..., Any] | None = None,
 ) -> tuple[Any, ...]:
+    # pyrefly: ignore [implicit-any]
     wrapped_args = []
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
