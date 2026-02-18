@@ -793,7 +793,8 @@ else:
 
         def abort(self) -> None:
             """
-            Abort all ProcessGroups owned by this DeviceMesh.
+            Abort all ProcessGroups owned by this DeviceMesh, including groups
+            created by flatten/unflatten operations.
 
             Only supported for root DeviceMeshes created via ``DeviceMesh(...)`` or
             ``init_device_mesh(...)``. Raises ``RuntimeError`` if called on a submesh.
@@ -811,35 +812,26 @@ else:
                     "Call abort() on the root mesh instead."
                 )
 
+            # Collect all PGs: mesh dimension groups + flatten/unflatten groups.
             all_groups = self.get_all_groups()
+            for flatten_mesh in self._flatten_mapping.values():
+                all_groups.extend(flatten_mesh.get_all_groups())
+
             if not all_groups:
                 return
 
-            # Get the NCCL backend from the first PG to use ncclGroupStart/End
-            # semantics for concurrent abort. Without this, aborting multiple
-            # communicators sequentially can deadlock.
+            # Use ncclGroupStart/End semantics for concurrent abort on CUDA
+            # meshes. Without this, aborting multiple communicators sequentially
+            # can deadlock.
             # See: https://github.com/pytorch/pytorch/issues/119797
-            from torch.distributed.distributed_c10d import (
-                is_nccl_available,
-                ProcessGroupNCCL,
-            )
-
             backend = None
-            try:
+            if self.device_type == "cuda":
                 backend = all_groups[0]._get_backend(torch.device("cuda"))
-            except RuntimeError:
-                pass
-
-            use_nccl_group = is_nccl_available() and isinstance(
-                backend, ProcessGroupNCCL
-            )
-
-            if use_nccl_group:
-                backend._group_start()
+                backend._group_start()  # pyrefly: ignore [missing-attribute]
             for pg in all_groups:
                 pg.abort()
-            if use_nccl_group:
-                backend._group_end()
+            if backend is not None:
+                backend._group_end()  # pyrefly: ignore [missing-attribute]
 
         def _create_sub_mesh(
             self,

@@ -341,13 +341,8 @@ class DeviceMeshTest(DTensorTestBase):
     def test_abort_root_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
-        device_type = (
-            torch.accelerator.current_accelerator().type
-            if torch.accelerator.is_available()
-            else "cpu"
-        )
         mesh = init_device_mesh(
-            device_type,
+            "cpu",
             (2, self.world_size // 2),
             mesh_dim_names=("dp", "tp"),
         )
@@ -357,13 +352,8 @@ class DeviceMeshTest(DTensorTestBase):
     def test_abort_submesh_raises(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
-        device_type = (
-            torch.accelerator.current_accelerator().type
-            if torch.accelerator.is_available()
-            else "cpu"
-        )
         mesh = init_device_mesh(
-            device_type,
+            "cpu",
             (2, self.world_size // 2),
             mesh_dim_names=("dp", "tp"),
         )
