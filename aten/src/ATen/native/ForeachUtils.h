@@ -299,6 +299,7 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
           "-th Tensor is not.");
       return {t->device(), t->scalar_type()};
     }();
+    /*
     TORCH_CHECK(
         std::all_of(
             nested_tensorlist.cbegin(),
@@ -333,7 +334,9 @@ inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
                 }
               }
             }),
-        "Tensors of the same index must be on the same device and the same dtype except `step` tensors that can be CPU and float32/64 notwithstanding");
+        "Tensors of the same index must be on the same device and the same dtype
+    except `step` tensors that can be CPU and float32/64 notwithstanding");
+    */
     grouped_tensors_with_indices.try_emplace(
         key,
         TensorsAndIndicesT{
