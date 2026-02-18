@@ -313,6 +313,10 @@ def bucketize_binary_search(
     BLOCK_SHAPE: the shape of the data block being processed.
     """
 
+    # Handle NaN values: NaN should be treated as greater than all boundaries
+    # and return BOUNDARIES_SIZE (the highest possible bucket index)
+    is_nan = values != values  # NaN != NaN is True
+
     low = tl.zeros(values.shape, dtype=indexing_dtype)
     high = tl.full(values.shape, BOUNDARIES_SIZE, dtype=indexing_dtype)
 
@@ -341,6 +345,9 @@ def bucketize_binary_search(
             is_above = values >= bucket_upper_bound
         else:
             is_above = values > bucket_upper_bound
+
+        # For NaN values, treat as always above any boundary
+        is_above = is_above | is_nan
 
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)
