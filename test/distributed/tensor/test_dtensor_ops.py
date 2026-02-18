@@ -127,6 +127,7 @@ def repurpose_ops(op_db, base_test_name, derived_test_name):
 # like python test/distributed/tensor/test_dtensor_ops.py > failed.expect
 dtensor_fails = {
     # view/reshape ops: rejects flatten/split of sharded dims without redistribution
+    xfail("cartesian_prod"),
     xfail("flatten"),
     xfail("kron"),
     xfail("ravel"),
@@ -134,6 +135,7 @@ dtensor_fails = {
     xfail("reshape"),
     xfail("reshape_as"),
     xfail("take_along_dim"),
+    xfail("unbind"),
     xfail("unflatten"),
     xfail("view"),
     xfail("view_as"),
@@ -176,9 +178,13 @@ dtensor_fails = {
     xfail("__getitem__"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
+    xfail("pca_lowrank"),
     xfail("quantile"),
+    xfail("svd_lowrank"),
     # dynamic output shape: output shape depends on data values
     xfail("combinations"),
+    xfail("linalg.lstsq"),
+    xfail("linalg.lstsq", "grad_oriented"),
     xfail("masked_select"),
     xfail("nn.functional.ctc_loss"),
     # 0-dim tensor edge cases: strategies don't handle scalar tensors
@@ -194,23 +200,19 @@ dtensor_fails = {
     xfail("nn.functional.conv_transpose3d"),
     # in-place op requires placement change during decomposition
     xfail("nn.functional.cosine_similarity"),
-    # miscellaneous
-    xfail("cartesian_prod"),
-    xfail("cholesky_solve"),
+    # Shard(0) causes local tensor index out of bounds for value broadcasting
     xfail("index_put"),
-    xfail("linalg.lstsq"),
-    xfail("linalg.lstsq", "grad_oriented"),
-    xfail("linalg.matrix_power"),
-    xfail("logdet"),
-    xfail("pca_lowrank"),
+    # "cannot resize variables that require grad" from test harness
     xfail("resize_"),
     xfail("resize_as_"),
+    # DTensorConverter can't convert sparse tensor inputs
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
+    # bug in squeeze.dims strategy: TypeError with empty dims arg
     xfail("squeeze", "multiple"),
-    xfail("svd_lowrank"),
+    # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
-    xfail("unbind"),
+    # output_specs count mismatch in unsafe_split strategy
     xfail("unsafe_split"),
     # /TODO(whc) debug/triage
     # ops inside this might even fail without dtensor
@@ -285,6 +287,7 @@ dtensor_fails_no_strategy = {
     xfail("cdist"),
     xfail("cholesky"),
     xfail("cholesky_inverse"),
+    xfail("cholesky_solve"),
     xfail("complex"),
     xfail("cross"),
     xfail("cummax"),
@@ -340,6 +343,7 @@ dtensor_fails_no_strategy = {
     xfail("linalg.lu_factor"),
     xfail("linalg.lu_factor_ex"),
     xfail("linalg.lu_solve"),
+    xfail("linalg.matrix_power"),
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.slogdet"),
@@ -352,6 +356,7 @@ dtensor_fails_no_strategy = {
     xfail("linspace", "tensor_overload"),
     xfail("log_normal"),
     xfail("logcumsumexp"),
+    xfail("logdet"),
     xfail("logspace", "tensor_overload"),
     xfail("lu"),
     xfail("lu_solve"),
