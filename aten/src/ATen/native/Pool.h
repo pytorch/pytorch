@@ -323,6 +323,12 @@ max_pool3d_backward_shape_check(
   check_dim_size(indices, ndim, ndim-3, otime);
   check_dim_size(indices, ndim, ndim-2, oheight);
   check_dim_size(indices, ndim, ndim-1, owidth);
+
+  if (ndim == 5) {
+    const int64_t batchSize = input.size(0);
+    check_dim_size(gradOutput, ndim, 0, batchSize);
+    check_dim_size(indices, ndim, 0, batchSize);
+  }
 }
 
 inline void
