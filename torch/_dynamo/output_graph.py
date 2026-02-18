@@ -2994,6 +2994,8 @@ class OutputGraph(OutputGraphCommon):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
+        self.mro_source_cache.clear()
+        self.guarded_mro_absent_keys.clear()
         self.signature_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
