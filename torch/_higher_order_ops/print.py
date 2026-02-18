@@ -78,6 +78,14 @@ def print_proxy_torch_dispatch_mode(
 @print.py_impl(FakeTensorMode)
 # pyre-ignore
 def print_fake_tensor_mode(mode, format_str: str, *args: object, **kwargs: object):
+    # Validate DTensor metadata if present (fake DTensors carry placement/mesh info)
+    from torch.distributed.tensor import DTensor
+
+    flat_args = pytree.arg_tree_leaves(*args, **kwargs)
+    for arg in flat_args:
+        if isinstance(arg, DTensor):
+            assert arg._spec is not None, "Fake DTensor must have a valid DTensorSpec"
+            assert arg._spec.mesh is not None, "Fake DTensor must have a valid DeviceMesh"
     return None
 
 
@@ -101,6 +109,26 @@ def print_impl(format_str: str, *args: object, **kwargs: object) -> None:
 
 print.fallthrough(torch._C.DispatchKey.AutogradCPU)
 print.fallthrough(torch._C.DispatchKey.AutogradCUDA)
+
+
+def _register_dtensor_impl() -> None:
+    from torch.distributed.tensor import DTensor, Replicate
+
+    @print.py_impl(DTensor)
+    # pyre-ignore
+    def print_dtensor(format_str: str, *args: object, **kwargs: object) -> None:
+        import torch.distributed as dist
+
+        def _unwrap_dtensor(val: object) -> object:
+            if isinstance(val, DTensor):
+                replicate_placements = [Replicate()] * len(val.placements)
+                return val.redistribute(placements=replicate_placements).to_local()
+            return val
+
+        local_args = pytree.tree_map(_unwrap_dtensor, args)
+        local_kwargs = pytree.tree_map(_unwrap_dtensor, kwargs)
+        if dist.get_rank() == 0:
+            print_impl(format_str, *local_args, **local_kwargs)
 
 
 @print.py_functionalize_impl
