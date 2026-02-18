@@ -1,15 +1,11 @@
 # Owner(s): ["module: inductor"]
 """
 Tests for inductor lowering of functional custom ops to out-variant via ExternKernelOut.
-
-Verifies that custom ops with both functional and .out overloads are lowered
-to ExternKernelOut (should_allocate=True) for buffer reuse, and that the config
-flag properly gates the behavior.
 """
 import unittest
 
 import torch
-import torch._inductor.config as inductor_config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -23,7 +19,7 @@ DEVICES = ("cpu", GPU_TYPE) if HAS_GPU else ("cpu",)
 
 
 @instantiate_parametrized_tests
-class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
+class TestCustomOpOutLowering(InductorTestCase):
     """Tests for lowering functional custom ops to out-variant ExternKernelOut."""
 
     def _register_add_one_ops(self, lib):
@@ -50,7 +46,6 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
 
         return torch.ops.mylib.add_one, torch.ops.mylib.add_one.out
 
-    @inductor_config.patch(lower_custom_ops_to_out_variant=True)
     @parametrize("device", DEVICES)
     def test_add_one_lowered_to_out(self, device):
         """Test that a simple functional op gets lowered to its out-variant."""
@@ -96,7 +91,6 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
 
         return torch.ops.mylib.split_add, torch.ops.mylib.split_add.out
 
-    @inductor_config.patch(lower_custom_ops_to_out_variant=True)
     @parametrize("device", DEVICES)
     def test_multi_output_lowered_to_out(self, device):
         """Test a two-output functional op gets lowered to its .out variant."""
@@ -117,26 +111,6 @@ class TestCustomOpOutLowering(torch._inductor.test_case.TestCase):
             self.assertIn(".out(", code)
             self.assertIn("out0=", code)
             self.assertIn("out1=", code)
-
-    @inductor_config.patch(lower_custom_ops_to_out_variant=False)
-    @parametrize("device", DEVICES)
-    def test_disabled_falls_back_to_fallback_kernel(self, device):
-        """Test that disabling the config causes the op to go through FallbackKernel."""
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            func_op, out_op = self._register_add_one_ops(lib)
-
-            def f(x):
-                return torch.ops.mylib.add_one(x)
-
-            x = torch.randn(4, 4, device=device)
-            eager_out = f(x)
-
-            compiled_out, (code,) = run_and_get_code(
-                torch.compile(f, backend="inductor", fullgraph=True), x
-            )
-            self.assertEqual(compiled_out, eager_out)
-            self.assertNotIn(".out(", code)
-            self.assertIn(".default(", code)
 
 
 if __name__ == "__main__":
