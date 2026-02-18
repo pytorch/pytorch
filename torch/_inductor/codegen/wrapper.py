@@ -131,7 +131,32 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
     if input_buf.get_device_or_error() != output_buf.get_device_or_error():
         return False
 
-    if input_buf.get_dtype() != output_buf.get_dtype():
+    input_dtype = input_buf.get_dtype()
+    output_dtype = output_buf.get_dtype()
+
+    # Fix for issue #172747: Be more conservative about dtype mismatches to prevent
+    # unsafe buffer reuse with view(dtype) operations that reinterpret memory.
+    if input_dtype != output_dtype:
+        # For view(dtype) operations that change element interpretation, buffer reuse
+        # can lead to incorrect results due to unsafe aliasing. Even if dtypes have
+        # the same bit width, the reinterpretation can cause silent bugs.
+
+        def _get_primitive_bitwidth(dtype):
+            if dtype.is_floating_point:
+                return torch.finfo(dtype).bits
+            else:
+                return torch.iinfo(dtype).bits
+
+        input_bits = _get_primitive_bitwidth(input_dtype)
+        output_bits = _get_primitive_bitwidth(output_dtype)
+
+        # If bit widths differ, buffer reuse is definitely unsafe
+        if input_bits != output_bits:
+            return False
+
+        # Even with same bit widths, be conservative about dtype reinterpretation
+        # to avoid the silent bugs reported in #172747 with GGUF dequantization.
+        # Future optimization: Could allow reuse in specific provably-safe cases.
         return False
 
     input_size = V.graph.sizevars.simplify(
