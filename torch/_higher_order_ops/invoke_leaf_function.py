@@ -65,10 +65,6 @@ class GradientInfo:
     device: torch.device
 
 
-def unwrap_fn_spec(fn_spec: _LeafCallable) -> Callable:
-    return fn_spec
-
-
 def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
     if _leaf_function_module_retriever is None:
         raise RuntimeError("Leaf function module retriever not set.")
@@ -370,14 +366,20 @@ class InvokeLeafFunction(HigherOrderOperator):
         )
 
     # pyrefly: ignore [bad-override]
-    def gen_schema(self, real_fn_callable, fake_fn_callable, input_spec, *flat_args, requires_grad_indices=()):
+    def gen_schema(
+        self,
+        real_fn_callable,
+        fake_fn_callable,
+        input_spec,
+        *flat_args,
+        requires_grad_indices=(),
+    ):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import _maybe_fake_prop_ignore_unbacked
 
-        fake_fn = unwrap_fn_spec(fake_fn_callable)
         with unflatten_args_with_modules(flat_args, input_spec) as (args, kwargs):
             fake_outputs = _maybe_fake_prop_ignore_unbacked(
-                lambda *a: fake_fn(*a, **kwargs), tuple(args)
+                lambda *a: fake_fn_callable(*a, **kwargs), tuple(args)
             )
 
         gen = HopSchemaGenerator(self)
@@ -434,8 +436,6 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def forward(ctx, real_fn_callable, fake_fn_callable, input_spec, *flat_args):
-        real_fn = unwrap_fn_spec(real_fn_callable)
-
         include_keys = torch._C._dispatch_tls_local_include_set()
         exclude_keys = torch._C._dispatch_tls_local_exclude_set()
 
@@ -445,7 +445,9 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
             if isinstance(arg, torch.Tensor) and arg.requires_grad
         )
 
-        real_forward, real_state = _make_forward(real_fn, include_keys, exclude_keys)
+        real_forward, real_state = _make_forward(
+            real_fn_callable, include_keys, exclude_keys
+        )
 
         def real_backward(*grads):
             if real_state["inputs"] is None or real_state["outputs"] is None:
@@ -486,7 +488,9 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outputs = invoke_leaf_function(
-                new_real_fn_callable, fake_fn_callable, input_spec,
+                new_real_fn_callable,
+                fake_fn_callable,
+                input_spec,
                 *flat_args,
                 requires_grad_indices=requires_grad_indices,
             )
@@ -498,7 +502,6 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
-    def backward(ctx, *grads):
     def backward(ctx, *grads):
         real_bw_callable = _LeafCallable(ctx.real_backward)
         fake_bw_callable = _LeafCallable(ctx.fake_backward)
@@ -619,9 +622,8 @@ def _check_no_input_mutation(
 def invoke_leaf_function_fake(
     real_fn_callable, fake_fn_callable, input_spec, *flat_args, requires_grad_indices=()
 ):
-    fake_fn = unwrap_fn_spec(fake_fn_callable)
     with unflatten_args_with_modules(flat_args, input_spec) as (args, kwargs):
-        return fake_fn(*args, **kwargs)
+        return fake_fn_callable(*args, **kwargs)
 
 
 @invoke_leaf_function.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -643,15 +645,13 @@ def invoke_leaf_function_dense(
         for idx, arg in enumerate(flat_args)
     )
 
-    real_fn = unwrap_fn_spec(real_fn_callable)
     with unflatten_args_with_modules(flat_args, input_spec) as (args, kwargs):
-        real_output = real_fn(*args, **kwargs)
+        real_output = real_fn_callable(*args, **kwargs)
 
         _check_no_input_mutation(flat_args, version_before)
 
         if dynamo_config.leaf_function_validate_outputs:
-            fake_fn = unwrap_fn_spec(fake_fn_callable)
-            fake_output = fake_fn(*args, **kwargs)
+            fake_output = fake_fn_callable(*args, **kwargs)
             _validate_outputs_match(fake_output, real_output)
 
     return real_output
