@@ -6,6 +6,7 @@ from typing_extensions import deprecated
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
 
+from ._functions import LinearCrossEntropyOptions
 from .distance import PairwiseDistance
 from .linear import Linear
 from .module import Module
@@ -1342,7 +1343,6 @@ class CrossEntropyLoss(_WeightedLoss):
         - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
 
-
         where:
 
         .. math::
@@ -1484,7 +1484,12 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
             Computer Vision
             <https://arxiv.org/abs/1512.00567>`__.
             Default: :math:`0.0`.
-
+        options (LinearCrossEntropyOptions, optional): Specify
+          chunking strategy options, see
+          :class:`~torch.nn.modules._functions.LinearCrossEntropyFunction`
+          for more details. To enable reference implementation of
+          linear_cross_entropy with chunking disabled, use
+          `options=None`.
     Shape:
         - Input: Shape :math:`(in_features)`, :math:`(N, in_features)`.
         - Target: If containing class indices, shape :math:`()`,
@@ -1518,6 +1523,7 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
     out_features: tuple[int, ...]
     ignore_index: int
     label_smoothing: float
+    options: LinearCrossEntropyOptions | None
 
     def __init__(
         self,
@@ -1531,11 +1537,12 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
         weight: Tensor | None = None,
         ignore_index: int = -100,
         label_smoothing: float = 0.0,
+        options: LinearCrossEntropyOptions | None = None,
     ) -> None:
         bias = False  # linear_cross_entropy does not depend on bias
         super().__init__(
             in_features,
-            num_classes * math.prod(out_features),
+            math.prod(out_features, start=num_classes),
             bias,
             device,
             dtype,
@@ -1546,23 +1553,28 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
         self.out_features = out_features
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
+        self.options = options
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
         return F.linear_cross_entropy(  # pyrefly: ignore [missing-attribute]
             input,
-            self.linear.weight,
+            self.linear.weight.reshape(
+                (*self.out_features, self.num_classes, self.linear.in_features)
+            ),
             target,
             weight=self.loss_weight,
             reduction=self.reduction,
             ignore_index=self.ignore_index,
             label_smoothing=self.label_smoothing,
+            options=self.options,
         )
 
     def extra_repr(self) -> str:
         return (
             f"num_classes={self.num_classes}, reduction={self.reduction}, "
-            f"out_features={self.out_features}, ignore_index={self.ignore_index}, label_smoothing={self.label_smoothing}"
+            f"out_features={self.out_features}, ignore_index={self.ignore_index}, "
+            f"label_smoothing={self.label_smoothing} options={self.options}"
         )
 
 
