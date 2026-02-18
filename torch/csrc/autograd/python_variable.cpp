@@ -2453,7 +2453,6 @@ create_native_op_schema(
           break;
         }
         case TensorFlavor::NON_TENSOR: {
-          bool handled_list = false;
           if (argument_it->isList()) {
             const auto list = argument_it->toList();
             comparison_key_hash =
@@ -2468,12 +2467,10 @@ create_native_op_schema(
                 if (is_symint) {
                   return std::nullopt;
                 }
-                handled_list = true;
               } else if (
                   item_flavor == TensorFlavor::EXACTLY_TENSOR ||
                   item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
                 handle_exactly_tensor(item_py_tensor);
-                handled_list = true;
               } else { // non-tensor
                 c10::IValue arg = item;
                 if (arg.isTensor() && !arg.toTensor().defined()) {
@@ -2486,8 +2483,7 @@ create_native_op_schema(
                 comparison_key.emplace_back(std::move(arg));
               }
             }
-          }
-          if (!handled_list) {
+          } else {
             handle_non_dtensor_arg(native_info.static_argnum, *argument_it);
           }
           break;
