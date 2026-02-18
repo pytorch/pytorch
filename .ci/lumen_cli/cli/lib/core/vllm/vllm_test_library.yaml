@@ -60,7 +60,7 @@ vllm_distributed_test_28_failure_test:
     VLLM_WORKER_MULTIPROC_METHOD: spawn
   num_gpus: 4
   steps:
-    - pytest -v -s distributed/test_sequence_parallel.py
+    - pytest -v -s compile/correctness_e2e/test_sequence_parallel.py
 
 vllm_lora_28_failure_test:
   title: LoRA pytorch 2.8 failure test
@@ -118,7 +118,7 @@ vllm_distributed_test_2_gpu_28_failure_test:
     VLLM_WORKER_MULTIPROC_METHOD: spawn
   num_gpus: 4
   steps:
-    - pytest -v -s distributed/test_sequence_parallel.py
+    - pytest -v -s compile/correctness_e2e/test_sequence_parallel.py
 
 vllm_lora_test:
   title: LoRA Test %N
