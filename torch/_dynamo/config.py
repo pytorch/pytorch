@@ -51,6 +51,17 @@ verify_correctness = False
 # [@compile_ignored: debug]
 debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
 
+# Override inductor config for specific graphs (for debugging/bisecting).
+# Format: "filter1:config1;filter2:config2;..." where filter uses same syntax as
+# debug_backend_override, and config is "key=value" or "key=value,key2=value2".
+# Examples:
+#   "0-5:triton.cudagraph_skip_dynamic_graphs=False"  - Disable skip for graphs 0-5
+#   ">10:triton.cudagraphs=False"                     - Disable cudagraphs for graphs > 10
+# [@compile_ignored: debug]
+debug_inductor_config_override: str = os.environ.get(
+    "TORCH_COMPILE_OVERRIDE_INDUCTOR_CONFIGS", ""
+)
+
 # Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
 # with matching shapes and dtypes in eager mode. Helps catch mismatches early.
 # Disabled by default to avoid runtime overhead.
@@ -840,6 +851,15 @@ _custom_ops_profile: Optional[Any] = None
 # Experimental flag to enable regional compile on invoke_subgraph HOP.
 # For testing only!
 enable_invoke_subgraph_regional_compile: bool = False
+
+# Clear WeakIdRef entries from TracingContext.tensor_to_context and
+# MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
+# can block torch.utils.swap_tensors from working after compile.
+# - None (default): clear for registered backends (inductor, eager, etc.),
+#   don't clear for custom backends (to support standalone_compile, etc.)
+# - True: always clear regardless of backend
+# - False: never clear regardless of backend
+invalidate_compile_context_weakrefs: Optional[bool] = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
