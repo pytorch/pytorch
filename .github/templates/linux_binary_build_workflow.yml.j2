@@ -79,7 +79,7 @@ jobs:
       timeout-minutes: 420
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420 
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
