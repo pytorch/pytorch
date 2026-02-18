@@ -1975,7 +1975,7 @@ class DunderDictVariable(ConstDictVariable):
     def getitem_or_default(
         self,
         name: str,
-        default: Callable,
+        default: Callable[[], VariableTracker],
     ) -> VariableTracker:
         if name in self.items:
             return self.items[name]
