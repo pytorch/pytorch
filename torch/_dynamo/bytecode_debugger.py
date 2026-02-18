@@ -5,7 +5,7 @@ This module provides a pdb-like debugger for stepping through Python bytecode
 one instruction at a time, with the ability to inspect the value stack,
 locals, and globals.
 
-Usage:
+Usage:  # doctest: +SKIP
     >>> import torch
     >>>
     >>> @torch.compile
