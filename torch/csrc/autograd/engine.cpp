@@ -1087,6 +1087,7 @@ void Engine::evaluate_function(
       TORCH_INTERNAL_ASSERT(opt_ready_stream && opt_parent_stream);
       if (*opt_parent_stream != *opt_ready_stream) {
         TORCH_INTERNAL_ASSERT(opt_ready_event);
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         opt_parent_stream->wait(opt_ready_event.value());
       }
     }
