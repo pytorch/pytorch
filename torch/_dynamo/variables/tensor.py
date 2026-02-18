@@ -70,7 +70,7 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
-from .constant import ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import TorchScriptObjectVariable
 from .user_defined import UserDefinedClassVariable
@@ -481,7 +481,7 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
         else:
-            return variables.ConstantVariable(None)
+            return variables.CONSTANT_VARIABLE_NONE
 
     def method_attr__version(self, tx: "InstructionTranslator") -> VariableTracker:
         from ..tensor_version_op import _tensor_version
@@ -1253,7 +1253,7 @@ class TensorVariable(VariableTracker):
                 # No leaf tensors found - nothing to accumulate gradients into.
                 # This matches eager behavior where backward() is a no-op if there
                 # are no leaves requiring grad.
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
         else:
             provided_vars = (
                 inputs.items
@@ -1449,7 +1449,7 @@ class TensorVariable(VariableTracker):
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
 
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def method_resize_(
         self,
@@ -1617,9 +1617,7 @@ class TensorVariable(VariableTracker):
 
             return vt.as_python_constant()
 
-        grad_placements_vt = kwargs.get(
-            "grad_placements", ConstantVariable.create(None)
-        )
+        grad_placements_vt = kwargs.get("grad_placements", CONSTANT_VARIABLE_NONE)
         if isinstance(grad_placements_vt, variables.UserDefinedObjectVariable):
             # grad_placement is a sequence-like structure, iterate over the value
             grad_placements_vt = variables.BuiltinVariable(tuple).call_function(
