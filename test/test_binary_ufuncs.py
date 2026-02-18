@@ -82,6 +82,8 @@ device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
 
+_unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
+
 
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
@@ -4517,11 +4519,25 @@ class TestBinaryUfuncs(TestCase):
         _compare_helper(t, zeros, *xlog1py_fns)
         _compare_helper(t, 0.0, *xlog1py_fns)
 
-    @dtypes(*product(all_types_and(torch.bool), all_types_and(torch.bool)))
+    @dtypes(
+        *product(
+            all_types_and(torch.bool, *_unsigned_int_types),
+            all_types_and(torch.bool, *_unsigned_int_types),
+        )
+    )
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @slowTest
     def test_zeta(self, device, dtypes):
         x_dtype, q_dtype = dtypes
+        # Skip incompatible type combinations for uints
+        try:
+            torch.promote_types(x_dtype, q_dtype)
+        except RuntimeError:
+            if not {x_dtype, q_dtype}.isdisjoint(_unsigned_int_types):
+                self.skipTest(
+                    f"Type promotion not supported for {x_dtype} and {q_dtype}"
+                )
+            raise
 
         def test_helper(x, q):
             x_np = x if isinstance(x, float) else x.cpu().numpy()

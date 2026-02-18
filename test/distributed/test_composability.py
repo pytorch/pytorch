@@ -450,7 +450,8 @@ class ComposabilityTest(MultiProcContinuousTest):
             total_fsdp_params = 0
 
             for state in distributed_state._state_ctx.all_states:
-                for group in state._fsdp_param_groups:
+                if state._fsdp_param_group:
+                    group = state._fsdp_param_group
                     for fsdp_param in group.fsdp_params:
                         total_fsdp_params += 1
                         if fsdp_param.sharded_state == ShardedState.UNSHARDED:
