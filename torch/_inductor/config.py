@@ -1054,8 +1054,11 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
-    # Bucket exposed collectives first
-    bucket_exposed_first: bool = True
+    # Bucket exposed collectives first (None means auto)
+    bucket_exposed_first: bool | None = None
+
+    # Experimental setting to bucket only internode communications
+    bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
