@@ -12,13 +12,14 @@ import traceback
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
+from torch._C import _fx_map_arg as map_arg
 from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import getArtifactLogger
+from torch.utils._pytree import tree_map_
 from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
@@ -43,6 +44,51 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 annotation_log = getArtifactLogger(__name__, "annotation")
+
+
+def _is_arbitrary_callable(obj: object) -> bool:
+    """
+    Returns True if obj is an arbitrary callable (function, lambda, method, etc.)
+    that requires special tracing to handle. These cannot be symbolically traced
+    using the standard Proxy mechanism.
+    """
+    import functools
+    import types
+
+    return isinstance(
+        obj,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.BuiltinMethodType,
+            functools.partial,
+        ),
+    )
+
+
+def _find_arbitrary_callable(
+    args: tuple[object, ...], kwargs: dict[str, object]
+) -> object:
+    """
+    Recursively searches args and kwargs for any arbitrary callable.
+    Returns the first arbitrary callable found, or None if none exist.
+    """
+    found = None
+
+    _T = TypeVar("_T")
+
+    def check(obj: _T) -> _T:
+        nonlocal found
+        if found is not None:
+            return obj
+        if _is_arbitrary_callable(obj):
+            found = obj
+        return obj
+
+    tree_map_(check, args)
+    tree_map_(check, kwargs)
+    return found
 
 
 @compatibility(is_backward_compatible=False)
@@ -700,8 +746,8 @@ class Proxy:
             if isinstance(a, cls):
                 tracers[a.tracer] = None
 
-        map_aggregate(args, find_tracer)
-        map_aggregate(kwargs, find_tracer)
+        tree_map_(find_tracer, args)
+        tree_map_(find_tracer, kwargs)
 
         if len(tracers) > 1:
             raise RuntimeError(
@@ -719,8 +765,14 @@ class Proxy:
             )
         else:
             if isinstance(orig_method, torch._ops.HigherOrderOperator):
-                # TODO: Define how to symbolically trace HigherOrderOperators
-                raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
+                bad_callable = _find_arbitrary_callable(args, kwargs)
+                if bad_callable is not None:
+                    raise RuntimeError(
+                        f"Unable to symbolically trace the HigherOrderOperator "
+                        f"{orig_method._name} because it received an arbitrary "
+                        f"callable argument {bad_callable}. Use make_fx or dynamo "
+                        f"tracing instead."
+                    )
             return tracer.create_proxy(
                 "call_function",
                 orig_method,

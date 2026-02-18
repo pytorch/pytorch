@@ -167,6 +167,11 @@ class profile:
 
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
 
+        post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
+            results. In this context, post-processing happens after the profiling itself has finished.
+            If specified, event parsing will stop after this duration and return partial results. Useful
+            for handling large traces that may take too long to process.
+
 
     .. warning::
         Enabling memory profiling or source attribution incurs additional profiler
@@ -220,6 +225,7 @@ class profile:
         experimental_config=None,
         acc_events=False,
         custom_trace_id_callback=None,
+        post_processing_timeout_s: Optional[float] = None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -257,6 +263,7 @@ class profile:
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
         self.custom_trace_id_callback = custom_trace_id_callback
+        self.post_processing_timeout_s = post_processing_timeout_s
         self.trace_id = ""
         if not self.use_cpu:
             if not use_kineto:
@@ -334,6 +341,12 @@ class profile:
 
         if len(self.kineto_activities) == 0:
             raise AssertionError("No activities specified for the profiler")
+
+        if (
+            self.post_processing_timeout_s is not None
+            and self.post_processing_timeout_s < 0
+        ):
+            raise ValueError("post_processing_timeout_s must be non-negative")
 
     def default_trace_id(self):
         # Generate a UUID
@@ -442,7 +455,9 @@ class profile:
         t0 = perf_counter_ns()
         parsed_results = []
         if self.kineto_results:
-            parsed_results = self._parse_kineto_results(self.kineto_results)
+            parsed_results = self._parse_kineto_results(
+                self.kineto_results, timeout_s=self.post_processing_timeout_s
+            )
         t1 = perf_counter_ns()
         self._stats.parse_kineto_call_duration_us = int((t1 - t0) / 1000)
 
@@ -566,6 +581,8 @@ class profile:
         # result.events() has most of the events - PyTorch op-level and device-level events
 
         timeout_ns = int(timeout_s * 1e9) if timeout_s is not None else None
+        if timeout_ns is not None and timeout_ns < 0:
+            raise ValueError("timeout_s must be non-negative")
         start_time_ns = perf_counter_ns()
         timed_out = False
 
@@ -709,10 +726,11 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if (
-                        f_evt.device_type == DeviceType.CUDA
-                        or f_evt.device_type == DeviceType.PrivateUse1
-                    ):
+                    if f_evt.device_type in [
+                        DeviceType.CUDA,
+                        DeviceType.PrivateUse1,
+                        DeviceType.XPU,
+                    ]:
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,

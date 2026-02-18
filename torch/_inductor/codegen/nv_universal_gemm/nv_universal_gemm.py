@@ -415,13 +415,13 @@ def _add_nv_gemm_choices_impl(
         return
 
     max_configs = config.nvgemm_max_profiling_configs or len(kernels)
-    if variant == GemmVariant.GEMM and mm_inputs is not None:
+    if variant in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM) and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
         kernels = heuristics.filter_kernels(
             kernels, mm_inputs, max_configs, accumulator_type
         )
     else:
-        # TODO(nikhilap): Enable heuristics for grouped and scaled GEMMs
+        # TODO(nikhilap): Enable heuristics for grouped GEMM
         # when nvMatmulHeuristics adds support
         kernels = kernels[:max_configs]
 
@@ -514,6 +514,7 @@ def add_nv_universal_scaled_gemm_choices(
     layout: Layout,
     input_nodes: list[Buffer],
     accumulator_type: Optional[torch.dtype] = None,
+    kernel_inputs: Optional[MMKernelInputs] = None,
 ) -> None:
     """
     Add NVIDIA Universal Scaled GEMM (FP8) kernels to the autotune choices.
@@ -546,6 +547,7 @@ def add_nv_universal_scaled_gemm_choices(
         input_nodes=input_nodes,
         variant=GemmVariant.SCALED_GEMM,
         accumulator_type=accumulator_type or torch.float32,
+        mm_inputs=kernel_inputs,
         scale_type_a=scale_type_a,
         scale_type_b=scale_type_b,
         swizzle_type_a=swizzle_type_a,
