@@ -6715,6 +6715,7 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
+fallback_cumprod_backward = fallback_handler(aten.cumprod_backward.default)
 fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
 fallback_cummax = fallback_handler(aten.cummax.default)
 fallback_cummin = fallback_handler(aten.cummin.default)
@@ -6766,6 +6767,14 @@ def cumprod(x, axis=None, dtype=None):
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
+
+
+@register_lowering(aten.cumprod_backward)
+def cumprod_backward(grad, input, dim, output):
+    # Always use fallback for cumprod_backward to maintain numerical stability
+    # The scan-based cumprod implementation can cause numerical divergence
+    # in the backward pass due to precision issues in associative operations
+    return fallback_cumprod_backward(grad, input, dim, output)
 
 
 @register_lowering(aten.logcumsumexp)
