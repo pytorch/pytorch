@@ -5199,7 +5199,9 @@ class Scheduler:
             ):
                 candidates.append(
                     (
-                        V.graph.sizevars.size_hint(lhs_dep.get_numel(), fallback=0),
+                        V.graph.sizevars.optimization_hint(
+                            lhs_dep.get_numel(), fallback=0
+                        ),
                         lhs_dep,
                         rhs_dep,
                     )

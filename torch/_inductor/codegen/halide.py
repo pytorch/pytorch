@@ -6,8 +6,8 @@ import functools
 import itertools
 import logging
 import re
+import sys
 from collections import defaultdict
-from math import inf
 from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
@@ -762,7 +762,9 @@ class HalideKernel(SIMDKernel):
         assert not (
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
-        size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)  # type: ignore[arg-type]
+        size_hint = functools.partial(
+            V.graph.sizevars.optimization_hint, fallback=sys.maxsize
+        )
         # pyrefly: ignore [bad-assignment]
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = OrderedSet[Any]()
@@ -1037,7 +1039,11 @@ class HalideKernel(SIMDKernel):
             dims.append(expr_to_dimension(expr, syms))
         for sym, expr in split_expr.items():
             dims.append(expr_to_dimension(expr, [sym]))
-        dims.sort(key=lambda d: V.graph.sizevars.size_hint(d.stride, fallback=inf))  # type: ignore[arg-type]
+        dims.sort(
+            key=lambda d: V.graph.sizevars.optimization_hint(
+                d.stride, fallback=sys.maxsize
+            )
+        )  # type: ignore[arg-type]
 
         if not dims:  # scalar load/store
             if self.has_indirect_indexing:
@@ -1609,14 +1615,14 @@ class HalideKernel(SIMDKernel):
             # This causes crashes if our estimate is greater than the vector length
             # https://github.com/halide/Halide/issues/3103
             if isinstance(arg, SizeArg):
-                hint = V.graph.sizevars.size_hint(arg.expr, fallback=1)
+                hint = V.graph.sizevars.optimization_hint(arg.expr, fallback=1)
                 code.writeline(f"{arg.name}.set_estimate({hint})")
             else:
                 dims = self.buffer_dimensions[arg.name]
                 range_hints = []
                 for i, dim in enumerate(dims):
                     hint = self._autoscheduler_workarounds(
-                        V.graph.sizevars.size_hint(dim.size, fallback=1), dims
+                        V.graph.sizevars.optimization_hint(dim.size, fallback=1), dims
                     )
                     # pyrefly: ignore [bad-argument-type]
                     range_hints.append(f"hl.Range(0, {hint})")
