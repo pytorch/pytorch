@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-import warnings
+from copy import deepcopy
 from typing_extensions import NotRequired, TypedDict
 
 import torch
@@ -535,88 +535,87 @@ class LinearCrossEntropyFunction(torch.autograd.Function):
             opt_options.get("classes_chunk_size", min_chunk_size), num_classes
         )
         max_classes_chunk_size: int = max(
-            opt_options.get("classes_chunk_size", num_classes),
+            min(opt_options.get("classes_chunk_size", num_classes), num_classes),
             min_classes_chunk_size,
         )
         min_features_chunk_size: int = min(
             opt_options.get("features_chunk_size", min_chunk_size), in_features
         )
         max_features_chunk_size: int = max(
-            opt_options.get("features_chunk_size", in_features),
+            min(opt_options.get("features_chunk_size", in_features), in_features),
             min_features_chunk_size,
         )
         min_batches_chunk_size: int = min(
             opt_options.get("batches_chunk_size", min_chunk_size), num_batches
         )
         max_batches_chunk_size: int = max(
-            opt_options.get("batches_chunk_size", num_batches),
+            min(opt_options.get("batches_chunk_size", num_batches), num_batches),
             min_batches_chunk_size,
         )
-        # we start with most efficient chunking strategy (that is, no
-        # chunking at all and doing chunking along classes as a last
-        # resort) until we'll find one that meets the max_memory_gb
-        # criteria:
-        for classes_chunk_size in reversed(
-            range(min_classes_chunk_size, max_classes_chunk_size + 1, min_chunk_size)
-        ):
-            minimal_features_batches_nof_chunks: float | None = None
-            features_batches_chunk_sizes = 0, 0
-            for features_chunk_size in reversed(
-                range(
-                    min_features_chunk_size, max_features_chunk_size + 1, min_chunk_size
-                )
-            ):
-                for batches_chunk_size in reversed(
-                    range(
-                        min_batches_chunk_size,
-                        max_batches_chunk_size + 1,
-                        min_chunk_size,
-                    )
-                ):
-                    n = get_numel_forward(
-                        batches_chunk_size, features_chunk_size, classes_chunk_size
-                    )
-                    if n <= max_total_numel:
-                        features_batches_nof_chunks = (
-                            num_batches / batches_chunk_size
-                            + in_features / features_chunk_size
-                        )
-                        if (
-                            minimal_features_batches_nof_chunks is None
-                            or features_batches_nof_chunks
-                            < minimal_features_batches_nof_chunks
-                        ):
-                            minimal_features_batches_nof_chunks = (
-                                features_batches_nof_chunks
-                            )
-                            features_batches_chunk_sizes = (
-                                features_chunk_size,
-                                batches_chunk_size,
-                            )
-            if minimal_features_batches_nof_chunks is not None:
-                features_chunk_size, batches_chunk_size = features_batches_chunk_sizes
-                opt_options["classes_chunk_size"] = int(classes_chunk_size)
-                opt_options["features_chunk_size"] = int(features_chunk_size)
-                if has_batches:
-                    opt_options["batches_chunk_size"] = int(batches_chunk_size)
-                return opt_options
 
-        constraints = [f"{num_batches=}, {in_features=}, {num_classes=}"]
-        for k, v in opt_options.items():
-            if k not in {"max_memory_gb", "min_chunk_size"}:
-                constraints.append(f"{k}={v}")
-        constraints = ", ".join(constraints)
-        warnings.warn(
-            "failed to find optimal chunking strategy for linear_cross_entropy: "
-            f"{max_memory_gb=} is too small or {min_chunk_size=} is too large. Constraints: {constraints}",
-            stacklevel=2,
+        def chunk_sizes(mn, mx, sz):
+            return [
+                min(mn + k * sz, mx)
+                for k in reversed(range((mx - mn + sz - 1) // sz + 1))
+            ]
+
+        state_min = dict(
+            classes=min_classes_chunk_size,
+            features=min_features_chunk_size,
+            batches=min_batches_chunk_size,
         )
+        state_chunks = dict(
+            classes=chunk_sizes(
+                min_classes_chunk_size, max_classes_chunk_size, min_chunk_size
+            ),
+            features=chunk_sizes(
+                min_features_chunk_size, max_features_chunk_size, min_chunk_size
+            ),
+            batches=chunk_sizes(
+                min_batches_chunk_size, max_batches_chunk_size, min_chunk_size
+            ),
+        )
+        state_chunks_copy = deepcopy(state_chunks)
+        state = dict(
+            classes=max_classes_chunk_size,
+            features=max_features_chunk_size,
+            batches=max_batches_chunk_size,
+        )
+        # We start with the most efficient chunking strategy (that is,
+        # no chunking at all and doing chunking along classes as a
+        # last resort) until we'll find one that meets the
+        # max_memory_gb criteria.
+        while True:
+            # chunking along batches, then features, and last, along
+            # classes:
+            for ignore in [("classes", "features"), ("classes",), ()]:
+                lst = [
+                    (v, k)
+                    for k, v in state.items()
+                    if v > state_min[k] and k not in ignore
+                ]
+                if lst:
+                    break
+            else:
+                break
+            # Chunk along dimension that has highest value.
+            k = max(lst)[1]
 
-        # Return a strategy that corresponds to minimal chunking size:
-        opt_options["classes_chunk_size"] = min_classes_chunk_size
-        opt_options["features_chunk_size"] = min_features_chunk_size
+            state[k] = state_chunks[k].pop(0)
+            n = get_numel_forward(state["batches"], state["features"], state["classes"])
+            if n <= max_total_numel:
+                break
+            # restore chunking along other axes
+            for k_ in dict(
+                classes=["batches", "features"], features=["batches"], batches=[]
+            )[k]:
+                state_chunks[k_] = state_chunks_copy[k_].copy()
+                state[k_] = state_chunks[k_].pop()
+
+        opt_options["classes_chunk_size"] = state["classes"]
+        opt_options["features_chunk_size"] = state["features"]
         if has_batches:
-            opt_options["batches_chunk_size"] = min_batches_chunk_size
+            opt_options["batches_chunk_size"] = state["batches"]
         return opt_options
 
     @staticmethod
