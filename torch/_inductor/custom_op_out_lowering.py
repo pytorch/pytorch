@@ -5,8 +5,7 @@ Lower functional custom ops to out-variant ExternKernelOut for buffer reuse.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._ops import OpOverload
@@ -14,6 +13,10 @@ from torch.utils._ordered_set import OrderedSet
 
 from . import ir
 from .virtualized import V
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
