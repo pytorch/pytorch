@@ -276,9 +276,10 @@ dtensor_multi_threaded_fails = {
 }
 
 # Ops that fail to compile with DTensor + torch.compile(fullgraph=True).
-# These are compile-time failures (as_strided, data-dependent, etc.),
-# NOT numeric correctness issues.
+# These are compile-time failures, NOT numeric correctness issues.
 dtensor_compiled_fails = {
+    # View-type ops that decompose into as_strided (at autograd level).
+    # DTensor doesn't have a sharding strategy for as_strided.
     xfail("argmax"),
     xfail("argmin"),
     xfail("atleast_1d"),
@@ -286,46 +287,55 @@ dtensor_compiled_fails = {
     xfail("atleast_3d"),
     xfail("broadcast_tensors"),
     xfail("broadcast_to"),
-    xfail("corrcoef"),
-    xfail("cov"),
-    xfail("diagonal"),
+    # xfail("diagonal"),
     xfail("dsplit"),
-    xfail("equal"),
     xfail("expand"),
     xfail("expand_as"),
-    xfail("gather"),
-    xfail("hash_tensor"),
     xfail("hsplit"),
-    xfail("index_select"),
-    xfail("item"),
     xfail("linalg.diagonal"),
-    xfail("masked.argmax"),
-    xfail("masked.argmin"),
     xfail("max", "reduction_with_dim"),
     xfail("min", "reduction_with_dim"),
     xfail("movedim"),
     xfail("narrow"),
-    xfail("nn.functional.binary_cross_entropy"),
-    xfail("nn.functional.binary_cross_entropy_with_logits"),
-    xfail("nn.functional.gaussian_nll_loss"),
-    xfail("nn.functional.interpolate", "bicubic"),
-    xfail("nn.functional.interpolate", "bilinear"),
-    xfail("nn.functional.interpolate", "linear"),
-    xfail("nn.functional.interpolate", "trilinear"),
-    xfail("nn.functional.logsigmoid"),
-    xfail("nn.functional.margin_ranking_loss"),
-    xfail("nn.functional.multilabel_soft_margin_loss"),
-    xfail("nn.functional.upsample_bilinear"),
-    xfail("nonzero_static"),
     xfail("permute"),
-    xfail("scatter"),
-    xfail("scatter_add"),
     xfail("select"),
     xfail("slice"),
     xfail("t"),
     xfail("transpose_copy"),
     xfail("unsqueeze"),
     xfail("vsplit"),
+    # Decompositions that use plain tensor constructors (e.g. arange),
+    # causing mixed tensor/DTensor errors during Dynamo's fake prop.
+    xfail("corrcoef"),
+    xfail("cov"),
+    xfail("nn.functional.interpolate", "bicubic"),
+    xfail("nn.functional.interpolate", "bilinear"),
+    xfail("nn.functional.interpolate", "linear"),
+    xfail("nn.functional.interpolate", "trilinear"),
+    xfail("nn.functional.upsample_bilinear"),
+    # Data-dependent outputs (SymBool, unbacked shapes) that raise
+    # during DTensor's fake prop.
+    xfail("equal"),
+    xfail("hash_tensor"),
+    xfail("item"),
+    xfail("nonzero_static"),
+    # Decompositions with .is_cuda checks that fail during sharding
+    # propagation for aten.is_cuda / prim::device.
+    xfail("nn.functional.binary_cross_entropy"),
+    xfail("nn.functional.binary_cross_entropy_with_logits"),
+    xfail("nn.functional.gaussian_nll_loss"),
+    xfail("nn.functional.logsigmoid"),
+    # Miscellaneous runtime crashes (e.g. index out of bounds).
+    xfail("gather"),
+    xfail("index_select"),
+    xfail("scatter"),
+    xfail("scatter_add"),
+    # False positives: these have no sharding strategy and their
+    # eager DTensor failure is registered elsewhere.
+    xfail("masked.argmax"),
+    xfail("masked.argmin"),
+    xfail("nn.functional.margin_ranking_loss"),
+    xfail("nn.functional.multilabel_soft_margin_loss"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
