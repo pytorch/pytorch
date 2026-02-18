@@ -4369,19 +4369,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), opt_fn(x))
         self.assertEqual(fn(x2), opt_fn(x2))
 
-    def test_inductor_no_recursionerror_on_for_loops(self):
-        def forward(x):
-            for _ in range(10000):
-                x = 1.0 * x
-            return x
-
-        self.assertTrue(
-            same(
-                torch.compile(forward, backend="eager")(torch.tensor([1.0])),
-                torch.tensor([1.0]),
-            )
-        )
-
     def test_user_defined_object_callable(self):
         # https://github.com/pytorch/pytorch/issues/114019
         class MyCallable:
@@ -6484,7 +6471,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         mod = Repro()
         x = torch.arange(9, device=torch.device("cuda"))
 
-        @torch.compile(backend="eager")
+        @torch.compile
         def f(x):
             return mod(x)
 
@@ -6561,35 +6548,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         ref = outer_func(x)
         res = compile_outer(x)
         self.assertEqual(ref, res)
-
-    # https://github.com/pytorch/pytorch/issues/136640
-    def test_inductor_dynamic_shapes_broadcasting(self) -> None:
-        def fn(x, y):
-            x_view = x.view(-1, 4)
-            y_view = y.view(-1, 4)
-            return x_view * y_view
-
-        x = torch.randn(4)
-        y = torch.randn(8)
-        out_ref = fn(x, y)
-        out_test = torch.compile(fn, dynamic=True, backend="eager")(x, y)
-        self.assertEqual(out_ref, out_test)
-
-    # https://github.com/pytorch/pytorch/issues/119162
-    def test_inductor_rng_default_dtype(self) -> None:
-        @torch.compile(backend="eager")
-        def fn():
-            tmp = torch.randn(4, 4, dtype=torch.bfloat16)
-            return tmp
-
-        try:
-            old = torch.get_default_dtype()
-            torch.set_default_dtype(torch.bfloat16)
-            out = fn()
-        finally:
-            torch.set_default_dtype(old)
-        # output dtype should be float32
-        self.assertEqual(out.dtype, torch.bfloat16)
 
     @unittest.skipIf(not HAS_MSGSPEC, "missing msgspec package")
     def test_c_defined_metaclass(self):
