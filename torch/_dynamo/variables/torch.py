@@ -1472,6 +1472,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
+        @register(torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols)
+        def handle_has_free_unbacked_symbols(
+            self, tx: "InstructionTranslator", x: VariableTracker
+        ) -> VariableTracker | None:
+            from .tensor import TensorVariable
+
+            if isinstance(x, TensorVariable):
+                example_value = x.as_proxy().node.meta.get("example_value")
+                if example_value is not None:
+                    return variables.ConstantVariable.create(
+                        torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols(
+                            example_value
+                        )
+                    )
+            return None
+
         @register(torch.fx.experimental.symbolic_shapes.guard_scalar)
         def guard_scalar(
             self, tx: "InstructionTranslator", expr: VariableTracker
