@@ -43,6 +43,14 @@ datatype of `torch.bfloat16` only uses {class}`torch.autocast`.
 `torch.cuda.amp.GradScaler(args...)` and `torch.cpu.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler("cuda", args...)` or `torch.amp.GradScaler("cpu", args...)` instead.
 :::
 
+:::{warning}
+Autocast should wrap only the forward pass (and loss computation). Backward passes
+under autocast are not recommended. If using `torch.compile`, note that the default
+`backward_pass_autocast` setting is `"same_as_forward"`, which assumes backward runs
+under the same autocast context. Set `torch._functorch.config.backward_pass_autocast = "off"`
+if you run backward outside autocast. See {ref}`compiler_backward` for details.
+:::
+
 {class}`torch.autocast` and {class}`torch.cpu.amp.autocast` are new in version `1.10`.
 
 ```{contents}
