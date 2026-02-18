@@ -8,7 +8,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
-    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
