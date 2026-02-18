@@ -110,7 +110,7 @@ mobilenet_v3_large,pass,7
 
 
 
-moco,pass,10
+moco,pass,13
 
 
 
@@ -134,7 +134,6 @@ phlippe_resnet,pass,6
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,6
 
 
 
