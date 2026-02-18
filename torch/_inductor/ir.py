@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -462,11 +463,8 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
-        if not V.graph.sizevars.statically_known_equals(
-            s1, s2
-        ) and V.graph.sizevars.symbolic_hint(s1) != V.graph.sizevars.symbolic_hint(s2):
+        if not V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2)):
             return False
-
     return True
 
 
@@ -1300,8 +1298,13 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
-        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
+        # TODO Laith support unbacked!
+        reduction_numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
+            reduction_numel
+        )
+        numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
+            sympy_product(ranges)
+        )
 
         should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
@@ -1354,8 +1357,10 @@ class Reduction(Loops):
                         new_reduction_ranges,
                     ) = extract_input_node_reduction_ranges(input_node)
                 if new_ranges is not None and new_reduction_ranges is not None:
-                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
-                        sympy_product(new_ranges + new_reduction_ranges)
+                    extracted_numel_hint = (
+                        V.graph.sizevars.replace_backed_symbols_with_hints(
+                            sympy_product(new_ranges + new_reduction_ranges)
+                        )
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         log.debug(
@@ -3856,7 +3861,11 @@ class Layout(OutputSpec):
         if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            strides, make_channels_last_strides_for(shape), shape
+            # pyrefly: ignore [bad-specialization]
+            strides,
+            # pyrefly: ignore [bad-specialization]
+            make_channels_last_strides_for(shape),
+            shape,
         ):
             if size != 1 and left != right:
                 return False
@@ -4062,6 +4071,15 @@ class FlexibleLayout(Layout):
     """
 
     allow_indexing = False
+
+    def get_fixed_layout_without_freezing(self) -> FixedLayout:
+        """
+        Compute what the strides would be if this layout were frozen,
+        without actually modifying the layout. This is used for speculative
+        stride computation during Triton template code generation.
+        """
+        # Create a temporary copy and use as_fixed to keep freezing path in sync
+        return copy.deepcopy(self).as_fixed()
 
     # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
@@ -5769,9 +5787,12 @@ class ConcatKernel(NopKernel):
         assert isinstance(fx_node_args, list), type(fx_node_args)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
+            # pyrefly: ignore [missing-attribute]
             "val" in arg.meta
             and (
+                # pyrefly: ignore [missing-attribute]
                 arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                # pyrefly: ignore [missing-attribute]
                 or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
             )
             for arg in fx_node_args
@@ -9052,10 +9073,12 @@ class Conditional(ExternKernel):
                     ret.append(output)
                 else:
                     ret.append(
+                        # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
                             TensorBox(output), fake.stride(), allow_padding=False
                         )
                     )
+            # pyrefly: ignore [bad-return]
             return ret
 
         for subgraph in (true_fn, false_fn):

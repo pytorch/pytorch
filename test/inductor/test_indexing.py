@@ -494,6 +494,53 @@ class ExprPrinterTests(InductorTestCase):
 instantiate_parametrized_tests(ExprPrinterTests)
 
 
+class TestEvaluateMinMax(InductorTestCase):
+    def test_evaluate_min_multiple(self):
+        """min(u0, k*u0) resolves via GCD: gcd(u0, k*u0)=u0.
+        UNSOUND: if u0 < 0 (e.g. u0=-1) true min is 10*u0=-10, not -1."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, 10 * u0), u0)
+        self.assertEqual(sizevars.evaluate_min(10 * u0, u0), u0)
+        self.assertEqual(sizevars.evaluate_max(u0, 10 * u0), 10 * u0)
+
+    def test_evaluate_max_concrete(self):
+        """works with concrete values even when negative.  Sound."""
+        sizevars = SizeVarAllocator()
+        self.assertEqual(sizevars.evaluate_max(-5, 3), 3)
+        self.assertEqual(sizevars.evaluate_min(-5, 3), -5)
+
+    def test_evaluate_min_product_gcd(self):
+        """evaluate_min(u0, u0*u1) resolves via GCD fallback: gcd(u0, u0*u1)=u0.
+        UNSOUND: when u1=0 the true min is 0, not u0; when u0<0 ordering inverts."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
+
+    def test_evaluate_min_product_with_both_gt_gcd(self):
+        """evaluate_min(u0, u0*u1) with u0>0, u1>0 resolves via GCD.
+        Sound: u1>=1 guarantees u0*u1 >= u0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Gt(u0, 0))
+        sizevars.check(sympy.Gt(u1, 0))
+        self.assertEqual(sizevars.evaluate_min(u0, u0 * u1), u0)
+
+    def test_guard_or_false_le_unbacked_symint_with_check(self):
+        """guard_or_false(Le(u0, k*u0)) resolves after constraining u0 >= 0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        sizevars.check(sympy.Ge(u0, 0))
+        # Le(u0, 10*u0) => 9*u0 >= 0, provable with u0 >= 0
+        self.assertTrue(sizevars.guard_or_false(sympy.Le(u0, 10 * u0)))
+        # Le(10*u0, u0) => -9*u0 >= 0 => u0 <= 0, not provable with u0 >= 0
+        self.assertFalse(sizevars.guard_or_false(sympy.Le(10 * u0, u0)))
+        # Lt(u0, 10*u0) => 9*u0 > 0 => u0 > 0, not provable (u0 could be 0)
+        self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

@@ -65,6 +65,11 @@ if cxx_pytree is not None:
     TREE_MAP_IMPLEMENTATIONS.append(("pytree_cxx", cxx_pytree.tree_map))
 
 
+TREE_MAP_WITH_PATH_IMPLEMENTATIONS = [
+    ("pytree_python", pytree.tree_map_with_path),
+]
+
+
 KWARG_CASES = [
     ("default", {}, None),
     ("none_is_leaf", {"none_is_leaf": True}, {"optree"}),
@@ -1027,6 +1032,228 @@ class TreeMapCompileTests(TestCase):
         self.assertTrue(torch.allclose(result["point"].y, torch.zeros(2) * 2))
         self.assertTrue(torch.allclose(result["val"], torch.ones(3) + 10))
         _assert_trees_allclose(self, expected, result)
+
+
+@instantiate_parametrized_tests
+class TreeMapWithPathCompileTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    @parametrize(
+        "tree_map_name,tree_map_with_path_impl", TREE_MAP_WITH_PATH_IMPLEMENTATIONS
+    )
+    def test_basic_nested_tree(
+        self, tree_map_name: str, tree_map_with_path_impl
+    ) -> None:
+        """Keypaths are correctly constructed for nested dicts, lists, and tuples."""
+        tree = {
+            "tensor": torch.ones(2),
+            "list": [torch.zeros(2), torch.ones(3)],
+            "tuple": (torch.ones(4),),
+        }
+
+        collected = []
+
+        def mapper(kp, x):
+            collected.append(kp)
+            return x + 1 if isinstance(x, torch.Tensor) else x
+
+        def fn(arg):
+            return tree_map_with_path_impl(mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+
+        # Eager reference
+        collected.clear()
+        expected = fn(tree)
+        eager_keypaths = list(collected)
+
+        # Compiled
+        collected.clear()
+        result = compiled(tree)
+        compiled_keypaths = list(collected)
+
+        _assert_trees_allclose(self, expected, result)
+        self.assertEqual(eager_keypaths, compiled_keypaths)
+
+    @parametrize(
+        "tree_map_name,tree_map_with_path_impl", TREE_MAP_WITH_PATH_IMPLEMENTATIONS
+    )
+    def test_multiple_trees(self, tree_map_name: str, tree_map_with_path_impl) -> None:
+        """tree_map_with_path with multiple input trees."""
+        tree1 = {"a": torch.ones(2), "b": [torch.zeros(3)]}
+        tree2 = {"a": torch.ones(2) * 2, "b": [torch.ones(3) * 3]}
+
+        def mapper(kp, x, y):
+            return x + y
+
+        def fn(t1, t2):
+            return tree_map_with_path_impl(mapper, t1, t2)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree1, tree2)
+        result = compiled(tree1, tree2)
+        _assert_trees_allclose(self, expected, result)
+
+    @parametrize(
+        "tree_map_name,tree_map_with_path_impl", TREE_MAP_WITH_PATH_IMPLEMENTATIONS
+    )
+    def test_is_leaf_predicate(
+        self, tree_map_name: str, tree_map_with_path_impl
+    ) -> None:
+        """is_leaf stops traversal and passes the subtree as a leaf."""
+        tree = {"a": [torch.ones(2), torch.zeros(2)]}
+
+        def is_leaf_fn(node):
+            return isinstance(node, list)
+
+        collected_keypaths = []
+
+        def mapper(kp, x):
+            collected_keypaths.append(kp)
+            if isinstance(x, list):
+                return [t * 2 for t in x]
+            return x
+
+        def fn(arg):
+            return tree_map_with_path_impl(mapper, arg, is_leaf=is_leaf_fn)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+
+        collected_keypaths.clear()
+        fn(tree)
+        eager_keypaths = list(collected_keypaths)
+
+        collected_keypaths.clear()
+        compiled(tree)
+        compiled_keypaths = list(collected_keypaths)
+
+        # The list should be treated as a single leaf with keypath (MappingKey("a"),)
+        self.assertEqual(len(eager_keypaths), 1)
+        self.assertEqual(eager_keypaths, compiled_keypaths)
+
+    @parametrize(
+        "tree_map_name,tree_map_with_path_impl", TREE_MAP_WITH_PATH_IMPLEMENTATIONS
+    )
+    def test_namedtuple_uses_getattr_key(
+        self, tree_map_name: str, tree_map_with_path_impl
+    ) -> None:
+        """Namedtuple fields produce GetAttrKey in keypaths."""
+        Point = namedtuple("Point", ["x", "y"])
+        tree = {"point": Point(torch.ones(2), torch.zeros(2))}
+
+        collected = []
+
+        def mapper(kp, x):
+            collected.append(kp)
+            if isinstance(x, torch.Tensor):
+                return x + 1
+            return x
+
+        def fn(arg):
+            return tree_map_with_path_impl(mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+
+        collected.clear()
+        expected = fn(tree)
+        eager_keypaths = list(collected)
+
+        collected.clear()
+        result = compiled(tree)
+        compiled_keypaths = list(collected)
+
+        _assert_trees_allclose(self, expected, result)
+        self.assertEqual(eager_keypaths, compiled_keypaths)
+
+    @parametrize(
+        "tree_map_name,tree_map_with_path_impl", TREE_MAP_WITH_PATH_IMPLEMENTATIONS
+    )
+    def test_deeply_nested_keypaths(
+        self, tree_map_name: str, tree_map_with_path_impl
+    ) -> None:
+        """Deeply nested structures produce correct multi-level keypaths."""
+        tree = {"outer": {"inner": [torch.ones(2)]}}
+
+        collected = []
+
+        def mapper(kp, x):
+            collected.append(kp)
+            return x * 2 if isinstance(x, torch.Tensor) else x
+
+        def fn(arg):
+            return tree_map_with_path_impl(mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+
+        collected.clear()
+        expected = fn(tree)
+        eager_keypaths = list(collected)
+
+        collected.clear()
+        result = compiled(tree)
+        compiled_keypaths = list(collected)
+
+        self.assertEqual(len(eager_keypaths), 1)
+        self.assertEqual(len(eager_keypaths[0]), 3)  # outer -> inner -> [0]
+        self.assertEqual(eager_keypaths, compiled_keypaths)
+        _assert_trees_allclose(self, expected, result)
+
+    @parametrize(
+        "tree_map_name,tree_map_with_path_impl", TREE_MAP_WITH_PATH_IMPLEMENTATIONS
+    )
+    def test_keypath_values_used_in_computation(
+        self, tree_map_name: str, tree_map_with_path_impl
+    ) -> None:
+        """The map function can use keypath values to influence the result."""
+        from torch.utils._pytree import MappingKey
+
+        tree = {"scale2": torch.ones(2), "scale3": torch.ones(2)}
+
+        def mapper(kp, x):
+            # Use the dict key name from the keypath to determine scaling
+            key = kp[-1]
+            if isinstance(key, MappingKey) and key.key == "scale3":
+                return x * 3
+            return x * 2
+
+        def fn(arg):
+            return tree_map_with_path_impl(mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree)
+        result = compiled(tree)
+        _assert_trees_allclose(self, expected, result)
+
+    @parametrize(
+        "tree_map_name,tree_map_with_path_impl", TREE_MAP_WITH_PATH_IMPLEMENTATIONS
+    )
+    def test_user_defined_object_treated_as_leaf(
+        self, tree_map_name: str, tree_map_with_path_impl
+    ) -> None:
+        """Unregistered user-defined objects are leaves in tree_map_with_path."""
+
+        class MyObj:
+            def __init__(self, val):
+                self.val = val
+
+        tree = {"obj": MyObj(42), "tensor": torch.ones(2)}
+
+        def mapper(kp, x):
+            if isinstance(x, MyObj):
+                return MyObj(x.val * 2)
+            return x + 1
+
+        def fn(arg):
+            return tree_map_with_path_impl(mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        result = compiled(tree)
+
+        self.assertIsInstance(result["obj"], MyObj)
+        self.assertEqual(result["obj"].val, 84)
+        self.assertTrue(torch.allclose(result["tensor"], torch.ones(2) + 1))
 
 
 if __name__ == "__main__":  # pragma: no cover
