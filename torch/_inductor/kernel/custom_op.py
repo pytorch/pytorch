@@ -193,6 +193,21 @@ __all__ = [
     "clear_aten_autotuning_registry",
 ]
 
+# Registry for aten op autotuning lowering functions
+_aten_autotuning_registry: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+
+
+def get_registered_aten_autotuning(
+    op_overload: torch._ops.OpOverload,
+) -> Optional[Callable[..., Any]]:
+    """Get the registered autotuning lowering function for an aten op."""
+    return _aten_autotuning_registry.get(op_overload)
+
+
+def clear_aten_autotuning_registry() -> None:
+    """Clear all registered aten autotuning entries."""
+    _aten_autotuning_registry.clear()
+
 
 # Registry for aten op autotuning lowering functions
 _aten_autotuning_registry: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
@@ -741,6 +756,54 @@ def _apply_config_patches_recursive(
                 )
 
 
+def _validate_impl_guards(
+    impl: Callable[..., Any],
+    impl_kwargs: dict[str, Any],
+    runtime_kwargs: dict[str, Any],
+    tensor_inputs: list[Any],
+) -> bool:
+    """Check if an implementation adds guards when traced with symbolic shapes.
+
+    Temporarily freezes the ShapeEnv with error_on_new_guards() so that any
+    guard attempt raises ShapeEnvGuardError. This exception is not cached by
+    the _inner_evaluate_expr LRU cache, avoiding stale-cache issues across
+    multiple validation calls.
+
+    Returns True if the impl is safe (no guards attempted), False otherwise.
+    """
+    from torch.fx.experimental.proxy_tensor import make_fx
+    from torch.fx.experimental.symbolic_shapes import ShapeEnvGuardError
+
+    from ..decomposition import select_decomp_table
+
+    shape_env = V.fake_mode.shape_env
+    if shape_env is None:
+        return True
+
+    merged_kwargs = _merge_config_and_runtime_kwargs(impl_kwargs, runtime_kwargs)
+
+    def impl_wrapper(*tensors):
+        return impl(*tensors, **merged_kwargs)
+
+    try:
+        with V.fake_mode, shape_env.error_on_new_guards():
+            fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
+            decomposition_table = select_decomp_table()
+            make_fx(
+                impl_wrapper,
+                decomposition_table=decomposition_table,
+                tracing_mode="symbolic",
+            )(*fake_inputs)
+    except ShapeEnvGuardError:
+        log.info(
+            "Implementation %s adds guards, detected via error_on_new_guards",
+            impl.__name__,
+        )
+        return False
+
+    return True
+
+
 def _lower_single_impl(
     impl: Callable[..., Any],
     impl_kwargs: dict[str, Any],
@@ -748,12 +811,23 @@ def _lower_single_impl(
     tensor_inputs: list[Any],
     name: str,
     config_patches: Optional[dict[str, Any]] = None,
+    default_impl: Optional[Callable[..., Any]] = None,
 ) -> Any:
     """Lower a single implementation by tracing and inlining it."""
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
     from torch.fx.experimental.proxy_tensor import make_fx
 
     from ..decomposition import select_decomp_table
+
+    # Validate that impl doesn't add guards; fall back to default_impl if it does
+    if impl != default_impl:
+        if not _validate_impl_guards(impl, impl_kwargs, runtime_kwargs, tensor_inputs):
+            log.info(
+                "Implementation %s adds guards, falling back to %s",
+                impl.__name__,
+                default_impl.__name__,
+            )
+            impl = default_impl
 
     merged_kwargs = _merge_config_and_runtime_kwargs(impl_kwargs, runtime_kwargs)
 
@@ -880,6 +954,32 @@ def _range_based_lowering_fn(
             impl_config.impl_name,
         )
 
+    # Validate winning impls don't add guards with symbolic shapes
+    fallback_config = ImplConfig(
+        impl_name=default_impl.__name__,
+        impl_func=default_impl,
+        kwargs=non_tensor_args[0] if non_tensor_args else {},
+    )
+    for range_bounds in list(range_to_best_impl_map.keys()):
+        impl_config = range_to_best_impl_map[range_bounds]
+        if impl_config.impl_func == default_impl:
+            continue
+        is_singleton = range_bounds.start == range_bounds.end
+        if is_singleton:
+            continue
+        if not _validate_impl_guards(
+            impl_config.impl_func,
+            impl_config.kwargs,
+            runtime_kwargs,
+            tensor_inputs,
+        ):
+            log.info(
+                "Decomposition %s adds guards for range %s, replacing with fallback",
+                impl_config.impl_name,
+                range_bounds,
+            )
+            range_to_best_impl_map[range_bounds] = fallback_config
+
     # Group ranges by implementation (more aggressive than adjacent merging)
     impl_groups = _group_ranges_by_impl(range_to_best_impl_map)
 
@@ -894,6 +994,7 @@ def _range_based_lowering_fn(
         return _lower_single_impl(
             group.impl_func, group.impl_kwargs, runtime_kwargs, tensor_inputs, name,
             config_patches=group.config_patches,
+            default_impl=default_impl,
         )
 
     def dispatch_fn(*fake_tensors):
@@ -1160,7 +1261,8 @@ def register_custom_op_autotuning(
     # Handle both CustomOpDef and OpOverload
     if isinstance(custom_op, CustomOpDef):
         op_overload = custom_op._opoverload
-        impl_fn = default_impl if default_impl is not None else custom_op._init_fn
+        if default_impl is None:
+            default_impl = custom_op._init_fn
     elif isinstance(custom_op, torch._ops.OpOverload):
         op_overload = custom_op
         if default_impl is None:
@@ -1168,7 +1270,6 @@ def register_custom_op_autotuning(
                 "default_impl is required when registering an OpOverload "
                 "(e.g., torch.ops.aten.mm.default)"
             )
-        impl_fn = default_impl
     else:
         raise TypeError(
             f"custom_op must be a CustomOpDef or OpOverload, got {type(custom_op)}."
@@ -1252,7 +1353,7 @@ def register_custom_op_autotuning(
     lowering_fn = _create_autotuning_lowering(
         # pyrefly: ignore [bad-argument-type]
         processed_configs=static_configs,
-        default_impl=impl_fn,
+        default_impl=default_impl,
         name=name,
         op_overload=op_overload,
         input_gen_fns=input_gen_fns,
