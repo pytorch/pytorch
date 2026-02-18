@@ -415,9 +415,13 @@ class TestFXGraphPasses(JitTestCase):
         )
 
         partitions = partitioner.propose_partitions()
-        assert(len(partitions) == 1)
-        nodes_names = [node.name for node in list(partitions)[0].nodes]
-        assert nodes_names == ["add", "add_1"], f"Unexpected partition nodes: {nodes_names}"
+        self.assertEqual(len(partitions), 1)
+        nodes_names = [node.name for node in next(iter(partitions)).nodes]
+        self.assertEqual(
+            nodes_names,
+            ["add", "add_1"],
+            f"Unexpected partition nodes: {nodes_names}",
+        )
 
     @parametrize("fn, expected_partition", [
         (TestPartitionFunctions.forward17, [['add', 'add_1', 'add_2']]),

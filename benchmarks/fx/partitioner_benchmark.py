@@ -63,11 +63,12 @@ class BenchmarkResult:
     max_ms: float
 
 
-def _run_case(
-    num_nodes: int, num_unsupported: int, iters: int) -> BenchmarkResult:
+def _run_case(num_nodes: int, num_unsupported: int, iters: int) -> BenchmarkResult:
     timings: list[float] = []
     for _ in range(iters):
-        fn = _make_large_partition_fn(num_nodes=num_nodes, num_unsupported=num_unsupported)
+        fn = _make_large_partition_fn(
+            num_nodes=num_nodes, num_unsupported=num_unsupported
+        )
         gm = symbolic_trace(fn)
         t0 = time.perf_counter()
         partitioner = CapabilityBasedPartitioner(
@@ -121,7 +122,13 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument(
         "--sizes",
         type=_parse_size,
-        default=[(4_000, 40), (10_000, 100), (40_000, 400), (100_000, 1_000), (1_000_000, 10_000)],
+        default=[
+            (4_000, 40),
+            (10_000, 100),
+            (40_000, 400),
+            (100_000, 1_000),
+            (1_000_000, 10_000),
+        ],
         help="List of NUM_NODES:NUM_UNSUPPORTED pairs.",
         nargs="+",
     )
