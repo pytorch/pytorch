@@ -98,7 +98,7 @@ def resolve_git_dir(submodule_worktree: Path) -> Path | None:
     # gitlink: read the target
     content = git_path.read_text().strip()
     if content.startswith("gitdir: "):
-        target = content[len("gitdir: "):]
+        target = content[len("gitdir: ") :]
         resolved = (submodule_worktree / target).resolve()
         if resolved.exists():
             return resolved
@@ -256,9 +256,7 @@ def main() -> None:
     )
 
     # "remove" subcommand
-    remove_parser = subparsers.add_parser(
-        "remove", help="Force-remove a worktree"
-    )
+    remove_parser = subparsers.add_parser("remove", help="Force-remove a worktree")
     remove_parser.add_argument(
         "name",
         help="Worktree directory name to remove",
