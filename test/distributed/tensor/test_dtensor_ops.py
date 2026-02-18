@@ -801,8 +801,6 @@ ops_unbacked_dtensor_dde = {
     xfail("addr"),
     xfail("alias_copy"),
     xfail("aminmax"),
-    xfail("argmax"),
-    xfail("argmin"),
     xfail("argsort"),
     xfail("argwhere"),
     xfail("as_strided"),
