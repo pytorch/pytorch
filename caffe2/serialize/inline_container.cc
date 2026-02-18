@@ -926,10 +926,16 @@ void PyTorchStreamWriter::writeSerializationId() {
   }
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 PyTorchStreamWriter::~PyTorchStreamWriter() {
   if (!finalized_) {
-    writeEndOfFile();
+    try {
+      writeEndOfFile();
+    } catch (const c10::Error& e) {
+      // writeEndOfFile may throw if a write error occurred (e.g. disk full).
+      // Swallow the exception to avoid std::terminate().
+      LOG(WARNING) << "PyTorchStreamWriter failed to finalize archive: "
+                   << e.what() << ". Output file may be corrupted.";
+    }
   }
 }
 
