@@ -31,37 +31,130 @@ def make_compile_print(
     bwd_f: Callable[[torch.Tensor], None],
 ) -> Callable[..., None]:
     """
-    Create a compile_print function with the given forward and backward callbacks.
+    Create a callable that observes tensors during forward and backward passes,
+    compatible with eager mode, ``torch.compile``, and ``aot_function``.
 
-    The returned function is side-effect-only: it calls fwd_f(tensor) on each tensor
-    in the forward pass, and registers hooks so bwd_f(grad) is called on each gradient
-    in the backward pass. It does not return anything.
+    The returned callable ``cp`` is side-effect-only: calling ``cp(t1, t2, ...)``
+    invokes ``fwd_f`` on each tensor in the forward pass and registers hooks so
+    that ``bwd_f`` is called on each gradient in the backward pass. ``cp``
+    returns ``None`` and does not modify the tensors.
 
-    Example:
-        >>> def print_fwd(t):
-        ...     print(f"Forward: shape={t.shape}, mean={t.mean():.4f}")
-        >>> def print_bwd(t):
-        ...     print(f"Backward: shape={t.shape}, mean={t.mean():.4f}")
-        >>> compile_print = make_compile_print(print_fwd, print_bwd)
-        >>> @torch.compile
-        ... def fn(x):
-        ...     compile_print(x)
-        ...     return x.sum()
-        >>> x = torch.randn(3, 3, requires_grad=True)
-        >>> fn(x).backward()
+    ``cp`` must be created **outside** the compiled region and called **inside**
+    it. Internally it uses :func:`@leaf_function <torch._dynamo.decorators.leaf_function>`
+    so both the forward and backward callbacks are opaque to the compiler — the
+    callbacks execute at runtime without being traced.
 
     Args:
-        fwd_f: Function to call on each tensor in forward pass. Signature: (Tensor) -> None.
-        bwd_f: Function to call on each gradient in backward pass. Signature: (Tensor) -> None.
+        fwd_f: Called as ``fwd_f(tensor)`` on each positional tensor argument in the
+            forward pass.
+        bwd_f: Called as ``bwd_f(grad)`` on each gradient in the backward pass.
 
     Returns:
-        A side-effect-only function that takes tensors and returns None.
+        A callable with signature ``cp(*tensors, tag="", ranks=None) -> None``.
 
-    Note:
-        Backward function bwd_f is called in both torch.compile and aot_function, but
-        through different mechanisms. With aot_function, bwd_f appears as an
-        explicit invoke_leaf_function graph node in the backward graph. With
-        torch.compile, bwd_f runs as a runtime hook on the tensor.
+        - **tag** (``str``): Optional label. When set, ``cp`` prints
+          ``[tag][fwd]`` / ``[tag][bwd]`` to stdout each time the callbacks run.
+          In distributed settings, the rank is prepended: ``[rank 0][tag][fwd]``.
+        - **ranks** (``int | set[int] | None``): Which distributed ranks should
+          execute callbacks. ``None`` (default) means all ranks. An ``int`` means
+          only that rank. A ``set[int]`` means those ranks.
+
+    .. note::
+
+        ``bwd_f`` is called in both ``torch.compile`` and ``aot_function``, but
+        through different mechanisms:
+
+        - With ``torch.compile``, ``bwd_f`` runs as an autograd hook at runtime.
+          If ``cp`` is called on a **leaf input**, the hook fires *after* the
+          compiled backward graph (so ``invoke_leaf_function`` does not appear in
+          the backward graph). If ``cp`` is called on an **intermediate tensor**
+          (e.g., a module output), the hook fires *during* the backward pass and
+          ``invoke_leaf_function`` appears in the backward graph.
+        - With ``aot_function``, ``bwd_f`` always appears as an explicit
+          ``invoke_leaf_function`` node in the backward graph regardless of
+          whether it's called on a leaf or intermediate tensor.
+
+    Example — basic usage::
+
+        >>> import torch
+        >>> from torch._higher_order_ops.compile_print_wrapper import make_compile_print
+        >>> cp = make_compile_print(
+        ...     fwd_f=lambda t: print(f"  fwd: shape={t.shape}, norm={t.norm():.4f}"),
+        ...     bwd_f=lambda t: print(f"  bwd: shape={t.shape}, norm={t.norm():.4f}"),
+        ... )
+
+        Eager mode:
+
+        >>> x = torch.randn(3, 3, requires_grad=True)
+        >>> cp(x)                     # prints fwd info immediately
+          fwd: shape=torch.Size([3, 3]), norm=...
+        >>> x.sum().backward()        # prints bwd info when gradient flows
+          bwd: shape=torch.Size([3, 3]), norm=...
+
+        Inside torch.compile:
+
+        >>> @torch.compile(backend="aot_eager")
+        ... def fn(x):
+        ...     cp(x)
+        ...     return x.sum()
+        >>> fn(torch.randn(3, 3, requires_grad=True)).backward()
+          fwd: shape=torch.Size([3, 3]), norm=...
+          bwd: shape=torch.Size([3, 3]), norm=...
+
+    Example — tagging and multiple tensors::
+
+        >>> cp = make_compile_print(
+        ...     fwd_f=lambda t: print(f"    {t.shape}"),
+        ...     bwd_f=lambda t: print(f"    {t.shape}"),
+        ... )
+        >>> x = torch.randn(2, 4, requires_grad=True)
+        >>> y = torch.randn(2, 4, requires_grad=True)
+        >>> cp(x, y, tag="inputs")
+        [inputs][fwd]
+            torch.Size([2, 4])
+            torch.Size([2, 4])
+        >>> (x + y).sum().backward()
+        [inputs][bwd]
+            torch.Size([2, 4])
+        [inputs][bwd]
+            torch.Size([2, 4])
+
+    Example — instrument all modules in a model::
+
+        >>> import torch.nn as nn
+        >>> import torch.utils._pytree as pytree
+        >>>
+        >>> def install_debug_prints(model: nn.Module) -> None:
+        ...     for name, module in model.named_modules():
+        ...         tag = f"{module.__class__.__name__}:{name}"
+        ...         cp = make_compile_print(
+        ...             fwd_f=lambda t: print(f"  {t.shape} mean={t.mean():.4f}"),
+        ...             bwd_f=lambda t: print(f"  {t.shape} mean={t.mean():.4f}"),
+        ...         )
+        ...         orig_forward = module.forward
+        ...         def wrapped(*args, _orig=orig_forward, _cp=cp, _tag=tag, **kwargs):
+        ...             out = _orig(*args, **kwargs)
+        ...             pytree.tree_map_only(torch.Tensor, lambda t: _cp(t, tag=_tag), out)
+        ...             return out
+        ...         module.forward = wrapped
+        >>>
+        >>> model = nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 4))
+        >>> install_debug_prints(model)
+        >>> compiled_model = torch.compile(model, backend="aot_eager")
+        >>> out = compiled_model(torch.randn(2, 8, requires_grad=True))
+        [Linear:0][fwd]
+          torch.Size([2, 16]) mean=...
+        [ReLU:1][fwd]
+          torch.Size([2, 16]) mean=...
+        [Linear:2][fwd]
+          torch.Size([2, 4]) mean=...
+        >>> out.sum().backward()
+        [Linear:2][bwd]
+          torch.Size([2, 4]) mean=...
+        [ReLU:1][bwd]
+          torch.Size([2, 16]) mean=...
+        [Linear:0][bwd]
+          torch.Size([2, 16]) mean=...
     """
 
     @leaf_function
