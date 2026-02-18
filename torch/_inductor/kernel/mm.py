@@ -214,17 +214,6 @@ def decomposeK(a, b, k_splits):
     return reduced_buf.to(a.dtype)
 
 
-def batch1_decompose_mm(a, b):
-    """Decompose mm to unsqueeze+mul+sum for batch=1 cases.
-
-    This is equivalent to:
-        (a.unsqueeze(2) * b.unsqueeze(0)).sum(dim=1)
-
-    When a is (1, K) and b is (K, N), this produces (1, N).
-    """
-    return (a.unsqueeze(2) * b.unsqueeze(0)).sum(dim=1)
-
-
 class DecomposeKSugraphTemplate(SubgraphTemplate):
     def __init__(self):
         super().__init__(
@@ -261,49 +250,6 @@ class DecomposeKSugraphTemplate(SubgraphTemplate):
 
 
 decompose_k_subgraph_template = DecomposeKSugraphTemplate()
-
-
-class Batch1DecomposeSubgraphTemplate(SubgraphTemplate):
-    """Template for decomposing batch=1 mm to unsqueeze+mul+sum.
-
-    This registers the decomposition as an autotuning choice rather than
-    applying it unconditionally during graph lowering.
-    """
-
-    def __init__(self):
-        super().__init__(
-            name="batch1_decompose",
-        )
-
-    def generate(  # type: ignore[override]
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-    ) -> SubgraphChoiceCaller:
-        from torch._dispatch.python import enable_python_dispatcher
-
-        from ..decomposition import select_decomp_table
-
-        name = "batch1_decompose_mm"
-        description = "unsqueeze+mul+sum"
-
-        with enable_python_dispatcher():
-            decompositions = select_decomp_table()
-            fn = make_fx(
-                batch1_decompose_mm,
-                decompositions,
-            )
-
-            return super().generate(
-                name=name,
-                input_nodes=input_nodes,
-                layout=layout,
-                make_fx_graph=fn,
-                description=description,
-            )
-
-
-batch1_decompose_subgraph_template = Batch1DecomposeSubgraphTemplate()
 
 
 class ContiguousTemplate(SubgraphTemplate):
@@ -482,10 +428,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        # Add batch1 decompose choice when m=1 (vector-matrix multiply)
-        if V.graph.sizevars.statically_known_equals(m, 1):
-            templates_to_use.append(batch1_decompose_subgraph_template)
-
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
         # Triton Templates typically perform very poorly for large K.

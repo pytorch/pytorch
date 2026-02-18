@@ -8,7 +8,7 @@ from typing import Any, Optional, Union
 
 import torch
 from torch._inductor.codegen.subgraph import SubgraphTemplate
-from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
+from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, StorageBox, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
@@ -189,7 +189,25 @@ __all__ = [
     "autotune_custom_op",
     "register_custom_op_autotuning",
     "CustomOpConfig",
+    "get_registered_aten_autotuning",
+    "clear_aten_autotuning_registry",
 ]
+
+
+# Registry for aten op autotuning lowering functions
+_aten_autotuning_registry: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
+
+
+def get_registered_aten_autotuning(
+    op: torch._ops.OpOverload,
+) -> Optional[Callable[..., Any]]:
+    """Get registered autotuning lowering function for an aten op."""
+    return _aten_autotuning_registry.get(op)
+
+
+def clear_aten_autotuning_registry() -> None:
+    """Clear all registered aten autotuning functions."""
+    _aten_autotuning_registry.clear()
 
 
 def _extract_tensor_inputs(
@@ -218,13 +236,13 @@ def _extract_tensor_inputs(
     ]
 
     for i, arg in enumerate(args):
-        if isinstance(arg, (TensorBox, Buffer)):
+        if isinstance(arg, (TensorBox, Buffer, StorageBox)):
             tensor_inputs.append(arg)
         else:
             non_tensor_kwargs[param_names[i]] = arg
 
     for key, value in kwargs.items():
-        if isinstance(value, (TensorBox, Buffer)):
+        if isinstance(value, (TensorBox, Buffer, StorageBox)):
             tensor_inputs.append(value)
         else:
             non_tensor_kwargs[key] = value
@@ -1045,7 +1063,7 @@ def _create_autotuning_lowering(
 
 
 def register_custom_op_autotuning(
-    custom_op: torch._library.custom_ops.CustomOpDef,
+    custom_op: Union[torch._library.custom_ops.CustomOpDef, torch._ops.OpOverload],
     configs: Optional[Union[list[CustomOpConfig], list[Callable[..., Any]]]] = None,
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
@@ -1056,6 +1074,7 @@ def register_custom_op_autotuning(
     split_points: Optional[list[int]] = None,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
+    default_impl: Optional[Callable[..., Any]] = None,
 ) -> None:
     """Register custom op for autotuning with custom_op configs where each config
     specifies a decomposition implementation function with its parameter values.
@@ -1063,12 +1082,15 @@ def register_custom_op_autotuning(
     runtime dispatch.
 
     Args:
-        custom_op: Custom operation (decorated function from @torch.library.custom_op)
+        custom_op: Custom operation (CustomOpDef from @torch.library.custom_op) or
+                   OpOverload (e.g., torch.ops.aten.mm.default)
         configs: List of CustomOpConfig objects for static inputs. Mutually exclusive with config_generator.
         config_generator: Dynamic config generator function that takes a dict mapping
                           parameter names to fake tensors, and returns list[CustomOpConfig]
                           based on input tensor properties. Mutually exclusive with configs.
         name: Operation name (default: "{op_name}_autotuned")
+        input_gen_fns: Custom input generators for benchmarking
+        default_impl: Default implementation function (required for OpOverload, optional for CustomOpDef)
         input_gen_fns: Custom input generators for benchmarking
         dispatch_on: Dict for range-based dispatch with keys:
             - 'tensor_name': Name of tensor parameter to dispatch on
@@ -1135,10 +1157,21 @@ def register_custom_op_autotuning(
     """
     from torch._library.custom_ops import CustomOpDef
 
-    if not isinstance(custom_op, CustomOpDef):
+    # Handle both CustomOpDef and OpOverload
+    if isinstance(custom_op, CustomOpDef):
+        op_overload = custom_op._opoverload
+        impl_fn = default_impl if default_impl is not None else custom_op._init_fn
+    elif isinstance(custom_op, torch._ops.OpOverload):
+        op_overload = custom_op
+        if default_impl is None:
+            raise ValueError(
+                "default_impl is required when registering an OpOverload "
+                "(e.g., torch.ops.aten.mm.default)"
+            )
+        impl_fn = default_impl
+    else:
         raise TypeError(
-            f"custom_op must be a CustomOpDef (decorated function from @torch.library.custom_op), "
-            f"got {type(custom_op)}."
+            f"custom_op must be a CustomOpDef or OpOverload, got {type(custom_op)}."
         )
 
     # Validate configs and config_generator are mutually exclusive
@@ -1150,9 +1183,6 @@ def register_custom_op_autotuning(
 
     if configs is None and config_generator is None:
         raise ValueError("Must specify either 'configs' or 'config_generator'")
-
-    op_overload = custom_op._opoverload
-    default_impl = custom_op._init_fn
 
     # Process and validate static configs at registration time
     static_configs = None
@@ -1222,7 +1252,7 @@ def register_custom_op_autotuning(
     lowering_fn = _create_autotuning_lowering(
         # pyrefly: ignore [bad-argument-type]
         processed_configs=static_configs,
-        default_impl=default_impl,
+        default_impl=impl_fn,
         name=name,
         op_overload=op_overload,
         input_gen_fns=input_gen_fns,
@@ -1235,4 +1265,9 @@ def register_custom_op_autotuning(
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
-    lowerings[op_overload] = lowering_fn
+    # For aten ops, register in the aten autotuning registry (don't override lowerings)
+    # For custom ops, register directly in lowerings
+    if isinstance(custom_op, torch._ops.OpOverload):
+        _aten_autotuning_registry[op_overload] = lowering_fn
+    else:
+        lowerings[op_overload] = lowering_fn

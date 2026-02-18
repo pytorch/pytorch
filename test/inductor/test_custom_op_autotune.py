@@ -906,7 +906,7 @@ class TestCustomOpAutoTune(TestCase):
             name="test_mm_autotuned",
             default_impl=torch.mm,
             input_gen_fns={
-                "self": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                "mat1": lambda t: torch.randn_like(t, device=self.device) * 0.1,
                 "mat2": lambda t: torch.randn_like(t, device=self.device) * 0.1,
             },
         )
@@ -925,6 +925,113 @@ class TestCustomOpAutoTune(TestCase):
             result = test_model(test_a, test_b)
 
         torch.testing.assert_close(result, torch.mm(test_a, test_b), rtol=1e-1, atol=1e-1)
+        clear_aten_autotuning_registry()
+
+    @skipIfXpu
+    def test_aten_mm_multi_decomp_range_dispatch(self):
+        """Test aten.mm with multiple decompositions and range-based dispatch.
+
+        Registers batch1_decompose, split_k variants, and lets autotuning pick
+        the best for each size range.
+        """
+        from torch._inductor.kernel.custom_op import (
+            clear_aten_autotuning_registry,
+            get_registered_aten_autotuning,
+        )
+
+        clear_aten_autotuning_registry()
+
+        def batch1_decompose(mat1, mat2):
+            """Decompose mm to unsqueeze+mul+sum - good for m=1."""
+            return (mat1.unsqueeze(2) * mat2.unsqueeze(0)).sum(dim=1)
+
+        def split_k_2(mat1, mat2):
+            """Split K dimension into 2 parts."""
+            m, k = mat1.shape
+            n = mat2.shape[1]
+            k_splits = 2
+            if k % k_splits == 0:
+                k_parts = k // k_splits
+                a = torch.permute(mat1.reshape(m, k_splits, k_parts), (1, 0, 2))
+                b = mat2.reshape(k_splits, k_parts, n)
+                return torch.sum(torch.bmm(a, b), dim=0)
+            return mat1 @ mat2
+
+        def split_k_4(mat1, mat2):
+            """Split K dimension into 4 parts."""
+            m, k = mat1.shape
+            n = mat2.shape[1]
+            k_splits = 4
+            if k % k_splits == 0:
+                k_parts = k // k_splits
+                a = torch.permute(mat1.reshape(m, k_splits, k_parts), (1, 0, 2))
+                b = mat2.reshape(k_splits, k_parts, n)
+                return torch.sum(torch.bmm(a, b), dim=0)
+            return mat1 @ mat2
+
+        def split_k_16(mat1, mat2):
+            """Split K dimension into 16 parts - good for large K, moderate M."""
+            m, k = mat1.shape
+            n = mat2.shape[1]
+            k_splits = 16
+            if k % k_splits == 0:
+                k_parts = k // k_splits
+                a = torch.permute(mat1.reshape(m, k_splits, k_parts), (1, 0, 2))
+                b = mat2.reshape(k_splits, k_parts, n)
+                return torch.sum(torch.bmm(a, b), dim=0)
+            return mat1 @ mat2
+
+        # Register with multiple configs and range-based dispatch on M dimension
+        # Using larger K to give split_k variants a chance to win
+        # Enable coordinate descent tuning via config_patches for better autotuning
+        config_patches = {"coordinate_descent_tuning": True}
+        register_custom_op_autotuning(
+            torch.ops.aten.mm.default,
+            configs=[
+                CustomOpConfig(batch1_decompose, config_patches=config_patches),
+                CustomOpConfig(split_k_2, config_patches=config_patches),
+                CustomOpConfig(split_k_4, config_patches=config_patches),
+                CustomOpConfig(split_k_16, config_patches=config_patches),
+            ],
+            name="test_mm_multi_decomp",
+            default_impl=torch.mm,
+            dispatch_on={"tensor_name": "mat1", "dim": 0},
+            split_points=[4, 32],  # Ranges: [1,4], [5,32], [33,inf] - batch1 wins small, split_k_16 wins mid
+            benchmark_with_cudagraphs=True,
+            input_gen_fns={
+                "mat1": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                "mat2": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+            },
+        )
+
+        self.assertIsNotNone(get_registered_aten_autotuning(torch.ops.aten.mm.default))
+
+        # Use router_256 shape: K=6144, N=256, fp32
+        # This shape shows batch1 winning at B=1-4 and split_k_16 winning at B=8-16
+        test_a = torch.randn(8, 6144, device=self.device, dtype=torch.float32)
+        test_b = torch.randn(6144, 256, device=self.device, dtype=torch.float32)
+
+        @torch.compile
+        def test_model(a, b):
+            return torch.mm(a, b)
+
+        # Mark first dimension (M/batch) as dynamic
+        torch._dynamo.mark_dynamic(test_a, 0)
+
+        torch._dynamo.reset()
+        with config.patch(coordinate_descent_tuning=True, fx_graph_cache=False):
+            # First compilation with dynamic M
+            result = test_model(test_a, test_b)
+            expected = torch.mm(test_a, test_b)
+            torch.testing.assert_close(result, expected, rtol=1e-1, atol=1e-1)
+
+            # Test with different M sizes - should use same compiled graph with dispatch
+            for m in [1, 4, 8, 16]:
+                test_a_sized = torch.randn(m, 6144, device=self.device, dtype=torch.float32)
+                result = test_model(test_a_sized, test_b)
+                expected = torch.mm(test_a_sized, test_b)
+                torch.testing.assert_close(result, expected, rtol=1e-1, atol=1e-1)
+
         clear_aten_autotuning_registry()
 
 
