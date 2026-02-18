@@ -387,7 +387,7 @@ class InputObserverInfo:
                 args = tuple(list_args)
             else:
                 raise TypeError(
-                    f"Unexepcted type {type(k)} for a missing value. The key is {k!r}."
+                    f"Unexpected type {type(k)} for a missing value. The key is {k!r}."
                 )
 
         # kwargs may come in a different order each time.
