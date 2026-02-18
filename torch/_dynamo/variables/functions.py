@@ -430,9 +430,6 @@ class BaseUserFunctionVariable(VariableTracker):
         # stored in code.co_consts[0]
         return self.get_code().co_consts[0]
 
-    def get_module(self) -> str:
-        return self.get_globals()["__name__"]
-
     def get_globals(self) -> dict[str, Any]:
         raise NotImplementedError
 
