@@ -1109,7 +1109,6 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/utils/model_dump/preact.mjs',
-    ".github/contributors.txt",
 ]
 is_formatter = true
 
@@ -1697,6 +1696,10 @@ command = [
 ]
 include_patterns = [
     'test/**/test_*.py',
+]
+exclude_patterns = [
+    # CPython tests
+    'test/dynamo/cpython/**',
 ]
 
 # 'header_only_linter' reports on properly testing header-only APIs.

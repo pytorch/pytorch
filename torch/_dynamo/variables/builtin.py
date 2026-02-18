@@ -82,7 +82,7 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
-from .constant import ConstantVariable, EnumVariable
+from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable, EnumVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -90,12 +90,14 @@ from .dicts import (
     DictViewVariable,
     FrozensetVariable,
     is_hashable,
+    OrderedSetClassVariable,
     SetVariable,
 )
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    RangeVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -1527,7 +1529,7 @@ class BuiltinVariable(VariableTracker):
 
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
-            return variables.ConstantVariable(None)
+            return variables.CONSTANT_VARIABLE_NONE
 
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
@@ -1652,6 +1654,18 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, variables.UserDefinedClassVariable):
             if type(arg.value).__repr__ is type.__repr__:
                 return variables.ConstantVariable.create(repr(arg.value))
+        if isinstance(
+            arg,
+            (
+                RangeVariable,
+                ConstDictVariable,
+                DefaultDictVariable,
+                OrderedSetClassVariable,
+                DictViewVariable,
+            ),
+        ):
+            return variables.ConstantVariable.create(arg.debug_repr())
+        return None
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2191,7 +2205,7 @@ class BuiltinVariable(VariableTracker):
                 f"{len(args)} args",
             )
         if len(args) == 1:
-            args = (*args, ConstantVariable.create(None))
+            args = (*args, CONSTANT_VARIABLE_NONE)
         if len(args) != 2:
             raise_args_mismatch(
                 tx,

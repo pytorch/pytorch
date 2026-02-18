@@ -61,7 +61,9 @@ __all__ = [
     "has_meta",
 ]
 
+# pyrefly: ignore [implicit-any]
 op_implementations_dict = {}
+# pyrefly: ignore [implicit-any]
 op_implementations_checks = []
 
 
@@ -1315,7 +1317,6 @@ def conv(
     with fake_mode:
         # if the input is unsqueezed is done in Convolution.cpp we get segfault
         k = new_kwargs["weight"].ndim
-        batch = new_kwargs["input"].shape[0]
 
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import has_hint
@@ -1458,6 +1459,7 @@ def _pack_padded_sequence(
     return (packed_data, batch_size)  # type: ignore[return]
 
 
+# pyrefly: ignore [implicit-any]
 FAST_OP_IMPLEMENTATIONS = {}
 
 
