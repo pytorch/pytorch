@@ -90,6 +90,9 @@ def make_pallas(cls):
         decorator=skip_decorator,
     )
 
+    # Pallas does not support float64 or int64
+    test_class._unsupported_input_gen_types = {"double"}
+
     test_classes[test_class.__name__] = test_class
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
