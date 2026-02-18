@@ -61,7 +61,9 @@ __all__ = [
     "has_meta",
 ]
 
+# pyrefly: ignore [implicit-any]
 op_implementations_dict = {}
+# pyrefly: ignore [implicit-any]
 op_implementations_checks = []
 
 
@@ -1320,11 +1322,7 @@ def conv(
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import has_hint
 
-        all_hinted = all(has_hint(s) for s in new_kwargs["input"].shape) and all(
-            has_hint(s) for s in new_kwargs["weight"].shape
-        )
-
-        if not all_hinted:
+        if not has_hint(batch):
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
@@ -1458,6 +1456,7 @@ def _pack_padded_sequence(
     return (packed_data, batch_size)  # type: ignore[return]
 
 
+# pyrefly: ignore [implicit-any]
 FAST_OP_IMPLEMENTATIONS = {}
 
 

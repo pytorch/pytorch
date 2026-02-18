@@ -47,6 +47,10 @@ TORCH_META_FUNC(nll_loss_forward)
   TORCH_CHECK(
       target.dim() <= 1,
       "0D or 1D target tensor expected, multi-target not supported");
+  TORCH_CHECK(
+      target.scalar_type() == kLong || target.scalar_type() == kByte,
+      "expected target dtype to be Long or Byte, but got ",
+      target.scalar_type());
   if (self.dim() == 1 && target.dim() == 1) {
       TORCH_CHECK_VALUE(
           target.size(0) == 1,

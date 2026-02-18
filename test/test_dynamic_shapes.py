@@ -4608,6 +4608,31 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res = f(x, start, 0)
         self.assertEqual(res.shape, torch.Size([0]))
 
+    def test_unbacked_norm_no_dde(self):
+        def vector_norm(x):
+            return torch.linalg.vector_norm(x)
+
+        def dist_fn(x, y):
+            return torch.dist(x, y)
+
+        def norm_fro(x):
+            return torch.norm(x, p="fro")
+
+        x = torch.randn(4, 5)
+        y = torch.randn(4, 5)
+        for dim in range(x.ndim):
+            torch._dynamo.decorators.mark_unbacked(x, dim)
+            torch._dynamo.decorators.mark_unbacked(y, dim)
+
+        for fn, args in [
+            (vector_norm, (x,)),
+            (dist_fn, (x, y)),
+            (norm_fro, (x,)),
+        ]:
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, fullgraph=True, backend="eager")
+            compiled(*args)
+
     @skipIfTorchDynamo()
     @torch.fx.experimental._config.patch("backed_size_oblivious", True)
     def test_backed_size_oblivious_expand(self):
@@ -5068,30 +5093,17 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         result.backward()
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_unbacked_norm_no_dde(self):
-        def vector_norm(x):
-            return torch.linalg.vector_norm(x)
+    def test_mark_unbacked_view_input(self):
+        @torch.compile()
+        def fn(x):
+            return x * 100 + 1
 
-        def dist_fn(x, y):
-            return torch.dist(x, y)
-
-        def norm_fro(x):
-            return torch.norm(x, p="fro")
-
-        x = torch.randn(4, 5)
-        y = torch.randn(4, 5)
-        for dim in range(x.ndim):
-            torch._dynamo.decorators.mark_unbacked(x, dim)
-            torch._dynamo.decorators.mark_unbacked(y, dim)
-
-        for fn, args in [
-            (vector_norm, (x,)),
-            (dist_fn, (x, y)),
-            (norm_fro, (x,)),
-        ]:
-            torch._dynamo.reset()
-            compiled = torch.compile(fn, fullgraph=True, backend="eager")
-            compiled(*args)
+        x = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        y = x[0:1, 0:1]  # y is a view, y._base is x
+        result = fn(y)
+        self.assertEqual(result.shape, (1, 1))
 
 
 instantiate_parametrized_tests(TestUnbacked)
