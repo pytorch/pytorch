@@ -8,7 +8,7 @@
 {%- if is_windows %}
       PYTORCH_ROOT: ${{ github.workspace }}
 {%- else %}
-      PYTORCH_ROOT: . 
+      PYTORCH_ROOT: /pytorch
 {%- endif %}
       PACKAGE_TYPE: !{{ config["package_type"] }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
@@ -78,7 +78,7 @@
 {%- if is_windows %}
       PYTORCH_ROOT: ${{ github.workspace }}
 {%- else %}
-      PYTORCH_ROOT: . 
+      PYTORCH_ROOT: /pytorch
 {%- endif %}
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: !{{ lt_config["desired_cuda"] }}

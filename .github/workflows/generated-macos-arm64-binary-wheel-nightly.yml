@@ -125,7 +125,7 @@ jobs:
       contents: read
     needs: wheel-py3_10-cpu-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -233,7 +233,7 @@ jobs:
       contents: read
     needs: wheel-py3_11-cpu-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -341,7 +341,7 @@ jobs:
       contents: read
     needs: wheel-py3_12-cpu-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -449,7 +449,7 @@ jobs:
       contents: read
     needs: wheel-py3_13-cpu-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -557,7 +557,7 @@ jobs:
       contents: read
     needs: wheel-py3_13t-cpu-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -665,7 +665,7 @@ jobs:
       contents: read
     needs: wheel-py3_14-cpu-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -773,7 +773,7 @@ jobs:
       contents: read
     needs: wheel-py3_14t-cpu-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -837,7 +837,7 @@ jobs:
       contents: read
     needs: libtorch-cpu-shared-with-deps-release-extract
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu

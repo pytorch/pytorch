@@ -28,7 +28,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
   OS: windows-arm64
-  PYTORCH_ROOT: . 
+  PYTORCH_ROOT: /pytorch 
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
@@ -94,7 +94,7 @@ jobs:
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
@@ -239,7 +239,7 @@ jobs:
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
@@ -384,7 +384,7 @@ jobs:
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |

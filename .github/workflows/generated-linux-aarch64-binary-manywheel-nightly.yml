@@ -52,7 +52,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -76,7 +76,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -99,7 +99,7 @@ jobs:
       contents: read
     needs: manywheel-py3_10-cpu-aarch64-test
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -118,7 +118,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -145,7 +145,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -169,7 +169,7 @@ jobs:
       contents: read
     needs: manywheel-py3_10-cuda-aarch64-12_6-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -189,7 +189,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -216,7 +216,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -240,7 +240,7 @@ jobs:
       contents: read
     needs: manywheel-py3_10-cuda-aarch64-12_8-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -260,7 +260,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -287,7 +287,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -311,7 +311,7 @@ jobs:
       contents: read
     needs: manywheel-py3_10-cuda-aarch64-12_9-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -331,7 +331,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -358,7 +358,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -382,7 +382,7 @@ jobs:
       contents: read
     needs: manywheel-py3_10-cuda-aarch64-13_0-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -402,7 +402,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -426,7 +426,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -449,7 +449,7 @@ jobs:
       contents: read
     needs: manywheel-py3_11-cpu-aarch64-test
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -468,7 +468,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -495,7 +495,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -519,7 +519,7 @@ jobs:
       contents: read
     needs: manywheel-py3_11-cuda-aarch64-12_6-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -539,7 +539,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -566,7 +566,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -590,7 +590,7 @@ jobs:
       contents: read
     needs: manywheel-py3_11-cuda-aarch64-12_8-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -610,7 +610,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -637,7 +637,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -661,7 +661,7 @@ jobs:
       contents: read
     needs: manywheel-py3_11-cuda-aarch64-12_9-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -681,7 +681,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -708,7 +708,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -732,7 +732,7 @@ jobs:
       contents: read
     needs: manywheel-py3_11-cuda-aarch64-13_0-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -752,7 +752,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -776,7 +776,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -799,7 +799,7 @@ jobs:
       contents: read
     needs: manywheel-py3_12-cpu-aarch64-test
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -818,7 +818,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -845,7 +845,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -869,7 +869,7 @@ jobs:
       contents: read
     needs: manywheel-py3_12-cuda-aarch64-12_6-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -889,7 +889,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -916,7 +916,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -940,7 +940,7 @@ jobs:
       contents: read
     needs: manywheel-py3_12-cuda-aarch64-12_8-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -960,7 +960,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -987,7 +987,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1011,7 +1011,7 @@ jobs:
       contents: read
     needs: manywheel-py3_12-cuda-aarch64-12_9-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1031,7 +1031,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1058,7 +1058,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1082,7 +1082,7 @@ jobs:
       contents: read
     needs: manywheel-py3_12-cuda-aarch64-13_0-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1102,7 +1102,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1126,7 +1126,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1149,7 +1149,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13-cpu-aarch64-test
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1168,7 +1168,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1195,7 +1195,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1219,7 +1219,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13-cuda-aarch64-12_6-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1239,7 +1239,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1266,7 +1266,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1290,7 +1290,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13-cuda-aarch64-12_8-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1310,7 +1310,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1337,7 +1337,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1361,7 +1361,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13-cuda-aarch64-12_9-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1381,7 +1381,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1408,7 +1408,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1432,7 +1432,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13-cuda-aarch64-13_0-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1452,7 +1452,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1476,7 +1476,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1499,7 +1499,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13t-cpu-aarch64-test
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1518,7 +1518,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1545,7 +1545,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1569,7 +1569,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13t-cuda-aarch64-12_6-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1589,7 +1589,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1616,7 +1616,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1640,7 +1640,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13t-cuda-aarch64-12_8-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1660,7 +1660,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1687,7 +1687,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1711,7 +1711,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13t-cuda-aarch64-12_9-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1731,7 +1731,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1758,7 +1758,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1782,7 +1782,7 @@ jobs:
       contents: read
     needs: manywheel-py3_13t-cuda-aarch64-13_0-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1802,7 +1802,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1826,7 +1826,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1849,7 +1849,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14-cpu-aarch64-test
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1868,7 +1868,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1895,7 +1895,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1919,7 +1919,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14-cuda-aarch64-12_6-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1939,7 +1939,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1966,7 +1966,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1990,7 +1990,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14-cuda-aarch64-12_8-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2010,7 +2010,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2037,7 +2037,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2061,7 +2061,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14-cuda-aarch64-12_9-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2081,7 +2081,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2108,7 +2108,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2132,7 +2132,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14-cuda-aarch64-13_0-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2152,7 +2152,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2176,7 +2176,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2199,7 +2199,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14t-cpu-aarch64-test
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2218,7 +2218,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2245,7 +2245,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2269,7 +2269,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14t-cuda-aarch64-12_6-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2289,7 +2289,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2316,7 +2316,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2340,7 +2340,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14t-cuda-aarch64-12_8-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2360,7 +2360,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2387,7 +2387,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2411,7 +2411,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14t-cuda-aarch64-12_9-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2431,7 +2431,7 @@ jobs:
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2458,7 +2458,7 @@ jobs:
       - get-label-type
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2482,7 +2482,7 @@ jobs:
       contents: read
     needs: manywheel-py3_14t-cuda-aarch64-13_0-build
     with:
-      PYTORCH_ROOT: .
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
