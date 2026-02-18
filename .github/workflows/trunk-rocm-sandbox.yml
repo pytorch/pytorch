@@ -1,12 +1,13 @@
 name: trunk-rocm-sandbox
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
+  #push:
+  #  branches:
+  #    - main
+  #    - release/*
   workflow_dispatch:
   schedule:
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
     - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
