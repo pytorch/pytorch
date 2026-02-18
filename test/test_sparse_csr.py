@@ -103,7 +103,8 @@ def _test_addmm_addmv(
         elif layout == torch.sparse_csc:
             return mat.to_sparse_csc()
         else:
-            assert mat.layout == layout
+            if mat.layout != layout:
+                raise AssertionError(f"expected layout {layout}, got {mat.layout}")
             return mat
 
     if mode == "all_sparse":
@@ -425,7 +426,8 @@ class TestSparseCompressed(TestCase):
                         batchsize = size[:batch_ndim]
                         basesize = size[batch_ndim:batch_ndim + base_ndim]
                         densesize = size[batch_ndim + base_ndim:]
-                        assert len(densesize) == dense_ndim
+                        if len(densesize) != dense_ndim:
+                            raise AssertionError(f"expected len(densesize) == {dense_ndim}, got {len(densesize)}")
                         printed.append(f"########## {dtype}/{index_dtype}/size={batchsize}+{basesize}+{densesize} ##########")
                         x = torch.sparse_compressed_tensor(compressed_indices,
                                                            plain_indices,
@@ -488,7 +490,8 @@ class TestSparseCompressed(TestCase):
 
             b = self.genSparseCompressedTensor(shape1, nnz, dtype=dtype, layout=layout, device=device,
                                                index_dtype=index_dtype, blocksize=blocksize)
-            assert a._nnz() != b._nnz(), (a._nnz(), b._nnz())
+            if a._nnz() == b._nnz():
+                raise AssertionError(f"expected nnz to differ: {(a._nnz(), b._nnz())}")
             with self.assertRaisesRegex(RuntimeError,
                                         "only sparse compressed tensors with the same number of specified elements are supported."):
                 a.copy_(b)
@@ -576,9 +579,11 @@ class TestSparseCompressed(TestCase):
 
         for sample, sparse_sample in samples:
             expected = op(sample.input, *sample.args, **sample.kwargs)
-            assert torch.is_tensor(expected)
+            if not torch.is_tensor(expected):
+                raise AssertionError(f"expected tensor, got {type(expected)}")
             output = op(sparse_sample.input, *sparse_sample.args, **sparse_sample.kwargs)
-            assert torch.is_tensor(output)
+            if not torch.is_tensor(output):
+                raise AssertionError(f"expected tensor, got {type(output)}")
             strided_output = output.to_dense()
             if require_mask and sample.kwargs.get('mask') is not None:
                 output_mask = torch.masked._output_mask(op.op, sample.input, *sample.args, **sample.kwargs)
@@ -998,7 +1003,7 @@ class TestSparseCompressed(TestCase):
             elif layout in {torch.sparse_csc, torch.sparse_bsc}:
                 n_batchdim = sparse.ccol_indices().ndim - 1
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"unreachable: layout={layout}")
             self.assertEqual(sparse, dense)
             for dim in range(sparse.ndim):
                 if sparse.shape[dim] == 0:
@@ -1616,7 +1621,8 @@ class TestSparseCSR(TestCase):
             def wrapper(c, a, b, alpha=None, beta=None, out=None):
                 if out is not None:
                     # the ref takes no out kwarg
-                    assert isinstance(out, torch.Tensor)
+                    if not isinstance(out, torch.Tensor):
+                        raise AssertionError(f"expected Tensor, got {type(out)}")
                     # transpose inplace to propagate out to checking context
                     out.transpose_(-2, -1)
                     return f(tt(c), tt(b), tt(a), alpha=alpha, beta=beta, out=out)
@@ -2689,7 +2695,8 @@ class TestSparseCSR(TestCase):
             self.skipTest("Skipped! Out not supported")
 
         for sample in samples:
-            assert torch.is_tensor(sample.input)
+            if not torch.is_tensor(sample.input):
+                raise AssertionError(f"expected tensor, got {type(sample.input)}")
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
@@ -2713,7 +2720,8 @@ class TestSparseCSR(TestCase):
             self.skipTest("Skipped! Inplace variant not supported!")
 
         for sample in samples:
-            assert torch.is_tensor(sample.input)
+            if not torch.is_tensor(sample.input):
+                raise AssertionError(f"expected tensor, got {type(sample.input)}")
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
@@ -3886,7 +3894,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                         result = bsr_scatter_mm(bsr, dense, indices_data=indices_data)
                     except triton.compiler.OutOfResources:
                         # ensure that there was at least one successful test:
-                        assert SPLIT_N < SPLIT_N_list[0]
+                        if SPLIT_N >= SPLIT_N_list[0]:
+                            raise AssertionError(f"expected SPLIT_N < {SPLIT_N_list[0]}, got {SPLIT_N}") from None
                         break
 
                     self.assertEqual(result, expected)
@@ -4002,8 +4011,10 @@ class TestSparseCompressedTritonKernels(TestCase):
                          _int_bsr_dense_addmm=_int_bsr_dense_addmm)[op]
 
         def reference(input, mat1, mat2, beta=1, alpha=1, left_alpha=None, right_alpha=None, op=op):
-            assert mat1.layout is torch.strided
-            assert mat2.layout is torch.strided
+            if mat1.layout is not torch.strided:
+                raise AssertionError(f"expected strided layout, got {mat1.layout}")
+            if mat2.layout is not torch.strided:
+                raise AssertionError(f"expected strided layout, got {mat2.layout}")
             if dtype is torch.int8:
                 if op == '_int_bsr_dense_addmm':
                     mat12 = torch._int_mm(mat1, mat2)
@@ -4104,7 +4115,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                 meta = get_meta(op, key, version=(0, dtype, 0.5))
                 if meta is None:
                     optimize_bsr_dense_addmm(M, K, N, BM, BK, beta=beta, alpha=alpha, dtype=dtype, sparsity=0.5)
-                    assert meta is not None
+                    if meta is None:
+                        raise AssertionError("expected meta to be not None after optimization")
                     dump()  # this will update torch/sparse/_triton_ops_meta.py
 
             expected = reference(input, mat1, mat2, beta=beta, alpha=alpha, left_alpha=left_alpha, right_alpha=right_alpha)

@@ -7,13 +7,17 @@ from typing import cast
 import torch
 from torch import Tensor
 from torch._prims_common import DimsType
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
     RuntimeSchemaInfo,
     StrategyType,
+)
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
@@ -766,6 +770,12 @@ register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
+    aten.squeeze.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.squeeze_.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
     aten.view.default,
     Tensor.view,
     schema_info=RuntimeSchemaInfo(1),
@@ -797,61 +807,20 @@ register_op_strategy_map(
 )
 
 
-@register_op_strategy(aten.view_as_complex.default)
-def view_as_complex_strategy(op_schema: OpSchema) -> StrategyType:
-    """
-    Strategy for view_as_complex. This operation converts real tensors to complex,
-    and complex numbers don't have a total ordering. Therefore, P(max) and P(min)
-    placements are invalid for the output (you can't reduce complex numbers via min/max).
-    """
-    dim_map = dim_maps[torch.view_as_complex]
-    rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
-    mesh = op_schema.get_mesh_from_args(validate=False)
-
-    global_in_shape = input_strategy.shape
-    if global_in_shape is None:
-        raise AssertionError("Shape required.")
-
-    output_strategy = OpStrategy([])
-    for input_placement_strategy in input_strategy.strategies:
-        input_src_spec = input_placement_strategy.output_spec
-
-        # P(max) and P(min) are invalid for complex output - replace with Replicate
-        input_placements = []
-        for p in input_src_spec.placements:
-            if isinstance(p, Partial) and p.reduce_op in ("max", "min"):
-                input_placements.append(Replicate())
-            else:
-                input_placements.append(p)
-
-        input_tgt_placements, output_placements = propagate_shape_and_sharding(
-            input_placements,
-            tuple(global_in_shape),
-            rules,
-            mesh.shape,
-            False,  # strict_view
-        )
-
-        input_tgt_spec = DTensorSpec(
-            placements=tuple(input_tgt_placements),
-            mesh=mesh,
-            tensor_meta=input_src_spec.tensor_meta,
-        )
-        redistribute_costs: list[list[float]] = [
-            generate_redistribute_costs(input_strategy, input_tgt_spec)
-        ]
-
-        output_spec = DTensorSpec(mesh=mesh, placements=tuple(output_placements))
-        output_strategy.strategies.append(
-            OpSpec(
-                output_specs=output_spec,
-                input_specs=(input_tgt_spec,),
-                redistribute_cost=redistribute_costs,
-            )
-        )
-
-    return output_strategy
+@register_single_dim_strategy(aten.view_as_complex.default)
+def view_as_complex_single_dim_strategy(op, args_schema, kwargs_schema):
+    # view_as_complex: float [..., 2] -> complex [...]
+    # Dims 0..ndim-2 map 1:1; last dim (real/imag pair) is consumed.
+    # P(max)/P(min) invalid: complex numbers have no total ordering.
+    input_meta = args_schema[0]
+    assert isinstance(input_meta, TensorMeta)
+    ndim = len(input_meta.shape)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim - 1):
+        strategies.append([_ShardingPlaceholder(d), _ShardingPlaceholder(d)])
+    strategies.append([Partial("sum"), Partial("sum")])
+    strategies.append([Partial("avg"), Partial("avg")])
+    return strategies
 
 
 register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
