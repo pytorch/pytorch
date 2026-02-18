@@ -1821,7 +1821,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         prefer_cudnn = (
             cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
         )
-        if prefer_cudnn:
+        if prefer_cudnn and torch.version.cuda:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         else:
             sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
