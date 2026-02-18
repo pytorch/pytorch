@@ -316,6 +316,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                     assert W_node.get_name() in V.graph.constants
                     # pyrefly: ignore [bad-argument-type]
                     W_tensor.append(V.graph.constants[W_node.get_name()])
+                # pyrefly: ignore [unsupported-operation]
                 new_input_nodes[wgt_start_idx : wgt_start_idx + gemm_grouped_num] = (
                     W_tensor  # type: ignore[assignment]
                 )

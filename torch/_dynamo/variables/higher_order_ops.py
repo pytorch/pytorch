@@ -34,7 +34,7 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from . import AutogradFunctionContextVariable
 
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Generator, Iterable
 from typing import ParamSpec, TypeVar
 
 
@@ -232,22 +232,7 @@ def only_consist_of(
 # A more read-able syntax sugar for creating a UserFunctionVariable for f
 # and run call_function on it. Make it return a function to preserve the calling
 # convention of the original f.
-def _make_inlined(
-    tx: "InstructionTranslator", f: Callable[..., Any]
-) -> Callable[..., VariableTracker]:
-    assert callable(f), "Expect f to be a python callable."
-
-    def inline_call(
-        *args: VariableTracker, **kwargs: VariableTracker
-    ) -> VariableTracker:
-        from torch._dynamo.trace_rules import _force_inline
-
-        with _force_inline():
-            # We cannot use SourcelessBuilder here because it ignores _force_inline.
-            # since the rules are static.
-            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
-
-    return inline_call
+from torch._dynamo.utils import _make_inlined
 
 
 def add_call_function(
@@ -270,6 +255,7 @@ def add_call_function(
     # Set backend metadata if provided
     if config is not None:
         if "custom" not in proxy.node.meta:
+            # pyrefly: ignore [implicit-any]
             proxy.node.meta["custom"] = {}
         proxy.node.meta["custom"]["nested_region_config"] = config
         assert proxy.node.target == torch._higher_order_ops.invoke_subgraph
@@ -930,6 +916,7 @@ def are_same_graph_modules(
                 if not isinstance(b_value, torch.Tensor):
                     return False
                 # Extract fake tensor metadata for a and b and then compare
+                # pyrefly: ignore [implicit-any]
                 a_result = []
                 state = _CacheKeyState(fake_mode.shape_env)
                 a_metadata = extract_tensor_metadata(a_value)
@@ -1688,6 +1675,7 @@ def speculate_subgraph_with_auto_output_flattening(
             # be actual FX graph outputs.
             # Collect only tensor and symint VTs that should be graph outputs.
             # We walk the output structure and extract proxyable VTs.
+            # pyrefly: ignore [implicit-any]
             graph_output_vt_list = []
 
             def visit(vt: VariableTracker) -> None:
@@ -3654,6 +3642,7 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
         # to (body_node, lifted_args_tuple, {})
         body_node = p_args[0]
         lifted_args = p_args[1:]
+        # pyrefly: ignore [implicit-any]
         p_args = (body_node, tuple(lifted_args), {})
 
         # add hints into p_kwargs
@@ -4550,7 +4539,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if i.is_tensor():
                     bwd_args.append(i)
                 else:
-                    bwd_args.append(ConstantVariable.create(None))
+                    bwd_args.append(CONSTANT_VARIABLE_NONE)
 
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
 
@@ -4751,6 +4740,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             return bwd_freevars.get(vt.proxy, vt.proxy).node  # type: ignore[attr-defined]
 
         # Find the mapping between orig_fwd_args and bwd_out
+        # pyrefly: ignore [implicit-any]
         outer_fwd_proxy_to_bwd_node = {}
         if isinstance(bwd_out, variables.BaseListVariable):
             bwd_outs = bwd_out.items
@@ -4904,6 +4894,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # we intentionally inserted a `None` VariableTracker for these positions,
         # so the backward graph contains no placeholder for them.
         bwd_input_nodes = list(bwd_graph.find_nodes(op="placeholder"))
+        # pyrefly: ignore [implicit-any]
         fwd_vt_to_bwd_node = {}
         bwd_idx = 0
         if isinstance(fwd_out, variables.BaseListVariable):
@@ -4949,6 +4940,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         # Mechanical steps from here on. We have the extra_fwd_outputs and rewired_bwd_inputs. Lets make the changes.
         # Lets change the fwd graph outputs.
+        # pyrefly: ignore [implicit-any]
         fwd_output_nodes = []
         for node in fwd_graph.find_nodes(op="output"):
             fwd_output_nodes = node.args[0]
@@ -5155,6 +5147,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             assert isinstance(fn_vt, UnspecializedNNModuleVariable)
             fn_id = id(fn_vt.value.forward.__func__)  # type: ignore[attr-defined]
             fn_name = fn_vt.value.forward.__name__  # type: ignore[attr-defined]
+        # pyrefly: ignore [implicit-any]
         previously_installed_submodules = []
         if invoke_subgraph_cache:
             previously_installed_submodules = (
