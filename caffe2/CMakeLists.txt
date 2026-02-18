@@ -6,6 +6,8 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
+include(CheckCXXSourceCompiles)
+
 # Debug messages - if you want to get a list of source files and examine
 # target information, enable the following by -DPRINT_CMAKE_DEBUG_INFO=ON.
 set(PRINT_CMAKE_DEBUG_INFO FALSE CACHE BOOL "print cmake debug information")
@@ -1651,6 +1653,26 @@ if(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE torch::nvtx3)
   else()
     target_link_libraries(torch_cuda PUBLIC torch::nvtoolsext)
+  endif()
+  # There is no guarantee about what atomic intrinsics clang will lower
+  # to library calls. So we need to be safe and link to atomic in order
+  # to be certain there are no undefined references.
+  if(UNIX AND NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(_atomic_test_source "
+      #include <atomic>
+      int main() {
+        std::atomic<unsigned long long> x{0};
+        x.store(1, std::memory_order_seq_cst);
+        return static_cast<int>(x.load(std::memory_order_seq_cst));
+      }
+    ")
+    set(CMAKE_REQUIRED_LIBRARIES atomic)
+    check_cxx_source_compiles("${_atomic_test_source}" CLANG_ATOMICS_WORK_WITH_LIBATOMIC)
+    if(CLANG_ATOMICS_WORK_WITH_LIBATOMIC)
+      target_link_libraries(torch_cuda PRIVATE atomic)
+    else()
+      message(WARNING "Clang atomic link test failed with -latomic; undefined atomic references may occur during build")
+    endif()
   endif()
 
   target_include_directories(
