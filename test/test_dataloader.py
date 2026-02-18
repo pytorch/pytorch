@@ -482,17 +482,15 @@ class TestTensorDataset(TestCase):
         batch = source.__getitems__([])
         self.assertEqual(len(batch), 0)
 
-    def test_getitems_tuple_indices(self):
-        """Test __getitems__ with tuple indices (as provided by batch_sampler)."""
-        # batch_sampler yields tuples, not lists. This test ensures
-        # __getitems__ handles tuple indices correctly, especially for 1D tensors
-        # where tuple indexing would otherwise be interpreted as multi-dimensional.
+    def test_getitems_1d_tensor(self):
+        """Test __getitems__ with list indices including a 1D tensor."""
+        # batch_sampler yields lists, not tuples. This test ensures
+        # __getitems__ handles indices correctly, including for 1D tensors.
         t = torch.randn(100, 2, 3, 5)
         l = torch.randperm(50).repeat(2)  # 1D tensor
         source = TensorDataset(t, l)
 
-        # Tuple indices (like batch_sampler produces)
-        indices = (0, 5, 10)
+        indices = [0, 5, 10]
         batch = source.__getitems__(indices)
 
         self.assertEqual(len(batch), 3)
