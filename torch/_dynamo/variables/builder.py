@@ -61,6 +61,7 @@ from torch._library.opaque_object import (
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
+    should_hoist,
 )
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
@@ -202,8 +203,6 @@ from .dicts import (
 )
 from .distributed import (
     DeviceMeshVariable,
-    PlacementClassVariable,
-    PlacementVariable,
     ProcessGroupVariable,
     WorldMetaClassVariable,
 )
@@ -213,14 +212,12 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
-    FiddleBuildableGetAttrVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
-    UserMethodVariable,
     WrapperUserFunctionVariable,
 )
 from .higher_order_ops import (
@@ -484,6 +481,15 @@ class VariableBuilder:
         self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value: object) -> VariableTracker:
+        _t0 = time.time_ns()
+        try:
+            return self._call_impl(value)
+        finally:
+            self.tx.output.bytecode_tracing_timings.variable_builder_call_ns += (
+                time.time_ns() - _t0
+            )
+
+    def _call_impl(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
@@ -601,8 +607,10 @@ class VariableBuilder:
         ]
 
         if trace_numpy and np:
+            # pyrefly: ignore [bad-argument-type]
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, tuple) else (ts,):
@@ -695,6 +703,7 @@ class VariableBuilder:
             (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
+        # pyrefly: ignore [implicit-any]
         result = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, (tuple, list)) else (ts,):
@@ -1222,17 +1231,6 @@ class VariableBuilder:
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return DeviceMeshVariable(value, source=self.source)
-        elif PlacementClassVariable.is_placement_type(value):
-            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return PlacementClassVariable(value, source=self.source)
-        elif PlacementVariable.is_placement(value):
-            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.EQUALS_MATCH)
-            return PlacementVariable(
-                value,
-                source=self.source,
-            )
         elif value is OrderedSet:
             self.install_guards(GuardBuilder.ID_MATCH)
             return OrderedSetClassVariable()
@@ -1365,10 +1363,6 @@ class VariableBuilder:
             return CreateTMADescriptorStableVariable()
         elif value is set_allocator:
             return TritonSetAllocatorSkipVariable(value)
-        elif (
-            _fiddle_mod := sys.modules.get("fiddle._src.config")
-        ) is not None and value is _fiddle_mod.Buildable.__getattr__:
-            return FiddleBuildableGetAttrVariable(value, source=self.source)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1454,31 +1448,6 @@ class VariableBuilder:
             )
             self.tx.output.side_effects.track_object_existing(value, result)
             return result
-        elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, (torch.nn.Module, torch.utils._pytree.TreeSpec)
-        ):
-            # don't let MethodTypes fall through to UserDefinedObject,
-            # which doesn't support 'CALL_FUNCTION'
-
-            # TODO(whc): Why do we limit this to methods on NNModules?
-            # I don't have a good reason for this, but it preserves the existing behavior
-            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
-            # I suspect we probably want to relax this check and dig deeper there.
-
-            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
-            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
-            # and then `__func__` gets wrapped inside UserMethodVariable.
-            self_obj = VariableBuilder(
-                self.tx, source=AttrSource(self.source, "__self__")
-            )(value.__self__)
-            assert self_obj and isinstance(self_obj, VariableTracker), (
-                "Failed to produce a valid self obj"
-            )
-            return UserMethodVariable(
-                value.__func__,
-                self_obj,
-                source=self.source,
-            )
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
@@ -1617,7 +1586,7 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
-            if is_opaque_value_type(type(value)):
+            if is_opaque_value_type(type(value)) and not should_hoist(type(value)):
                 proxy = value
             else:
                 proxy = self.tx.output.root_tracer.create_graph_input(
@@ -1841,15 +1810,6 @@ class VariableBuilder:
     def wrap_listlike(
         self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
     ) -> VariableTracker:
-        for item in value:
-            if item is value:
-                unimplemented(
-                    gb_type="list elements are pointing to the list itself",
-                    context="",
-                    explanation="Dynamo does not support lists whose items reference to itself",
-                    hints=["Avoid using self referential list"],
-                )
-
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
@@ -2992,6 +2952,7 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
             base_src = AttrSource(obj.source, "__dataclass_fields__")
             source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
+    # pyrefly: ignore [bad-argument-type]
     return TupleVariable(items)
 
 
@@ -3640,9 +3601,12 @@ def record_automatic_dynamic(
         candidates = {}
         for i_stride, neg_i in pending:
             i = -neg_i
+            # pyrefly: ignore [unsupported-operation]
             stride[i] = candidates.get(i_stride, i_stride)
+            # pyrefly: ignore [no-matching-overload]
             candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
+        # pyrefly: ignore [implicit-any]
         stride = []
 
     return process_automatic_dynamic(
@@ -3786,6 +3750,7 @@ def _automatic_dynamic(
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
     t_id = id(e)
+    # pyrefly: ignore [implicit-any]
     dim2constraint = {}
 
     def update_dim2constraint(
@@ -3855,7 +3820,9 @@ def _automatic_dynamic(
             # into the mutable state
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
+            # pyrefly: ignore [unsupported-operation]
             mark_size[i] = auto_dynamic
+            # pyrefly: ignore [bad-argument-type]
             frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
@@ -3960,6 +3927,7 @@ def _automatic_dynamic(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
+        # pyrefly: ignore [bad-argument-type]
         constraint_strides=constraint_strides,
         specialize_on=specialize_on,
         view_base_context=view_base_context,
@@ -4216,8 +4184,6 @@ class SourcelessBuilder:
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
-        elif PlacementVariable.is_placement(value):
-            return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
         elif value is functools.wraps:
