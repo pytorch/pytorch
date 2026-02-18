@@ -22,6 +22,7 @@ from typing import Any, Literal, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
+from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -47,7 +48,7 @@ from ..utils import (
     set_example_value,
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
-from .constant import ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .user_defined import UserDefinedTupleVariable
@@ -176,6 +177,53 @@ class BaseListVariable(VariableTracker):
                     map_fn,
                     sibling_leaves,
                     tree_map_kwargs,
+                )
+            )
+
+        return self.clone(
+            items=new_items,
+            source=None,
+            mutation_type=ValueMutationNew(),
+        )
+
+    def call_tree_map_with_path_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+        keypath: tuple[Any, ...],
+    ) -> VariableTracker:
+        if not isinstance(self, (ListVariable, TupleVariable)):
+            return self._tree_map_with_path_fallback(
+                tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+            )
+
+        other_lists: list[BaseListVariable] = []
+        for candidate in rest:
+            if (
+                not isinstance(candidate, BaseListVariable)
+                or len(candidate.items) != len(self.items)
+                or self.python_type() != candidate.python_type()
+            ):
+                return self._tree_map_with_path_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+                )
+            other_lists.append(candidate)
+
+        new_items: list[VariableTracker] = []
+        for idx, item in enumerate(self.items):
+            sibling_leaves = [candidate.items[idx] for candidate in other_lists]
+            child_keypath = keypath + (SequenceKey(idx),)
+            new_items.append(
+                item.call_tree_map_with_path(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    sibling_leaves,
+                    tree_map_kwargs,
+                    child_keypath,
                 )
             )
 
@@ -710,7 +758,7 @@ class CommonListMethodsVariable(BaseListVariable):
             (arg,) = args
             tx.output.side_effects.mutation(self)
             self.items.append(arg)
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "extend" and self.is_mutable():
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -728,7 +776,7 @@ class CommonListMethodsVariable(BaseListVariable):
             arg.force_apply_to_var_sequence(
                 tx, lambda item: self.call_method(tx, "append", [item], {})
             )
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "insert" and self.is_mutable():
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
@@ -745,7 +793,7 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             # type: ignore[arg-type]
             self.items.insert(const_idx, value)
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "pop" and self.is_mutable():
             if kwargs or len(args) > 1:
                 raise_args_mismatch(
@@ -776,7 +824,7 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "__setitem__" and self.is_mutable() and args:
             # Realize args[0] to get the concrete type for proper type checking
             key = args[0].realize()
@@ -816,7 +864,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     self.items[items_slice] = list(value.items)  # type: ignore[attr-defined]
             else:
                 self.items[key.as_python_constant()] = value
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "__delitem__" and self.is_mutable():
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -849,7 +897,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"list indices must be integers or slices, not {args[0].python_type_name()}"
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "copy":
             # List copy() doesn't have args and kwargs
             if args or kwargs:
@@ -871,7 +919,7 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
             self.items.reverse()
             tx.output.side_effects.mutation(self)
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "remove" and self.is_mutable():
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -883,7 +931,7 @@ class CommonListMethodsVariable(BaseListVariable):
 
             idx = self.call_method(tx, "index", args, kwargs)
             self.call_method(tx, "pop", [idx], {})
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -977,12 +1025,12 @@ class ListVariable(CommonListMethodsVariable):
                     raise_observed_exception(
                         type(e), tx, args=list(map(ConstantVariable.create, e.args))
                     )
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         if name == "sort" and self.is_mutable():
             if len(args) != 0:
                 raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
-            key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
+            key_fn_var = kwargs.pop("key", CONSTANT_VARIABLE_NONE)
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
             ).as_python_constant()
@@ -1035,18 +1083,18 @@ class ListVariable(CommonListMethodsVariable):
                 self.items[:] = [x for x, *_ in sorted_items_with_keys]
             except Exception as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         if name == "__init__" and self.is_mutable():
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             if len(args) == 0:
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
             elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
                 (arg,) = args
                 tx.output.side_effects.mutation(self)
                 self.items[:] = arg.force_unpack_var_sequence(tx)
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -1079,7 +1127,7 @@ class DequeVariable(CommonListMethodsVariable):
         **kwargs: Any,
     ) -> None:
         if maxlen is None:
-            maxlen = ConstantVariable.create(None)
+            maxlen = CONSTANT_VARIABLE_NONE
         assert maxlen.is_python_constant(), (
             f"maxlen must be a constant, got: {maxlen.debug_repr()}"
         )
@@ -1164,7 +1212,7 @@ class DequeVariable(CommonListMethodsVariable):
             assert isinstance(key.as_python_constant(), int)
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None:
@@ -1191,7 +1239,7 @@ class DequeVariable(CommonListMethodsVariable):
                 tx, lambda item: self.call_method(tx, "appendleft", [item], {})
             )
             slice_within_maxlen = slice(None, maxlen)
-            result = ConstantVariable.create(None)
+            result = CONSTANT_VARIABLE_NONE
         elif name == "popleft" and self.is_mutable():
             if kwargs or len(args) > 0:
                 raise_args_mismatch(
@@ -1213,7 +1261,7 @@ class DequeVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             self.items[:] = [args[0], *self.items]
             slice_within_maxlen = slice(None, maxlen)
-            result = ConstantVariable.create(None)
+            result = CONSTANT_VARIABLE_NONE
         elif name == "insert" and len(args) > 0 and self.is_mutable():
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
@@ -1612,6 +1660,82 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             mutation_type=ValueMutationNew(),
         )
 
+    def call_tree_map_with_path(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+        keypath: tuple[Any, ...],
+    ) -> VariableTracker:
+        is_leaf_var = tree_map_kwargs.get("is_leaf")
+        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
+            pred_result = is_leaf_var.call_function(tx, [self], {})
+            try:
+                leaf_decision = pred_result.as_python_constant()
+            except NotImplementedError:
+                # For namedtuples, they're always pytree containers, so is_leaf
+                # should return False. Assume False and proceed with fast path.
+                leaf_decision = False
+            if leaf_decision:
+                keypath_var = variables.TupleVariable(
+                    [VariableTracker.build(tx, k) for k in keypath]
+                )
+                return map_fn.call_function(tx, [keypath_var, self, *rest], {})
+
+        return self.call_tree_map_with_path_branch(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+            keypath,
+        )
+
+    def call_tree_map_with_path_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: UserFunctionVariable,
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+        keypath: tuple[Any, ...],
+    ) -> VariableTracker:
+        other_tuples: list[NamedTupleVariable] = []
+        for candidate in rest:
+            if (
+                not isinstance(candidate, NamedTupleVariable)
+                or len(candidate.items) != len(self.items)
+                or candidate.tuple_cls is not self.tuple_cls
+            ):
+                return self._tree_map_with_path_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs, keypath
+                )
+            other_tuples.append(candidate)
+
+        fields = self.fields()
+        new_items: list[VariableTracker] = []
+        for idx, item in enumerate(self.items):
+            sibling_leaves = [candidate.items[idx] for candidate in other_tuples]
+            child_keypath = keypath + (GetAttrKey(fields[idx]),)
+            new_items.append(
+                item.call_tree_map_with_path(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    sibling_leaves,
+                    tree_map_kwargs,
+                    child_keypath,
+                )
+            )
+
+        return NamedTupleVariable(
+            new_items,
+            self.tuple_cls,
+            mutation_type=ValueMutationNew(),
+        )
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_structseq():
             create_fn = self.tuple_cls
@@ -1712,7 +1836,7 @@ class SliceVariable(VariableTracker):
         **kwargs: Any,
     ) -> None:
         items_to_map = items
-        start, stop, step = [variables.ConstantVariable.create(None)] * 3
+        start, stop, step = [variables.CONSTANT_VARIABLE_NONE] * 3
 
         if len(items_to_map) == 1:
             (stop,) = items_to_map
