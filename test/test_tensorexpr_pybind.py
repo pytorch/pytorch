@@ -197,7 +197,8 @@ graph(%a : Tensor, %b : Tensor):
             # Graph doesn't have shape info for inputs => compilation should
             # fail
             exception_thrown = True
-        assert exception_thrown
+        if not exception_thrown:
+            raise AssertionError("expected RuntimeError for missing shape info")
 
         # Inject shape info and try compiling again
         example_inputs = [torch.rand(4, 4), torch.rand(4, 4)]
@@ -226,7 +227,8 @@ graph(%a : Tensor, %b : Tensor):
             kernel = te.TensorExprKernel(graph)
         except RuntimeError:
             exception_thrown = True
-        assert exception_thrown
+        if not exception_thrown:
+            raise AssertionError("expected RuntimeError for missing shape info")
 
         # Try injecting shape info for graph inputs
         example_inputs = [torch.rand(4, 4), torch.rand(4, 4)]
@@ -237,7 +239,8 @@ graph(%a : Tensor, %b : Tensor):
         except RuntimeError:
             # Graph has a 'self' argument for which we can't set shapes
             exception_thrown = True
-        assert exception_thrown
+        if not exception_thrown:
+            raise AssertionError("expected RuntimeError for self argument")
 
         # Remove 'self' argument and try annotating shapes one more time
         torch._C._te.remove_unused_self_argument(graph)
@@ -457,7 +460,8 @@ class TestExprHandlePyBind(JitTestCase):
             te_fn = construct_te_fn(te_op, n, torch.float32)
             res = torch.empty(n)
             te_fn.call([a, res])
-            assert torch.allclose(ref, res, atol=1e-3, rtol=1e-3)
+            if not torch.allclose(ref, res, atol=1e-3, rtol=1e-3):
+                raise AssertionError("tensor expression result does not match reference")
 
 
 if __name__ == "__main__":
