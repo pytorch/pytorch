@@ -445,8 +445,6 @@ class TestPartialC(_TestPartial, CPythonTestCase):
     if c_functools:
         module = functools
         partial = functools.partial
-        # module = c_functools
-        # partial = c_functools.partial
 
     def test_attributes_unwritable(self):
         # attributes should not be writable
