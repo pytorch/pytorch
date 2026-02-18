@@ -40,12 +40,6 @@ from enum import Enum
 from typing import NamedTuple
 
 
-def foo() -> int:
-    return ""
-
-def bar() -> str:
-    return []
-
 class LintSeverity(str, Enum):
     ERROR = "error"
     WARNING = "warning"
@@ -101,17 +95,9 @@ def run_command(
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
-        env = os.environ.copy()
-        # Pyrefly unconditionally appends GitHub Actions commands to stdout
-        # when GITHUB_ACTIONS is set, even with --output-format=json, which
-        # corrupts the JSON output.
-        env.pop("GITHUB_ACTIONS", None)
-        if extra_env:
-            env.update(extra_env)
         return subprocess.run(
             args,
             capture_output=True,
-            env=env,
         )
     finally:
         end_time = time.monotonic()
