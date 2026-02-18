@@ -154,6 +154,7 @@ try:
     else:
         NP_SUPPORTED_MODULES = ()
 
+        # pyrefly: ignore [implicit-any]
         NP_TO_TNP_MODULE = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
@@ -2050,6 +2051,7 @@ class ChromiumEventLogger:
             event_metadata = all_event_data[event_name]
             del all_event_data[event_name]
         else:
+            # pyrefly: ignore [implicit-any]
             event_metadata = {}
         # Add the passed in metadata
         event_metadata.update(metadata)
@@ -2618,6 +2620,10 @@ common_constant_types: set[type] = {
     torch.iinfo,
     torch.nn.attention.SDPBackend,
     torch.cuda._CudaDeviceProperties,
+    # Pytree key types (frozen dataclasses used in tree_map_with_path)
+    torch.utils._pytree.SequenceKey,
+    torch.utils._pytree.MappingKey,
+    torch.utils._pytree.GetAttrKey,
 }
 
 if has_triton_package():
@@ -3666,7 +3672,9 @@ def _get_fake_value_impl(
             id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
         }
     else:
+        # pyrefly: ignore [implicit-any]
         flat_args_kwargs = []
+        # pyrefly: ignore [implicit-any]
         id_to_initial_version = {}
 
     nnmodule = None
@@ -5235,3 +5243,20 @@ def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
+
+
+def _make_inlined(
+    tx: InstructionTranslator, f: Callable[..., Any]
+) -> Callable[..., VariableTracker]:
+    assert callable(f), "Expect f to be a python callable."
+
+    def inline_call(
+        *args: VariableTracker, **kwargs: VariableTracker
+    ) -> VariableTracker:
+        from torch._dynamo.trace_rules import _force_inline
+        from torch._dynamo.variables.functions import UserFunctionVariable
+
+        with _force_inline():
+            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+
+    return inline_call
