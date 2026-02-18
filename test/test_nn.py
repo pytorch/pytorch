@@ -2667,6 +2667,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected_loss = torch.tensor(0.25)
         self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
 
+    def test_mse_loss_mixed_dtype_grad(self):
+        x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True)
+        y = torch.tensor([1.5, 2.5], dtype=torch.float64, requires_grad=True)
+        loss = F.mse_loss(x, y, reduction='mean')
+        expected_loss = torch.tensor(0.25, dtype=torch.float64)
+        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+        loss.backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(y.grad)
+        self.assertEqual(x.grad.dtype, torch.float32)
+        self.assertEqual(y.grad.dtype, torch.float64)
+        expected_grad_x = torch.tensor([-0.5, -0.5], dtype=torch.float32)
+        expected_grad_y = torch.tensor([0.5, 0.5], dtype=torch.float64)
+        self.assertTrue(torch.allclose(x.grad, expected_grad_x), f"Expected {expected_grad_x}, but got {x.grad}")
+        self.assertTrue(torch.allclose(y.grad, expected_grad_y), f"Expected {expected_grad_y}, but got {y.grad}")
+        
     def test_weighted_l1_loss_with_weights(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
