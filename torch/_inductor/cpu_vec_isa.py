@@ -382,14 +382,14 @@ class VecAVX2(VecISA):
 
 @dataclasses.dataclass
 class VecZVECTOR(VecISA):
-    _bit_width = 256
+    _bit_width = 128
     _macro = [
         "CPU_CAPABILITY_ZVECTOR",
         "CPU_CAPABILITY=ZVECTOR",
         "HAVE_ZVECTOR_CPU_DEFINITION",
     ]
     _arch_flags = "-mvx -mzvector"
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
         return "zvector"

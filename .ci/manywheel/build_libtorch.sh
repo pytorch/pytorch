@@ -118,7 +118,7 @@ fi
     time CMAKE_ARGS=${CMAKE_ARGS[@]} \
         EXTRA_CAFFE2_CMAKE_FLAGS="${EXTRA_CAFFE2_CMAKE_FLAGS[@]} $STATIC_CMAKE_FLAG" \
         # TODO: Remove this flag once https://github.com/pytorch/pytorch/issues/55952 is closed
-        CFLAGS='-Wno-deprecated-declarations' \
+        CFLAGS="$CFLAGS -Wno-deprecated-declarations" \
         BUILD_LIBTORCH_CPU_WITH_DEBUG=1 \
         python -m pip install --no-build-isolation -v .
 
