@@ -102,7 +102,10 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not node_info_map[n].features.is_reduction()
             and len(node_info_map[n].tiling) == 2
-            and V.graph.sizevars.optimization_hint(node_info_map[n].tiling["x"], fallback=1) > LARGE_NUMELS  # type: ignore[arg-type]
+            and V.graph.sizevars.optimization_hint(
+                node_info_map[n].tiling["x"], fallback=1
+            )
+            > LARGE_NUMELS  # type: ignore[arg-type]
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
