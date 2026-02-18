@@ -178,7 +178,7 @@ def _register_dtensor_impl() -> None:
         local_args = pytree.tree_map(_unwrap_dtensor, args)
         local_kwargs = pytree.tree_map(_unwrap_dtensor, kwargs)
         if dist.get_rank() == 0:
-            print_impl(format_str, *local_args, **local_kwargs)
+            print(format_str, *local_args, **local_kwargs)
 
 
 @print.py_functionalize_impl
