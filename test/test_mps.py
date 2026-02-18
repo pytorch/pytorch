@@ -1936,6 +1936,24 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad, atol=1e-5, rtol=1e-5)
         self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad, atol=1e-5, rtol=1e-5)
 
+    def test_batch_norm_backward_channels_last(self):
+        # Regression test: batch_norm backward with channels_last input produced wrong
+        # weight/bias gradients on MPS due to incorrect mem_format_key in the cache key.
+        bn_cpu = nn.BatchNorm2d(3)
+        bn_mps = nn.BatchNorm2d(3).to("mps")
+        bn_mps.load_state_dict(bn_cpu.state_dict())
+
+        base = torch.randn(4, 3, 8, 8, device="mps").to(memory_format=torch.channels_last)
+        cpu_x = base.cpu().detach().requires_grad_(True)
+        mps_x = base.detach().requires_grad_(True)
+
+        bn_cpu(cpu_x).sum().backward()
+        bn_mps(mps_x).sum().backward()
+
+        self.assertEqual(cpu_x.grad, mps_x.grad)
+        self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad)
+
     def test_layer_norm_backward(self):
         inputs = torch.rand(4, 4, device="mps", requires_grad=True)
         x = torch.nn.LayerNorm(4).to("mps")

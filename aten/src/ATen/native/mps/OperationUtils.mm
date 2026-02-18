@@ -341,7 +341,7 @@ Tensor getTensorView(const Tensor& t, MPSShape* shape) {
     res.push_back(elem.longLongValue);
   }
   IntArrayRef r = IntArrayRef(res);
-  return t.view(res);
+  return t.reshape(res);
 }
 
 MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format) {
