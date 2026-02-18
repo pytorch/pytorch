@@ -33,6 +33,7 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer, Symbol
 
+import torch
 import torch._export.serde.schema as export_schema
 import torch._library.utils as library_utils
 import torch._logging
@@ -1167,6 +1168,12 @@ def get_reduction_combine_fn(
         ) -> tuple[OpsValue, OpsValue]:
             a_value, a_index = a
             b_value, b_index = b
+
+            # For boolean tensors, cast to int32 before comparison since
+            # Triton's comparison operators don't work correctly on boolean types
+            if is_boolean_dtype(dtype):
+                a_value = ops.to_dtype(a_value, torch.int32)
+                b_value = ops.to_dtype(b_value, torch.int32)
 
             if reduction_type == "argmin":
                 mask = ops.lt(a_value, b_value)
