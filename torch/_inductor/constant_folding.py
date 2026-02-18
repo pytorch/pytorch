@@ -1,4 +1,5 @@
 import collections
+import typing_extensions
 from collections.abc import Callable
 from typing import Any, Optional
 
@@ -189,6 +190,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
         return last_non_output_use
 
+    @typing_extensions.override
     def run_node(self, node: torch.fx.Node) -> Any:
         if node.target == "output":
             # because we remove nodes from env on last non output use,
