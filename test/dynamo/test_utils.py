@@ -330,7 +330,7 @@ class TestDynamoTimed(TestCase):
     def warmup(self):
         # Helper to make sure any process-global lru_caches (e.g., torch_key())
         # have already executed. Just compile something.
-        @torch.compile(backend="eager")
+        @torch.compile(backend="inductor")
         def add(x, y):
             return x + y
 
