@@ -3187,7 +3187,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
     def test_cond_with_empty_operands(self):
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def fn(x, y, z):
             def true_fn():
                 return y + 2
