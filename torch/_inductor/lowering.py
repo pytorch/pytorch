@@ -65,6 +65,7 @@ from .ir import (
     ExpandView,
     IndexingConstant,
     IRNode,
+    is_cpu,
     is_triton,
     MutableBox,
     OnlineSoftmaxReduction,
@@ -6878,11 +6879,44 @@ def reduce_min(x, dim=None, keepdim=False):
 register_lowering(prims.xor_sum)(make_reduction("xor_sum"))
 reduce_amax = register_lowering(aten.amax)(make_reduction("max"))
 reduce_amin = register_lowering(aten.amin)(make_reduction("min"))
+def argmax_argmin_cpu_fallback_wrapper(reduction_type):
+    """
+    Wrapper for argmax/argmin that falls back to eager for problematic CPU cases.
+
+    Addresses issue #174073: argmax outputs wrong when working on transposed matrix.
+    The logical index computation fix in make_reduction only works for Triton backend,
+    but CPU backends using CPP codegen can't handle the tuple return. For CPU cases
+    with transposed/non-contiguous tensors, we fall back to eager mode.
+    """
+    original_reduction = make_reduction(reduction_type, override_return_dtype=torch.int64)
+    fallback_fn = fallback_handler(getattr(aten, reduction_type).default)
+
+    def wrapper(x, dim=None, keepdim=False):
+        # Check if this is a problematic case for CPU backend
+        if (
+            hasattr(x, 'get_device')
+            and x.get_device().type == 'cpu'
+            and hasattr(x, 'data')
+            and (
+                isinstance(x.data, PermuteView) or
+                (isinstance(x.data, (ir.ReinterpretView, ir.StorageBox)) and
+                 hasattr(x, 'get_layout') and
+                 (x.get_layout().is_transposed() or not x.get_layout().is_contiguous()))
+            )
+        ):
+            # Fall back to eager for transposed/non-contiguous tensors on CPU
+            return fallback_fn(x, dim, keepdim)
+        else:
+            # Use standard reduction for other cases
+            return original_reduction(x, dim, keepdim)
+
+    return wrapper
+
 reduce_argmax = register_lowering(aten.argmax)(
-    make_reduction("argmax", override_return_dtype=torch.int64)
+    argmax_argmin_cpu_fallback_wrapper("argmax")
 )
 reduce_argmin = register_lowering(aten.argmin)(
-    make_reduction("argmin", override_return_dtype=torch.int64)
+    argmax_argmin_cpu_fallback_wrapper("argmin")
 )
 
 add = register_pointwise(

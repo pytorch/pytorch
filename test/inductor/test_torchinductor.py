@@ -15328,6 +15328,43 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(6, 4, device=GPU_TYPE).t().contiguous().t(),))
 
+    def test_cpp_argmin_argmax_transpose_logical_index(self):
+        """Test argmin/argmax logical index computation for transposed matrices on CPU backend"""
+
+        def fn(x):
+            x.tan_()
+            x = x.t()
+            return x.argmin()
+
+        self.common(fn, (torch.randn(6, 4, device='cpu'),))
+
+        def fn(x):
+            return (x.t().argmin(), x.t().argmax())
+
+        self.common(fn, (torch.randn(6, 4, device='cpu'),))
+        self.common(fn, (torch.randn(128, 64, device='cpu'),))
+        self.common(fn, (torch.randn(8, 6, device='cpu', dtype=torch.float16),))
+
+        def fn(x):
+            # Permute: (A, B, C) -> (C, A, B)
+            permuted = x.permute(2, 0, 1)
+            return (permuted.argmin(), permuted.argmax())
+
+        self.common(fn, (torch.randn(4, 6, 8, device='cpu'),))
+
+        def fn(x):
+            # sliced tensor with gaps in memory
+            sliced = x[:, :10]
+            return (sliced.argmin(), sliced.argmax())
+
+        self.common(fn, (torch.randn(10, 20, device='cpu'),))
+
+        # Test column major passed as input
+        def fn(x):
+            return (x.argmin(), x.argmax())
+
+        self.common(fn, (torch.randn(6, 4, device='cpu').t().contiguous().t(),))
+
     @skip_if_halide
     @requires_cuda_and_triton
     def test_unbacked_float_item(self):
