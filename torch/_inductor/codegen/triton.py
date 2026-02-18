@@ -1721,6 +1721,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def pow(a, b):
+        if config.emulate_precision_casts:
+            # Use inline PTX pow that matches CUDA's powf exactly.
+            # libdevice.pow uses FTZ (flush-to-zero) which causes 1-3 ULP differences.
+            return f"triton_helpers.powf_cuda({a}, {b})"
         return f"libdevice.pow({a}, {b})"
 
     @staticmethod
