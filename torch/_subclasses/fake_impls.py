@@ -61,7 +61,9 @@ __all__ = [
     "has_meta",
 ]
 
+# pyrefly: ignore [implicit-any]
 op_implementations_dict = {}
+# pyrefly: ignore [implicit-any]
 op_implementations_checks = []
 
 
@@ -1454,6 +1456,7 @@ def _pack_padded_sequence(
     return (packed_data, batch_size)  # type: ignore[return]
 
 
+# pyrefly: ignore [implicit-any]
 FAST_OP_IMPLEMENTATIONS = {}
 
 

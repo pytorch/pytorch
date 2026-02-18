@@ -34,6 +34,7 @@ if not hasattr(torch._C, "_XpuStreamBase"):
         "_xpu_isCurrentStreamCapturing"
     )
 
+# pyrefly: ignore [missing-module-attribute]
 from torch._C import _xpu_graph_pool_handle, _xpu_isCurrentStreamCapturing, _XPUGraph
 
 
