@@ -175,8 +175,7 @@ class TestDecompSharding(TestCase):
         out = aten.smooth_l1_loss.default(input, target)
         self.assertEqual(out.placements, (Partial("avg"), Partial("avg")))
 
-        # expand_copy
-        check_no_strategy(aten.expand_copy.default)
+        # expand_copy: has a registered strategy (same as expand)
         input = d_empty(16, 1, device_mesh=mesh, placements=[Partial("min")])
         out = aten.expand_copy.default(input, [-1, 16])
         self.assertEqual(out.placements, (Partial("min"),))

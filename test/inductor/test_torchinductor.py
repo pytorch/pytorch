@@ -3769,6 +3769,7 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
+    @skip_if_pallas  # only 32-bit indexing
     @largeTensorTest("4GB", inductor=True)
     def test_large_pointwise(self):
         def fn(a):
@@ -3786,6 +3787,7 @@ class CommonTemplate:
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
+    @skip_if_pallas  # only 32-bit indexing
     @largeTensorTest("3GB", inductor=True)
     def test_large_offset_pointwise(self):
         # Test 64-bit indexing is used when input views a tensor that can be
