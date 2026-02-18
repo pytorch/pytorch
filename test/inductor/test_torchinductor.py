@@ -5004,8 +5004,8 @@ class CommonTemplate:
 
         x = torch.randn([2, 1, 16, 20])
         w = torch.randn([1, 1, 5, 5])
-
-        torch._dynamo.mark_dynamic(x, 0)
+        # X get specialized ! dilation can't be dynamic.
+        torch._dynamo.maybe_mark_dynamic(x, 0)
 
         atol = None
         rtol = None
