@@ -6719,6 +6719,7 @@ fallback_cumprod_backward = fallback_handler(aten.cumprod_backward.default)
 fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
 fallback_cummax = fallback_handler(aten.cummax.default)
 fallback_cummin = fallback_handler(aten.cummin.default)
+fallback_atan = fallback_handler(aten.atan.default)
 
 
 @register_lowering(aten.cumsum)
@@ -6775,6 +6776,14 @@ def cumprod_backward(grad, input, dim, output):
     # The scan-based cumprod implementation can cause numerical divergence
     # in the backward pass due to precision issues in associative operations
     return fallback_cumprod_backward(grad, input, dim, output)
+
+
+@register_lowering(aten.atan)
+def atan(x):
+    # Use fallback for atan to maintain numerical consistency with eager mode
+    # Inductor uses libdevice.atan which has different precision than CUDA atan()
+    # This is critical when atan output is used by precision-sensitive functions like digamma/special_psi
+    return fallback_atan(x)
 
 
 @register_lowering(aten.logcumsumexp)
