@@ -4608,6 +4608,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res = f(x, start, 0)
         self.assertEqual(res.shape, torch.Size([0]))
 
+    @skipIfTorchDynamo("mark_unbacked not supported")
     def test_unbacked_norm_no_dde(self):
         def vector_norm(x):
             return torch.linalg.vector_norm(x)
