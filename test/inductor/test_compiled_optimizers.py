@@ -58,7 +58,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-from torch.testing._internal.common_utils import parametrize, skipIfWindows
+from torch.testing._internal.common_utils import parametrize, skipIfRocm, skipIfWindows
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -989,6 +989,184 @@ class CompiledOptimizerTests(TestCase):
 
         for param, param_ref in zip(params, params_ref):
             self.assertEqual(param, param_ref)
+
+
+@skipIfRocm(msg="ROCm may have different numerical behavior")
+@requires_cuda_and_triton
+class CompiledOptimizerBitwiseTests(TestCase):
+    """
+    Tests that compiled optimizers produce bitwise identical results to eager
+    when precision configs are enabled.
+
+    These tests verify that with the following config options:
+    - eager_numerics.division_rounding = True
+    - eager_numerics.pow_precision = True
+    - emulate_precision_casts = True
+
+    The compiled optimizer step produces results that are bitwise identical
+    to the eager optimizer step.
+    """
+
+    @staticmethod
+    def _test_optimizer_bitwise(
+        test_case,
+        optim_cls,
+        foreach=True,
+        capturable=True,
+        num_steps=10,
+        **optim_kwargs,
+    ):
+        """Helper to test optimizer bitwise equality."""
+        torch._dynamo.reset()
+        torch.manual_seed(42)
+
+        params_eager = [
+            torch.randn(64, 64, device=GPU_TYPE, dtype=torch.float32),
+            torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32),
+        ]
+        params_compiled = [p.clone() for p in params_eager]
+
+        opt_eager = optim_cls(
+            params_eager,
+            lr=0.001,
+            foreach=foreach,
+            capturable=capturable,
+            **optim_kwargs,
+        )
+        opt_compiled = optim_cls(
+            params_compiled,
+            lr=0.001,
+            foreach=foreach,
+            capturable=capturable,
+            **optim_kwargs,
+        )
+
+        @torch.compile
+        def compiled_step():
+            opt_compiled.step()
+
+        for step in range(num_steps):
+            # Generate gradients with consistent seed
+            torch.manual_seed(1000 + step)
+            grads = [torch.randn_like(p) for p in params_eager]
+
+            for p, g in zip(params_eager, grads):
+                p.grad = g.clone()
+            for p, g in zip(params_compiled, grads):
+                p.grad = g.clone()
+
+            opt_eager.step()
+            compiled_step()
+
+            # Check bitwise equality
+            for i, (p_eager, p_compiled) in enumerate(
+                zip(params_eager, params_compiled)
+            ):
+                test_case.assertEqual(
+                    p_eager,
+                    p_compiled,
+                    atol=0,
+                    rtol=0,
+                    msg=f"Step {step + 1}, param {i}: params differ",
+                )
+
+        # Also check optimizer state
+        for p_eager, p_compiled in zip(params_eager, params_compiled):
+            for key in opt_eager.state[p_eager]:
+                eager_val = opt_eager.state[p_eager][key]
+                compiled_val = opt_compiled.state[p_compiled][key]
+                if isinstance(eager_val, torch.Tensor):
+                    test_case.assertEqual(
+                        eager_val,
+                        compiled_val,
+                        atol=0,
+                        rtol=0,
+                        msg=f"State '{key}' differs",
+                    )
+
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.pow_precision": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_adam_bitwise(self):
+        """Test Adam with foreach=True, capturable=True is bitwise equal."""
+        self._test_optimizer_bitwise(self, Adam)
+
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.pow_precision": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_adam_bitwise_amsgrad(self):
+        """Test Adam with amsgrad=True is bitwise equal."""
+        self._test_optimizer_bitwise(self, Adam, amsgrad=True)
+
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.pow_precision": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_adamw_bitwise(self):
+        """Test AdamW with foreach=True, capturable=True is bitwise equal."""
+        self._test_optimizer_bitwise(self, AdamW)
+
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.pow_precision": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_adamw_bitwise_with_weight_decay(self):
+        """Test AdamW with weight_decay is bitwise equal."""
+        self._test_optimizer_bitwise(self, AdamW, weight_decay=0.01)
+
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.pow_precision": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_adamw_bitwise_amsgrad(self):
+        """Test AdamW with amsgrad=True is bitwise equal."""
+        self._test_optimizer_bitwise(self, AdamW, amsgrad=True)
+
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.pow_precision": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_adamw_bitwise_maximize(self):
+        """Test AdamW with maximize=True is bitwise equal."""
+        self._test_optimizer_bitwise(self, AdamW, maximize=True)
+
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.pow_precision": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_adamw_bitwise_all_options(self):
+        """Test AdamW with all options enabled is bitwise equal."""
+        self._test_optimizer_bitwise(
+            self,
+            AdamW,
+            weight_decay=0.1,
+            amsgrad=True,
+            maximize=True,
+            betas=(0.95, 0.99),
+        )
 
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:

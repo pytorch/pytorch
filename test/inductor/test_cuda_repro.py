@@ -2720,6 +2720,78 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         # is already float16 and the output is int64.
         self.assertNotIn(".to(tl.float16)", code[0])
 
+    def test_lerp_fma_precision(self):
+        # Test that lerp uses FMA to match CUDA's native lerp behavior.
+        # CUDA's lerp uses fma(weight, end-start, start) internally.
+        def fn(start, end, weight):
+            return torch.lerp(start, end, weight)
+
+        start = torch.randn(1000, device="cuda", dtype=torch.float32)
+        end = torch.randn(1000, device="cuda", dtype=torch.float32)
+        # Use weight similar to Adam's (1 - beta1) = 0.1
+        weight = 0.1
+        self.common(fn, [start, end, weight])
+
+    @config.patch("eager_numerics.pow_precision", True)
+    def test_pow_precision(self):
+        # Test that pow(scalar, tensor) matches eager bitwise when using
+        # eager_numerics.pow_precision, which uses inline PTX to match CUDA's powf.
+        def fn(exp):
+            return torch.pow(0.9, exp)
+
+        exp = torch.arange(1, 101, device="cuda", dtype=torch.float32)
+
+        eager_result = fn(exp)
+        compiled_result = torch.compile(fn)(exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    @config.patch("eager_numerics.division_rounding", True)
+    def test_reciprocal_precision_rounding(self):
+        # Test that reciprocal matches eager when division_rounding is enabled.
+        # This requires OpDecompositions.reciprocal to use float32 constant so
+        # that div_rn can be applied (the dtype check requires both operands float32).
+        def fn(x):
+            return torch.reciprocal(x)
+
+        x = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
+        self.common(fn, [x])
+
+    @skipIfRocm(msg="ROCm may have small numerical differences")
+    def test_compiled_adam_foreach_capturable_bitwise(self):
+        # Test that compiled Adam with foreach=True and capturable=True
+        # matches eager Adam bitwise.
+        torch.manual_seed(42)
+        params_eager = [torch.randn(64, 64, device="cuda", dtype=torch.float32)]
+        params_compiled = [p.clone() for p in params_eager]
+        grads = [torch.randn_like(p) for p in params_eager]
+
+        opt_eager = torch.optim.Adam(
+            params_eager, lr=0.001, foreach=True, capturable=True
+        )
+        opt_compiled = torch.optim.Adam(
+            params_compiled, lr=0.001, foreach=True, capturable=True
+        )
+
+        # Set gradients
+        for p, g in zip(params_eager, grads):
+            p.grad = g.clone()
+        for p, g in zip(params_compiled, grads):
+            p.grad = g.clone()
+
+        # Eager step
+        opt_eager.step()
+
+        # Compiled step
+        @torch.compile
+        def compiled_step():
+            opt_compiled.step()
+
+        compiled_step()
+
+        # Check bitwise equality
+        for p_eager, p_compiled in zip(params_eager, params_compiled):
+            self.assertEqual(p_eager, p_compiled, atol=0, rtol=0)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

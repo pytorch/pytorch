@@ -58,7 +58,12 @@ from torch.utils._sympy.functions import (
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import decompositions, get_decompositions
+from .decomposition import (
+    decompositions,
+    decomps_to_exclude,
+    emulate_precision_decomps_to_exclude,
+    get_decompositions,
+)
 from .ir import (
     BaseView,
     DtypeView,
@@ -2304,15 +2309,18 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    # When emulate_precision_casts is enabled, we skip decomposing addcmul ops
-    # to use the inductor lowering which preserves FMA semantics.
-    # For _foreach_addcdiv, we use the native CUDA kernel.
-    skip_decomp_for_precision = config.emulate_precision_casts and op in {
-        aten.addcmul,
-        aten._foreach_addcmul.Scalar,
-        aten._foreach_addcdiv.Scalar,
-    }
-    assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
+    def is_in_exclude_set(op, exclude_set):
+        if op in exclude_set:
+            return True
+        if hasattr(op, "overloadpacket"):
+            return op.overloadpacket in exclude_set
+        return False
+
+    skip_decomp = is_in_exclude_set(op, decomps_to_exclude) or (
+        config.emulate_precision_casts
+        and is_in_exclude_set(op, emulate_precision_decomps_to_exclude)
+    )
+    assert op not in decompositions or override_decomp or skip_decomp, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
@@ -7039,6 +7047,77 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     )
 
 
+@register_lowering(aten.addcdiv, broadcast=True)
+def addcdiv(self, tensor1, tensor2, *, value=1):
+    """
+    Computes self + value * (tensor1 / tensor2) using FMA for better precision.
+
+    Matches eager CUDA kernel order: self + value * (tensor1 / tensor2)
+    This is computed as: fma(value, tensor1 / tensor2, self)
+
+    For value=1: self + tensor1 / tensor2 (no FMA needed, just add the division)
+    For value!=1: fma(value, div_rn(tensor1, tensor2), self)
+
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
+    we fall back to regular arithmetic since FMA doesn't support integers.
+
+    We use div_rn (round-to-nearest division) to force proper rounding, preventing
+    Triton from fusing operations in ways that change the rounding behavior.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
+    """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
+    dtype = get_promoted_dtype(
+        self,
+        tensor1,
+        tensor2,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+
+    self_loader = self.make_loader()
+    t1_loader = tensor1.make_loader()
+    t2_loader = tensor2.make_loader()
+
+    # FMA is only available for floating-point types on non-AMD GPUs
+    use_fma = dtype.is_floating_point and not torch.version.hip
+
+    def inner_fn(idx):
+        self_val = self_loader(idx)
+        t1_val = t1_loader(idx)
+        t2_val = t2_loader(idx)
+
+        # Compute tensor1 / tensor2 first
+        # Always use div_rn for round-to-nearest division to match eager CUDA behavior
+        t1_div_t2 = ops.div_rn(t1_val, t2_val)
+
+        if value == 1:
+            # For value=1, just add the division result (no FMA needed)
+            return ops.add(self_val, t1_div_t2)
+
+        # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
+        if isinstance(value, sympy.Basic):
+            value_expr = ops.index_expr(value, dtype)
+        else:
+            value_expr = ops.constant(value, dtype)
+
+        if use_fma:
+            # Use FMA for floating-point types for better precision
+            return ops.fma(value_expr, t1_div_t2, self_val)
+        else:
+            # Fall back to regular arithmetic for integer types
+            return ops.add(self_val, ops.mul(value_expr, t1_div_t2))
+
+    return Pointwise.create(
+        device=self.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=self.get_size(),
+    )
+
+
 def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
     """
     Foreach version of addcmul with scalar value parameter.
@@ -7065,6 +7144,97 @@ def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
 
 
 _register_foreach_lowering(aten._foreach_addcmul.Scalar, _foreach_addcmul_scalar)
+
+
+@register_lowering(aten.lerp.Scalar, broadcast=True)
+def lerp_scalar(start, end, weight):
+    """
+    Computes start + weight * (end - start) using FMA for precision.
+
+    CUDA's lerp uses FMA internally: fma(weight, end-start, start)
+    This computes weight*(end-start)+start with no intermediate rounding.
+    We match this behavior by using ops.fma.
+    """
+    dtype = get_promoted_dtype(
+        start,
+        end,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    start_loader = start.make_loader()
+    end_loader = end.make_loader()
+
+    use_fma = dtype.is_floating_point and not torch.version.hip
+
+    def inner_fn(idx):
+        start_val = start_loader(idx)
+        end_val = end_loader(idx)
+
+        # Compute end - start
+        diff = ops.sub(end_val, start_val)
+
+        weight_val = ops.constant(weight, dtype)
+        if use_fma:
+            # Use FMA to match CUDA lerp: fma(weight, diff, start) = weight*diff + start
+            return ops.fma(weight_val, diff, start_val)
+        else:
+            # Fallback for non-FMA targets
+            return ops.add(start_val, ops.mul(weight_val, diff))
+
+    return Pointwise.create(
+        device=start.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=start.get_size(),
+    )
+
+
+@register_lowering(aten.lerp.Tensor, broadcast=True)
+def lerp_tensor(start, end, weight):
+    """
+    Computes start + weight * (end - start) using FMA for precision.
+
+    CUDA's lerp uses FMA internally: fma(weight, end-start, start)
+    This computes weight*(end-start)+start with no intermediate rounding.
+    We match this behavior by using ops.fma.
+    """
+    dtype = get_promoted_dtype(
+        start,
+        end,
+        weight,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    start_loader = start.make_loader()
+    end_loader = end.make_loader()
+    weight_loader = weight.make_loader()
+
+    use_fma = dtype.is_floating_point and not torch.version.hip
+
+    def inner_fn(idx):
+        start_val = start_loader(idx)
+        end_val = end_loader(idx)
+        weight_val = weight_loader(idx)
+
+        # Compute end - start
+        diff = ops.sub(end_val, start_val)
+
+        if use_fma:
+            # Use FMA to match CUDA lerp: fma(weight, diff, start) = weight*diff + start
+            return ops.fma(weight_val, diff, start_val)
+        else:
+            # Fallback for non-FMA targets
+            return ops.add(start_val, ops.mul(weight_val, diff))
+
+    return Pointwise.create(
+        device=start.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=start.get_size(),
+    )
+
+
+register_foreach_pointwise(aten._foreach_lerp.Scalar, lerp_scalar)
 
 
 register_pointwise_numeric_ldf64(aten.cos)
