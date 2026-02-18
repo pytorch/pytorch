@@ -106,7 +106,7 @@ print.fallthrough(torch._C.DispatchKey.AutogradCUDA)
 def _register_dtensor_impl() -> None:
     from torch.distributed.tensor import DTensor, Replicate
 
-    @print.py_impl(DTensor)
+    @print.py_impl(DTensor)  # pyrefly: ignore [missing-attribute]
     # pyre-ignore
     def print_dtensor(format_str: str, *args: object, **kwargs: object) -> None:
         import torch.distributed as dist

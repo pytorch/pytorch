@@ -755,9 +755,7 @@ class TestHopPrintDTensor(DTensorTestBase):
         )
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            torch._higher_order_ops.print(
-                "dt: {} scalar: {}", dtensor, 42
-            )
+            torch._higher_order_ops.print("dt: {} scalar: {}", dtensor, 42)
             output = mock_stdout.getvalue()
 
         if dist.get_rank() == 0:
