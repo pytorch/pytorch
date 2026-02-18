@@ -227,7 +227,7 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
         (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
         (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
-        # Reflection padding forward: bfloat16 has minor precision differences between
+        # Reflection padding: bfloat16 has minor precision differences between
         # native and decomposed paths due to different memory access patterns (#131050).
         (torch.bfloat16, torch.ops.aten.reflection_pad1d.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.reflection_pad2d.default): 1e-2,
@@ -304,7 +304,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.int16, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
         (torch.int32, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
         (torch.int64, torch.ops.aten.linspace.Scalar_Tensor): (0, 1),
-        # Reflection padding forward: bfloat16 native vs decomposed paths (#131050)
+        # Reflection padding: bfloat16 native vs decomposed paths (#131050)
         (torch.bfloat16, torch.ops.aten.reflection_pad1d.default): (1e-2, 1e-2),
         (torch.bfloat16, torch.ops.aten.reflection_pad2d.default): (1e-2, 1e-2),
         (torch.bfloat16, torch.ops.aten.reflection_pad3d.default): (1e-2, 1e-2),

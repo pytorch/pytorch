@@ -4973,6 +4973,7 @@ def _reflection_or_replication_pad(
 @register_decomposition(aten.reflection_pad1d_backward)
 @register_decomposition(aten.reflection_pad2d_backward)
 @register_decomposition(aten.reflection_pad3d_backward)
+@pw_cast_for_opmath
 @out_wrapper("grad_input")
 def _reflection_pad_backward(grad_output, x, padding):
     dim = len(padding) // 2
