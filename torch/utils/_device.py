@@ -54,14 +54,6 @@ def _device_constructors():
         torch.tensor,
         torch.as_tensor,
         torch.scalar_tensor,
-        # *_like may contain device kwarg, but the user implicitly
-        # expects a specific device even when kwarg unused.
-        # torch.zeros_like,
-        # torch.randint_like,
-        # torch.randn_like,
-        # torch.ones_like,
-        # torch.full_like,
-        # torch.empty_like,
     }
 
 

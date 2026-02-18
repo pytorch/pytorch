@@ -537,8 +537,40 @@ class ComboKernelTests(TestCase):
             self.assertEqual(grid1[1], 1)
             self.assertEqual(grid2[1], 1)
 
+    @requires_gpu_and_triton
+    @parametrize("pointwise_only,expected_kernel_count", [(False, 2), (True, 3)])
+    def test_combo_kernels_pointwise_only(self, pointwise_only, expected_kernel_count):
+        def fn(a, b, c, d):
+            p1 = a * 2.0
+            p2 = b + 1.0
+            r1 = c.sum(dim=-1)
+            r2 = d.mean(dim=-1)
+            return p1, p2, r1, r2
+
+        inps = [
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(32, 1024, device=GPU_TYPE),
+            torch.rand(32, 1024, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+
+        torch._inductor.metrics.reset()
+        with torch._inductor.config.patch(
+            "combo_kernels_pointwise_only", pointwise_only
+        ):
+            fn_c = torch.compile(fn)
+            out_compiled, _ = run_and_get_code(fn_c, *inps)
+            self.assertEqual(out_eager, out_compiled)
+            # With pointwise_only=True, we expect more kernels because reductions are not combined with pointwise ops
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count, expected_kernel_count
+            )
+
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
+    @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
     def test_combo_kernel_yz_overflow(self):
         from torch.profiler import ProfilerActivity
 
