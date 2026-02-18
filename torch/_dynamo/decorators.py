@@ -220,23 +220,69 @@ def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> N
 
 
 def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
-    # Like `allow_in_graph`, but with the following enhancements/differences:
-    #
-    # 1. Supports user-defined class as inputs, as long as the class has been
-    #    registered with pytree.
-    # 2. Reads to global/captured tensors forces the underlying graph to treat
-    #    those tensors as constant, and we _assume_ they will not be updated. This
-    #    is similar to FX tracing.
-    # 3. In the resulting Dynamo graph, the call to a `nonstrict_trace`-ed function
-    #    will be represented as a call to `torch._higher_order_ops.flat_apply`,
-    #    which takes in the `nonstrict_trace`-ed function and pytree-flattened
-    #    inputs.
-    # 4. Only the returned function is traceable, and the original function will
-    #    not be. Moreover, `nonstrict_trace` can be used inside a `torch.compile`
-    #    region.
-    #
-    # NOTE: like `allow_in_graph`, aliasing information is neither preserved
-    # between inputs themselves, nor between inputs and outputs.
+    """
+    Decorator to mark a function as nonstrict-traceable for dynamo.
+
+    A nonstrict-traced function appears as an opaque call in the dynamo graph.
+    Dynamo does not trace into the function body (hence the "nonstrict"), but
+    aot_autograd will trace into it.
+
+    This is similar to ``allow_in_graph`` but with enhanced support for:
+    - User-defined classes as inputs (must be registered with pytree)
+    - ``nn.Module`` as input arguments (parameters and buffers are tracked for autograd)
+    - Global/captured tensors treated as constants (assumed not updated during execution)
+
+    Note:
+        - With ``backend="eager"``, the original Python function runs directly.
+          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
+          With ``backend="inductor"``, the traced graph is compiled with inductor.
+
+        - Training is supported: you can call ``.backward()`` on outputs and gradients
+          will flow through the nonstrict-traced function.
+
+    Dangerous patterns (may cause silent incorrectness):
+        - Side effects between nonstric_traced fn and compiled region: The function should
+          not depend on variables mutated by other code inside the compiled function, and code
+          after the call should not depend on mutations made by it.
+
+        - Implicit inputs (closures/globals): Tensors captured from enclosing scopes
+          are treated as constants. Gradients will NOT flow back to them. Pass tensors
+          as explicit arguments if gradients are needed.
+
+    Restrictions:
+        - Both inputs and outputs must use pytree-compatible types. User-defined classes
+          must be registered via :func:`torch.utils._pytree.register_pytree_node`,
+          :func:`torch.utils._pytree.register_dataclass`, or
+          :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
+          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
+          tuple, dict) are already handled by default.
+        - Primitive values and container structure are specialized per call site:
+          each call site expects the same primitives and structure on every execution.
+
+    Example::
+
+        >>> import torch
+        >>> @torch._dynamo.nonstrict_trace
+        ... def traced_forward(model, x):
+        ...     # It's OK to have dynamo graph break within nonstrict_trace region
+        ...     torch._dynamo.graph_break()
+        ...     return model(x) + x
+        ...
+        >>> class MyModule(torch.nn.Module):
+        ...     def __init__(self):
+        ...         super().__init__()
+        ...         self.inner = torch.nn.Linear(10, 10)
+        ...
+        ...     def forward(self, x):
+        ...         return traced_forward(self.inner, x)
+        ...
+        >>> # Compile and run
+        >>> model = MyModule()
+        >>> opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+        >>> out = opt_model(torch.randn(10, 10))
+        >>> out.sum().backward()  # Gradients flow through traced_forward
+
+    """
     assert callable(traceable_fn), "nonstrict_trace expects a callable"
 
     _check_mutually_exclusive_decorators(traceable_fn, "nonstrict_trace")
@@ -326,17 +372,10 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         to trace through and potentially optimize the code.
 
     Usage:
-        **Supported Inputs**:
-        - Inputs must use pytree-compatible types: tensors, Python primitives
-        (int, float, bool, str), and built-in containers (list, tuple, dict).
-        User-defined classes must be registered as pytree nodes via
-        :func:`torch.utils.pytree.register_pytree_node`.
-        - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers are
-        tracked for autograd. The module must exist outside the compile region.
-
-        **Supported Outputs**: Must be a tuple of tensors: ``return (tensor,)`` for one tensor,
-        ``return (a, b)`` for multiple. Primitive types (int, float, bool, str) can also be
-        included in outputs.
+        **Inputs and Outputs**:
+        - Both inputs and outputs must use pytree-compatible types.
+        Tensors, Python primitives (int, float, bool, str), and built-in containers
+        (list, tuple, dict) are supported by default.
 
         Note: We recommend leaf_functions only accept and return tensors. Though primitive
         types (int, float, bool, str) are supported in inputs and outputs, they may cause
@@ -367,7 +406,15 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # At runtime: real function runs (counter increments to 1, 2, 3, ...)
             # But returned count is always 999 (from fake implementation at compile time)
 
-        **register_fake (required)**: Since the function body is not traced, you must
+        - User-defined classes must be registered via :func:`torch.utils._pytree.register_pytree_node`
+        or :func:`torch.utils._pytree.register_dataclass`.
+
+        - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers
+        are tracked for autograd. The module must exist outside the compile region.
+        Running the module multiple times must not modify its parameters, buffers, or attributes.
+
+        **register_fake (required)**:
+        Since the function body is not traced, you must
         provide a shape-inference function via ``@fn.register_fake``. It runs at compile
         time with FakeTensor inputs (tensors with no data, only metadata) and must
         satisfy the following requirements:

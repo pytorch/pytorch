@@ -60,7 +60,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.8": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | "  # noqa: B950
         "cuda-bindings==12.9.4; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.17.1.4; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu12==9.19.0.56; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
         "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
@@ -76,7 +76,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.0": (
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
         "cuda-bindings==13.0.3; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.17.1.4; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.19.0.56; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
@@ -414,6 +414,53 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
+
+    return ret
+
+
+def generate_libtorch_extraction_configs(
+    os: str,
+    wheel_configs: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Generate libtorch extraction configs from existing wheel build configs.
+
+    For each unique arch variant in wheel_configs, find the py3.10 config
+    (py3.11 for windows-arm64) and produce a config that the CI template
+    uses to add an extraction job that depends on that wheel's build job.
+    """
+    preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+
+    # Group wheel configs by (gpu_arch_type, gpu_arch_version)
+    arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
+    for config in wheel_configs:
+        key = (config["gpu_arch_type"], config.get("gpu_arch_version", ""))
+        if config.get("python_version") == preferred_python:
+            arch_to_config[key] = config
+
+    ret: list[dict[str, str]] = []
+    for (gpu_arch_type, gpu_arch_version), source_config in arch_to_config.items():
+        # No libtorch for XPU
+        if gpu_arch_type == "xpu":
+            continue
+
+        desired_cuda = source_config["desired_cuda"]
+        libtorch_variant = "shared-with-deps"
+        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
+            ".", "_"
+        )
+
+        ret.append(
+            {
+                "source_wheel_build_name": source_config["build_name"],
+                "build_name": build_name,
+                "package_type": "libtorch",
+                "libtorch_variant": libtorch_variant,
+                "libtorch_config": RELEASE,
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": gpu_arch_type,
+                "gpu_arch_version": gpu_arch_version,
+            }
+        )
 
     return ret
 
