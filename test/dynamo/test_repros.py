@@ -6240,6 +6240,38 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             ref = mod(x)  # noqa: F841
             res = opt_mod(x)  # noqa: F841
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
+    def test_nnmodule_variable_children_wrap_value(self):
+        """
+        tests wrap_values() in nn_module.py by calling children() on a submodule,
+        which triggers NNModuleVariable.call_method only when
+        inline_inbuilt_nn_modules=False.  This path was previously untested
+        causing #173924
+        """
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.container = torch.nn.Sequential(
+                    torch.nn.Linear(10, 10),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(10, 5),
+                )
+
+            def forward(self, x):
+                for child in self.container.children():
+                    x = child(x)
+                return x
+
+        model = Parent()
+        x = torch.randn(2, 10)
+
+        eager_result = model(x)
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        compiled_result = compiled_model(x)
+
+        self.assertEqual(eager_result, compiled_result)
+
     def test_optimized_module_training(self):
         mod = torch.nn.Linear(3, 3)
         mod.eval()
@@ -7848,6 +7880,60 @@ SavedForBackwardsNoVcCheckAOTOutput(idx=4)
 SavedForBackwardsAOTOutput(idx=5)""",
             )
 
+    def test_move_tensor_subclass_parameter_after_compile(self):
+        aten = torch.ops.aten
+
+        class Subclass(torch.Tensor):
+            def __new__(cls, data):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, data.shape, dtype=data.dtype, device=data.device
+                )
+
+            def __init__(self, data):
+                self._data = data
+
+            def __repr__(self):
+                return f"{self.__class__.__name__}(data={self._data})"
+
+            def __tensor_flatten__(self):
+                return ["_data"], []
+
+            @classmethod
+            def __tensor_unflatten__(cls, inner_tensors, ctx, outer_size, outer_stride):
+                return cls(inner_tensors["_data"])
+
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if func == torch.nn.functional.linear:
+                    return func(args[0], args[1]._data, *args[2:])
+
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **(kwargs or dict()))
+
+            def __torch_dispatch__(self, func, types, args, kwargs):
+                if func in (aten._to_copy.default, aten.detach.default):
+                    args = [x._data if isinstance(x, Subclass) else x for x in args]
+                    out = func(*args, **kwargs)
+                    return Subclass(out)
+
+                raise NotImplementedError(f"{func=}")
+
+        # Compile on CPU
+        linear = torch.nn.Linear(2, 2)
+        linear.weight = torch.nn.Parameter(Subclass(linear.weight.detach()))
+        linear.compile()
+        linear(torch.randn(1, 2))
+
+        # Check that weakrefs are cleared after compile
+        t1 = linear.weight
+        self.assertEqual(len(weakref.getweakrefs(t1)), 0)
+
+        # Already on CPU, so should just clear weakrefs
+        linear.cpu()
+
+        # Check that there is no recompile
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            linear(torch.randn(1, 2, device="cpu"))
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
@@ -8653,78 +8739,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(result, expected))
         # Should compile successfully with fullgraph=True
         self.assertEqual(cnt.frame_count, 1)
-
-    @unittest.skipIf(not HAS_CUDA, "Tests moving from cuda to cpu and back")
-    def test_move_tensor_subclass_parameter_after_compile(self):
-        aten = torch.ops.aten
-
-        class Subclass(torch.Tensor):
-            def __new__(cls, data):
-                return torch.Tensor._make_wrapper_subclass(
-                    cls, data.shape, dtype=data.dtype, device=data.device
-                )
-
-            def __init__(self, data):
-                self._data = data
-
-            def __repr__(self):
-                return f"{self.__class__.__name__}(data={self._data})"
-
-            def __tensor_flatten__(self):
-                return ["_data"], []
-
-            @classmethod
-            def __tensor_unflatten__(cls, inner_tensors, ctx, outer_size, outer_stride):
-                return cls(inner_tensors["_data"])
-
-            def __torch_function__(self, func, types, args, kwargs=None):
-                if func == torch.nn.functional.linear:
-                    return func(args[0], args[1]._data, *args[2:])
-
-                with torch._C.DisableTorchFunctionSubclass():
-                    return func(*args, **(kwargs or dict()))
-
-            def __torch_dispatch__(self, func, types, args, kwargs):
-                if func in (aten._to_copy.default, aten.detach.default):
-                    args = [x._data if isinstance(x, Subclass) else x for x in args]
-                    out = func(*args, **kwargs)
-                    return Subclass(out)
-
-                raise NotImplementedError(f"{func=}")
-
-        # Compile on cuda
-        device = "cuda"
-        linear = torch.nn.Linear(2, 2, device=device)
-        linear.weight = torch.nn.Parameter(Subclass(linear.weight.detach()))
-        linear.compile()
-        linear(torch.randn(1, 2, device=device))
-
-        # TODO @azahed98: We wish to test that there are no weakrefs, but there are known issues
-        # with weakrefs from
-        # 1. TracingContext.tensor_to_context
-        # 2. MetaTensorDescriber.lookup_tensor
-
-        # Check for weakrefs
-        t1 = linear.weight
-        self.assertEqual(len(weakref.getweakrefs(t1)), 2)
-
-        # TODO @azahed98: Once the aforementioned issue is fixed, we can remove the self.assertRaises
-        with self.assertRaises(RuntimeError):
-            # Move to cpu. Should work with no weakrefs
-            linear.cpu()
-
-            # Move back to cuda and check that there is no recompile
-            linear.to(device)
-            prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
-                "ok", 0
-            )
-            linear(torch.randn(1, 2, device=device))
-            new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
-                "ok", 0
-            )
-            assert new_frame_count == prev_frame_count, (
-                "linear() call caused a recompile"
-            )
 
 
 instantiate_parametrized_tests(ReproTests)

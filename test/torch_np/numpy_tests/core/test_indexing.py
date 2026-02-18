@@ -570,7 +570,10 @@ class TestBroadcastedAssignments(TestCase):
 
         shape = arr[index].shape
         r_inner_shape = "".join(f"{side}, ?" for side in shape[:-1]) + str(shape[-1])
-        assert re.search(rf"[\(\[]{r_inner_shape}[\]\)]$", str(e.value))
+        if not re.search(rf"[\(\[]{r_inner_shape}[\]\)]$", str(e.value)):
+            raise AssertionError(
+                f"Expected error message to match pattern, got: {e.value}"
+            )
 
     def test_index_is_larger(self):
         # Simple case of fancy index broadcasting of the index.
@@ -1151,8 +1154,14 @@ class TestBooleanIndexing(TestCase):
     def test_boolean_indexing_weirdness(self):
         # Weird boolean indexing things
         a = np.ones((2, 3, 4))
-        assert a[False, True, ...].shape == (0, 2, 3, 4)
-        assert a[True, [0, 1], True, True, [1], [[2]]].shape == (1, 2)
+        if a[False, True, ...].shape != (0, 2, 3, 4):
+            raise AssertionError(
+                f"Expected shape (0, 2, 3, 4), got {a[False, True, ...].shape}"
+            )
+        if a[True, [0, 1], True, True, [1], [[2]]].shape != (1, 2):
+            raise AssertionError(
+                f"Expected shape (1, 2), got {a[True, [0, 1], True, True, [1], [[2]]].shape}"
+            )
         assert_raises(IndexError, lambda: a[False, [0, 1], ...])
 
     def test_boolean_indexing_fast_path(self):
