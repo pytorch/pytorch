@@ -2195,6 +2195,8 @@ class TestSDPACpuOnly(NNTestCase):
             tol_grad = Tolerances(5e-2, 5e-2)
         if dtype is torch.float16:
             tol_grad = Tolerances(1e-1, 1e-1)
+        if dtype is torch.float32:
+            tol_grad = Tolerances(1.25e-5, 5.25e-6)
         for mask_shape in itertools.product(
             [q_seq_len, 1], [kv_seq_len, 1]
         ) if mask_dim == 2 else itertools.product(

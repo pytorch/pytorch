@@ -336,27 +336,6 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     return sizes
 
 
-def _partial_fallback_view_groups(
-    resolved: list[DimSpec],
-    from_size: Shape,
-    to_size: Shape,
-    from_idx: int,
-    to_idx: int,
-    from_group_dim: list[int],
-    to_group_shape: list,
-) -> DimMap:
-    """Flatten-then-split fallback for remaining dims when symbolic comparisons are unresolvable."""
-    remaining_from = list(from_group_dim) + list(range(from_idx, len(from_size)))
-    remaining_to = list(to_group_shape) + list(to_size[to_idx:])
-    if remaining_to:
-        flattened = Flatten.new(tuple(InputDim(fi) for fi in remaining_from))
-        resolved += [
-            Split.new(flattened, tuple(remaining_to), i)
-            for i in range(len(remaining_to))
-        ]
-    return tuple(resolved)
-
-
 def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     """
     Decompose a reshape operation into forwarding, flattening, or splitting dimensions for each output dimension.
@@ -432,32 +411,14 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
         else:
             # produces ([1], [1]),  ([2], [2]), ([2,3], [6])
             while guard_or_true(f != t):
-                if guard_or_true(f < t):
-                    if from_idx >= from_len:
-                        return _partial_fallback_view_groups(
-                            result_pp,
-                            from_size,
-                            to_size,
-                            from_idx,
-                            to_idx,
-                            from_group_dim,
-                            to_group_shape,
-                        )
+                if (
+                    t % f == 0 or t > f
+                ):  # for easier symbolic comparisons, e.g. u0*u1 > u0
                     nf = from_size[from_idx]
                     from_group_dim.append(from_idx)
                     from_idx += 1
                     f *= nf
                 else:
-                    if to_idx >= to_len:
-                        return _partial_fallback_view_groups(
-                            result_pp,
-                            from_size,
-                            to_size,
-                            from_idx,
-                            to_idx,
-                            from_group_dim,
-                            to_group_shape,
-                        )
                     nt = to_size[to_idx]
                     to_group_shape.append(nt)
                     to_idx += 1
@@ -709,7 +670,7 @@ def propagate_shape_and_sharding(
                 for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard | _StridedShard) and shard.dim == in_dim:
                         submesh_size *= size
-                if not guard_or_false(out_size % submesh_size == 0):
+                if guard_or_true(out_size % submesh_size != 0):
                     raise AssertionError(
                         f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
                     )
@@ -840,6 +801,12 @@ register_op_strategy_map(
 )
 register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.squeeze.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.squeeze_.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
     aten.view.default,
