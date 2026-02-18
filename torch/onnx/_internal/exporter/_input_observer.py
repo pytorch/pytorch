@@ -874,7 +874,7 @@ class InputObserver:
     """
 
     def __init__(self, value_if_missing: dict[str, Any] | None = None):
-        self.info: InputObserverInfo | None = None  # type: ignore[annotation-unchecked]
+        self.info: InputObserverInfo | None = None
         self.value_if_missing = value_if_missing or {}
 
     def _replaced_method(
