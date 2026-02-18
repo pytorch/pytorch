@@ -2597,7 +2597,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info
-            mod.benchmark_compiled_module(times=1, repeat=1)
+            args = mod.get_args()
+            mod.benchmark_compiled_module(args, times=1, repeat=1)
 
         return mod
 

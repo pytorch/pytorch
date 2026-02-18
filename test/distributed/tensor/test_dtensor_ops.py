@@ -218,7 +218,6 @@ dtensor_fails = {
     xfail("signal.windows.hann"),
     xfail("signal.windows.nuttall"),
     xfail("signal.windows.kaiser"),
-    xfail("stack"),
     xfail("svd_lowrank"),
     xfail("take_along_dim"),
     xfail("tensor_split"),
