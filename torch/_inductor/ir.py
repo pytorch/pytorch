@@ -8359,11 +8359,8 @@ class FallbackKernel(ExternKernelAlloc):
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         # Try to lower functional custom ops to their out-variant via
-        # ExternKernelOut. This enables Inductor's AllocateLine.plan()
-        # buffer reuse for the output allocation.
-        if config.lower_custom_ops_to_out_variant and isinstance(
-            kernel, torch._ops.OpOverload
-        ):
+        # ExternKernelOut for buffer reuse.
+        if isinstance(kernel, torch._ops.OpOverload):
             from .custom_op_out_lowering import try_lower_to_out_variant
 
             result = try_lower_to_out_variant(
