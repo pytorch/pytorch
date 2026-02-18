@@ -1764,7 +1764,7 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
 std::array<int64_t, 2> DimCounter::max_2d_step() const {
   int64_t step0 = std::min(shape[0] - values[0], range.end - offset);
   int64_t step1 = 1;
-  if (step0 == shape[0] && !shape.empty()) {
+  if (!shape.empty() && step0 == shape[0]) {
     step1 = std::min(shape[1] - values[1], (range.end - offset) / shape[0]);
   }
   return {step0, step1};
