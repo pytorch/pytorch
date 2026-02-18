@@ -21,7 +21,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -45,6 +48,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
@@ -94,6 +98,7 @@ register_op_strategy(
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
+        prims.view_of.default,
     ]
 )(propagate_single_input_strategy)
 
@@ -269,39 +274,33 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
     return new_factory_strategy
 
 
-@register_op_strategy(aten.bucketize.Tensor)
-def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
-    """Just propagate input sharding, but expect replicated for boundaries input."""
-    mesh = op_schema.get_mesh_from_args()
-    input_strategy, boundaries_strategy = op_schema.args_schema
-    bucketize_strategy = OpStrategy([])
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    if not isinstance(boundaries_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(boundaries_strategy)}")
-    for arg_strategy in input_strategy.strategies:
-        arg_spec = DTensorSpec(
-            mesh,
-            arg_strategy.output_spec.placements,
-            arg_strategy.output_spec.tensor_meta,
-        )
-        replica_spec = DTensorSpec(
-            mesh,
-            tuple([Replicate()] * mesh.ndim),
-            boundaries_strategy.strategies[0].output_spec.tensor_meta,
-        )
-        bucketize_strategy.strategies.append(
-            OpSpec(
-                output_specs=arg_spec,
-                input_specs=(arg_spec, replica_spec),
-                redistribute_cost=[
-                    generate_redistribute_costs(input_strategy, arg_spec),
-                    generate_redistribute_costs(boundaries_strategy, replica_spec),
-                ],
-            )
-        )
+@register_single_dim_strategy(aten.bucketize.Tensor)
+def bucketize_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Bucketize returns indices into a sorted boundary tensor.
 
-    return bucketize_strategy
+    Three families of strategies:
+    1. Shard the input (and output) on any dim, keep boundaries replicated.
+    2. Shard boundaries on dim 0, replicate input, output is Partial("sum").
+       Each rank counts how many of its local boundary values each input
+       element exceeds; summing across ranks gives the correct global index.
+    3. Partial("max") or Partial("min") input with replicated boundaries.
+       Bucketize is monotonically non-decreasing in its input, so reducing
+       local bucket indices with max (or min) across ranks gives the same
+       result as bucketizing the reduced input values.
+    """
+    input_meta, _boundaries_meta = args_schema
+    assert isinstance(input_meta, TensorMeta)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(len(input_meta.shape)):
+        strategies.append(
+            [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim), Replicate()]
+        )
+    strategies.append([Partial("sum"), Replicate(), _ShardingPlaceholder(0)])
+    for reduce_op in ("max", "min"):
+        strategies.append([Partial(reduce_op), Partial(reduce_op), Replicate()])
+    return strategies
 
 
 @register_op_strategy(aten.select.int, schema_info=RuntimeSchemaInfo(1))
@@ -788,8 +787,9 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     first_input_strategy = input_strategies[0]
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
-    # normalize the dim to be within the common input ndim
-    dim = normalize_dim(dim, common_input_ndim)
+    # normalize the dim to be within the output ndim (input ndim + 1),
+    # since stack inserts a new dimension
+    dim = normalize_dim(dim, common_input_ndim + 1)
 
     mesh = first_input_strategy.mesh
 
@@ -1309,3 +1309,28 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+
+@register_op_strategy(aten.eye.m_out)
+def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Strategy for torch.eye with out= parameter.
+    The sharding is determined by the out tensor's placement.
+    """
+    # eye.m_out has signature: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+    # The out kwarg is a DTensor that determines the sharding
+    out_spec = op_schema.kwargs_schema["out"]
+    assert isinstance(out_spec, OpStrategy), (
+        f"Expected OpStrategy for out, got {type(out_spec)}"
+    )
+
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=strategy.output_spec,
+                input_specs=[strategy.output_spec],  # out is both input and output
+                redistribute_cost=[[0.0]],
+            )
+            for strategy in out_spec.strategies
+        ]
+    )

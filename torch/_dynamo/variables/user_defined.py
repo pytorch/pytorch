@@ -363,13 +363,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         non functional loss call: input, target, optional_output
         """
-        from . import ConstantVariable
+        from . import CONSTANT_VARIABLE_NONE, ConstantVariable
 
         def normalize_args(
-            weight: VariableTracker = ConstantVariable.create(None),
-            size_average: VariableTracker = ConstantVariable.create(None),
+            weight: VariableTracker = CONSTANT_VARIABLE_NONE,
+            size_average: VariableTracker = CONSTANT_VARIABLE_NONE,
             ignore_index: VariableTracker = ConstantVariable.create(-100),
-            reduce: VariableTracker = ConstantVariable.create(None),
+            reduce: VariableTracker = CONSTANT_VARIABLE_NONE,
             reduction: VariableTracker = ConstantVariable.create("mean"),
             label_smoothing: VariableTracker = ConstantVariable.create(0.0),
         ) -> tuple[VariableTracker, ...]:
@@ -534,7 +534,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
         elif self.value is collections.defaultdict:
             if len(args) == 0:
-                default_factory = variables.ConstantVariable.create(None)
+                default_factory = variables.CONSTANT_VARIABLE_NONE
             elif len(args) == 1:
                 # In the case the argument is a builtin, then we can take the callable as the factory method.
                 # Otherwise, it must be a ConstantVariable holding None.
@@ -566,7 +566,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             return SourcelessBuilder.create(tx, dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
-            maxlen = variables.ConstantVariable.create(None)
+            maxlen = variables.CONSTANT_VARIABLE_NONE
 
             def deque_signature(
                 iterable: Iterable[Any] | None = None, maxlen: int | None = None
@@ -629,7 +629,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if len(args) > 1:
                 callback = args[1]
             else:
-                callback = variables.ConstantVariable.create(None)
+                callback = variables.CONSTANT_VARIABLE_NONE
             return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
@@ -1166,6 +1166,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return self.value
             # TODO else try reconstructing the object by, e.g., leveraging side
             # effects and `as_python_constant`.
+
+        # Special case for _MaskModWrapper during legacy export: Dynamo creates
+        # objects via __new__ without calling __init__, so self.value.fn is unset.
+        # Reconstruct from the tracked side-effect attribute instead.
+        from torch.nn.attention.flex_attention import _MaskModWrapper
+
+        if isinstance(self.value, _MaskModWrapper):
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            if tx is not None and tx.export:
+                fn_vt = tx.output.side_effects.load_attr(self, "fn", deleted_ok=True)
+                if fn_vt is not None:
+                    # Let as_python_constant() raise the proper exception
+                    # (e.g., ClosureConversionError for non-constant closures)
+                    fn = fn_vt.as_python_constant()
+                    return _MaskModWrapper(fn)
+
         return super().as_python_constant()
 
     def guard_as_python_constant(self) -> object:
@@ -1224,12 +1242,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: list[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
-        from . import ConstantVariable, UserMethodVariable
+        from . import CONSTANT_VARIABLE_NONE, ConstantVariable, UserMethodVariable
 
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
@@ -1306,6 +1324,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             "an AttributeMutation mutation_type"
         )
 
+        if name_str == "__class__":
+            unimplemented(
+                gb_type="__class__ assignment on user-defined object",
+                context=f"object={self}, value={value}",
+                explanation="Dynamo does not support reassigning __class__ on user-defined objects.",
+                hints=[
+                    "Move the __class__ assignment outside of the torch.compile region.",
+                ],
+            )
+
         if directly_update_dict:
             self.attrs_directly_modifed_on_dict.add(name_str)
         else:
@@ -1321,7 +1349,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # use `type(...)` to ignore instance attrs.
                     func_source = AttrSource(TypeSource(desc_source), "__set__")
                 desc_var = VariableTracker.build(tx, descriptor, desc_source)
-                func_var = VariableTracker.build(tx, setter, func_source)
+                func_var = VariableTracker.build(tx, setter, func_source, realize=True)
                 args = [desc_var, self, value]
                 return func_var.call_function(tx, args, {})
             # NOTE: else we assume the descriptor (if any) has a
@@ -1329,7 +1357,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # Emulate the standard setattr on instance dict.
         tx.output.side_effects.store_attr(self, name_str, value)
-        return variables.ConstantVariable(None)
+        return variables.CONSTANT_VARIABLE_NONE
 
     def needs_slow_setattr(self) -> bool:
         return not is_standard_setattr(
@@ -1437,7 +1465,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             assert self.source is not None
             func_src = AttrSource(self.source, "__func__")
-            func_var = VariableTracker.build(tx, func, func_src)
+            func_var = VariableTracker.build(tx, func, func_src, realize=True)
             obj_src = AttrSource(self.source, "__self__")
             obj_var = VariableTracker.build(tx, obj, obj_src)
             return func_var.call_function(tx, [obj_var] + args, kwargs)  # type: ignore[arg-type]
@@ -1706,7 +1734,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if self.source:
                 # Read the class attribute to reach the property
                 source = AttrSource(self.get_source_by_walking_mro(name), "fget")
-            fget_vt = VariableTracker.build(tx, subobj.fget, source=source)
+            fget_vt = VariableTracker.build(
+                tx, subobj.fget, source=source, realize=True
+            )
             return fget_vt.call_function(tx, [self], {})
         elif isinstance(subobj, _collections._tuplegetter):
             # namedtuple fields are represented by _tuplegetter, and here we
@@ -2023,6 +2053,84 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tree_map_kwargs,
         )
 
+    def call_tree_map_with_path_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "variables.functions.UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: "collections.abc.Sequence[VariableTracker]",
+        tree_map_kwargs: "dict[str, VariableTracker]",
+        keypath: "tuple[Any, ...]",
+    ) -> "VariableTracker":
+        """Emulate tree_map_with_path behavior for user-defined objects.
+
+        Same logic as call_tree_map_branch but passes keypath to the map function.
+        """
+        tree_map_module = tree_map_fn.get_module()
+        is_optree = tree_map_module.startswith("optree")
+
+        if is_optree:
+            try:
+                import optree
+                from optree.registry import _NODETYPE_REGISTRY
+
+                is_registered = (
+                    self.value_type in _NODETYPE_REGISTRY
+                    or optree.is_namedtuple_class(self.value_type)
+                    or optree.is_structseq_class(self.value_type)
+                )
+
+                if not is_registered:
+                    namespace_var = tree_map_kwargs.get("namespace")
+                    if namespace_var is not None:
+                        try:
+                            namespace = namespace_var.as_python_constant()
+                            is_registered = (
+                                namespace,
+                                self.value_type,
+                            ) in _NODETYPE_REGISTRY
+                        except NotImplementedError:
+                            return self._tree_map_with_path_fallback(
+                                tx,
+                                tree_map_fn,
+                                map_fn,
+                                rest,
+                                tree_map_kwargs,
+                                keypath,
+                            )
+            except ImportError:
+                return self._tree_map_with_path_fallback(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                    keypath,
+                )
+        else:
+            import torch.utils._pytree as pytree
+
+            is_registered = (
+                self.value_type in pytree.SUPPORTED_NODES
+                or pytree.is_namedtuple_class(self.value_type)
+                or pytree.is_structseq_class(self.value_type)
+            )
+
+        if not is_registered:
+            keypath_var = variables.TupleVariable(
+                [VariableTracker.build(tx, k) for k in keypath]
+            )
+            return map_fn.call_function(tx, [keypath_var, self, *rest], {})
+
+        return self._tree_map_with_path_fallback(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+            keypath,
+        )
+
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
     @staticmethod
@@ -2261,7 +2369,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             self.exc_vt.args = tuple(args)
             # pyrefly: ignore[missing-attribute]
             self.value.args = args
-            return variables.ConstantVariable(None)
+            return variables.CONSTANT_VARIABLE_NONE
         elif (
             name == "__setattr__"
             and len(args) == 2
@@ -2297,6 +2405,33 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
     @python_stack.setter
     def python_stack(self, value: traceback.StackSummary) -> None:
         self.exc_vt.python_stack = value
+
+
+class InspectVariable(UserDefinedObjectVariable):
+    """Handles inspect.Signature and inspect.Parameter objects.
+
+    Short-circuits property accesses to avoid tracing property getters,
+    redirecting them to the underlying private attributes directly.
+    """
+
+    _PROPERTY_REDIRECTS: dict[type, dict[str, str]] = {
+        inspect.Signature: {"parameters": "_parameters"},
+        inspect.Parameter: {"kind": "_kind", "name": "_name"},
+    }
+
+    @staticmethod
+    def is_matching_object(obj: object) -> bool:
+        return type(obj) in InspectVariable._PROPERTY_REDIRECTS
+
+    @staticmethod
+    def is_matching_class(obj: object) -> bool:
+        return obj in InspectVariable._PROPERTY_REDIRECTS
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
+        if name in redirects:
+            return super().var_getattr(tx, redirects[name])
+        return super().var_getattr(tx, name)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
@@ -2359,7 +2494,7 @@ class RemovableHandleVariable(VariableTracker):
                 assert self.idx is not None
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
-            return variables.ConstantVariable.create(None)
+            return variables.CONSTANT_VARIABLE_NONE
         return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -2686,6 +2821,44 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
         self.generic_dict_vt = ConstDictVariable({})
+
+    def method_setattr_standard(
+        self,
+        tx: "InstructionTranslator",
+        name: VariableTracker,
+        value: VariableTracker,
+        directly_update_dict: bool = False,
+    ) -> VariableTracker:
+        """Override to handle property setters on MutableMapping subclasses.
+
+        This is needed because property.__set__ is a slot wrapper (C function),
+        not a Python function, so the base class's try_get_descritor_and_setter_py_func
+        returns None for properties. But property.fset IS a Python function we can trace.
+
+        Without this, property setters on newly created MutableMapping objects fail
+        when accessing nested objects (which haven't been initialized yet on the
+        example value). By tracing the fset, we capture the setter logic in the graph
+        instead of running it on uninitialized example objects.
+
+        TODO(compiler): This fix is scoped to MutableMapping only because tracing
+        property setters on ALL UserDefinedObjectVariable can cause failures when
+        the fset calls untraceable C++ functions (e.g., pybind functions). Ideally,
+        this should be extended to all user-defined classes with a graceful fallback
+        when tracing the fset hits an untraceable function.
+        See: https://github.com/pytorch/pytorch/issues/172000
+        """
+        if isinstance(name, variables.ConstantVariable) and isinstance(name.value, str):
+            name_str = name.value
+            descriptor = inspect.getattr_static(type(self.value), name_str, None)
+            if isinstance(descriptor, property) and descriptor.fset is not None:
+                fset_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name_str)
+                    fset_source = AttrSource(desc_source, "fset")
+                fset_vt = VariableTracker.build(tx, descriptor.fset, fset_source)
+                return fset_vt.call_function(tx, [self, value], {})
+
+        return super().method_setattr_standard(tx, name, value, directly_update_dict)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to
