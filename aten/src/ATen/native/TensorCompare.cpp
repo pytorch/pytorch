@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
@@ -380,7 +381,23 @@ Tensor isclose(
     if (isTensorSubclassLike(other)) {
       close.__ior__(self.isnan().bitwise_and(other.isnan()));
     } else {
-      close.__ior__(self.isnan().__iand__(other.isnan()));
+      // In-place __iand__ requires the target shape to equal the broadcast
+      // result. Check shapes to pick the right in-place target, or fall back
+      // to out-of-place for mutual broadcast (e.g. [3,1] vs [1,4] -> [3,4]).
+      if (self.sizes() == other.sizes()) {
+        close.__ior__(self.isnan().__iand__(other.isnan()));
+      } else {
+        auto self_nan = self.isnan();
+        auto other_nan = other.isnan();
+        auto expected = at::infer_size(self_nan.sizes(), other_nan.sizes());
+        if (other_nan.sizes().equals(expected)) {
+          close.__ior__(other_nan.__iand__(self_nan));
+        } else if (self_nan.sizes().equals(expected)) {
+          close.__ior__(self_nan.__iand__(other_nan));
+        } else {
+          close.__ior__(self_nan.bitwise_and(other_nan));
+        }
+      }
     }
   }
 
