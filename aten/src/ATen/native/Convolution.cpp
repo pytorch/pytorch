@@ -705,6 +705,63 @@ static void check_shape_forward(const at::Tensor& input,
       TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
+
+    // Check for output size overflow. With very large padding values,
+    // the computed output dimensions can be huge, and multiplying them
+    // together can overflow int64_t. We validate that the output numel
+    // is representable as int64_t.
+    {
+      constexpr int64_t int64_max = std::numeric_limits<int64_t>::max();
+      // Start with batch size * output channels
+      int64_t output_numel = 1;
+      bool overflow = false;
+
+      // Include batch size
+      auto batch_size = at::symint::size<T>(input, 0);
+      // Include output channels
+      auto out_channels = weight_sizes[0];
+
+      // Compute each spatial output dimension and check for overflow
+      // when multiplying
+      for (size_t i = 0; i < input_shape.size(); ++i) {
+        // output_dim = (input_shape - kernel_shape) / stride + 1
+        T output_dim = (input_shape[i] - kernel_shape[i]) / params.stride[i] + 1;
+
+        // Check if this dimension alone is too large
+        if (output_dim > int64_max / 2) {
+          overflow = true;
+          break;
+        }
+
+        // Check for overflow when multiplying
+        int64_t output_dim_val = static_cast<int64_t>(output_dim);
+        if (output_numel > int64_max / output_dim_val) {
+          overflow = true;
+          break;
+        }
+        output_numel *= output_dim_val;
+      }
+
+      // Also check batch and channel dimensions
+      if (!overflow) {
+        int64_t batch_val = static_cast<int64_t>(batch_size);
+        int64_t channels_val = static_cast<int64_t>(out_channels);
+        if (batch_val > 0 && output_numel > int64_max / batch_val) {
+          overflow = true;
+        } else {
+          output_numel *= batch_val;
+          if (channels_val > 0 && output_numel > int64_max / channels_val) {
+            overflow = true;
+          }
+        }
+      }
+
+      TORCH_CHECK(!overflow,
+                  "Convolution output size overflow: the computed output dimensions are too large. "
+                  "This is likely caused by very large padding values. "
+                  "Input size: ", at::symint::sizes<T>(input), ", weight size: ", weight_sizes,
+                  ", padding: ", params.padding, ", stride: ", params.stride, ", dilation: ", params.dilation);
+    }
   } else { // transposed
     for (const auto i : c10::irange(2, k)) {
       TORCH_CHECK(padding[i-2] <= (std::numeric_limits<T>::max() - padding[i-2]),
@@ -719,6 +776,67 @@ static void check_shape_forward(const at::Tensor& input,
              "Given transposed=", transposed, ", weight of size ", weight_sizes,
              ", expected bias to be 1-dimensional with ", weight_sizes[1] * groups, " elements",
              ", but got bias of size ", at::symint::sizes<T>(bias), " instead");
+
+    // Check for output size overflow in transposed convolution.
+    // For transposed conv: output_dim = (input_dim - 1) * stride - 2 * padding + dilation * (kernel - 1) + output_padding + 1
+    {
+      constexpr int64_t int64_max = std::numeric_limits<int64_t>::max();
+      int64_t output_numel = 1;
+      bool overflow = false;
+
+      // Include batch size
+      auto batch_size = at::symint::size<T>(input, 0);
+      // For transposed conv, output channels = weight[1] * groups
+      auto out_channels = weight_sizes[1] * groups;
+
+      // Compute each spatial output dimension
+      for (const auto i : c10::irange(2, k)) {
+        T input_dim = at::symint::size<T>(input, i);
+        T kernel_dim = weight_sizes[i];
+        T stride_val = params.stride[i-2];
+        T pad_val = padding[i-2];
+        T dil_val = dilation[i-2];
+        T out_pad_val = params.output_padding[i-2];
+
+        // output_dim = (input_dim - 1) * stride - 2 * padding + dilation * (kernel - 1) + output_padding + 1
+        T output_dim = (input_dim - 1) * stride_val - 2 * pad_val + dil_val * (kernel_dim - 1) + out_pad_val + 1;
+
+        // Check if this dimension alone is too large
+        if (output_dim > int64_max / 2 || output_dim <= 0) {
+          overflow = true;
+          break;
+        }
+
+        // Check for overflow when multiplying
+        int64_t output_dim_val = static_cast<int64_t>(output_dim);
+        if (output_numel > int64_max / output_dim_val) {
+          overflow = true;
+          break;
+        }
+        output_numel *= output_dim_val;
+      }
+
+      // Also check batch and channel dimensions
+      if (!overflow) {
+        int64_t batch_val = static_cast<int64_t>(batch_size);
+        int64_t channels_val = static_cast<int64_t>(out_channels);
+        if (batch_val > 0 && output_numel > int64_max / batch_val) {
+          overflow = true;
+        } else {
+          output_numel *= batch_val;
+          if (channels_val > 0 && output_numel > int64_max / channels_val) {
+            overflow = true;
+          }
+        }
+      }
+
+      TORCH_CHECK(!overflow,
+                  "Transposed convolution output size overflow: the computed output dimensions are too large. "
+                  "This is likely caused by very large stride or output_padding values. "
+                  "Input size: ", at::symint::sizes<T>(input), ", weight size: ", weight_sizes,
+                  ", padding: ", params.padding, ", stride: ", params.stride,
+                  ", dilation: ", params.dilation, ", output_padding: ", params.output_padding);
+    }
   }
 }
 

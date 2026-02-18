@@ -381,6 +381,40 @@ class TestConvolutionNN(NNTestCase):
                 padding=[2**31, 2**31, 2**31],
             )
 
+    def test_conv3d_output_size_overflow(self):
+        """Test that Conv3d with padding that causes output size overflow raises proper error.
+
+        This tests the fix for issue #165976 where padding=2^55 caused an internal
+        assertion failure instead of a user-friendly error message.
+
+        The issue is that while 2*padding fits in int64, the computed output size
+        (batch * channels * d * h * w) can overflow when padding is very large.
+        """
+        # padding = 2^55 causes output size overflow
+        # Each output dim ≈ 2^56, so 3D spatial output ≈ (2^56)^3 = 2^168 which overflows int64
+        padding = 36028797018963968  # 2^55
+
+        conv = nn.Conv3d(3, 16, kernel_size=3, padding=padding)
+        x = torch.randn(1, 3, 2, 3, 3)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"overflow|too large|too small",
+        ):
+            conv(x)
+
+    def test_conv2d_output_size_overflow(self):
+        """Test that Conv2d with large padding that causes output size overflow raises proper error."""
+        # Use a large padding value that would cause output numel to overflow
+        padding = 36028797018963968  # 2^55
+
+        conv = nn.Conv2d(3, 16, kernel_size=3, padding=padding)
+        x = torch.randn(1, 3, 4, 4)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"overflow|too large|too small",
+        ):
+            conv(x)
+
     def test_Conv1d_module_same_padding(self):
         # Compare module against functional: without strides/dilation, asymmetric padding
         x = torch.rand(1, 1, 20)
