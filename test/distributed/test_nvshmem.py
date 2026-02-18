@@ -328,7 +328,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         )
         torch.testing.assert_close(out, expected)
 
-    @skip_if_rocm_multiprocess
     def test_all_to_all_vdev(self) -> None:
         self._init_device()
 

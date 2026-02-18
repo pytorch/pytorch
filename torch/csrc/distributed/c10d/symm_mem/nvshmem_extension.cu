@@ -15,13 +15,12 @@
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
 
-#ifndef USE_ROCM
 // NVSHMEM minimum SM arch
 #define _NVSHMEM_MIN_SM_ARCH 700
 
 // If CUDA_ARCH is less than sm_70, or on sm_110, skip NVSHMEM device APIs
 #define _NVSHMEM_DEVICELIB_SUPPORTED 1
-#if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__) && !defined(USE_ROCM)
 #  if (__CUDA_ARCH__ < _NVSHMEM_MIN_SM_ARCH) || (__CUDA_ARCH__ == 1100)
 #    undef _NVSHMEM_DEVICELIB_SUPPORTED
 #  endif
@@ -32,7 +31,6 @@
 // Only include host APIs. See nvshmem.h for details.
 #  define NVSHMEM_HOSTLIB_ONLY
 #endif  // Must be done before nvshmem.h is included
-#endif
 
 #ifdef USE_ROCM
 #include <c10/hip/HIPException.h>
@@ -290,7 +288,7 @@ __global__ void allToAllV(
     auto block_offset = block_size * (bid % blocks_per_peer);
     auto source_offset = source_offsets[peer] * stride + block_offset;
     auto write_offset = peer_offsets[peer] * stride + block_offset;
-    rocshmem_getmem_nbi(
+    rocshmem_getmem_nbi_wg(
         (char*)recv_data + write_offset,
         (char*)send_data + source_offset,
         block_size,
@@ -413,9 +411,6 @@ void all_to_all_vdev(
   int rank = input_hdl->get_rank();
   int world_size = input_hdl->get_world_size();
 
-  std::cerr << "[all_to_all_vdev] rank=" << rank << " world_size=" << world_size
-            << " group=" << group_name << std::endl;
-
   void* input_ptr = input.data_ptr();
   void* output_ptr = out.mutable_data_ptr();
   int64_t* in_splits_ptr = (int64_t*)(in_splits.const_data_ptr());
@@ -428,10 +423,6 @@ void all_to_all_vdev(
   auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
   auto stream = at::cuda::getCurrentCUDAStream(device.index());
 
-  std::cerr << "[all_to_all_vdev] rank=" << rank << " team=" << (void*)team
-            << " in_splits_ptr=" << (void*)in_splits_ptr
-            << " out_splits_offsets_ptr=" << (void*)out_splits_offsets_ptr << std::endl;
-
   // Exchange output splits and source offsets
 #if defined(USE_ROCM)
   // Team is host-allocated; device kernel cannot dereference it (HSA 0x1016).
@@ -442,14 +433,12 @@ void all_to_all_vdev(
       {world_size},
       at::kInt).clone().to(device);
   const int* global_ranks_ptr = global_ranks_t.const_data_ptr<int>();
-
-  std::cerr << "[all_to_all_vdev] rank=" << rank << " launching exchangeSplitAndOffset"
-            << " (1 block, " << THREADS_PER_BLOCK << " threads)" << std::endl;
+  int mype = rocshmem_team_my_pe(team);
+  int npes = rocshmem_team_n_pes(team);
   exchangeSplitAndOffset<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
-      in_splits_ptr, out_splits_offsets_ptr, rank, world_size, global_ranks_ptr);
+      in_splits_ptr, out_splits_offsets_ptr, mype, npes, global_ranks_ptr);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   rocshmem::rocshmem_barrier_all();
-  std::cerr << "[all_to_all_vdev] rank=" << rank << " exchangeSplitAndOffset OK, barrier done" << std::endl;
 #else
   // Use collective launch because kernel involves nvshmem barrier
   void* args0[] = {
@@ -474,18 +463,13 @@ void all_to_all_vdev(
   // Stride at dim 0 (assuming input is contiguous, TODO)
   size_t stride_bytes = input.stride(0) * input.element_size();
 
-  std::cerr << "[all_to_all_vdev] rank=" << rank << " num_blocks=" << num_blocks
-            << " stride_bytes=" << stride_bytes << " input_size=" << input_size << std::endl;
-
   // All to all data exchange
 #if defined(USE_ROCM)
-  std::cerr << "[all_to_all_vdev] rank=" << rank << " launching allToAllV" << std::endl;
   allToAllV<<<dim3(num_blocks), dim3(THREADS_PER_BLOCK), 0, stream>>>(
       input_ptr, output_ptr, out_splits_offsets_ptr,
-      stride_bytes, rank, world_size, global_ranks_ptr);
+      stride_bytes, mype, npes, global_ranks_ptr);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   C10_CUDA_CHECK(hipStreamSynchronize(stream));
-  std::cerr << "[all_to_all_vdev] rank=" << rank << " allToAllV launch OK" << std::endl;
 #else
   void* args1[] = {
       &input_ptr,
@@ -521,7 +505,7 @@ void all_to_all_vdev(
 /* Template parameters:
  * `HAS_IN_OFFSETS` is a boolean flag indicating whether `in_splits_offsets` has offsets (2nd row) or not.
 */
-
+#if !defined(USE_ROCM)
 template <bool HAS_IN_OFFSETS>
 __global__ void exchangeSplitAndOffset_2d(int64_t* in_splits_offsets, int64_t* out_splits_offsets, nvshmem_team_t team, int ne, size_t input_dim0, bool rank_is_row_in) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
@@ -1038,7 +1022,6 @@ void all_to_all_vdev_2d_offset(
 }
 
 /* Tiled Communication */
-#if !defined(USE_ROCM)
 using Shape2D = nvshmemx::shape<int64_t, int64_t>;
 using Stride2D = nvshmemx::stride<int64_t, int64_t>;
 
@@ -1238,9 +1221,9 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("nvshmem_put_with_signal", c10d::nvshmem_extension::nvshmem_put_with_signal);
   m.impl("nvshmem_all_to_all", c10d::nvshmem_extension::nvshmem_all_to_all);
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
+#if !defined(USE_ROCM)
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
-#if !defined(USE_ROCM)
   m.impl("tile_reduce", c10d::nvshmem_extension::tile_reduce);
   m.impl("multi_root_tile_reduce", c10d::nvshmem_extension::multi_root_tile_reduce);
 #endif
