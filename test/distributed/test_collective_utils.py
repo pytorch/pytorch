@@ -13,7 +13,10 @@ from torch.distributed.collective_utils import (
 )
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing import FileCheck
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -132,6 +135,7 @@ class TestCollectiveUtils(MultiProcessTestCase):
             all_gather(data_or_fn=func)
 
     @parametrize("device", ["cpu", "cuda"])
+    @skip_if_lt_x_gpu(4)
     def test_check_rng_sync(
         self,
         device,
