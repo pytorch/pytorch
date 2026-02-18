@@ -601,13 +601,35 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
         return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
+
+    # For comparison operations (override_return_dtype=torch.bool), we need to match
+    # eager behavior which promotes scalars to the tensor's dtype, not to the
+    # mathematically "correct" common promoted type. This fixes the BF16/FP32 comparison
+    # issue where eager and inductor had different promotion behavior.
+    if override_return_dtype == torch.bool:
+        # For comparison operations, promote scalars to tensor's dtype (eager behavior)
+        promoted_dtype = ex.get_dtype()
+    else:
+        # For non-comparison operations, use proper type promotion
+        promoted_dtype = get_promoted_dtype(
+            *inputs,
+            type_promotion_kind=type_promotion_kind or ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )
+
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
+            # Convert scalar to target dtype precision to match eager behavior
+            if promoted_dtype in (torch.bfloat16, torch.float16):
+                # For low precision dtypes, convert through PyTorch tensor to get proper precision
+                converted_value = torch.tensor(x, dtype=promoted_dtype).item()
+            else:
+                converted_value = x
+
             out.append(
                 ExpandView.create(
                     ir.Constant(
-                        value=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
+                        value=converted_value, dtype=promoted_dtype, device=ex.get_device_or_error()
                     ),
                     list(ex.get_size()),
                 )
@@ -616,7 +638,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
             out.append(
                 ExpandView.create(
                     IndexingConstant(
-                        index=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
+                        index=x, dtype=promoted_dtype, device=ex.get_device_or_error()
                     ),
                     list(ex.get_size()),
                 )
