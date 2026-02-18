@@ -228,7 +228,7 @@ def check_files(
                 name="json-parse-error",
                 original=None,
                 replacement=None,
-                description=f"Failed to parse pyrefly JSON output: {e}\nRaw stdout: {stdout}",
+                description=f"Failed to parse pyrefly JSON output: {e}",
             )
         ]
 
