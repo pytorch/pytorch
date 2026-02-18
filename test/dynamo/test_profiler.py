@@ -259,7 +259,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             return x * r
 
         with torch.profiler.profile() as prof:
-            fn_c = torch.compile(fn)
+            fn_c = torch.compile(fn, backend="eager")
 
             fn_c(
                 torch.randn(10),
