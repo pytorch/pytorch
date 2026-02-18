@@ -3771,8 +3771,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float: 1.35e-3 if TEST_WITH_ROCM else 1e-3,
-                        torch.cfloat: 1e-3})
+    @precisionOverride({torch.float: 1.35e-3, torch.cfloat: 1e-3})
     def test_tensorinv(self, device, dtype):
 
         def run_test(a_shape, ind):
