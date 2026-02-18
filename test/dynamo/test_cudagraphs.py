@@ -8,6 +8,7 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch._inductor.cudagraph_trees as cudagraph_trees
 from torch._dynamo.testing import same
 from torch.testing._internal.common_utils import TEST_CUDA_GRAPH
 
@@ -197,6 +198,35 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
         x = torch.empty(20, device="cuda:0")
         fn(x)
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "cuda graph test is skipped")
+    def test_inference_mode_does_not_need_mark_step_begin(self):
+        # This tests that torch.inference_mode() removes the need for
+        # the user to call torch.compiler.mark_step_begin()
+
+        # reset to make sure that warned_functions is empty
+        cudagraph_trees.reset_cudagraph_trees()
+        self.addCleanup(cudagraph_trees.reset_cudagraph_trees)
+
+        def foo(x):
+            with torch.inference_mode():
+                return x.sin()
+
+        x = torch.randn(4, device="cuda", requires_grad=False)
+
+        compiled_foo = torch.compile(foo, backend="cudagraphs")
+
+        # First call runs eager, second captures and replays, rest
+        # should just replay.
+        for _ in range(4):
+            out = compiled_foo(x)
+            self.assertTrue(same(out, foo(x)))
+
+        manager = cudagraph_trees.get_manager(x.device.index)
+        self.assertTrue(
+            len(manager.warned_functions) == 0,
+            "Replaying inference workload should not warn about repeated graph captures",
+        )
 
 
 if __name__ == "__main__":
