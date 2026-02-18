@@ -1228,7 +1228,8 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def mod(x, y):
-        out = f"({x} % {y})"
+        # Add division by zero check to match eager behavior
+        out = f"triton_helpers.remainder_with_zero_check({x}, {y})"
         if low_precision_fp_var(x) or low_precision_fp_var(y):
             out_dtype = get_dtype_handler().mod(x, y)
             if out_dtype in (torch.float16, torch.float32):

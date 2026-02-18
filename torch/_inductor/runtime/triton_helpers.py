@@ -89,6 +89,13 @@ def remainder_integer(a, b):
 
 
 @triton.jit
+def remainder_with_zero_check(a, b):
+    # Check for division by zero to match eager behavior
+    tl.device_assert(b != 0, "ZeroDivisionError")
+    return a % b
+
+
+@triton.jit
 def is_floating(x):
     return promote_to_tensor(x).dtype.is_floating()
 
