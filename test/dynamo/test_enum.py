@@ -303,6 +303,8 @@ class EnumTests(torch._dynamo.test_case.TestCase):
             total = 0
             for color in Color:
                 total += color.value
+            for color in Color.__iter__():
+                total += color.value
             return x + total
 
         x = torch.randn(4)
