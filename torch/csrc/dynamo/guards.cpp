@@ -3740,6 +3740,9 @@ class RootGuardManager : public GuardManager {
     // Clean up dict pointer recording for tag safe roots
     reset_dict_tag_recording_variables();
 
+    // Reset exclusion guard flag for this evaluation
+    exclusion_guard_failed = false;
+
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
       LocalState state;
@@ -3943,6 +3946,11 @@ class RootGuardManager : public GuardManager {
   // Local state for TENSOR_MATCH guards.
   LocalState _local_state;
 
+  // Set by EXCLUSION_GUARD when the exclusion check fails. The cache
+  // walk in lookup() uses this to implement best-effort exclusion:
+  // prefer entries without the flag, fall back to flagged entries.
+  bool exclusion_guard_failed = false;
+
  private:
   // All the relational guards under this guard manager. We only use these
   // when the guard evaluates to False. This ensures that guard state is reset
@@ -3995,6 +4003,66 @@ class RootGuardManager : public GuardManager {
   GuardManager* _current_tag_safe_root{nullptr};
   std::vector<std::pair<PyObject*, uint64_t>> _recorded_dict_pointers;
   std::vector<PyObject*> _recorded_tensor_pointers;
+};
+
+// An exclusion guard is a "soft" guard used for guard exclusion in
+// automatic_dynamic. Unlike LAMBDA_GUARD which causes a hard rejection,
+// EXCLUSION_GUARD always returns true but sets a flag on the
+// RootGuardManager when the check fails. The cache walk in lookup()
+// uses this flag to prefer other cache entries (e.g., static graphs)
+// but falls back to this entry if no better match exists.
+class EXCLUSION_GUARD : public LeafGuard {
+ public:
+  EXCLUSION_GUARD(
+      RootGuardManager* root_guard_manager,
+      py::object guard_check_fn,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _root(root_guard_manager) {
+    if (py::isinstance<py::function>(guard_check_fn)) {
+      _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
+    } else {
+      throw py::type_error("EXCLUSION_GUARD expects (callable, str)");
+    }
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value);
+    if (x == nullptr) {
+      PyErr_Clear();
+      _root->exclusion_guard_failed = true;
+      return true;
+    }
+    bool result = PyObject_IsTrue(x);
+    Py_DECREF(x);
+    if (!result) {
+      _root->exclusion_guard_failed = true;
+    }
+    return true; // always pass
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value);
+    if (x == nullptr) {
+      PyErr_Clear();
+      _root->exclusion_guard_failed = true;
+      return GuardDebugInfo(true, 0);
+    }
+    bool result = PyObject_IsTrue(x);
+    Py_DECREF(x);
+    if (!result) {
+      _root->exclusion_guard_failed = true;
+    }
+    return GuardDebugInfo(true, 0);
+  }
+
+ private:
+  py::function _guard_check_fn;
+  RootGuardManager* _root;
 };
 
 /*
@@ -6815,6 +6883,13 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
+bool get_root_guard_manager_exclusion_flag(void* root) {
+  if (root == nullptr) {
+    return false;
+  }
+  return ((RootGuardManager*)root)->exclusion_guard_failed;
+}
+
 PyObject* torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
@@ -7215,6 +7290,18 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts,
              py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<LAMBDA_GUARD>(
+                self.get_root(),
+                std::move(lambda),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_exclusion_guard",
+          [](GuardManager& self,
+             py::object lambda,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<EXCLUSION_GUARD>(
                 self.get_root(),
                 std::move(lambda),
                 std::move(verbose_code_parts),

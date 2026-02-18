@@ -229,6 +229,12 @@ class GuardManager:
         verbose_code_parts: list[str],
         user_stack: Optional[traceback.StackSummary],
     ) -> None: ...
+    def add_exclusion_guard(
+        self,
+        user_lambda: Callable[..., Any],
+        verbose_code_parts: list[str],
+        user_stack: Optional[traceback.StackSummary],
+    ) -> None: ...
     def add_id_match_guard(
         self,
         id_val: int,

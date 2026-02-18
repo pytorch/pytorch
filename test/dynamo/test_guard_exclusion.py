@@ -32,7 +32,6 @@ class GraphTracker:
 
 
 @skipIfTorchDynamo("uses custom backend incompatible with PYTORCH_TEST_WITH_DYNAMO")
-@torch._dynamo.config.patch(guard_exclusion_for_automatic_dynamic=True)
 class TestGuardExclusion(TestCase):
     def setUp(self):
         super().setUp()
