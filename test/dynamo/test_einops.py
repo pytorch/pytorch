@@ -136,7 +136,7 @@ class TorchModuleWithOperations(nn.Module):
         addition = einsum(x_abc, x_abcd, suf("a b c , a b c d -> d"))[0]
         return x1 + addition
 
-compiled_fn = torch.compile(TorchModuleWithOperations(), fullgraph=True)
+compiled_fn = torch.compile(TorchModuleWithOperations(), fullgraph=True, backend="eager")
 x = torch.arange(2 * 3 * 5).view(2, 3, 5)
 y = compiled_fn(x)
 
