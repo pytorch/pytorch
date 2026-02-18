@@ -119,8 +119,36 @@ class DistTestCases:
         backend_feature["xpu"] = {"xccl"}
 
 
-def requires_ddp_rank(device):
+def requires_ddp_rank(device) -> bool:
     return device in DDP_RANK_DEVICES
+
+
+def exit_if_lt_x_cuda_devs(x: int):
+    """Exit process unless at least the given number of CUDA devices are available"""
+    if torch.cuda.device_count() < x:
+        sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+
+
+# allows you to check for multiple accelerator irrespective of device type
+# to add new device types to this check simply follow the same format
+# and append an elif with the conditional and appropriate device count function for your new device
+def exit_if_lt_x_accelerators(x: int):
+    if torch.accelerator.device_count() < x:
+        sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+
+
+def require_accelerator_for_each_rank(func):
+    """Check that at least `self.world_size` accelerators are available.
+    Skip early if none are available."""
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        exit_if_lt_x_accelerators(self.world_size)
+        return func(self, *args, **kwargs)
+
+    return unittest.skipUnless(
+        torch.accelerator.current_accelerator is not None, TEST_SKIPS["no_cuda"].message
+    )(wrapper)
 
 
 def skip_if_no_gpu(func):
@@ -129,8 +157,6 @@ def skip_if_no_gpu(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not (TEST_CUDA or TEST_HPU or TEST_XPU):
-            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if TEST_CUDA and torch.cuda.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
@@ -141,7 +167,9 @@ def skip_if_no_gpu(func):
 
         return func(*args, **kwargs)
 
-    return wrapper
+    return unittest.skipUnless(
+        TEST_CUDA or TEST_HPU or TEST_XPU, TEST_SKIPS["no_cuda"].message
+    )(wrapper)
 
 
 # TODO (kwen2501): what is the purpose of this decorator?  Tests with this
@@ -172,37 +200,16 @@ def skip_if_odd_worldsize(func):
     return wrapper
 
 
-def require_n_gpus_for_nccl_backend(n, backend):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if backend == "nccl" and torch.cuda.device_count() < n:
-                sys.exit(TEST_SKIPS[f"multi-gpu-{n}"].exit_code)
-            else:
-                return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
 def import_transformers_or_skip():
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                from transformers import AutoModelForMaskedLM, BertConfig  # noqa: F401
+    try:
+        from transformers import AutoModelForMaskedLM, BertConfig  # noqa: F401
 
-                return func(*args, **kwargs)
-            except ImportError:
-                sys.exit(TEST_SKIPS["importerror"].exit_code)
-
-        return wrapper
-
-    return decorator
+        return unittest.skipIf(False, "Dummy")
+    except ImportError:
+        return unittest.skip(TEST_SKIPS["importerror"].message)
 
 
-def at_least_x_gpu(x):
+def at_least_x_gpu(x: int) -> bool:
     if TEST_CUDA and torch.cuda.device_count() >= x:
         return True
     if TEST_HPU and torch.hpu.device_count() >= x:
@@ -220,7 +227,7 @@ def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
     return True
 
 
-def skip_if_lt_x_gpu(x, *, allow_cpu=False):
+def skip_if_lt_x_gpu(x: int, *, allow_cpu=False):
     """Skip if fewer than x accelerators available.
 
     Args:
@@ -231,21 +238,18 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
-                return func(*args, **kwargs)
-            if TEST_HPU and torch.hpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if TEST_XPU and torch.xpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
-                return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
         return wrapper
 
-    return decorator
+    if not at_least_x_gpu(x):
+        return decorator
+    return unittest.skipUnless(
+        allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU),
+        TEST_SKIPS[f"multi-gpu-{x}"].message,
+    )
 
 
 def requires_world_size(n: int):
@@ -290,21 +294,15 @@ def get_required_world_size(obj: Any, default: int) -> int:
 
 
 # This decorator helps avoiding initializing cuda while testing other backends
-def nccl_skip_if_lt_x_gpu(backend, x):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if backend != "nccl":
-                return func(*args, **kwargs)
-            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
-                return func(*args, **kwargs)
-            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
-            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
-                sys.exit(test_skip.exit_code)
+def require_n_gpus_for_nccl_backend(n: int, backend: str):
+    return unittest.skipUnless(
+        backend != "nccl" or torch.cuda.device_count() >= n,
+        TEST_SKIPS[f"multi-gpu-{n}"].message,
+    )
 
-        return wrapper
 
-    return decorator
+def nccl_skip_if_lt_x_gpu(backend: str, x: int):
+    return require_n_gpus_for_nccl_backend(x, backend)
 
 
 def verify_ddp_error_logged(model_DDP, err_substr):
