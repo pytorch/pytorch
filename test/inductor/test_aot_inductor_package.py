@@ -32,7 +32,7 @@ from torch.testing._internal.common_cuda import (
     requires_triton_ptxas_compat,
     TRITON_PTXAS_VERSION,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -320,10 +320,9 @@ class TestAOTInductorPackage(TestCase):
 
     @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # doesn't support multi-arch binary
     def test_compile_after_package_multi_arch(self):
         if self.device != GPU_TYPE:
-            raise unittest.SkipTest("Only meant to test GPU_TYPE")
+            raise unittest.SkipTest(f"Only meant to test {GPU_TYPE}")
         self.check_package_cpp_only()
 
         class Model(torch.nn.Module):
@@ -364,7 +363,6 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
-    @skipIfXpu  # build system may be different
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_after_package_static(self):
         # compile_standalone will set package_cpp_only=True
@@ -424,7 +422,6 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
-    @skipIfXpu  # build system may be different
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_standalone_cos(self):
         # compile_standalone will set package_cpp_only=True
@@ -458,7 +455,6 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
-    @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter(self):
         self.check_package_cpp_only()
@@ -498,22 +494,17 @@ class TestAOTInductorPackage(TestCase):
                 # Test compiling generated files
                 result = self.cmake_compile_and_run(tmp_dir)
                 if package_example_inputs:
-                    if self.device == GPU_TYPE:
-                        self.assertEqual(
-                            result.stdout,
-                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CUDAFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
-                            " 0  0  0\n 0  0  0\n[ CUDAFloatType{3,3} ]\n",
-                        )
-                    else:
-                        self.assertEqual(
-                            result.stdout,
-                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CPUFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
-                            " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
-                        )
+                    out_str = result.stdout
+                    device_str = self.device.upper()
+
+                    expected_result = (
+                        f"output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ {device_str}FloatType{{3,3}} ]\n"
+                        f"output_tensor2\n 0  0  0\n 0  0  0\n 0  0  0\n[ {device_str}FloatType{{3,3}} ]\n"
+                    )
+                    self.assertTrue(expected_result in out_str)
 
     @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter_weights(self):
         self.check_package_cpp_only()

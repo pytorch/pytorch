@@ -405,6 +405,11 @@ option(USE_MIMALLOC "Use mimalloc" OFF)
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
 if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
   set(USE_MIMALLOC ON)
+  # Disable OPT flags for mimalloc on aarch64 as it breaks ARMv8.0
+  # See https://github.com/pytorch/pytorch/issues/174344
+  if(CPU_AARCH64)
+    set(MI_NO_OPT_ARCH ON)
+  endif()
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
   # https://github.com/pytorch/pytorch/issues/138994
@@ -940,8 +945,8 @@ cmake_dependent_option(
   OFF)
 
 
-IF(USE_ROCM AND "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Setting USE_MSLK for gfx942 to ON by default, doing ROCM build")
+IF(USE_ROCM AND ("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
+  message(WARNING "Setting USE_MSLK for gfx942/gfx950 to ON by default, doing ROCM build")
   set(USE_MSLK_DEFAULT ON)
 elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
   message(STATUS "Setting USE_MSLK to ON by default , doing CUDA build for SM100a")
