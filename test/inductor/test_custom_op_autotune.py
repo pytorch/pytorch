@@ -350,7 +350,7 @@ class TestCustomOpAutoTune(TestCase):
                 expected,
                 rtol=2e-1,
                 atol=5e-1,
-                msg=f"Failed for shape ({m}, {k}, {n})",
+                #msg=f"Failed for shape ({m}, {k}, {n})",
             )
 
     @skipIfXpu
