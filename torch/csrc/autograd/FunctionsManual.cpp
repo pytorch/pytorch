@@ -7184,6 +7184,8 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     Tensor src_is_result = (src == value).to(self.scalar_type());
     Tensor N_to_distribute =
         self_is_result.scatter_add(dim, index, src_is_result);
+    // Avoid division by zero when N_to_distribute contains zeros
+    N_to_distribute = N_to_distribute.masked_fill(N_to_distribute == 0, 1);
     Tensor grad_distributed = grad / N_to_distribute;
     grad_self = (self == result) * grad_distributed;
     grad_src = (src == value) * grad_distributed.gather(dim, index);
