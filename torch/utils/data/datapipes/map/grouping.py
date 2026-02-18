@@ -66,6 +66,7 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
                 raise IndexError(f"Index {index} is out of bound.") from e
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if isinstance(self.datapipe, Sized):
             if self.drop_last:
                 return len(self.datapipe) // self.batch_size
