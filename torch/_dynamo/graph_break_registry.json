@@ -1546,6 +1546,17 @@
       ]
     }
   ],
+  "GB4026": [
+    {
+      "Gb_type": "triton.set_allocator not supported",
+      "Context": "triton.set_allocator called inside compiled region",
+      "Explanation": "triton.set_allocator is not supported inside torch.compile. It modifies global Triton allocator state and cannot be traced.",
+      "Hints": [
+        "Move triton.set_allocator() outside of the torch.compile region ",
+        "(call it before the compiled function)."
+      ]
+    }
+  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",
@@ -3876,6 +3887,20 @@
       "Explanation": "Expected init leaves.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB1297": [
+    {
+      "Gb_type": "Reconstruction failure (self-referential)",
+      "Context": "str(self)",
+      "Explanation": "Dynamo tried to reconstruct sourceless variable {self}, but it is self-referential. Dynamo must manually implement reconstruction rules for self-referentiable sourceless variables.",
+      "Hints": [
+        "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable ",
+        "that Dynamo cannot reconstruct, then remove it from the return statement.",
+        "Remove the self-reference in the variable. A self-referring list, for example, is `l = []; l.append(l)`.",
+        "Report an issue to PyTorch if you need self-referential reconstrtuction support.",
+        "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
       ]
     }
   ],
