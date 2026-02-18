@@ -233,7 +233,6 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
-          path: pytorch
           show-progress: false
       - uses: !{{ common.download_artifact_action }}
         name: Download Wheel Artifact
@@ -244,7 +243,7 @@ jobs:
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform linux \
