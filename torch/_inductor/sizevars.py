@@ -504,7 +504,7 @@ class SizeVarAllocator:
         return self.guard_or_false(sympy.Eq(size, 1))
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
-        """return the smaller of left and right, and guard on that choice"""
+        """Return the smaller of left and right, and guard on that choice."""
         if isinstance(left, Expr):
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
@@ -513,12 +513,28 @@ class SizeVarAllocator:
             return left
         if self.guard_or_false(sympy.Le(right, left)):
             return right
+
+        # GCD fallback: if gcd(a, b) == a then a divides b, implying a <= b.
+        #
+        # TODO: This is NOT always sound for unbacked symints.  It can
+        # produce wrong results when:
+        #   - inputs can be negative: gcd(u0, 10*u0) = u0, returns u0,
+        #     but if u0 < 0 then u0 > 10*u0 (e.g. u0=-1: min(-1,-10) = -10)
+        #   - a factor can be zero: gcd(u0, u0*u1) = u0, returns u0,
+        #     but if u1=0 then u0*u1=0 < u0 (e.g. u0=5,u1=0: min(5,0) = 0)
+        # TODO shall we add a runtime assertion at least.
+        gcd = sympy.gcd(left, right)
+        if left == gcd:
+            return left
+        if right == gcd:
+            return right
+
         raise TypeError(
             f"evaluate_min({left}, {right}) with unbacked symints"
         ) from None
 
     def evaluate_max(self, left: Expr, right: Expr) -> Expr:
-        """return the larger of left and right, and guard on that choice"""
+        """Return the larger of left and right, and guard on that choice."""
         # Always choose the opposite of eval min for consistency
         # This means min(a, b) and max(a, b) produce the same guards
         min_val = self.evaluate_min(left, right)
@@ -736,6 +752,7 @@ class SizeVarAllocator:
         assert fallback is not None
 
         original = expr
+        expr = self.simplify(expr)
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
@@ -1113,11 +1130,12 @@ class SizeVarAllocator:
         while sub_cnt < sub_cnt_limit:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
-                return new_expr
+                break
             expr = sympy.factor(new_expr)
             sub_cnt += 1
+        else:
+            log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
 
-        log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
         return expr
