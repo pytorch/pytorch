@@ -49,6 +49,9 @@ from torch.testing._internal.opinfo import core as opinfo_core
 from torch.utils import _pytree as pytree
 
 
+def bar() -> int:
+    return ""
+
 # A combo key is (input_placement_strs, output_placement_str)
 ComboKey = tuple[tuple[str, ...], str]
 

@@ -40,6 +40,12 @@ from enum import Enum
 from typing import NamedTuple
 
 
+def foo() -> int:
+    return ""
+
+def bar() -> str:
+    return []
+
 class LintSeverity(str, Enum):
     ERROR = "error"
     WARNING = "warning"
@@ -226,7 +232,7 @@ def check_files(
                 name="json-parse-error",
                 original=None,
                 replacement=None,
-                description=f"Failed to parse pyrefly JSON output: {e}",
+                description=f"Failed to parse pyrefly JSON output: {e}\nRaw stdout (first 1000 chars): {stdout[:1000]}",
             )
         ]
 
