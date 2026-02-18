@@ -2844,6 +2844,29 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
         )
 
 
+def linear_cross_entropy_loss_reference(input, linear_weight, target,
+                                        weight=None,
+                                        ignore_index=-100,
+                                        reduction='mean',
+                                        label_smoothing=0.0):
+    num_classes = linear_weight.shape[0]
+    if len(linear_weight.shape) > 2:
+        linear_weight = linear_weight.reshape((-1, linear_weight.shape[-1]))
+    logits = F.linear(input, linear_weight)
+    if target.dtype.is_floating_point:
+        logits_shape = target.shape
+    elif target.shape:
+        logits_shape = (target.shape[0], num_classes, *target.shape[1:])
+    else:
+        logits_shape = (num_classes,)
+    logits = logits.reshape(logits_shape)
+    return F.cross_entropy(
+        logits, target, weight=weight,
+        reduction=reduction, ignore_index=ignore_index,
+        label_smoothing=label_smoothing
+    )
+
+
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
                       reduction='mean'):
 
@@ -3086,7 +3109,8 @@ loss_reference_fns: dict['str', Callable] = {
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
     'CTCLoss': ctcloss_reference,
-    'CrossEntropyLoss': cross_entropy_loss_reference
+    'CrossEntropyLoss': cross_entropy_loss_reference,
+    'LinearCrossEntropyLoss': linear_cross_entropy_loss_reference,
 }
 
 
