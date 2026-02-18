@@ -147,7 +147,7 @@ jobs:
         with:
           build-targets: vllm
           docker-image: ${{ env.MANYLINUX_IMAGE }}
-          cuda-arch-list: '8.0;8.9;9.0;10.0a;12.0'
+          cuda-arch-list: '8.0 8.9 9.0 10.0a 12.0'
           torch-wheel-dir: ${{ runner.temp }}/artifacts
           output-dir: ${{ runner.temp }}/artifacts/externals
 
