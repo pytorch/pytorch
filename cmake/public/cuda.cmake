@@ -377,7 +377,7 @@ elseif(CUDA_DEVICE_DEBUG)
 endif()
 
 # needed for compat with newer versions of clang that use C++20 mangling rules
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
   list(APPEND CUDA_NVCC_FLAGS "-fclang-abi-compat=17")
 endif()
 
