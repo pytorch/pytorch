@@ -5016,12 +5016,14 @@ def empty(
     if memory_format == torch.contiguous_format:
         strides = utils.make_contiguous_strides_for(shape)
     elif memory_format == torch.channels_last_3d:
+        # pyrefly: ignore [bad-specialization]
         strides = utils.make_channels_last_3d_strides_for(shape)
     else:  # memory_format == torch.channels_last
         torch._check(
             memory_format == torch.channels_last,
             lambda: f"torch.empty: received an unknown memory format {memory_format}!",
         )
+        # pyrefly: ignore [bad-specialization]
         strides = utils.make_channels_last_2d_strides_for(shape)
 
     return torch.empty_strided(

@@ -2798,6 +2798,41 @@ if HAS_GPU:
 class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
+    # Regression test for #169782
+    @make_mutation_test
+    def test_with_none_arg():
+        @triton.jit
+        def add_kernel_with_none_arg(
+            in_ptr0,
+            optional_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            if optional_ptr is not None:
+                y = tl.load(optional_ptr + offsets, mask=mask)
+                x = x + y
+            tl.store(out_ptr + offsets, x, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_kernel_with_none_arg,
+            {
+                "in_ptr0": t,
+                "optional_ptr": None,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            {},
+            ["out_ptr"],
+        )
+
     @make_mutation_test
     def test_out_of_order_kernel():
         @triton.jit

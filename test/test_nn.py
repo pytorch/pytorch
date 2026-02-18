@@ -8773,6 +8773,89 @@ class TestNNDeviceType(NNTestCase):
         # reduce memory usage
         self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
 
+    def test_avg_pool2d_invalid_parameters(self, device):
+        """Test that avg_pool2d properly validates parameters and prevents integer overflow.
+
+        This tests the fix for issue #145077 where extremely large or negative values
+        could cause crashes or undefined behavior.
+        """
+        x = torch.randn(1, 2, 4, 4, device=device, dtype=torch.float32)
+
+        # Extremely large kernel_size (would overflow int)
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=(9223372036854775807, 100),  # INT64_MAX
+                stride=1,
+                padding=0
+            )
+
+        # Negative stride (invalid)
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=(-1, 2),  # Negative stride
+                padding=0
+            )
+
+        # Zero stride (invalid)
+        with self.assertRaisesRegex(RuntimeError, r"stride should not be zero"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=0,  # Zero stride
+                padding=0
+            )
+
+        # Extremely large stride (would overflow int)
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=(1, 3010182406857593769),  # Extremely large
+                padding=0
+            )
+
+        # Negative padding (invalid)
+        with self.assertRaisesRegex(RuntimeError, r"pad must be non-negative"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=1,
+                padding=(-1, 0)  # Negative padding
+            )
+
+        # Extremely large padding (would overflow int)
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=2,
+                stride=1,
+                padding=(9223372036854775807, 0)  # INT64_MAX
+            )
+
+        # Combined invalid parameters
+        with self.assertRaisesRegex(RuntimeError, r"integer out of range"):
+            torch.nn.functional.avg_pool2d(
+                x,
+                kernel_size=(9223372036854775807, 5868783964474102731),
+                stride=(-1, 3010182406857593769),
+                padding=(0,),
+                ceil_mode=True,
+                count_include_pad=True
+            )
+
+        # Valid parameters should work fine
+        result = torch.nn.functional.avg_pool2d(
+            x,
+            kernel_size=2,
+            stride=1,
+            padding=0
+        )
+        self.assertEqual(result.shape, (1, 2, 3, 3))
+
+
     @onlyCUDA
     @largeTensorTest("24GB", "cpu")
     @largeTensorTest("24GB", "cuda")
@@ -10683,6 +10766,34 @@ class TestNNDeviceType(NNTestCase):
         ], device=device, dtype=t_in.dtype).reshape(1, 3, 2, 2)
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
+
+    @onlyCUDA
+    def test_upsamplingBicubic2d_many_channels(self, device):
+        # Exercises the parallelized batch/channel kernel for small spatial
+        # sizes with many channels, typical in VLM position embeddings.
+        for batch, channels, in_h, in_w, out_h, out_w in [
+            (64, 768, 16, 16, 6, 6),
+            (8, 1152, 32, 32, 14, 14),
+            (2, 256, 8, 8, 16, 16),
+        ]:
+            in_t = torch.randn(batch, channels, in_h, in_w, device=device)
+            # Compute via single-element batch to get reference without
+            # the parallel kernel (batch=1, channels loop is short)
+            expected_parts = []
+            for n in range(batch):
+                expected_parts.append(
+                    F.interpolate(
+                        in_t[n : n + 1],
+                        size=(out_h, out_w),
+                        mode="bicubic",
+                        align_corners=False,
+                    )
+                )
+            expected = torch.cat(expected_parts, dim=0)
+            out_t = F.interpolate(
+                in_t, size=(out_h, out_w), mode="bicubic", align_corners=False
+            )
+            self.assertEqual(out_t, expected)
 
     @expectedFailureMPS  # NotImplementedError: aten::upsample_trilinear3d.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("align_corners", [True, False])
@@ -13422,7 +13533,6 @@ if __name__ == '__main__':
         self.assertEqual(m_initialized.weight.device, m_uninitialized.weight.device)
         self.assertFalse(torch.allclose(m_initialized.weight, m_uninitialized.weight))
 
-    @skipIfMPS  # TODO(hvaara): Investigate as possible bug. macOS 13 passes, while 14 and 15 fails.
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
     def test_transformerencoderlayer(self, device, dtype):
