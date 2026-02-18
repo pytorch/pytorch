@@ -3,7 +3,7 @@ set -eux -o pipefail
 export TZ=UTC
 
 tagged_version() {
-  GIT_DIR="${workdir}/pytorch/.git"
+  GIT_DIR="${workdir}/.git"
   GIT_DESCRIBE="git --git-dir ${GIT_DIR} describe --tags --match v[0-9]*.[0-9]*.[0-9]*"
   if [[ ! -d "${GIT_DIR}" ]]; then
     echo "Abort, abort! Git dir ${GIT_DIR} does not exists!"
@@ -31,9 +31,9 @@ fi
 export DOCKER_IMAGE=${DOCKER_IMAGE:-}
 if [[ -z "$DOCKER_IMAGE" ]]; then
   if [[ "$DESIRED_CUDA" == cpu ]]; then
-    export DOCKER_IMAGE="pytorch/manylinux2_28:cpu"
+    export DOCKER_IMAGE="manylinux2_28:cpu"
   else
-    export DOCKER_IMAGE="pytorch/manylinux2_28-builder:${DESIRED_CUDA:2}"
+    export DOCKER_IMAGE="manylinux2_28-builder:${DESIRED_CUDA:2}"
   fi
 fi
 

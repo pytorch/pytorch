@@ -28,7 +28,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
   OS: windows-arm64
-  PYTORCH_ROOT: /pytorch
+  PYTORCH_ROOT: . 
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
@@ -82,28 +82,27 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          "ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          "ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          "ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -150,20 +149,19 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -229,28 +227,27 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          "ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          "ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          "ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -297,20 +294,19 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -376,28 +372,27 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          "ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          "ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          "ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -444,20 +439,19 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -505,7 +499,6 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
-          path: pytorch
           show-progress: false
       - uses: actions/download-artifact@v4.1.7
         name: Download Wheel Artifact
@@ -517,7 +510,7 @@ jobs:
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \

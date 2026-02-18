@@ -118,13 +118,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -142,14 +140,12 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
-        working-directory: pytorch
         if: always()
         timeout-minutes: 120
         run: |
           .github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
-        working-directory: pytorch
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
@@ -224,13 +220,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -255,14 +249,12 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
         shell: powershell
-        working-directory: pytorch
         if: always()
         timeout-minutes: 120
         run: |
           .github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
-        working-directory: pytorch
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
@@ -366,13 +358,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -390,14 +380,12 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
-        working-directory: pytorch
         if: always()
         timeout-minutes: 120
         run: |
           .github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
-        working-directory: pytorch
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
@@ -473,13 +461,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -504,14 +490,12 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
         shell: powershell
-        working-directory: pytorch
         if: always()
         timeout-minutes: 120
         run: |
           .github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
-        working-directory: pytorch
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
@@ -616,13 +600,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -640,14 +622,12 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
-        working-directory: pytorch
         if: always()
         timeout-minutes: 120
         run: |
           .github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
-        working-directory: pytorch
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
@@ -723,13 +703,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -754,14 +732,12 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
         shell: powershell
-        working-directory: pytorch
         if: always()
         timeout-minutes: 120
         run: |
           .github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
-        working-directory: pytorch
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
@@ -866,13 +842,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       - name: Populate binary env
         shell: bash
         run: |
@@ -890,14 +864,12 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Wait until all sessions have drained
         shell: powershell
-        working-directory: pytorch
         if: always()
         timeout-minutes: 120
         run: |
           .github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
-        working-directory: pytorch
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
@@ -973,13 +945,11 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1004,14 +974,12 @@ jobs:
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
       - name: Wait until all sessions have drained
         shell: powershell
-        working-directory: pytorch
         if: always()
         timeout-minutes: 120
         run: |
           .github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
-        working-directory: pytorch
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
