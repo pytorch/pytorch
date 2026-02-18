@@ -5,17 +5,15 @@ Lower functional custom ops to out-variant ExternKernelOut for buffer reuse.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, Optional, Union
 
 import torch
 from torch._ops import OpOverload
+from torch.utils._ordered_set import OrderedSet
 
 from . import ir
 from .virtualized import V
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 log = logging.getLogger(__name__)
@@ -30,7 +28,9 @@ def try_lower_to_out_variant(
 ) -> Optional[Union[ir.IRNode, list[ir.IRNode]]]:
     """Try lowering a functional custom op to ExternKernelOut.
 
-    Returns IR node(s) on success, or None to fall through to FallbackKernel.
+    On success, returns IR node(s) that replace the FallbackKernel path.
+    On failure (no out-variant, non-functional, unsupported output type),
+    returns None to fall through to FallbackKernel.
     """
     if not isinstance(kernel, OpOverload):
         return None
@@ -210,7 +210,7 @@ def _codegen_input_args(node: ir.ExternKernel) -> list[str]:
     return args
 
 
-def _codegen_kwargs(node: ir.ExternKernel, skip_names: set[str]) -> list[str]:
+def _codegen_kwargs(node: ir.ExternKernel, skip_names: OrderedSet[str]) -> list[str]:
     """Codegen keyword args, skipping names in ``skip_names``."""
     result = []
     for k, v in node.kwargs.items():
@@ -255,7 +255,7 @@ class CustomOpExternKernelOut(ir.ExternKernelOut):
     def codegen(self, wrapper: Any) -> None:
         self.codegen_comment(wrapper)
         args = _codegen_input_args(self)
-        kwargs_list = _codegen_kwargs(self, skip_names=set(self.out_arg_names))
+        kwargs_list = _codegen_kwargs(self, skip_names=OrderedSet(self.out_arg_names))
         kernel_name = self.get_kernel_name()
         out_ref = self.codegen_reference()
 
@@ -330,11 +330,8 @@ class CustomOpMultiOutputNode(ir.ExternKernel):
         self.codegen_comment(wrapper)
         kernel_name = self.get_kernel_name()
 
-        # NOTE: Allocate child output buffers BEFORE emitting the .out() call.
-        # In the normal multi-output flow (FallbackKernel), the packed node
-        # stores the result and children extract via indexing (buf1 = buf0[0]).
-        # In our flow, the .out() call needs pre-allocated buffers as arguments,
-        # so we explicitly trigger allocation here.
+        # Allocate child buffers before the .out() call (unlike FallbackKernel
+        # which uses post-hoc tuple indexing).
         for out_node in self.output_nodes:
             wrapper.codegen_allocation(out_node)
 
