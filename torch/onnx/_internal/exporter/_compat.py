@@ -125,6 +125,14 @@ def export_compat(
                     "Refer to the documentation for 'torch.export.export' for more information on dynamic shapes."
                 ) from e
 
+    # Remap dynamic_shapes keys from input_names to original model parameter names.
+    # This allows users to use input_names (e.g., "bgr_image") as dynamic_shapes keys
+    # instead of the original parameter names (e.g., "x").
+    if not isinstance(model, torch.export.ExportedProgram):
+        dynamic_shapes = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+
     dynamic_shapes_with_export_dim, need_axis_mapping = (
         _dynamic_shapes.convert_str_to_export_dim(dynamic_shapes)
     )

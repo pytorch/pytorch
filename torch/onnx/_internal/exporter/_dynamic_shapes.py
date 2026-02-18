@@ -336,6 +336,78 @@ def _flatten_dynamic_shapes_to_axes(
     return _pytree.tree_flatten(dynamic_shapes, is_leaf=is_axes)
 
 
+def remap_dynamic_shapes_from_input_names(
+    model,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None,
+    input_names: Sequence[str] | None,
+) -> dict[str, Any] | tuple[Any, ...] | list[Any] | None:
+    """Remap dynamic_shapes dict keys from input_names to original model parameter names.
+
+    When users provide ``input_names`` to rename ONNX inputs and also use
+    ``dynamic_shapes`` as a dict keyed by those renamed names, ``torch.export.export``
+    will fail validation because it expects the original model parameter names.
+
+    This function translates the dict keys back to the original parameter names
+    so that ``torch.export.export`` can accept them.
+
+    Args:
+        model: The model being exported.
+        dynamic_shapes: The dynamic shapes specification. Only dicts are remapped;
+            tuples/lists are positional and need no remapping.
+        input_names: The user-provided input names for ONNX renaming.
+
+    Returns:
+        The dynamic_shapes with keys remapped to original parameter names, or
+        the original dynamic_shapes if no remapping is needed.
+    """
+    # Only remap when dynamic_shapes is a dict and input_names is provided
+    if (
+        dynamic_shapes is None
+        or not isinstance(dynamic_shapes, dict)
+        or not input_names
+    ):
+        return dynamic_shapes
+
+    # Get the original parameter names from the model's forward signature
+    try:
+        sig = _signature(model)
+    except ValueError:
+        return dynamic_shapes
+
+    original_param_names = [
+        name
+        for name, param in sig.parameters.items()
+        if param.kind
+        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    ]
+
+    # Build a mapping: input_name -> original_param_name
+    # input_names may be longer than model params (e.g. includes output names),
+    # so only map up to the number of model parameters.
+    input_name_to_param: dict[str, str] = {}
+    for i, param_name in enumerate(original_param_names):
+        if i < len(input_names):
+            input_name_to_param[input_names[i]] = param_name
+
+    # Check if any dynamic_shapes key needs remapping
+    needs_remapping = any(
+        key in input_name_to_param and key not in original_param_names
+        for key in dynamic_shapes
+    )
+    if not needs_remapping:
+        return dynamic_shapes
+
+    # Remap the keys
+    remapped: dict[str, Any] = {}
+    for key, value in dynamic_shapes.items():
+        if key in input_name_to_param and key not in original_param_names:
+            remapped[input_name_to_param[key]] = value
+        else:
+            remapped[key] = value
+
+    return remapped
+
+
 def _signature(model) -> inspect.Signature:
     should_be_callable = getattr(model, "forward", model)
     if callable(should_be_callable):

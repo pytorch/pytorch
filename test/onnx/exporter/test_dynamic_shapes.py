@@ -629,6 +629,142 @@ class TestDynamicShapes(common_utils.TestCase):
             _dynamic_shapes._any_str_or_dim_in_dynamic_shapes(dynamic_shapes)
         )
 
+    def test_remap_dynamic_shapes_from_input_names_basic(self):
+        """Test basic remapping from input_names to original parameter names."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = SimpleModel()
+        dynamic_shapes = {"bgr_image": {0: "batch"}}
+        input_names = ["bgr_image"]
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+        self.assertEqual(result, {"x": {0: "batch"}})
+
+    def test_remap_dynamic_shapes_from_input_names_multiple_inputs(self):
+        """Test remapping with multiple inputs."""
+
+        class MultiInputModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        model = MultiInputModel()
+        dynamic_shapes = {"input_a": {0: "batch"}, "input_b": {0: "batch"}}
+        input_names = ["input_a", "input_b"]
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+        self.assertEqual(result, {"x": {0: "batch"}, "y": {0: "batch"}})
+
+    def test_remap_dynamic_shapes_noop_when_keys_match_original(self):
+        """Test no-op when dynamic_shapes keys already match original param names."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = SimpleModel()
+        dynamic_shapes = {"x": {0: "batch"}}
+        input_names = ["bgr_image"]
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+        # Keys already match, no remapping needed
+        self.assertIs(result, dynamic_shapes)
+
+    def test_remap_dynamic_shapes_noop_when_tuple(self):
+        """Test no-op when dynamic_shapes is a tuple (positional)."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = SimpleModel()
+        dynamic_shapes = ({0: "batch"},)
+        input_names = ["bgr_image"]
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+        self.assertIs(result, dynamic_shapes)
+
+    def test_remap_dynamic_shapes_noop_when_list(self):
+        """Test no-op when dynamic_shapes is a list (positional)."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = SimpleModel()
+        dynamic_shapes = [{0: "batch"}]
+        input_names = ["bgr_image"]
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+        self.assertIs(result, dynamic_shapes)
+
+    def test_remap_dynamic_shapes_noop_when_input_names_none(self):
+        """Test no-op when input_names is None."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = SimpleModel()
+        dynamic_shapes = {"bgr_image": {0: "batch"}}
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, None
+        )
+        self.assertIs(result, dynamic_shapes)
+
+    def test_remap_dynamic_shapes_noop_when_dynamic_shapes_none(self):
+        """Test no-op when dynamic_shapes is None."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = SimpleModel()
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, None, ["bgr_image"]
+        )
+        self.assertIsNone(result)
+
+    def test_remap_dynamic_shapes_partial_rename(self):
+        """Test remapping when only some inputs are renamed."""
+
+        class MultiInputModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        model = MultiInputModel()
+        # Only first input renamed, second uses original name
+        dynamic_shapes = {"renamed_x": {0: "batch"}, "y": {0: "batch"}}
+        input_names = ["renamed_x", "renamed_y"]
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+        # "renamed_x" -> "x", "y" is already an original name so kept as-is
+        self.assertEqual(result, {"x": {0: "batch"}, "y": {0: "batch"}})
+
+    def test_remap_dynamic_shapes_with_export_dim(self):
+        """Test remapping works with torch.export.Dim values."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = SimpleModel()
+        batch_dim = torch.export.Dim("batch")
+        dynamic_shapes = {"bgr_image": {0: batch_dim}}
+        input_names = ["bgr_image"]
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+        self.assertEqual(result, {"x": {0: batch_dim}})
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
