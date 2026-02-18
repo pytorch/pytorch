@@ -40,6 +40,11 @@ inline void check_max_pool1d(
     stride = kernel_size;
   }
 
+  safe_downcast<int, int64_t>(kernel_size[0]);
+  safe_downcast<int, int64_t>(stride[0]);
+  safe_downcast<int, int64_t>(padding[0]);
+  safe_downcast<int, int64_t>(dilation[0]);
+
   TORCH_CHECK(
       kernel_size[0] > 0,
       "max_pool1d() kernel_size must be greater than zero, but got ",
