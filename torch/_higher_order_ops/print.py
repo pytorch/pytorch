@@ -52,7 +52,13 @@ class Print(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("print")
 
-    def __call__(self, format_str: str, *args: object, print_backward: bool = False, **kwargs: object):  # type: ignore[override]
+    def __call__(
+        self,
+        format_str: str,
+        *args: object,
+        print_backward: bool = False,
+        **kwargs: object,
+    ):  # type: ignore[override]
         if not isinstance(format_str, str):
             raise AssertionError(f"format_str must be a string, got {type(format_str)}")
 
@@ -80,7 +86,9 @@ class Print(HigherOrderOperator):
         for k in grad_kwarg_keys:
             grad_fmt_parts.append(f"{k}=" + "{}")
 
-        grad_format_str = format_str if not grad_fmt_parts else "grad " + " ".join(grad_fmt_parts)
+        grad_format_str = (
+            format_str if not grad_fmt_parts else "grad " + " ".join(grad_fmt_parts)
+        )
 
         results = _PrintGradFunction.apply(grad_format_str, *all_tensors)
 

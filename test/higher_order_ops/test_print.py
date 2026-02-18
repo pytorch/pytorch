@@ -856,9 +856,7 @@ class TestHopPrintBackward(TestCase):
         """print_backward=True with no tensor args returns None."""
 
         def f():
-            return torch._higher_order_ops.print(
-                "val: {}", 42, print_backward=True
-            )
+            return torch._higher_order_ops.print("val: {}", 42, print_backward=True)
 
         with patch("sys.stdout", new_callable=io.StringIO):
             result = f()
@@ -887,6 +885,46 @@ class TestHopPrintBackward(TestCase):
         # Backward print with actual gradient values
         self.assertIn("[backward]", printed_output)
         self.assertIn("tensor([2., 2., 2.]", printed_output)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_print_backward_train_step(self, backend):
+        """Test backward gradient printing in a realistic train step."""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3, bias=False)
+                self.linear2 = torch.nn.Linear(3, 3, bias=False)
+
+            def forward(self, x):
+                h1 = self.linear1(x)
+                h1_logged = torch._higher_order_ops.print(
+                    "after linear1: {}", h1, print_backward=True
+                )
+                h2 = self.linear2(h1_logged)
+                h2_logged = torch._higher_order_ops.print(
+                    "after linear2: {}", h2, print_backward=True
+                )
+                return h2_logged
+
+        model = Model()
+        x = torch.randn(2, 3)
+        target = torch.randn(2, 3)
+
+        opt_model = torch.compile(model, backend=backend, fullgraph=True)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            out = opt_model(x)
+            loss = torch.nn.functional.mse_loss(out, target)
+            loss.backward()
+            printed_output = mock_stdout.getvalue().strip()
+
+        # Verify forward and backward prints occurred with actual tensor values
+        self.assertIn("after linear1:", printed_output)
+        self.assertIn("after linear2:", printed_output)
+        self.assertIn("[backward]", printed_output)
+        # Verify gradients were computed
+        self.assertIsNotNone(model.linear1.weight.grad)
+        self.assertIsNotNone(model.linear2.weight.grad)
 
 
 if __name__ == "__main__":
