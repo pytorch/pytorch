@@ -259,20 +259,6 @@ endfunction()
 
 
 ##############################################################################
-# Multiplex between adding libraries for CUDA versus HIP (AMD Software Stack).
-# Usage:
-#   torch_cuda_based_add_library(cuda_target)
-#
-macro(torch_cuda_based_add_library cuda_target)
-  if(USE_ROCM)
-    hip_add_library(${cuda_target} ${ARGN})
-  elseif(USE_CUDA)
-    add_library(${cuda_target} ${ARGN})
-  else()
-  endif()
-endmacro()
-
-##############################################################################
 # Get the HIP arch flags specified by PYTORCH_ROCM_ARCH.
 # Usage:
 #   torch_hip_get_arch_list(variable_to_store_flags)

@@ -78,7 +78,7 @@ if(USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(test_nativert PRIVATE
     hiprtc::hiprtc
-    hip::amdhip64
+    hip::host
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_nativert PRIVATE USE_ROCM)
