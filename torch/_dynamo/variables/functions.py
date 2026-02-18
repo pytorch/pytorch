@@ -2043,6 +2043,10 @@ class SkipFunctionVariable(VariableTracker):
             # function.__get__(func, obj[, cls]) produces a bound method.
             # This is called by inspect._descriptor_get when resolving
             # descriptors during inspect.signature().
+            # Note that function.__get__ does not use the 3rd argument. The
+            # reason it still has the 3rd argument is because descriptors follow
+            # a function signature that takes 3 arguments, and other descriptors
+            # (not function.__get__) can use the 3rd argument.
             if len(args) in (2, 3) and not kwargs:
                 func_var = args[0]
                 obj_var = args[1]
