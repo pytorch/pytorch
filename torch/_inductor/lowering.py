@@ -58,7 +58,12 @@ from torch.utils._sympy.functions import (
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import decompositions, get_decompositions
+from .decomposition import (
+    decompositions,
+    decomps_to_exclude,
+    emulate_precision_decomps_to_exclude,
+    get_decompositions,
+)
 from .ir import (
     BaseView,
     DtypeView,
@@ -2303,27 +2308,20 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    # Always skip lerp decompositions - we have a lowering that uses FMA to match
-    # eager CUDA behavior
-    skip_lerp_decomp = op in {
-        aten.lerp.Scalar,
-        aten.lerp.Tensor,
-        aten._foreach_lerp.Scalar,
-    }
-    # When emulate_precision_casts is enabled, we also skip decomposing addcmul ops
-    # to use the inductor lowering which preserves FMA semantics.
-    # For _foreach_addcdiv, we use the native CUDA kernel.
-    skip_decomp_for_precision = config.emulate_precision_casts and op in {
-        aten.addcmul,
-        aten._foreach_addcmul.Scalar,
-        aten._foreach_addcdiv.Scalar,
-    }
-    assert (
-        op not in decompositions
-        or override_decomp
-        or skip_decomp_for_precision
-        or skip_lerp_decomp
-    ), f"both a fallback and a decomp for same op: {op}"
+    def is_in_exclude_set(op, exclude_set):
+        if op in exclude_set:
+            return True
+        if hasattr(op, "overloadpacket"):
+            return op.overloadpacket in exclude_set
+        return False
+
+    skip_decomp = is_in_exclude_set(op, decomps_to_exclude) or (
+        config.emulate_precision_casts
+        and is_in_exclude_set(op, emulate_precision_decomps_to_exclude)
+    )
+    assert op not in decompositions or override_decomp or skip_decomp, (
+        f"both a fallback and a decomp for same op: {op}"
+    )
     if (
         warn
         and bool(os.getenv("CI"))
@@ -7164,27 +7162,7 @@ def lerp_tensor(start, end, weight):
     )
 
 
-def _foreach_lerp_scalar(start, end, weight):
-    """
-    Foreach version of lerp with scalar weight parameter.
-    Uses foreach_group_loop for consistent grouping behavior.
-    """
-    realize_outputs = (
-        len(V.graph.current_node.users) == 0
-        or V.graph.current_node.target in inplace_foreach_ops
-        or cur_node_has_non_foreach_users()
-    )
-
-    groups = group_foreach_args(zip(start, end))
-
-    def apply_fn(args):
-        start_t, end_t = args
-        return lerp_scalar(start_t, end_t, weight)
-
-    return foreach_group_loop(groups, len(start), apply_fn, realize_outputs)
-
-
-_register_foreach_lowering(aten._foreach_lerp.Scalar, _foreach_lerp_scalar)
+register_foreach_pointwise(aten._foreach_lerp.Scalar, lerp_scalar)
 
 
 register_pointwise_numeric_ldf64(aten.cos)
