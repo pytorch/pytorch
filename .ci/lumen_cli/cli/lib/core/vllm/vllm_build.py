@@ -288,7 +288,7 @@ class VllmBuildRunner(BaseRunner):
                 --build-arg USE_SCCACHE={int(bool(inputs.sccache_bucket and inputs.sccache_region))} \
                 --build-arg SCCACHE_BUCKET_NAME={inputs.sccache_bucket} \
                 --build-arg SCCACHE_REGION_NAME={inputs.sccache_region} \
-                --build-arg torch_cuda_arch_list='{inputs.torch_cuda_arch_list}' \
+                --build-arg torch_cuda_arch_list={inputs.torch_cuda_arch_list} \
                 --target {inputs.target_stage} \
                 -t {inputs.tag_name} \
                 --progress=plain .
