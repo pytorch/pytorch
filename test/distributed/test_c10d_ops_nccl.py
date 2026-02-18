@@ -340,6 +340,41 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
                     graph.replay()
 
     @requires_nccl()
+    @requires_nccl_version(
+        (2, 29), "Need NCCL 2.29+ for multisegment memory in CUDA graph"
+    )
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_nccl_cudagraph_multisegment(self):
+        # Prior to NCCL 2.29, this would cause an Invalid Memory Access (IMA)
+        # because NCCL didn't properly handle multisegment memory in graphs.
+        local_device_idx = self.rank_to_GPU[self.rank][0]
+        torch.cuda.set_device(local_device_idx)
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+
+        b, t, d = 64, 1, 101024
+        inp = torch.ones((b, t, d), device="cuda") * (self.rank + 1)
+
+        for _ in range(3):
+            output = inp.new_empty((self.world_size, b, t, d))
+            c10d.all_gather_into_tensor(output, inp, group=self.pg)
+
+        expected_sum = inp.numel() * sum(range(1, self.world_size + 1))
+        self.assertEqual(output.sum().item(), expected_sum)
+
+        static_inp = inp.clone()
+        static_output = inp.new_empty((self.world_size, b, t, d))
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            c10d.all_gather_into_tensor(static_output, static_inp, group=self.pg)
+
+        graph.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(static_output.sum().item(), expected_sum)
+        torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_reduce_ops(self):
         pg = self.pg

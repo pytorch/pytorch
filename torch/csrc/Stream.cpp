@@ -130,6 +130,16 @@ static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStream_get_native_handle(THPStream* self, void* unused) {
+  HANDLE_TH_ERRORS
+  auto stream = c10::Stream::unpack3(
+      self->stream_id,
+      static_cast<c10::DeviceIndex>(self->device_index),
+      static_cast<c10::DeviceType>(self->device_type));
+  return PyLong_FromVoidPtr(stream.native_handle());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
@@ -214,6 +224,10 @@ static PyObject* THPStream_record_event(
     TORCH_CHECK(false, "parse record_event arg fails");
   }
   if (_event != Py_None) {
+    // We expect it to be an explicit torch.Event instance.
+    TORCH_CHECK(
+        Py_TYPE(_event) == THPEventClass,
+        "expected event to be a torch.Event object");
     // Increase the refcount of the event to avoid it being destroyed.
     Py_INCREF(_event);
     _new_event = _event;
@@ -399,6 +413,11 @@ static const std::initializer_list<PyMemberDef> THPStream_members = {
 static const std::initializer_list<PyGetSetDef> THPStream_properties = {
     {"device",
      reinterpret_cast<getter>(THPStream_get_device),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"native_handle",
+     reinterpret_cast<getter>(THPStream_get_native_handle),
      nullptr,
      nullptr,
      nullptr},

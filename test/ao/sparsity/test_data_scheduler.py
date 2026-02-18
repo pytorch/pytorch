@@ -87,11 +87,16 @@ class TestBaseDataScheduler(TestCase):
         schedule_param = self._get_schedule_param()
         scheduler = self._get_scheduler(sparsifier, schedule_param)
 
-        assert scheduler.data_sparsifier == sparsifier
-        assert scheduler._step_count == 1
+        if scheduler.data_sparsifier != sparsifier:
+            raise AssertionError("scheduler.data_sparsifier should equal sparsifier")
+        if scheduler._step_count != 1:
+            raise AssertionError(f"Expected _step_count=1, got {scheduler._step_count}")
 
         for name, config in sparsifier.data_groups.items():
-            assert scheduler.base_param[name] == config.get(schedule_param, None)
+            if scheduler.base_param[name] != config.get(schedule_param, None):
+                raise AssertionError(
+                    f"base_param[{name}] mismatch: {scheduler.base_param[name]} != {config.get(schedule_param, None)}"
+                )
 
     def test_order_of_steps(self):
         data_list, data_with_config, defaults = self._get_data()
@@ -112,10 +117,11 @@ class TestBaseDataScheduler(TestCase):
             for warning in w:
                 fname = warning.filename
                 fname = "/".join(fname.split("/")[-5:])
-                assert (
+                if (
                     fname
-                    != "torch/ao/sparsity/experimental/scheduler/data_scheduler/base_data_scheduler.py"
-                )
+                    == "torch/ao/sparsity/experimental/scheduler/data_scheduler/base_data_scheduler.py"
+                ):
+                    raise AssertionError("Unexpected warning from base_data_scheduler")
 
     def test_step(self):
         data_list, data_with_config, defaults = self._get_data()
@@ -127,19 +133,23 @@ class TestBaseDataScheduler(TestCase):
 
         for some_data in all_data:
             name, _, config = self._get_name_data_config(some_data, defaults)
-            assert (
-                sparsifier.data_groups[name][schedule_param] == config[schedule_param]
-            )
+            if sparsifier.data_groups[name][schedule_param] != config[schedule_param]:
+                raise AssertionError(
+                    f"data_groups[{name}][{schedule_param}] mismatch: "
+                    f"{sparsifier.data_groups[name][schedule_param]} != {config[schedule_param]}"
+                )
 
         sparsifier.step()
         scheduler.step()
 
         for some_data in all_data:
             name, _, config = self._get_name_data_config(some_data, defaults)
-            assert (
-                sparsifier.data_groups[name][schedule_param]
-                == config[schedule_param] * 0.5
-            )
+            expected = config[schedule_param] * 0.5
+            if sparsifier.data_groups[name][schedule_param] != expected:
+                raise AssertionError(
+                    f"data_groups[{name}][{schedule_param}] mismatch: "
+                    f"{sparsifier.data_groups[name][schedule_param]} != {expected}"
+                )
 
         # checking step count
         step_cnt = 5
@@ -147,9 +157,13 @@ class TestBaseDataScheduler(TestCase):
             sparsifier.step()
             scheduler.step()
 
-        assert (
-            scheduler._step_count == step_cnt + 2
+        expected_step_count = (
+            step_cnt + 2
         )  # step_cnt + step above + 1 step in constructor
+        if scheduler._step_count != expected_step_count:
+            raise AssertionError(
+                f"Expected _step_count={expected_step_count}, got {scheduler._step_count}"
+            )
 
     def test_state_dict(self):
         data_list, data_with_config, defaults = self._get_data()
@@ -164,16 +178,28 @@ class TestBaseDataScheduler(TestCase):
         all_data = data_list + data_with_config
         for some_data in all_data:
             name, _, _ = self._get_name_data_config(some_data, defaults)
-            assert scheduler1.base_param[name] != scheduler2.base_param[name]
-            assert scheduler1._last_param[name] == scheduler2.base_param[name]
+            if scheduler1.base_param[name] == scheduler2.base_param[name]:
+                raise AssertionError(
+                    f"base_param[{name}] should differ between schedulers"
+                )
+            if scheduler1._last_param[name] != scheduler2.base_param[name]:
+                raise AssertionError(
+                    f"scheduler1._last_param[{name}] should equal scheduler2.base_param[{name}]"
+                )
 
         scheduler1_state = scheduler1.state_dict()
         scheduler2.load_state_dict(scheduler1_state)
 
         for some_data in all_data:
             name, _, _ = self._get_name_data_config(some_data, defaults)
-            assert scheduler1.base_param[name] == scheduler2.base_param[name]
-            assert scheduler1._last_param[name] == scheduler2._last_param[name]
+            if scheduler1.base_param[name] != scheduler2.base_param[name]:
+                raise AssertionError(
+                    f"After load_state_dict, base_param[{name}] should match"
+                )
+            if scheduler1._last_param[name] != scheduler2._last_param[name]:
+                raise AssertionError(
+                    f"After load_state_dict, _last_param[{name}] should match"
+                )
 
 
 if __name__ == "__main__":
