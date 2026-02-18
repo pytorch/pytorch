@@ -28,6 +28,7 @@ struct XPUHooks : public at::XPUHooksInterface {
   bool hasPrimaryContext(DeviceIndex device_index) const override;
   DeviceIndex deviceCount() const override;
   DeviceIndex getCurrentDevice() const override;
+  const at::xpu::LevelZero& level_zero() const override;
 };
 
 } // namespace at::xpu::detail
