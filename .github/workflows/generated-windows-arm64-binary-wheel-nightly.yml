@@ -54,7 +54,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -126,7 +126,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -182,7 +182,7 @@ jobs:
       contents: read
     needs: wheel-py3_11-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -199,7 +199,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -271,7 +271,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -327,7 +327,7 @@ jobs:
       contents: read
     needs: wheel-py3_12-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -344,7 +344,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -416,7 +416,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -472,7 +472,7 @@ jobs:
       contents: read
     needs: wheel-py3_13-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -530,7 +530,7 @@ jobs:
       contents: read
     needs: libtorch-cpu-shared-with-deps-release-extract
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu

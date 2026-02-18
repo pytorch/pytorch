@@ -48,7 +48,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -155,7 +155,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -258,7 +258,7 @@ jobs:
       contents: read
     needs: wheel-py3_10-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -275,7 +275,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -383,7 +383,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -487,7 +487,7 @@ jobs:
       contents: read
     needs: wheel-py3_10-cuda12_6-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -505,7 +505,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -613,7 +613,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -717,7 +717,7 @@ jobs:
       contents: read
     needs: wheel-py3_10-cuda12_8-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -735,7 +735,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -843,7 +843,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -947,7 +947,7 @@ jobs:
       contents: read
     needs: wheel-py3_10-cuda13_0-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -965,7 +965,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1073,7 +1073,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1176,7 +1176,7 @@ jobs:
       contents: read
     needs: wheel-py3_10-xpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1193,7 +1193,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1300,7 +1300,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1403,7 +1403,7 @@ jobs:
       contents: read
     needs: wheel-py3_11-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1420,7 +1420,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1528,7 +1528,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1632,7 +1632,7 @@ jobs:
       contents: read
     needs: wheel-py3_11-cuda12_6-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1650,7 +1650,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1758,7 +1758,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1862,7 +1862,7 @@ jobs:
       contents: read
     needs: wheel-py3_11-cuda12_8-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1880,7 +1880,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1988,7 +1988,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2092,7 +2092,7 @@ jobs:
       contents: read
     needs: wheel-py3_11-cuda13_0-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2110,7 +2110,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2218,7 +2218,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2321,7 +2321,7 @@ jobs:
       contents: read
     needs: wheel-py3_11-xpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2338,7 +2338,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2445,7 +2445,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2548,7 +2548,7 @@ jobs:
       contents: read
     needs: wheel-py3_12-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2565,7 +2565,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2673,7 +2673,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2777,7 +2777,7 @@ jobs:
       contents: read
     needs: wheel-py3_12-cuda12_6-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2795,7 +2795,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2903,7 +2903,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3007,7 +3007,7 @@ jobs:
       contents: read
     needs: wheel-py3_12-cuda12_8-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3025,7 +3025,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3133,7 +3133,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3237,7 +3237,7 @@ jobs:
       contents: read
     needs: wheel-py3_12-cuda13_0-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3255,7 +3255,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3363,7 +3363,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3466,7 +3466,7 @@ jobs:
       contents: read
     needs: wheel-py3_12-xpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3483,7 +3483,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3590,7 +3590,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3693,7 +3693,7 @@ jobs:
       contents: read
     needs: wheel-py3_13-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3710,7 +3710,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3818,7 +3818,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3922,7 +3922,7 @@ jobs:
       contents: read
     needs: wheel-py3_13-cuda12_6-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3940,7 +3940,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4048,7 +4048,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4152,7 +4152,7 @@ jobs:
       contents: read
     needs: wheel-py3_13-cuda12_8-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4170,7 +4170,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4278,7 +4278,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4382,7 +4382,7 @@ jobs:
       contents: read
     needs: wheel-py3_13-cuda13_0-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4400,7 +4400,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4508,7 +4508,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4611,7 +4611,7 @@ jobs:
       contents: read
     needs: wheel-py3_13-xpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4628,7 +4628,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4735,7 +4735,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4838,7 +4838,7 @@ jobs:
       contents: read
     needs: wheel-py3_13t-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4855,7 +4855,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4963,7 +4963,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5067,7 +5067,7 @@ jobs:
       contents: read
     needs: wheel-py3_13t-cuda12_6-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5085,7 +5085,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5193,7 +5193,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5297,7 +5297,7 @@ jobs:
       contents: read
     needs: wheel-py3_13t-cuda12_8-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5315,7 +5315,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5423,7 +5423,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5527,7 +5527,7 @@ jobs:
       contents: read
     needs: wheel-py3_13t-cuda13_0-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5545,7 +5545,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5653,7 +5653,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5756,7 +5756,7 @@ jobs:
       contents: read
     needs: wheel-py3_13t-xpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5773,7 +5773,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5880,7 +5880,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -5983,7 +5983,7 @@ jobs:
       contents: read
     needs: wheel-py3_14-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6000,7 +6000,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6108,7 +6108,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6212,7 +6212,7 @@ jobs:
       contents: read
     needs: wheel-py3_14-cuda12_6-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6230,7 +6230,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6338,7 +6338,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6442,7 +6442,7 @@ jobs:
       contents: read
     needs: wheel-py3_14-cuda12_8-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6460,7 +6460,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6568,7 +6568,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6672,7 +6672,7 @@ jobs:
       contents: read
     needs: wheel-py3_14-cuda13_0-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6690,7 +6690,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6798,7 +6798,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6901,7 +6901,7 @@ jobs:
       contents: read
     needs: wheel-py3_14-xpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -6918,7 +6918,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7025,7 +7025,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7128,7 +7128,7 @@ jobs:
       contents: read
     needs: wheel-py3_14t-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7145,7 +7145,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7253,7 +7253,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7357,7 +7357,7 @@ jobs:
       contents: read
     needs: wheel-py3_14t-cuda12_6-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7375,7 +7375,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7483,7 +7483,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7587,7 +7587,7 @@ jobs:
       contents: read
     needs: wheel-py3_14t-cuda12_8-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7605,7 +7605,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7713,7 +7713,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7817,7 +7817,7 @@ jobs:
       contents: read
     needs: wheel-py3_14t-cuda13_0-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7835,7 +7835,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.12xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -7943,7 +7943,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -8046,7 +8046,7 @@ jobs:
       contents: read
     needs: wheel-py3_14t-xpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -8104,7 +8104,7 @@ jobs:
       contents: read
     needs: libtorch-cpu-shared-with-deps-release-extract
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
@@ -8161,7 +8161,7 @@ jobs:
       contents: read
     needs: libtorch-cuda12_6-shared-with-deps-release-extract
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: cu126
       GPU_ARCH_VERSION: "12.6"
@@ -8219,7 +8219,7 @@ jobs:
       contents: read
     needs: libtorch-cuda12_8-shared-with-deps-release-extract
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: cu128
       GPU_ARCH_VERSION: "12.8"
@@ -8277,7 +8277,7 @@ jobs:
       contents: read
     needs: libtorch-cuda13_0-shared-with-deps-release-extract
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: cu130
       GPU_ARCH_VERSION: "13.0"
