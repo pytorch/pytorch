@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -47,9 +46,9 @@ class LogitRelaxedBernoulli(Distribution):
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | Number | None = None,
+        logits: Tensor | Number | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         self.temperature = temperature
         if (probs is None) == (logits is None):
@@ -61,7 +60,8 @@ class LogitRelaxedBernoulli(Distribution):
             # pyrefly: ignore [read-only]
             (self.probs,) = broadcast_all(probs)
         else:
-            assert logits is not None  # helps mypy
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
             is_scalar = isinstance(logits, _Number)
             # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)
@@ -150,9 +150,9 @@ class RelaxedBernoulli(TransformedDistribution):
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | Number | None = None,
+        logits: Tensor | Number | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         base_dist = LogitRelaxedBernoulli(temperature, probs, logits)
         super().__init__(base_dist, SigmoidTransform(), validate_args=validate_args)

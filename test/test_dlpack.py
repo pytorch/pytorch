@@ -11,7 +11,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIfNotRocm,
-    skipCUDAIfRocm,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import (
@@ -22,6 +21,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
@@ -249,7 +249,8 @@ class TestTorchDlPack(TestCase):
     def test_from_dlpack_dtype(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
-        assert x.dtype == y.dtype
+        if x.dtype != y.dtype:
+            raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipMeta
     @onlyCUDA
@@ -263,9 +264,11 @@ class TestTorchDlPack(TestCase):
 
             def __dlpack__(self, stream=None):
                 if torch.version.hip is None:
-                    assert stream == 1
+                    if stream != 1:
+                        raise AssertionError(f"expected stream=1, got {stream}")
                 else:
-                    assert stream == 0
+                    if stream != 0:
+                        raise AssertionError(f"expected stream=0, got {stream}")
                 capsule = self.tensor.__dlpack__(stream=stream)
                 return capsule
 
@@ -276,7 +279,6 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_convert_default_stream(self, device):
         # tests run on non-default stream, so _sleep call
         # below will run on a non-default stream, causing
@@ -289,7 +291,9 @@ class TestTorchDlPack(TestCase):
             x = torch.zeros(1, device=device)
             torch.cuda._sleep(2**20)
             self.assertTrue(torch.cuda.default_stream().query())
-            x.__dlpack__(stream=1)
+            # ROCm uses stream 0 for default stream, CUDA uses stream 1
+            default_stream_id = 0 if torch.version.hip else 1
+            x.__dlpack__(stream=default_stream_id)
         # check that the default stream has work (a pending cudaStreamWaitEvent)
         self.assertFalse(torch.cuda.default_stream().query())
 
@@ -303,14 +307,21 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_cuda_per_thread_stream(self, device):
         # Test whether we raise an error if we are trying to use per-thread default
         # stream, which is currently not supported by PyTorch.
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(
-            BufferError, "per-thread default stream is not supported"
-        ):
+
+        if TEST_WITH_ROCM:
+            context = self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: 2"
+            )
+        else:
+            context = self.assertRaisesRegex(
+                BufferError, "per-thread default stream is not supported"
+            )
+
+        with context:
             x.__dlpack__(stream=2)
 
     @skipMeta
@@ -330,11 +341,18 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_invalid_cuda_streams(self, device):
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(AssertionError, r"unsupported stream on CUDA: \d"):
-            x.__dlpack__(stream=0)
+
+        if TEST_WITH_ROCM:
+            # On ROCm, stream=0 is valid (default stream).
+            self.assertIsNotNone(x.__dlpack__(stream=0))
+        else:
+            # CUDA raises AssertionError for stream=0
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on CUDA: \d"
+            ):
+                x.__dlpack__(stream=0)
 
     @skipMeta
     def test_dlpack_invalid_cpu_stream(self):
@@ -453,8 +471,9 @@ class TestTorchDlPack(TestCase):
             # DLPack support only available from NumPy 1.22 onwards.
             # Here, we test having another framework (NumPy) calling our
             # Tensor.__dlpack__ implementation.
-            arr = np.from_dlpack(t)
-            self.assertEqual(t, arr)
+            np_from_dlpack = np.from_dlpack(t)
+            np_from_copy = t.numpy()
+            self.assertEqual(np_from_dlpack, np_from_copy)
 
         # We can't use the array created above as input to from_dlpack.
         # That's because DLPack imported NumPy arrays are read-only.

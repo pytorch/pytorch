@@ -37,7 +37,7 @@ if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
-# pyrefly: ignore [unsupported-operation]
+
 if (3, 12) <= sys.version_info < (3, 14):
     TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
 if sys.version_info >= (3, 13):
@@ -55,6 +55,7 @@ def get_indexof(insts: list["Instruction"]) -> dict["Instruction", int]:
     Get a mapping from instruction memory address to index in instruction list.
     Additionally checks that each instruction only appears once in the list.
     """
+    # pyrefly: ignore [implicit-any]
     indexof = {}
     for i, inst in enumerate(insts):
         assert inst not in indexof

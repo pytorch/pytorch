@@ -2,6 +2,7 @@
 #include <ATen/hip/HIPContext.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorAccessor.h>
+#include <c10/hip/HIPCachingAllocator.h>
 #include <c10/hip/HIPStream.h>
 #include <iostream>
 #include <vector>
@@ -69,6 +70,10 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     const size_t b_element_size = mat_b.element_size();
     const size_t out_element_size = out.element_size();
 
+    // Synchronize the stream to ensure all prior GPU ops
+    // affecting host memory are done.
+    AT_CUDA_CHECK(hipStreamSynchronize(c10::cuda::getCurrentCUDAStream()));
+
     // for each group, calculate m,n,k,lda,ldb,ldc and A,B,out pointer base addresses.
     if (mat_a_dim == 2 && mat_b_dim == 2) {
         // 2D*2D case requires offset tensor
@@ -83,6 +88,12 @@ void launch_grouped_bgemm_ck_impl_dispatch(
             int start_k = (i == 0) ? 0 : offs_accessor[i-1];
             int end_k = offs_accessor[i];
             int k = end_k - start_k;
+
+            // Skip zero-sized groups but continue processing subsequent groups.
+            // Output for this group is pre-initialized to zeros (correct for K=0 matmul).
+            if (k <= 0) {
+                continue;
+            }
 
             //K dimension are sliced, hence select stride(1) always.
             //K dimension is always dimension 1, regardless of memory layout (row/column major)
@@ -360,7 +371,12 @@ void launch_grouped_bgemm_ck_impl_dispatch(
         TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions, mat A dim is ", mat_a_dim, ", mat B dim is ", mat_b_dim);
     }
 
-    TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
+    // TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
+    // If all groups were skipped (e.g., all K=0 in 2D-2D case), return early.
+    // Output is already pre-initialized to zeros which is the correct result.
+    if (p_a_ptrs.size() == 0) {
+        return;
+    }
 
     // Initialize d_ptrs with the correct size
     std::vector<std::array<const void*, 0>> d_ptrs(p_a_ptrs.size());
@@ -375,20 +391,17 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     size_t arg_buf_size = gemm_instance.GetDeviceKernelArgSize(&argument);
     size_t ws_size = gemm_instance.GetWorkSpaceSize(&argument);
 
-    void* gemm_arg_buf = nullptr;
-    void* ws_buf = nullptr;
-
-    hipMalloc(&gemm_arg_buf, arg_buf_size);
-    hipMalloc(&ws_buf, ws_size);
+    void* gemm_arg_buf = c10::cuda::CUDACachingAllocator::raw_alloc(arg_buf_size);
+    void* ws_buf = c10::cuda::CUDACachingAllocator::raw_alloc(ws_size);
 
     gemm_instance.SetDeviceKernelArgs(&argument, gemm_arg_buf);
     gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
 
     auto invoker = gemm_instance.MakeInvoker();
-    hipStream_t stream = c10::hip::getCurrentHIPStream();
+    hipStream_t stream = c10::cuda::getCurrentCUDAStream();
     invoker.Run(argument, {stream});
-    hipFree(gemm_arg_buf);
-    hipFree(ws_buf);
+    c10::cuda::CUDACachingAllocator::raw_delete(gemm_arg_buf);
+    c10::cuda::CUDACachingAllocator::raw_delete(ws_buf);
 }
 
 void group_gemm_ck(

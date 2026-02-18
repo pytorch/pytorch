@@ -14,8 +14,10 @@ computations.
 """
 
 import collections
+import functools
 import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
+from contextvars import ContextVar
 from enum import Enum
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
@@ -38,6 +40,13 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+# Tracks active method calls on VariableTracker instances to detect self-referential
+# calls (e.g., as_python_constant on a list that contains itself). Maps
+# (id(instance), method_name) tuples to track which calls are in progress.
+_vt_active_calls: ContextVar[set[tuple[int, str]] | None] = ContextVar(
+    "_vt_active_calls", default=None
+)
 
 
 class SourceType(Enum):
@@ -213,8 +222,9 @@ def is_side_effect_safe(m: MutationType) -> bool:
 class AsPythonConstantNotImplementedError(NotImplementedError):
     vt: "VariableTracker"
 
-    def __init__(self, vt: "VariableTracker") -> None:
-        super().__init__(f"{vt} is not a constant")
+    def __init__(self, vt: "VariableTracker", msg: str | None = None) -> None:
+        msg = f"{vt} is not a constant" if msg is None else msg
+        super().__init__(msg)
         self.vt = vt
 
 
@@ -450,6 +460,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return None
 
+    def _contains_self_reference(self) -> bool:
+        """Check if this variable references itself (directly or indirectly)."""
+        found_self = False
+
+        def check(vt: "VariableTracker") -> None:
+            nonlocal found_self
+            if vt is self:
+                found_self = True
+
+        # unwrap first iteration - otherwise we can't detect if we revisit self
+        for key, subvalue in self.__dict__.items():
+            if key not in self._nonvar_fields:
+                VariableTracker.visit(check, subvalue)
+
+        return found_self
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError
 
@@ -486,7 +512,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
-    def call_obj_hasattr(self, tx: Any, name: str) -> "ConstantVariable":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "ConstantVariable":
         unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",
@@ -713,14 +741,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         tx: Any,
         value: Any,
         source: Optional[Source] = None,
+        realize: bool = False,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
+        elif realize:
+            return builder.VariableBuilder(tx, source)(value)
+        elif type(value) in variables.LazyConstantVariable.supported_types:
+            # Use LazyConstantVariable for primitives to enable deferred
+            # guard installation - constants that are just passed through
+            # won't cause recompilation when their values change.
+            return variables.LazyConstantVariable.create(value, source)
         else:
             return variables.LazyVariableTracker.create(value, source)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         """
         Unlike the variable tracker's own __hash__, this method checks whether
         the underlying Python object referenced by this variable tracker is hashable.
@@ -742,7 +778,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         """
         Unlike the variable tracker’s own __hash__, this method is used by
         ConstDictVariableTracker to compute the hash of the underlying key object.
@@ -759,7 +795,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         """
         NB - Deliberately not overriding the __eq__ method because that can
         disable the __hash__ for the vt itself.
@@ -802,6 +838,75 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 # 1. one forgot to pass in a source
                 # 2. `mutation_type` is incorrect
                 assert source is not None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """
+        Wraps all subclasses' `as_python_constant` and `reconstruct` so that it cannot be
+        called twice in the same call chain - i.e. self-referential objects.
+        For `as_python_constant` - self-referential objects are NOT treated as constants.
+        For `reconstruct` - we will graph break. The graph break can be avoided if the VT subclass
+        can generate and cache itself before recursively `reconstruct`ing - see ListVariable for an example.
+        """
+        super().__init_subclass__(**kwargs)
+
+        def as_python_constant_failure(self) -> NoReturn:
+            raise AsPythonConstantNotImplementedError(
+                self, msg=f"{self} is self-referential"
+            )
+
+        VariableTracker._add_call_once_guard(
+            cls, "as_python_constant", as_python_constant_failure
+        )
+
+        def reconstruct_failure(self) -> NoReturn:
+            unimplemented(
+                gb_type="Reconstruction failure (self-referential)",
+                context=str(self),
+                explanation=f"Dynamo tried to reconstruct sourceless variable {self}, but it is self-referential. "
+                "Dynamo must manually implement reconstruction rules for self-referentiable sourceless variables.",
+                hints=[
+                    "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable "
+                    "that Dynamo cannot reconstruct, then remove it from the return statement.",
+                    "Remove the self-reference in the variable. A self-referring list, for example, is `l = []; l.append(l)`.",
+                    *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                    "Report an issue to PyTorch if you need self-referential reconstrtuction support.",
+                ],
+            )
+
+        VariableTracker._add_call_once_guard(cls, "reconstruct", reconstruct_failure)
+
+    @staticmethod
+    def _add_call_once_guard(
+        cls: type["VariableTracker"],
+        method: str,
+        callback: Callable[["VariableTracker"], Any],
+    ) -> None:
+        original_method = getattr(cls, method)
+
+        if original_method is getattr(VariableTracker, method) or hasattr(
+            original_method, "_call_once_guarded"
+        ):
+            return
+
+        @functools.wraps(original_method)
+        def guarded_method(self, *args: Any, **kwargs: Any) -> VariableTracker:
+            active = _vt_active_calls.get()
+            if active is None:
+                active = set()
+                _vt_active_calls.set(active)
+
+            key = (id(self), method)
+            if key in active:
+                callback(self)
+
+            active.add(key)
+            try:
+                return original_method(self, *args, **kwargs)
+            finally:
+                active.discard(key)
+
+        guarded_method._call_once_guarded = True  # pyrefly: ignore[missing-attribute]
+        setattr(cls, method, guarded_method)
 
 
 def raise_type_error_exc(tx: Any, msg_str: str) -> NoReturn:

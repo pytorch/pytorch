@@ -13,6 +13,7 @@ behavior, including:
 import getpass
 import os
 import sys
+import sysconfig
 import tempfile
 from collections.abc import Callable
 from os.path import abspath, dirname
@@ -38,11 +39,47 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
+# Override backend for specific graphs (for debugging/bisecting).
+# Format: "filter1:backend1;filter2:backend2;..." where filter can be:
+#   - Individual IDs: "0,5,10"
+#   - Ranges: "10-20" (inclusive)
+#   - Comparisons: ">10", ">=10", "<5", "<=5"
+# Backends can be: "eager", "aot_eager", "inductor", "inductor:reduce-overhead", etc.
+# Examples:
+#   ">10:eager"                    - Run graphs with frame_id > 10 in dynamo eager backend
+#   "<=5:aot_eager;>5:inductor"    - First 6 graphs use aot_eager, rest use inductor
+# [@compile_ignored: debug]
+debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
+
+# Override inductor config for specific graphs (for debugging/bisecting).
+# Format: "filter1:config1;filter2:config2;..." where filter uses same syntax as
+# debug_backend_override, and config is "key=value" or "key=value,key2=value2".
+# Examples:
+#   "0-5:triton.cudagraph_skip_dynamic_graphs=False"  - Disable skip for graphs 0-5
+#   ">10:triton.cudagraphs=False"                     - Disable cudagraphs for graphs > 10
+# [@compile_ignored: debug]
+debug_inductor_config_override: str = os.environ.get(
+    "TORCH_COMPILE_OVERRIDE_INDUCTOR_CONFIGS", ""
+)
+
+# Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
+# with matching shapes and dtypes in eager mode. Helps catch mismatches early.
+# Disabled by default to avoid runtime overhead.
+# [@compile_ignored: debug]
+leaf_function_validate_outputs = False
+
+# Check for escaped gradients in @leaf_function. When a leaf_function closes over
+# a tensor with requires_grad=True, gradients won't flow back to it. This check
+# walks the autograd graph to detect such cases and raises an error.
+# Disabled by default to avoid runtime overhead. Enable for debugging.
+# [@compile_ignored: debug]
+leaf_function_check_escaped_gradients = False
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
-dead_code_elimination = True
+dead_code_elimination = None
 
 # Enable or disable side effect replay after graph execution.
 # When False, mutations to Python objects (lists, dicts, attributes) won't be
@@ -52,10 +89,12 @@ dead_code_elimination = True
 replay_side_effects = True
 
 # Configure side effect warning level
-# If `silent`, we silently allow side effects
-# If `warn`, we warn side effects
+# If `info` (default): allow side effects and log to TORCH_LOGS="side_effects" and tlparse
+# If `silent`, we allow side effects, no logs are made.
+# If `warn`, we allow side effects but issue warnings
 # If `error`, we error on side effects
-side_effect_replay_policy = "silent"
+# NOTE: it is NOT safe to change this config during compilation!
+side_effect_replay_policy = "info"
 
 # disable (for a function) when cache reaches this size
 
@@ -120,7 +159,9 @@ assume_static_by_default = True
 # with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = True
+automatic_dynamic_shapes = (
+    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_SHAPES", "1") == "1"
+)
 
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
@@ -201,6 +242,12 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
+
+# Enable Dynamo profiler. When enabled, prints pstats output showing
+# time spent tracing each user function. Set to True to enable, or set to a
+# file path to save the .prof file for snakeviz.
+# [@compile_ignored: runtime_behaviour]
+dynamo_profiler: bool | str = os.environ.get("TORCH_COMPILE_DYNAMO_PROFILER", False)
 
 # Legacy config, does nothing now!
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
@@ -423,6 +470,11 @@ error_on_nested_jit_trace = True
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
 
+# If true, force dynamo compilation even when inside FX symbolic tracing.
+# This allows nested compilation where the outer tracer (e.g., make_fx) can
+# trace over dynamo-compiled functions. Use with error_on_nested_fx_trace=False.
+force_compile_during_fx_trace = False
+
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
@@ -445,6 +497,9 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
+
+# Trace through torch.autograd.grad or graphbreak
+trace_autograd_ops = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
@@ -480,6 +535,12 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 # Resume tracing in nested frames if a nested graph break occurs
 # Old behavior is to bubble up the graph break to the top level frame.
 nested_graph_breaks = False
+
+# If True, error if Dynamo attempts to trace more code while running compiled code in fullgraph=True.
+# If Dynamo determines that it should skip tracing the code (either at the C/C++ or Python level),
+# no error will be raised.
+# Set to false if force falling back to eager is desired.
+error_on_dynamo_callback_in_fullgraph_compiled_code = False
 
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
@@ -670,6 +731,16 @@ enable_dynamo_decompositions = True
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
 
+# If True, enable calling torch.compile inside __torch_dispatch__ handlers.
+# When enabled:
+# 1. __torch_dispatch__ methods are automatically wrapped with torch._dynamo.disable
+# 2. torch.compile is skipped when active TorchDispatchModes are on the stack
+#    (unless they have ignore_compile_internals=True)
+# This allows torch.compile to work inside dispatch mode handlers once all
+# ambient modes have been "consumed".
+# See https://github.com/pytorch/pytorch/issues/155331 for more context.
+inline_torch_dispatch_torch_compile = True
+
 # Eager AC/SAC reapplies the mutations (like global dict mutations) in the
 # backward during the recomputation of forward. torch.compile has no easy way to
 # reapply python mutations in the backward. But many users might be ok to skip
@@ -753,7 +824,8 @@ pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", N
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
-    default=True,
+    # Disable by default on free-threaded builds since they always do a full collection, which can be slow
+    default=sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
@@ -776,8 +848,18 @@ enable_aot_compile = False
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
-# Deprecated! Please use the config in torch/fx/experimental/_config instead.
-enrich_profiler_metadata: bool = False
+# Experimental flag to enable regional compile on invoke_subgraph HOP.
+# For testing only!
+enable_invoke_subgraph_regional_compile: bool = False
+
+# Clear WeakIdRef entries from TracingContext.tensor_to_context and
+# MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
+# can block torch.utils.swap_tensors from working after compile.
+# - None (default): clear for registered backends (inductor, eager, etc.),
+#   don't clear for custom backends (to support standalone_compile, etc.)
+# - True: always clear regardless of backend
+# - False: never clear regardless of backend
+invalidate_compile_context_weakrefs: Optional[bool] = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

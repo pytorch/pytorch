@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyCUDA,
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
@@ -217,6 +218,76 @@ class TestScheduler(TestCase):
 
         node.read_writes = read_writes
         return node
+
+    @onlyCUDA
+    def test_index_add_fusion_prevented(self):
+        """
+        Test that index_add_ (scatter with atomic_add mode) is not fused with
+        subsequent reads from the same buffer, preventing read-after-write hazards.
+
+        Regression test for: index_add_ followed by indexing was incorrectly fused,
+        causing reads to occur before atomic writes completed.
+        """
+
+        def fn(f, batch):
+            # Scatter: atomic writes to shared location
+            f_u = f**2 + 0.00987654321
+            n_batch = batch.max() + 1
+            F_u_mol = torch.zeros((n_batch, f.shape[1]), device=f.device, dtype=f.dtype)
+            F_u_mol.index_add_(0, batch, f_u)
+
+            # Gather: reads from same buffer (requires synchronization)
+            F_u_at_atom = F_u_mol[batch] + 1e-6
+            return f_u / F_u_at_atom
+
+        device = "cuda"
+        f = torch.ones(1024, 1, device=device)
+        batch = torch.zeros(1024, dtype=torch.long, device=device)
+
+        # Eager execution (ground truth)
+        eager_result = fn(f, batch)
+
+        # Compiled execution (should match eager)
+        compiled_fn = torch.compile(fn)
+        compiled_result = compiled_fn(f, batch)
+
+        # Verify results match (no fusion bug)
+        self.assertTrue(
+            torch.allclose(eager_result, compiled_result, rtol=1e-4, atol=1e-4),
+            msg=f"index_add_ fusion bug detected: "
+            f"eager={eager_result.mean().item():.6f}, "
+            f"compiled={compiled_result.mean().item():.6f}",
+        )
+
+    @onlyCUDA
+    def test_atomic_add_no_fusion_correctness(self):
+        """
+        Test that atomic_add operations produce correct results.
+        """
+
+        def fn(x, idx):
+            out = torch.zeros(10, device=x.device)
+            out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
+            return out[idx] + 1.0  # read from same buffer: requires sync
+
+        device = "cuda"
+        x = torch.ones(5, device=device)
+        idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
+
+        # Eager (correct) result
+        expected = fn(x, idx)
+
+        # Compiled result: will be wrong if fusion bug exists
+        compiled_fn = torch.compile(fn)
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            result = compiled_fn(x, idx)
+
+        # This test will FAIL without the fusion prevention fix
+        self.assertTrue(
+            torch.allclose(expected, result),
+            msg=f"Fusion bug detected! Expected {expected}, got {result}",
+        )
 
 
 instantiate_device_type_tests(TestScheduler, globals(), allow_xpu=True)

@@ -27,7 +27,7 @@ from torch.distributed.tensor._op_schema import (
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _find_lowest_cost_sharding,
-    _SingleDimStrategyFunc,
+    _SingleDimStrategyInfo,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
@@ -41,6 +41,8 @@ aten = torch.ops.aten
 
 log = logging.getLogger(__name__)
 
+_USE_MIN_COST_SEARCH = True
+
 
 def _length(obj) -> int:
     if obj is None:
@@ -50,11 +52,83 @@ def _length(obj) -> int:
     return len(obj)
 
 
+def _get_expected_num_tensor_outputs(op: OpOverload) -> int:
+    """
+    Get the expected number of tensor outputs for an operator based on its schema.
+
+    Returns:
+        The number of tensor outputs expected. Returns 0 for ops that don't return tensors
+        (e.g., _linalg_check_errors). Returns 1 for single tensor return, and >1 for
+        tuple returns where each element is a tensor.
+    """
+    return_types = op._schema.returns
+    if len(return_types) == 0:
+        return 0
+
+    first_return = return_types[0]
+    if isinstance(first_return.type, torch.TensorType):
+        # Could be single tensor or tuple of tensors
+        return len(return_types)
+    elif isinstance(first_return.type, torch.ListType):
+        # List[Tensor] - we don't know the length at schema time, treat as 1
+        return 1
+    else:
+        # Not a tensor return type
+        return 0
+
+
+def _validate_tensor_meta_count(
+    op_schema: OpSchema,
+    tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
+) -> None:
+    """
+    Validate that the tensor_meta matches the expected number of outputs for the op.
+
+    Raises AssertionError if the count doesn't match, providing a helpful error message.
+    """
+    expected_outputs = _get_expected_num_tensor_outputs(op_schema.op)
+
+    # Compute actual count:
+    # - None means 0 outputs
+    # - TensorMeta (single instance) means 1 output
+    # - Sequence of TensorMeta means len(sequence) outputs
+    # Note: TensorMeta is a NamedTuple (subclass of tuple), so we must check for it first
+    if tensor_meta is None:
+        actual_outputs = 0
+    elif isinstance(tensor_meta, TensorMeta):
+        actual_outputs = 1
+    else:
+        actual_outputs = len(tensor_meta)
+
+    assert actual_outputs == expected_outputs, (
+        f"Tensor meta count mismatch for {op_schema.op}: "
+        f"expected {expected_outputs} tensor output(s) based on op schema, "
+        f"but _propagate_tensor_meta returned {actual_outputs}. "
+        f"This usually indicates a bug in fake tensor propagation for this op."
+    )
+
+
 class LocalLRUCache(threading.local):
     def __init__(self, user_function: Callable) -> None:
         self.cache = lru_cache(None)(user_function)
 
     def __call__(self, *args, **kwargs) -> object:
+        # Fast path: log.handlers check is very cheap (just checking if list is non-empty)
+        # Only do the more expensive isEnabledFor check if handlers exist
+        if log.handlers and log.isEnabledFor(logging.DEBUG):
+            info_before = self.cache.cache_info()
+            result = self.cache(*args, **kwargs)
+            info_after = self.cache.cache_info()
+            cache_hit = info_after.hits > info_before.hits
+            op_schema = args[0] if args else None
+            output_spec = getattr(result, "output_spec", None)
+            log.debug(
+                "sharding_prop python cache %s: %s -> %s",
+                "HIT" if cache_hit else "MISS",
+                op_schema,
+                output_spec,
+            )
+            return result
         return self.cache(*args, **kwargs)
 
     def cache_info(self):
@@ -140,7 +214,7 @@ class ShardingPropagator:
         ] = {}
         self.op_single_dim_strategy_funcs: dict[
             OpOverload,
-            _SingleDimStrategyFunc,
+            _SingleDimStrategyInfo,
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
@@ -185,13 +259,13 @@ class ShardingPropagator:
     def register_single_dim_op_strategy(
         self,
         op_overload: OpOverload,
-        strategy_func: _SingleDimStrategyFunc,
+        strategy_info: _SingleDimStrategyInfo,
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
         Register a strategy over a single mesh-dim, relying on infra to automatically expand to the full mesh.
         """
-        self.op_single_dim_strategy_funcs[op_overload] = strategy_func
+        self.op_single_dim_strategy_funcs[op_overload] = strategy_info
         if schema_info is not None:
             self.op_to_schema_info_for_single_dim_strategy[op_overload] = schema_info
 
@@ -252,7 +326,7 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -297,33 +371,33 @@ class ShardingPropagator:
             return None
 
     @lru_cache  # noqa: B019
-    def _propagate_tensor_meta(
+    def _propagate_tensor_meta_cached(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Cached version of _propagate_tensor_meta_non_cached
-        This is a private API. Use propagate_tensor_meta instead.
+        Use _propagate_tensor_meta instead to handle dynamic shapes.
         """
         return self._propagate_tensor_meta_non_cached(op_schema)
 
-    def propagate_tensor_meta(
+    def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
-        or a list/tuple of TensorMetas. This is a public API that should be
-        used if cache should be used.
+        or a list/tuple of TensorMetas. Uses the cached version if not
+        actively tracing. Use this method instead of _propagate_tensor_meta_non_cached
         """
         if _are_we_tracing():
             return self._propagate_tensor_meta_non_cached(op_schema)
         else:
-            return self._propagate_tensor_meta(op_schema)
+            return self._propagate_tensor_meta_cached(op_schema)
 
     def _create_output_spec_with_new_tensor_meta(
         self,
         op: OpOverload,
         output_specs: OutputSpecType,
-        output_tensor_meta: None | TensorMeta | Sequence[TensorMeta | None],
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
     ) -> OutputSpecType:
         """
         Wrap the output_specs with the tensor metadata from the output.
@@ -434,6 +508,13 @@ class ShardingPropagator:
         # Ideally, this function would be deleted, but there are a handful of
         # one off call sites here that aren't cleaned up.
 
+        # NOTE: schema should always be populated when calling this function,
+        # as it's only called after unwrap_to_op_info (create_schema=True).
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in propagate. "
+            "This function should only be called after unwrap_to_op_info."
+        )
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
@@ -460,7 +541,15 @@ class ShardingPropagator:
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
-        if op_schema.op in self.op_single_dim_strategy_funcs:
+
+        single_dim_strategy_info = self.op_single_dim_strategy_funcs.get(op_schema.op)
+        op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
+        decomp_exception = None
+        if single_dim_strategy_info is not None or op_strategy_func is not None:
+            # Validate that tensor_meta count matches expected outputs from op schema.
+            # This catches bugs in fake tensor propagation early.
+            if single_dim_strategy_info is not None:
+                _validate_tensor_meta_count(op_schema, out_tensor_meta)
             """
             Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
             for the operator over a single mesh dimension,
@@ -474,73 +563,57 @@ class ShardingPropagator:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
-            mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
-            assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
-            single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
-            single_dim_expand_fully = True
-            if single_dim_expand_fully:
-                # expand to generate the full set of strategy combinations, each one
-                # with a redistribute cost, and then find the min strategy over those costs.
-                # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
-                # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
-                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                    mesh, strategy_schema, single_dim_strategy
-                )
-                strategy = _expanded_strategy_fn(
-                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
-                )
+            if single_dim_strategy_info is not None:
+                mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+                assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
+
+                op_strategy = None
+                if _USE_MIN_COST_SEARCH:
+                    # Try PQ search first; returns None on StridedShard fallback
+                    op_strategy = _find_lowest_cost_sharding(
+                        mesh,
+                        strategy_schema,
+                        single_dim_strategy_info,
+                        output_tensor_meta=out_tensor_meta,
+                    )
+
+                if op_strategy is None:
+                    # Fall back to full expansion
+                    _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                        mesh, strategy_schema, single_dim_strategy_info, out_tensor_meta
+                    )
+                    op_strategy = _expanded_strategy_fn(
+                        op_schema.op,
+                        strategy_schema.args_meta,
+                        strategy_schema.kwargs_meta,
+                    )
             else:
-                strategy = _find_lowest_cost_sharding(
-                    mesh, strategy_schema, single_dim_strategy
-                )
-            assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
-            output_strategy = _select_min_cost_strategy(strategy, op_schema)
-            # TODO: the rest of this is copypaste from the elif block for regular sharding strategies,
-            # but with a lot of special cases elided.  We'll see if this can be kept simple, or else
-            # refactor to share code.
-            assert output_strategy.input_specs is not None, (
-                "single-dim strategies always have input specs"
+                assert op_strategy_func is not None
+                op_strategy = op_strategy_func(strategy_schema)
+
+        else:
+            # try operator decomposition path
+            from torch.distributed.tensor._decompositions import DecompShardingStrategy
+
+            # If the op has a CIA decomposition, we prioritize it over the decomposition flow,
+            # allowing decomposed ops to individually enter DTensor dispatch.
+            # TODO(pianpwk): maybe switch this back; the decomp flow could incur fewer comms.
+            op_strategy = None
+            has_cia = torch._C._dispatch_has_kernel_for_dispatch_key(
+                op_schema.op.name(),
+                torch._C.DispatchKey.CompositeImplicitAutograd,
             )
-            needs_redistribute = False
-            expected_input_specs: list[DTensorSpec] = []
-            for idx, input_spec in enumerate(op_schema.args_spec):
-                desired_spec = output_strategy.input_specs[idx]
-                expected_input_specs.append(
-                    desired_spec.shallow_copy_with_tensor_meta(input_spec.tensor_meta)
-                )
-                if input_spec.placements != desired_spec.placements:
-                    needs_redistribute = True
+            if not has_cia and DecompShardingStrategy.has_decomp(op_schema.op):
+                # Ensure schema_info is registered for proper cache key computation
+                DecompShardingStrategy.ensure_schema_info(op_schema.op, self)
+                try:
+                    op_strategy = DecompShardingStrategy.propagate_strategy(
+                        op_schema, self
+                    )
+                except Exception as e:
+                    decomp_exception = e
 
-            suggestion_schema = None
-            if needs_redistribute:
-                suggestion_schema = OpSchema(
-                    op_schema.op, tuple(expected_input_specs), {}
-                )
-                suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
-
-            assert op_schema.return_type_tensor(), "Other return types NYI"
-            output_specs = output_strategy.output_specs
-
-            # TODO: figure out what use_val_from_redistribute_schema is for
-            output_sharding = OutputSharding(
-                output_specs,
-                suggestion_schema,
-                needs_redistribute=needs_redistribute,
-                use_val_from_redistribute_schema=False,
-            )
-            # associate the output sharding with the output tensor metadata
-            new_output_spec = self._create_output_spec_with_new_tensor_meta(
-                op_schema.op, output_sharding.output_spec, out_tensor_meta
-            )
-            output_sharding.output_spec = new_output_spec
-            return output_sharding
-        elif op_schema.op in self.op_strategy_funcs:
-            # wrap the op_schema with op strategy for sharding strategy propagation
-            strategy_schema = self._wrap_with_op_strategy(op_schema)
-
-            # run sharding strategy propagation/generation
-            op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
-
+        if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
@@ -752,7 +825,7 @@ class ShardingPropagator:
         else:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
-            )
+            ) from decomp_exception
 
     def _adjust_shape_and_stride_args(
         self,

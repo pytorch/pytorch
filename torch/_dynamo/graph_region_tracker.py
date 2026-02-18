@@ -331,9 +331,10 @@ class GraphRegionTracker:
         # the reason for this is that we will necessarily create the largest groups first.
         for group in self.hash_to_duplicates.values():
             if len(group) > 1:
+                # pyrefly: ignore [implicit-any]
                 region_group = []
                 min_rank = math.inf
-                # pyrefly: ignore [bad-assignment]
+
                 for node in group:
                     # some nodes aren't in the topo ranking?
                     if node in topological_ranking:

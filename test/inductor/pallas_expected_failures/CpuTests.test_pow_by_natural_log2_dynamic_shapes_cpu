@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpi5ec0rpz/2o/c2o7xwjaouw3u2yvim3aqg7b5rpxhtdzrn2z5sdbokewgpqamd2i.py", line 11, in pallas_fused_add_42303b0e_kernel
-    tmp1 = 2 ** math.floor(1.0000000000000000 + math.log2(torch.sym_float(s83)))
-                ^^^^
-NameError: name 'math' is not defined

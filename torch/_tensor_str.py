@@ -693,7 +693,8 @@ def _str_intern(inp, *, tensor_contents=None):
 
 def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
     level = torch._C._functorch.maybe_get_level(tensor)
-    assert level != -1
+    if level == -1:
+        raise AssertionError("expected functorch level to be >= 0, got -1")
 
     if torch._C._functorch.is_functionaltensor(tensor):
         # Since we're unwrapping the FunctionalTensorWrapper, we need to make sure
@@ -706,7 +707,8 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
     indented_value_repr = textwrap.indent(value_repr, " " * 4)
     if torch._C._functorch.is_batchedtensor(tensor):
         bdim = torch._C._functorch.maybe_get_bdim(tensor)
-        assert bdim != -1
+        if bdim == -1:
+            raise AssertionError("expected batch dimension to be >= 0, got -1")
         return (
             f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n{indented_value_repr}\n)"
         )

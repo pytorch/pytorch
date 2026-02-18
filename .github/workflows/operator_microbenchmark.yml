@@ -98,7 +98,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
@@ -107,7 +107,8 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: opmicrobenchmark-build-rocm
     with:
-      timeout-minutes: 500
+      # TODO (huydo): Need to implement sharding for ops micro benchmark
+      timeout-minutes: 900
       build-environment: ${{ needs.opmicrobenchmark-build-rocm.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}

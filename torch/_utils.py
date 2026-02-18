@@ -3,14 +3,18 @@ import copyreg
 import functools
 import importlib
 import logging
+import math
+import os
+import pickle
+import re
 import sys
 import traceback
 import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from types import ModuleType
-from typing import Any, Generic, TYPE_CHECKING
-from typing_extensions import deprecated, ParamSpec
+from typing import Any, cast, Generic, TYPE_CHECKING, TypedDict
+from typing_extensions import deprecated, NotRequired, ParamSpec
 
 import torch
 
@@ -82,9 +86,8 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert device_module is not None, (
-        f"{device.type.upper()} device module is not loaded"
-    )
+    if device_module is None:
+        raise AssertionError(f"{device.type.upper()} device module is not loaded")
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -96,9 +99,10 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert not self.is_sparse, (
-                f"sparse storage is not supported for {device.type.upper()} tensors"
-            )
+            if self.is_sparse:
+                raise AssertionError(
+                    f"sparse storage is not supported for {device.type.upper()} tensors"
+                )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
@@ -137,7 +141,10 @@ def _get_restore_location(device):
         elif isinstance(map_location, (str, torch.device)):
             return map_location
         else:
-            assert callable(map_location)
+            if not callable(map_location):
+                raise AssertionError(
+                    f"expected callable map_location, got {type(map_location).__name__}"
+                )
             raise RuntimeError(
                 "Callable map_location not supported with _rebuild_wrapper_subclass "
                 "or _rebuild_device_tensor_from_numpy"
@@ -193,14 +200,17 @@ def get_tensor_metadata(tensor):
     # Tensor's Metadata for serializing.
     # Currently, this only returns a dict[string, bool] specifying whether
     # `conj` or `neg` bit is set.
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
 
 
 def set_tensor_metadata(tensor, metadata):
     # See `get_tensor_metadata` above
-    assert isinstance(metadata, dict)
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(metadata, dict):
+        raise AssertionError(f"expected dict, got {type(metadata).__name__}")
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
@@ -744,7 +754,7 @@ class ExceptionWrapper:
         if exc_info is None:
             exc_info = sys.exc_info()
         self.exc_type = exc_info[0]
-        # pyrefly: ignore [not-iterable]
+
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
         self.where = where
 
@@ -1066,7 +1076,8 @@ def try_import(module_name: str) -> ModuleType | None:
 
         # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
         # "The finder should always set this attribute"
-        assert spec.loader is not None, "The loader attribute should always be set"
+        if spec.loader is None:
+            raise AssertionError("The loader attribute should always be set")
         spec.loader.exec_module(module)
         return module
 
@@ -1115,3 +1126,228 @@ NAME_MAPPING = {
     ("exceptions", "StandardError"): ("builtins", "Exception"),
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
+
+
+def _maybe_view_chunk_cat(
+    res: "torch.Tensor", group_size: int, gather_dim: int
+) -> "torch.Tensor":
+    """
+    This is intuitively the same as torch.cat(torch.chunk(res, group_size,
+    dim=0), dim=gather_dim), but returns a view if data movement is not
+    necessary.  This operation arises in NCCL all_gather, where you always get
+    a result which is concatenated on dim=0, even though actually you may need
+    to undo this concatenation and then re-cat on the gather dim.
+
+    When is data-movement not necessary?  Intuitively, we need to understand if
+    the unflatten in this reference implementation of this code triggers a
+    copy or not:
+
+        chunks = torch.unflatten(res, 0, [group_size, -1])
+        return torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
+
+    Assume res is contiguous (it will be coming out of the collective).  We
+    essentially need to know if the movedim maintains the contiguity of the
+    tensor.  Moving a dimension typically does NOT preserve contiguity, unless
+    EVERY dimension it is moved across is size 1.
+
+    Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
+
+        [4, d1, d2] -> [4, 1, d1, d2] -> [1, 4, d1, d2] (contiguous!)
+
+    Example: shape [4, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 4*d2]
+
+        [4, 2, d2] -> [4, 1, 2, d2] -> [1, 2, 4, d2] (not contiguous!)
+
+    Args:
+        res: Tensor with gathered data in dim 0, shape [group_size, ...]
+        group_size: Number of ranks in the group
+        gather_dim: Dimension to gather along in the output
+
+    Returns:
+        Tensor with data rearranged to gather along gather_dim
+    """
+
+    if gather_dim == 0:
+        # When gather_dim is 0, chunk+cat is a no-op
+        return res
+
+    shape = list(res.shape)
+
+    # Optimization: Can use view instead of split+cat when:
+    # 1. res.shape[0] == group_size (invariant after all_gather)
+    # 2. All dims between 0 and gather_dim (exclusive) have size 1
+    numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+
+    if shape[0] == group_size and numel_between == 1:
+        # View optimization: reshape to collapse dim 0 into gather_dim
+        final_shape = (
+            [1]  # Dim 0 becomes 1
+            + shape[1:gather_dim]  # Dims 1 to gather_dim-1 unchanged
+            + [shape[0] * shape[gather_dim]]  # gather_dim gets multiplied by group_size
+            + shape[gather_dim + 1 :]  # Rest unchanged
+        )
+        return res.view(final_shape)
+    else:
+        # General case: fall back to split + cat
+        # This is better than torch.flatten as cat can be vectorized, whereas
+        # the contiguous kernel is always bad.
+        return torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+
+
+class _Frame(TypedDict):
+    """Frame information from memory profiler snapshots."""
+
+    filename: str
+    line: int
+    name: str
+    # Fields added by FX augmentation (optional)
+    fx_node_op: NotRequired[str]
+    fx_node_name: NotRequired[str]
+    fx_node_target: NotRequired[str]
+    fx_original_trace: NotRequired[str]
+
+
+class _Block(TypedDict):
+    """Memory block information."""
+
+    size: int
+    requested_size: int
+    address: int
+    state: str
+    frames: list[_Frame]
+
+
+class _Segment(TypedDict):
+    """Memory segment information."""
+
+    address: int
+    total_size: int
+    stream: int
+    segment_type: str
+    allocated_size: int
+    active_size: int
+    blocks: list[_Block]
+
+
+class _TraceEntry(TypedDict):
+    """Memory trace entry information."""
+
+    action: str
+    addr: NotRequired[int]
+    frames: list[_Frame]
+    size: int
+    stream: int
+    device_free: NotRequired[int]
+
+
+class _Snapshot(TypedDict):
+    """Memory snapshot structure."""
+
+    segments: list[_Segment]
+    device_traces: NotRequired[list[list[_TraceEntry]]]
+
+
+def _augment_frames(frames: list[_Frame]) -> int:
+    """
+    Augment a list of frames with FX debug information. For each frame corresponding
+    to an FX-generated Python file, this function attaches additional FX node
+    metadata (op, name, target, and original trace).
+
+    Args:
+        frames (list[_Frame]): List of frame dictionaries to augment
+
+    Returns:
+        int: The count of frames that were augmented.
+    """
+    from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
+    from torch.fx.traceback import _FX_METADATA_REGISTRY
+
+    # Regex pattern to match FX generated files
+    _FX_GENERATED_PATTERN = re.compile(
+        rf"{re.escape(FX_GRAPH_MODULE_FILE_PREFIX)}.*\.py$"
+    )
+
+    count = 0
+
+    for frame in frames:
+        filename = frame.get("filename")
+        lineno = frame.get("line")
+        if not filename or not lineno:
+            continue
+
+        # Check if this looks like an FX generated file
+        if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
+            continue
+
+        metadata = _FX_METADATA_REGISTRY.get(filename)
+        if metadata is None:
+            continue
+
+        lineno_map = metadata.get("lineno_map", {})
+        node_metadata = metadata.get("node_metadata", {})
+        prologue_start = metadata.get("prologue_start", 0)
+
+        # Get the node index for this line
+        node_idx = lineno_map.get(lineno - prologue_start)
+        if node_idx is None:
+            continue
+
+        node_info = node_metadata.get(node_idx)
+        if node_info is None:
+            continue
+
+        # Populate FX metadata fields
+        frame["fx_node_op"] = node_info.get("op")
+        frame["fx_node_name"] = node_info.get("name")
+        frame["fx_node_target"] = str(node_info.get("target"))
+
+        # Attach original stack trace if available
+        original_trace = node_info.get("stack_trace")
+        if original_trace:
+            frame["fx_original_trace"] = original_trace
+
+        count += 1
+
+    return count
+
+
+def _augment_memory_snapshot_stack_traces(
+    snapshot: str | _Snapshot,
+) -> _Snapshot:
+    """
+    Augment a memory snapshot with original source stack traces from FX metadata.
+
+    IMPORTANT: This function reads from a global in-memory registry (_FX_METADATA_REGISTRY)
+    that is populated during graph module compilation. It must be called in the same
+    Python process where the FX graphs were compiled. It cannot be used to augment
+    snapshots loaded from disk in a different process.
+
+    Args:
+        snapshot (str or _Snapshot): Either a memory snapshot dict or path to a snapshot pickle file
+
+    Returns:
+        _Snapshot: The augmented snapshot dictionary with fx_node_op, fx_node_name,
+            fx_original_trace, and fx_node_info fields added to frames
+    """
+
+    snapshot_dict: _Snapshot
+    if isinstance(snapshot, str):
+        # Load the memory snapshot
+        with open(snapshot, "rb") as f:
+            snapshot_dict = cast(_Snapshot, pickle.load(f))
+    else:
+        snapshot_dict = snapshot
+
+    # Process blocks in segments (for regular allocations)
+    for segment in snapshot_dict.get("segments", []):
+        for block in segment.get("blocks", []):
+            if "frames" in block:
+                _augment_frames(block["frames"])
+
+    # Process device traces (for memory history)
+    for trace_list in snapshot_dict.get("device_traces", []):
+        for trace_entry in trace_list:
+            if isinstance(trace_entry, dict) and "frames" in trace_entry:
+                _augment_frames(trace_entry["frames"])
+
+    return snapshot_dict
