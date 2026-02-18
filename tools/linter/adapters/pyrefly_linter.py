@@ -101,9 +101,17 @@ def run_command(
     logging.debug("$ %s", " ".join(args))
     start_time = time.monotonic()
     try:
+        env = os.environ.copy()
+        # Pyrefly unconditionally appends GitHub Actions commands to stdout
+        # when GITHUB_ACTIONS is set, even with --output-format=json, which
+        # corrupts the JSON output.
+        env.pop("GITHUB_ACTIONS", None)
+        if extra_env:
+            env.update(extra_env)
         return subprocess.run(
             args,
             capture_output=True,
+            env=env,
         )
     finally:
         end_time = time.monotonic()
@@ -195,21 +203,15 @@ def check_files(
             )
         ]
 
-    # Parse JSON output from pyrefly, which may emit multiple JSON objects
+    # Parse JSON output from pyrefly. In GitHub Actions, pyrefly appends
+    # ::error commands to stdout after the JSON, so use raw_decode to parse
+    # only the first JSON object and ignore trailing output.
     try:
-        errors: list[dict[str, object]] = []
         if stdout:
-            decoder = json.JSONDecoder()
-            idx = 0
-            while idx < len(stdout):
-                # Skip whitespace between JSON objects
-                while idx < len(stdout) and stdout[idx] in " \t\n\r":
-                    idx += 1
-                if idx >= len(stdout):
-                    break
-                result, end_idx = decoder.raw_decode(stdout, idx)
-                errors.extend(result.get("errors", []))
-                idx = end_idx
+            result, _ = json.JSONDecoder().raw_decode(stdout)
+            errors = result.get("errors", [])
+        else:
+            errors = []
         errors = [error for error in errors if error["name"] != "deprecated"]
         rc = [
             LintMessage(
