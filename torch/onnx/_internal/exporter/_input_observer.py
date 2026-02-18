@@ -287,7 +287,7 @@ class InputObserverInfo:
             to be the same in the ordered dictionaries `add_inputs` receive.
         default_values: Default values defined by the signature of the function,
             any value equal to that is ignored to simplify the export.
-        missing: If a named argument (in kwargs) is missing,
+        value_if_missing: If a named argument (in kwargs) is missing,
             a default value will be taken in this dictionary,
             this is used when after the prefill step, an argument
             disappears (such as `pixel_values`) and another one
@@ -305,12 +305,12 @@ class InputObserverInfo:
         self,
         signature_names: list[str],
         default_values: dict[str, int | bool | str | float],
-        missing: dict[str, Any],
+        value_if_missing: dict[str, Any],
         args_name_and_position: tuple[str, int] | None,
         kwargs_name: str | None,
     ):
         self.default_values = default_values
-        self.missing = missing
+        self.value_if_missing = value_if_missing
         self.inputs: list[InputCandidate] = []
         self.outputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
         self.flat_outputs: list[list[torch.Tensor | None]] = []
@@ -346,18 +346,20 @@ class InputObserverInfo:
             if v is not None and not isinstance(v, (int, float, bool, str))
         }
 
-        # adds missing attributes
-        for k, v in self.missing.items():
+        # adds value_if_missing attributes
+        for k, v in self.value_if_missing.items():
             if k not in kwargs:
-                # Validate that `missing` keys are compatible with the observed signature.
-                # If the function does not accept **kwargs, all missing keys must be
+                # Validate that `value_if_missing` keys are compatible
+                # with the observed signature.
+                # If the function does not accept **kwargs,
+                # all value_if_missing keys must be
                 # present in the observed signature names.
-                if k not in self.signature_names and not getattr(
-                    self, "kwargs_name", None
-                ):
+                if k not in self.signature_names and not self.kwargs_name:
                     raise ValueError(
-                        f"Unexpected keyword argument '{k}' provided as a missing input "
-                        "for a function that does not accept it. All missing keys must "
+                        f"Unexpected keyword argument '{k}' "
+                        f"provided as a value_if_missing input "
+                        "for a function that does not accept it. "
+                        f"All value_if_missing keys must "
                         f"be in the observed signature: {tuple(self.signature_names)}."
                     )
                 kwargs[k] = v
@@ -624,7 +626,29 @@ class InputObserverInfo:
         | dict[str, torch.Tensor]
         | tuple[list[torch.Tensor] | tuple[torch.Tensor, ...], dict[str, torch.Tensor]]
     ):
-        """Infers arguments based on the collected tensors."""
+        """Infers arguments based on the collected tensors.
+
+        Args:
+            index_or_args_or_kwargs: If missing, the method selects one set of inputs
+                among the available ones, usually the set of inputs containing
+                with the highest number of tensors.
+                It then replaces None values and missing tensors with empty tensors.
+                If not missing, it can be an integer to fetch one of the stored set
+                or some inputs.
+            flat: If True, it returns a flattened list of tensors,
+                if False, it returns a tuple or a dictionary preserving
+                the nested structures. The flat version is used internally.
+                It produces a single list of tensors easier to process or modify
+                rather than a nested structure holding the same tensors.
+                The original structure can be restored with
+                ``torch.utils._pytree.tree_unflatten(flat_list, self.aligned_spec)``.
+                This mechanism is used to replace None values by empty tensors.
+            as_args_kwargs: If True, the method always returns `(args, kwargs)`,
+                otherwise, it returns either a tuple (only args) or a dictionary
+                (only kwargs) or raises an exception if it cannot do so.
+        Returns:
+            Inferred arguments, every optional tensor is replaced by an empty tensor.
+        """
         # This is already checked by _build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
         self.align_inputs_none_values()
@@ -767,7 +791,7 @@ class InputObserver:
     export arguments.
 
     Args:
-        missing: If a named argument (in kwargs) is missing,
+        value_if_missing: If a named argument (in kwargs) is missing,
             a default value will be taken in this dictionary,
             this is used when after the prefill step, an argument
             disappears (such as `pixel_values`) and another one
@@ -806,7 +830,7 @@ class InputObserver:
     are needed but they may not be both specified at the same time.
     Since `pixel_values` only appears in the first call, the observer cannot
     tell how to infer an empty tensor for this argument. That's what the argument
-    `missing` is for. The following example is more than a dummy example
+    `value_if_missing` is for. The following example is more than a dummy example
     but shows how to use it with ``transformers``.
 
     .. code-block:: python
@@ -839,7 +863,7 @@ class InputObserver:
             },
         ]
         observer = InputObserver(
-            missing=dict(
+            value_if_missing=dict(
                 pixel_values=torch.empty((0, 3, 896, 896), dtype=torch.float16)
             )
         )
@@ -849,9 +873,9 @@ class InputObserver:
     .. versionadded:: 2.11.0
     """
 
-    def __init__(self, missing: dict[str, Any] | None = None):
+    def __init__(self, value_if_missing: dict[str, Any] | None = None):
         self.info: InputObserverInfo | None = None  # type: ignore[annotation-unchecked]
-        self.missing = missing or {}
+        self.value_if_missing = value_if_missing or {}
 
     def _replaced_method(
         self,
@@ -921,7 +945,7 @@ class InputObserver:
                     if p.default != inspect.Parameter.empty
                     and isinstance(p.default, (int, bool, str, float))
                 },
-                missing=self.missing,
+                value_if_missing=self.value_if_missing,
                 args_name_and_position=args_names[0] if args_names else None,
                 kwargs_name=kwargs_names[0] if kwargs_names else None,
             )
@@ -995,7 +1019,12 @@ class InputObserver:
                 or some inputs.
             flat: If True, it returns a flattened list of tensors,
                 if False, it returns a tuple or a dictionary preserving
-                the nested structures.
+                the nested structures. The flat version is used internally.
+                It produces a single list of tensors easier to process or modify
+                rather than a nested structure holding the same tensors.
+                The original structure can be restored with
+                ``torch.utils._pytree.tree_unflatten(flat_list, self.aligned_spec)``.
+                This mechanism is used to replace None values by empty tensors.
             as_args_kwargs: If True, the method always returns `(args, kwargs)`,
                 otherwise, it returns either a tuple (only args) or a dictionary
                 (only kwargs) or raises an exception if it cannot do so.
