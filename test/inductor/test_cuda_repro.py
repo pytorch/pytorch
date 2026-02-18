@@ -2745,6 +2745,19 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         compiled_result = torch.compile(fn)(exp)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
+    def test_pow_precision_fp64(self):
+        # Test that pow matches eager bitwise for fp64.
+        # libdevice.pow matches CUDA's pow for fp64 (no FTZ issues).
+        def fn(base, exp):
+            return torch.pow(base, exp)
+
+        base = torch.tensor([0.9, 0.999, 0.5, 0.8], device="cuda", dtype=torch.float64)
+        exp = torch.tensor([50.0, 100.0, 10.0, 20.0], device="cuda", dtype=torch.float64)
+
+        eager_result = fn(base, exp)
+        compiled_result = torch.compile(fn)(base, exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
     @config.patch("eager_numerics.division_rounding", True)
     def test_reciprocal_precision_rounding(self):
         # Test that reciprocal matches eager when division_rounding is enabled.
