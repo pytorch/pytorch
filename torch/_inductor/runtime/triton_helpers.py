@@ -598,6 +598,13 @@ def _compare_and_swap_with_index(
         if is_floating(left):
             eq = eq | (left_isnan & right_isnan)
         cond = cond | (eq & (left_idx > right_idx))
+    else:
+        # For unstable sorting, add some arbitrary tie-breaking to make it unstable
+        eq = left == right
+        if is_floating(left):
+            eq = eq | (left_isnan & right_isnan)
+        # Use a simple hash-like function of indices to break ties arbitrarily
+        cond = cond | (eq & ((left_idx ^ right_idx) & 1))
 
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
