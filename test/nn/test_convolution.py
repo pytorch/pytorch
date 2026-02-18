@@ -3537,6 +3537,22 @@ class TestConvolutionNNDeviceType(NNTestCase):
             exact_device=False,
         )
 
+    @onlyNativeDeviceTypes
+    def test_slow_conv_transpose3d_kernel_size_mismatch(self, device):
+        input = torch.randn(1, 2, 4, 5, 4, device=device)
+        weight = torch.randn(2, 3, 2, 3, 2, device=device)
+        with self.assertRaisesRegex(RuntimeError, "kernel_size must match weight"):
+            torch.ops.aten.slow_conv_transpose3d(
+                input,
+                weight,
+                [1, 1, 1],
+                None,
+                [1, 1, 1],
+                [0, 0, 0],
+                [0, 0, 0],
+                [1, 1, 1],
+            )
+
     @onlyCUDA
     def test_ConvTranspose3d_size_1_kernel(self, device):
         with set_default_dtype(torch.double):
