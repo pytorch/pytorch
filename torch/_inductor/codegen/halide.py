@@ -77,7 +77,7 @@ class Unsupported(RuntimeError):
         super().__init__(f"halide backend does not support: {thing}")
 
 
-class HalidePrinter(PythonPrinter):
+class HalidePrinter(PythonPrinter):  # noqa: docstring_linter
     @staticmethod
     def cast_index(expr):
         return f"hl.cast({V.kernel.index_dtype}, {expr})"
@@ -91,25 +91,30 @@ class HalidePrinter(PythonPrinter):
 
     def _print_ToFloat(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.f32({self._print(expr.args[0])})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return self.cast_index(f"hl.floor({self._print(expr.args[0])})")
 
     _print_FloorToInt = _print_floor
 
     def _print_Trunc(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return self.cast_index(f"hl.trunc({self._print(expr.args[0])})")
 
     _print_TruncToInt = _print_Trunc
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return self.cast_index(f"hl.ceil({self._print(expr.args[0])})")
 
     def _helper_sqrt(self, expr):
+        # pyrefly: ignore [missing-attribute]
         return f"hl.sqrt({self.cast_float(self._print(expr))})"
 
     def _print_Where(self, expr):
@@ -120,61 +125,77 @@ class HalidePrinter(PythonPrinter):
 
     def _print_Min(self, expr):
         if len(expr.args) == 1:
+            # pyrefly: ignore [missing-attribute]
             return self._print(expr.args[0])
 
         mid = len(expr.args) // 2
+        # pyrefly: ignore [missing-attribute]
         a = self._print(sympy.Min(*expr.args[:mid]))
+        # pyrefly: ignore [missing-attribute]
         b = self._print(sympy.Min(*expr.args[mid:]))
         return f"hl.min({a}, {b})"
 
     def _print_Max(self, expr):
         if len(expr.args) == 1:
+            # pyrefly: ignore [missing-attribute]
             return self._print(expr.args[0])
 
         mid = len(expr.args) // 2
+        # pyrefly: ignore [missing-attribute]
         a = self._print(sympy.Max(*expr.args[:mid]))
+        # pyrefly: ignore [missing-attribute]
         b = self._print(sympy.Max(*expr.args[mid:]))
 
         return f"hl.max({a}, {b})"
 
     def _print_Abs(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return self.cast_index(f"hl.abs({self._print(expr.args[0])})")
 
     def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.cos({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.cosh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.acos({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.sin({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.sinh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.asin({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.tan({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.tanh({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"hl.atan({self._print(expr.args[0])})"
 
     def _print_OpaqueUnaryFn_log2(self, expr):
@@ -191,6 +212,7 @@ class HalidePrinter(PythonPrinter):
 
     def _print_Round(self, expr):
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return self.cast_index(f"hl.round({self._print(expr.args[0])})")
 
     _print_RoundToInt = _print_Round
@@ -202,6 +224,7 @@ class HalidePrinter(PythonPrinter):
 
     def _print_RoundDecimal(self, expr):
         val, n = expr.args
+        # pyrefly: ignore [missing-attribute]
         val = self._print(val)
         n = int(n)
         return f"hl.f32({10.0 ** (-n)!r})*hl.round(({val})*hl.f32({10.0**n!r}))"

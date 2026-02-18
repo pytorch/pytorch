@@ -1130,11 +1130,12 @@ class SizeVarAllocator:
         while sub_cnt < sub_cnt_limit:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
-                return new_expr
+                break
             expr = sympy.factor(new_expr)
             sub_cnt += 1
+        else:
+            log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
 
-        log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
         return expr
