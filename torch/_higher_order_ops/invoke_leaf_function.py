@@ -381,7 +381,7 @@ def _make_forward(
     @functools.wraps(fn)
     def forward(*args, **kwargs):
         effective_keys = include_keys
-        if effective_keys.has(DispatchKey.PythonDispatcher):
+        if include_keys.has(DispatchKey.PythonDispatcher):
             effective_keys = effective_keys.remove(DispatchKey.PythonDispatcher)
         if effective_keys.has(DispatchKey.Python):
             effective_keys = effective_keys.remove(DispatchKey.Python)
@@ -507,6 +507,7 @@ class InvokeLeafFunction(HigherOrderOperator):
 
 
 invoke_leaf_function = InvokeLeafFunction()
+
 
 # NOTE: [Autograd support for invoke_leaf_function]
 #
