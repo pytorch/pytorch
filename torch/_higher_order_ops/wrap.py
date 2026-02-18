@@ -80,6 +80,17 @@ redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)
 redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
 
 
+from torch._functorch._aot_autograd.runtime_wrappers import (
+    _AnalyzeCustomOpInputOutputMode,
+)
+
+
+@inductor_compiled_code.py_impl(_AnalyzeCustomOpInputOutputMode)
+def inductor_compiled_code_analyze_mode(mode, func, inputs):
+    with mode:
+        return func(inputs)
+
+
 @register_fake(inductor_compiled_code)
 def inductor_compiled_code_fake(func, inputs):
     raise RuntimeError(
