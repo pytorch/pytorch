@@ -1285,6 +1285,90 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         result.graph.lint()
 
 
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestAugmentedGraphHelper(InductorTestCase):
+    """Unit tests for AugmentedGraphHelper.transfer_erased_node_deps cycle prevention."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_transfer_erased_deps_no_mutual_cycle(self):
+        """
+        Bucketing two all_gathers whose waits sandwich an unbucketed
+        reduce_scatter wait in the timeline must not create a mutual
+        extra-dep cycle.
+
+        Before:                         After erase {ag1_w, ag2_w} -> new_w:
+
+          ag1_w ---extra---> rs_w          new_w ---extra---> rs_w
+                              |                                |
+                            extra                            extra
+                              |                                |
+                              v                                v
+                            ag2_w                            new_w  ← cycle!
+
+        The has_path checks in _try_timeline_position only verify no path
+        between the two nodes being merged (ag1_w vs ag2_w). The cycle
+        involves rs_w, an external node not being merged.
+        """
+        from torch._dynamo.graph_deduplication import _has_cycle
+        from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
+
+        group_name = "0"
+        group_size = 2
+
+        def func(a, b, c):
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            ag1_wait = torch.ops._c10d_functional.wait_tensor(ag1)
+            rs = torch.ops._c10d_functional.reduce_scatter_tensor(
+                b, "sum", group_size, group_name
+            )
+            rs_wait = torch.ops._c10d_functional.wait_tensor(rs)
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                c, group_size, group_name
+            )
+            ag2_wait = torch.ops._c10d_functional.wait_tensor(ag2)
+            # Stand-in for the new bucketed wait node
+            new_wait = torch.neg(a)
+            return ag1_wait, rs_wait, ag2_wait, new_wait
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(8, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b, c)
+
+        ag1_wait, rs_wait, ag2_wait = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.wait_tensor.default,
+        )
+        (new_wait,) = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.neg.default
+        )
+
+        aug = AugmentedGraphHelper(traced.graph)
+        aug.add_extra_dep(n=rs_wait, dep=ag1_wait)
+        aug.add_extra_dep(n=ag2_wait, dep=rs_wait)
+
+        aug.transfer_erased_node_deps({ag1_wait: new_wait, ag2_wait: new_wait})
+
+        self.assertFalse(_has_cycle(traced.graph, aug.get_all_extra_deps()))
+
+
 class TestForeachGroupsUnit(InductorTestCase):
     """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
 
