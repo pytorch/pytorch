@@ -765,5 +765,73 @@ class TestHopPrintDTensor(DTensorTestBase):
             self.assertEqual(output, "")
 
 
+class TestHopPrintBackward(TestCase):
+    def test_print_backward_basic(self):
+        """Gradient is printed during backward with [backward] prefix."""
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            y = torch._higher_order_ops.print("x: {}", x, print_backward=True)
+            loss = y.sum()
+            loss.backward()
+            output = mock_stdout.getvalue()
+
+        # Forward print
+        self.assertIn("x: tensor([1., 2., 3.]", output)
+        # Backward print
+        self.assertIn("[backward]", output)
+        self.assertIn("tensor([1., 1., 1.]", output)
+
+    def test_print_backward_returns_tensor(self):
+        """print_backward=True returns the input tensor (identity)."""
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            y = torch._higher_order_ops.print("x: {}", x, print_backward=True)
+
+        self.assertIsInstance(y, torch.Tensor)
+        self.assertEqual(y, x)
+
+    def test_print_backward_gradient_passthrough(self):
+        """Gradients pass through unchanged (identity backward)."""
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            y = torch._higher_order_ops.print("x: {}", x, print_backward=True)
+            loss = (y * 2).sum()
+            loss.backward()
+
+        # Gradient should be 2.0 everywhere (from the * 2 op)
+        self.assertEqual(x.grad, torch.tensor([2.0, 2.0, 2.0]))
+
+    def test_print_backward_false_returns_none(self):
+        """Default print_backward=False still returns None."""
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            result = torch._higher_order_ops.print("x: {}", x)
+
+        self.assertIsNone(result)
+
+    def test_print_backward_multiple_tensors(self):
+        """Multiple tensor args are returned as a tuple."""
+        x = torch.tensor([1.0], requires_grad=True)
+        y = torch.tensor([2.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            out = torch._higher_order_ops.print("x: {} y: {}", x, y, print_backward=True)
+            loss = out[0].sum() + out[1].sum()
+            loss.backward()
+            output = mock_stdout.getvalue()
+
+        self.assertIsInstance(out, tuple)
+        self.assertEqual(len(out), 2)
+        self.assertIn("[backward]", output)
+
+    def test_print_backward_no_tensor_returns_none(self):
+        """print_backward=True with no tensor args returns None."""
+        with patch("sys.stdout", new_callable=io.StringIO):
+            result = torch._higher_order_ops.print(
+                "val: {}", 42, print_backward=True
+            )
+
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     run_tests()
