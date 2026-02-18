@@ -481,6 +481,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
     except FileNotFoundError:
         return False
 
+    # pyrefly: ignore [unreachable]
     return False
 
 
@@ -525,6 +526,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
         # --version args not support.
         return False
 
+    # pyrefly: ignore [unreachable]
     return False
 
 
