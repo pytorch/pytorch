@@ -896,7 +896,7 @@ class AsyncTPTest(MultiProcContinuousTest):
                     f"Expected mm_output_0.stride() to be truthy, got {mm_output_0.stride()}"
                 )
 
-    @skip_if_rocm_multiprocess  # this requires async_input_mm support
+    # @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
