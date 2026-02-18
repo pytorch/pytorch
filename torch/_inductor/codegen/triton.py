@@ -1758,11 +1758,22 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
-        # Similar to div_floor_kernel_cuda in pytorch core.
-        # Notice that // in triton behaves as truncdiv instead of floordiv
-        quot = f"{a} // {b}"
-        rem = f"{a} % {b}"
-        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+        # Notice that // in triton behaves as truncdiv instead of floordiv.
+        #
+        # We avoid feeding negative values into Triton's // operator because
+        # Triton's AxisInfo analysis incorrectly deduplicates signed division
+        # results for contiguous inputs (triton-lang/triton#XXXX). Instead we
+        # use bitwise complement (~) to make the dividend non-negative:
+        #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
+        # For negative b we negate both operands first.
+        zero = ops.constant(0, torch.int32)
+        b_neg = ops.lt(b, zero)
+        a = ops.where(b_neg, ops.sub(zero, a), a)
+        b = ops.where(b_neg, ops.sub(zero, b), b)
+        a_neg = ops.lt(a, zero)
+        a = ops.where(a_neg, ops.bitwise_not(a), a)
+        quot = ops.truncdiv(a, b)
+        return ops.where(a_neg, ops.bitwise_not(quot), quot)
 
     @staticmethod
     def sign(x):
@@ -3880,26 +3891,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         codegen reduction of value to Triton according the reduction_type
         """
 
+        def should_upcast(d: torch.dtype | None) -> bool:
+            return d is not None and d.is_floating_point and d.itemsize < 4
+
         def maybe_upcast(value: CSEVariable) -> CSEVariable:
-            # Math reductions in FP16/BF16 are less accurate because the Triton compiler does not
-            # automatically promote to FP32 for accumulation. Additionally, max/min reductions
-            # do not support FP16/BF16. We manually promote to FP32 here.
+            # Math reductions in small floats are less accurate because the Triton
+            # compiler does not automatically promote to FP32 for accumulation.
+            # Additionally, max/min reductions do not support FP16/BF16.  Manually
+            # promote to FP32 here.
             return (
                 ops.to_dtype(value, torch.float32)
-                if value.dtype
-                in [
-                    torch.float16,
-                    torch.bfloat16,
-                ]
+                if should_upcast(value.dtype)
                 else value
             )
 
-        original_dtypes = [val.dtype for val in pytree.tree_leaves(value)]
-        value = pytree.tree_map(maybe_upcast, value)
-        if any(x in [torch.float16, torch.bfloat16] for x in original_dtypes):
+        do_upcast = pytree.tree_any(lambda v: should_upcast(v.dtype), value)
+        original_dtype = dtype
+        if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
-            src_dtype = torch.promote_types(src_dtype, torch.float32)
-            dtype = torch.promote_types(dtype, torch.float32)
+            pytree.tree_map_(maybe_upcast, value)
+            src_dtype = torch.float32 if should_upcast(src_dtype) else src_dtype
+            dtype = torch.float32 if should_upcast(dtype) else dtype
 
         assert self.inside_reduction
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
@@ -4331,32 +4343,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self.cse.reduction_cache[cache_key] = result_var
 
-        if isinstance(result_var, tuple):
-            assert all(isinstance(x, TritonCSEVariable) for x in result_var)
-            self.outside_loop_vars.update(result_var)
+        result_tuple = result_var if isinstance(result_var, tuple) else (result_var,)
+        self.outside_loop_vars.update(result_tuple)
+        assert all(isinstance(x, TritonCSEVariable) for x in result_tuple)
 
-            # Match output dtype with input dtype
-            if reduction_type in ("welford_reduce", "online_softmax_reduce"):
-                assert len(original_dtypes) == 1
-                original_dtypes = len(result_var) * original_dtypes
-
-            assert len(result_var) == len(original_dtypes)
-            for var, orig_dtype in zip(result_var, original_dtypes):
-                assert orig_dtype is not None
-                if var.dtype != orig_dtype:
+        # If BF16/F16 upcasting was done, ensure the output is downcast to the
+        # expected dtype.
+        if do_upcast:
+            for result in result_tuple:
+                if result.dtype != original_dtype:
                     self.post_loop_combine.writeline(
-                        f"{var} = {var}.to({triton_compute_type(orig_dtype)})"
+                        f"{result} = {result}.to({triton_compute_type(original_dtype)})"
                     )
-        else:
-            assert isinstance(result_var, TritonCSEVariable)
-            self.outside_loop_vars.add(result_var)
-
-            # Match output dtype with input dtype
-            if result_var.dtype != original_dtypes[0]:
-                assert original_dtypes[0] is not None
-                self.post_loop_combine.writeline(
-                    f"{result_var} = {result_var}.to({triton_compute_type(original_dtypes[0])})"
-                )
 
         return result_var
 
