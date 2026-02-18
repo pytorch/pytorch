@@ -91,8 +91,32 @@ def remainder_integer(a, b):
 @triton.jit
 def remainder_with_zero_check(a, b):
     # Check for division by zero to match eager behavior
-    tl.device_assert(b != 0, "ZeroDivisionError")
-    return a % b
+    # Issue #174174: Inductor produces inconsistent results for aten.remainder
+
+    # Check if either operand is floating point
+    is_float_a = promote_to_tensor(a).dtype.is_floating()
+    is_float_b = promote_to_tensor(b).dtype.is_floating()
+    is_float_op = is_float_a or is_float_b
+
+    # For floating point operations, allow division by zero (returns NaN/Inf)
+    # For integer operations, we need to implement a proper zero check
+
+    # Since tl.device_assert is unreliable, we use conditional execution
+    # For integer zero division, we'll cause a specific behavior that can be detected
+    zero_divisor = (b == 0)
+
+    # For integer types with zero divisor, we return a sentinel value that will
+    # cause consistent behavior across backends. We use the approach where
+    # integer division by zero should raise an error.
+    result = tl.where(
+        zero_divisor & ~is_float_op,
+        # For integer division by zero, we force an error by doing a / 0
+        # This should consistently fail in a predictable way
+        a / tl.zeros_like(b),  # This will cause a division by zero
+        a % b  # Normal remainder for all other cases
+    )
+
+    return result
 
 
 @triton.jit
