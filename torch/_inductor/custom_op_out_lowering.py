@@ -1,26 +1,16 @@
 """
-Inductor lowering of functional custom ops to their out-variant overload.
-
-Instead of routing through FallbackKernel (ExternKernelAlloc, should_allocate=False),
-this module lowers to ExternKernelOut (should_allocate=True) so that output buffers
-participate in Inductor's AllocateLine.plan() buffer reuse.
-
-Supports:
-    - Single-output ops: functional(x) -> Tensor  (PR A2)
-    - Multi-output ops: functional(x) -> (Tensor, ...)  (PR A3)
-
-Gated behind ``config.lower_custom_ops_to_out_variant`` (default False).
+Lower functional custom ops to out-variant ExternKernelOut for buffer reuse.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._ops import OpOverload
 
-from . import config, ir
+from . import ir
 from .virtualized import V
 
 
@@ -37,20 +27,11 @@ def try_lower_to_out_variant(
     tensor_args: Sequence[ir.IRNode],
     non_tensor_args: Sequence[Any],
     kwargs: dict[str, Any],
-) -> Optional[Union[ir.IRNode, list[ir.IRNode]]]:
+) -> Optional[ir.IRNode]:
+    """Try lowering a functional custom op to ExternKernelOut.
+
+    Returns IR node(s) on success, or None to fall through to FallbackKernel.
     """
-    Attempt to lower a functional custom op to its out-variant via ExternKernelOut.
-
-    Returns the IR node(s) if lowering succeeds, or None to fall through to
-    FallbackKernel.  For single-output ops returns one node; for multi-output
-    ops returns a list of nodes.
-
-    Called from the FallbackKernel.create() hook in ir.py when
-    ``config.lower_custom_ops_to_out_variant`` is True.
-    """
-    if not config.lower_custom_ops_to_out_variant:
-        return None
-
     if not isinstance(kernel, OpOverload):
         return None
 
@@ -78,23 +59,16 @@ def try_lower_to_out_variant(
             )
             return None
         return _lower_single_output(
-            kernel, out_op, out_arg_names,
-            example_output, tensor_args, non_tensor_args, kwargs,
+            kernel,
+            out_op,
+            out_arg_names,
+            example_output,
+            tensor_args,
+            non_tensor_args,
+            kwargs,
         )
-    elif isinstance(example_output, (tuple, list)):
-        tensors = [t for t in example_output if isinstance(t, torch.Tensor)]
-        if len(tensors) == len(example_output) and len(tensors) == len(out_arg_names):
-            return _lower_multi_output(
-                kernel, out_op, out_arg_names,
-                example_output, tensor_args, non_tensor_args, kwargs,
-            )
-        log.debug(
-            "Skipping %s: %d tensor outputs vs %d out args",
-            kernel, len(tensors), len(out_arg_names),
-        )
-        return None
-    else:
-        return None
+
+    return None
 
 
 def _lower_single_output(
@@ -128,27 +102,8 @@ def _lower_single_output(
     return node
 
 
-def _lower_multi_output(
-    kernel: OpOverload,
-    out_op: OpOverload,
-    out_arg_names: list[str],
-    example_output: Union[tuple, list],
-    tensor_args: Sequence[ir.IRNode],
-    non_tensor_args: Sequence[Any],
-    kwargs: dict[str, Any],
-) -> Optional[list[ir.IRNode]]:
-    """Lower a multi-output functional op to ExternKernelOut.
-
-    Implemented in a follow-up commit.
-    """
-    return None
-
-
 def _make_python_kernel_name(out_op: OpOverload) -> str:
-    """Build the fully-qualified Python kernel name for an out-variant op.
-
-    Example: torch.ops.mylib.add_one.out
-    """
+    """Build fully-qualified kernel name, e.g. 'torch.ops.mylib.add_one.out'."""
     ns = out_op.namespace
     op_name = out_op._schema.name.split("::")[1]
     overload = out_op._overloadname
@@ -156,7 +111,7 @@ def _make_python_kernel_name(out_op: OpOverload) -> str:
 
 
 def _codegen_input_args(node: ir.ExternKernel) -> list[str]:
-    """Codegen positional + constant args as a list of strings."""
+    """Codegen positional + constant args as strings."""
     assert ir.is_node_sequence(node.inputs)
     args = [x.codegen_reference() for x in node.inputs]  # type: ignore[union-attr]
     for const in node.constant_args:
@@ -165,7 +120,7 @@ def _codegen_input_args(node: ir.ExternKernel) -> list[str]:
 
 
 def _codegen_kwargs(node: ir.ExternKernel, skip_names: set[str]) -> list[str]:
-    """Codegen keyword args, skipping any names in ``skip_names``."""
+    """Codegen keyword args, skipping names in ``skip_names``."""
     result = []
     for k, v in node.kwargs.items():
         if k not in skip_names:
@@ -174,15 +129,10 @@ def _codegen_kwargs(node: ir.ExternKernel, skip_names: set[str]) -> list[str]:
 
 
 class CustomOpExternKernelOut(ir.ExternKernelOut):
-    """
-    ExternKernelOut for single-output custom ops with flexible out-arg naming.
+    """ExternKernelOut with flexible out-arg naming from schema.
 
-    Unlike the base ExternKernelOut which hardcodes ``out=`` in codegen,
-    this uses the actual out-arg name from the op's schema (e.g., "result",
-    "output").
-
-    Inherits ``should_allocate() = True`` from ExternKernelOut, enabling
-    Inductor's AllocateLine.plan() buffer reuse.
+    Uses the schema's actual out-arg name (e.g. "result") instead of
+    hardcoded "out=". Inherits should_allocate()=True for buffer reuse.
     """
 
     out_op: OpOverload
