@@ -252,18 +252,34 @@ class Benchmarker:
         This captures the callable into a CUDA graph and benchmarks the graph replay,
         which eliminates kernel launch overhead for fair comparison between different
         implementations.
-        """
-        # Warmup
-        _callable()
-        torch.cuda.synchronize()
 
-        # Capture into CUDA graph
-        cuda_graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(cuda_graph):
+        cuBLAS workspaces for the benchmark and capture streams are cleaned up after
+        benchmarking. Graph memory returns to the allocator's cache for reuse.
+        """
+        benchmark_stream = torch.cuda.Stream()
+
+        # Warmup on the benchmark stream
+        with torch.cuda.stream(benchmark_stream):
             _callable()
         torch.cuda.synchronize()
 
-        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        # Capture into CUDA graph, tracking the capture stream
+        cuda_graph = torch.cuda.CUDAGraph()
+        capture_stream_ptr = None
+        with torch.cuda.stream(benchmark_stream):
+            with torch.cuda.graph(cuda_graph):
+                capture_stream_ptr = torch.cuda.current_stream().cuda_stream
+                _callable()
+        torch.cuda.synchronize()
+
+        try:
+            return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+        finally:
+            # Clear cuBLAS workspaces for both streams to avoid memory leaks
+            torch._C._cuda_clearCublasWorkspacesForStream(benchmark_stream.cuda_stream)
+            if capture_stream_ptr is not None:
+                torch._C._cuda_clearCublasWorkspacesForStream(capture_stream_ptr)
+            del cuda_graph
 
 
 class TritonBenchmarker(Benchmarker):
