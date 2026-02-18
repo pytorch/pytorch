@@ -987,42 +987,11 @@ inductor_one_sample["xpu"] = {
 
 # TODO: Fix these so strides match.
 inductor_skip_exact_stride = {
-    "complex",
-    "empty_permuted",
-    "fft.irfftn",
-    "fft.irfft2",
-    "linalg.diagonal",
-    "linalg.eigvals",  # Fails for ROCM
-    "linalg.lu",
-    "linalg.lu_factor",
     "linalg.matrix_norm",
-    "linalg.norm",
-    "linalg.norm.subgradients_at_zero",
-    "linalg.pinv.singular",
-    "linalg.svdvals",
-    "linalg.solve",
-    "linalg.solve_ex",
-    "linalg.qr",
-    "matmul",
-    "__rmatmul__",
-    "nn.functional.adaptive_avg_pool1d",
-    "nn.functional.group_norm",
-    "nn.functional.linear",
-    "nn.functional.max_pool2d",
-    "nn.functional.unfold",
     "ormqr",
-    "pca_lowrank",
-    "polar",
-    "prod",
-    "qr",
     "rot90",
-    "stack",
     "sum",
     "tensordot",
-    "tril_indices",
-    "triu_indices",
-    "unbind",
-    "unbind_copy",
 }
 
 # On XPU, Inductor may apply additional layout optimizations that can change
