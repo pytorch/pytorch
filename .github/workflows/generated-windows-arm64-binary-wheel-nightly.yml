@@ -98,11 +98,11 @@ jobs:
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -243,11 +243,11 @@ jobs:
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -388,11 +388,11 @@ jobs:
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |

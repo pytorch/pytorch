@@ -17,7 +17,7 @@ tagged_version() {
 
 envfile=${BINARY_ENV_FILE:-/tmp/env}
 if [[ -n "${PYTORCH_ROOT}"  ]]; then
-  workdir="${workdir}${PYTORCH_ROOT}"
+  workdir=$(dirname "${PYTORCH_ROOT}")
 else
   # docker executor (binary builds)
   workdir="/pytorch"
