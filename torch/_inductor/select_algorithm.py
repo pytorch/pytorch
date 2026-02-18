@@ -2208,10 +2208,10 @@ class ExternKernelChoice:
         name = name or kernel.__name__
         assert callable(kernel)
         assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
+        setattr(extern_kernels, name, kernel)
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
-        setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
@@ -2251,7 +2251,11 @@ class ExternKernelChoice:
     ):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         return ExternKernelCaller(
-            self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
+            self,
+            input_nodes,
+            layout,
+            kwargs,
+            has_out_variant=self.has_out_variant,
         )
 
     @property
@@ -2327,6 +2331,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)
+        self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
@@ -2452,6 +2457,7 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         # pyrefly: ignore [missing-attribute]
         return self.bmreq.benchmark(*args, out=out)
 
@@ -2834,12 +2840,20 @@ class AlgorithmSelectorCache(PersistentCache):
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
+        min_speedup_threshold: float = 1.0,  # Only pick non-fallback if faster by this ratio
+        benchmark_with_cudagraphs: bool = False,  # Use CUDA graphs for ExternKernelCaller benchmarking
     ):
         from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.subgraph import SubgraphChoiceCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
             choices = preprocessing_fn(choices)
+
+        # Apply benchmark_with_cudagraphs to all choices
+        if benchmark_with_cudagraphs:
+            for choice in choices:
+                choice._benchmark_with_cudagraphs = True
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
@@ -2863,10 +2877,17 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(choices) == 1:
             if not isinstance(choices[0], CUDATemplateCaller):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
-                return choices[0].output_node()
+                node = choices[0].output_node()
+                if return_choice:
+                    return node, choices[0]
+                return node
 
         if config.deterministic:
-            return self.pick_deterministic_choice(choices).output_node()
+            choice = self.pick_deterministic_choice(choices)
+            node = choice.output_node()
+            if return_choice:
+                return node, choice
+            return node
 
         inputs_key = create_inputs_key(input_nodes)
 
@@ -2881,7 +2902,12 @@ class AlgorithmSelectorCache(PersistentCache):
             precompilation_timeout_seconds=precompilation_timeout_seconds,
         )
 
-        if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
+        # Skip multi-template path when return_choice=True since caller needs immediate result
+        if (
+            return_multi_template
+            and not return_choice
+            and (config.max_autotune or config.max_autotune_gemm)
+        ):
             if config.pipeline_max_autotune_gemm:
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
@@ -3030,7 +3056,33 @@ class AlgorithmSelectorCache(PersistentCache):
             return node
 
         # if we got any timings at all, pick the best of those
-        choice = min(timings, key=timings.__getitem__)
+        best_choice = min(timings, key=timings.__getitem__)
+
+        # Apply min_speedup_threshold: only pick non-fallback if it beats fallback by threshold
+        if min_speedup_threshold > 1.0:
+
+            def is_fallback(c: ChoiceCaller) -> bool:
+                return isinstance(c, ExternKernelCaller) and getattr(
+                    c.choice, "use_fallback_kernel", False
+                )
+
+            fallback_choices = [c for c in timings if is_fallback(c)]
+            if fallback_choices and not is_fallback(best_choice):
+                fallback_time = min(timings[c] for c in fallback_choices)
+                best_time = timings[best_choice]
+                speedup = fallback_time / best_time if best_time > 0 else 0
+
+                if speedup < min_speedup_threshold:
+                    # Best choice doesn't beat fallback by enough, use fallback instead
+                    log.debug(
+                        "Best choice %s speedup %.2fx < threshold %.2fx, using fallback",
+                        best_choice.name,
+                        speedup,
+                        min_speedup_threshold,
+                    )
+                    best_choice = min(fallback_choices, key=lambda c: timings[c])
+
+        choice = best_choice
         node = choice.output_node()
 
         log.debug("Autotuning selected choice: %s", node)
