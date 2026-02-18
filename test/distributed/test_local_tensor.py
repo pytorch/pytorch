@@ -229,6 +229,21 @@ class TestLocalTensorWorld2(LocalTensorWorldTest):
         result = node1.le(node2)
         self.assertTrue(bool(result))
 
+    def test_data_ptr_raises(self):
+        """data_ptr() on a LocalTensor should raise instead of returning 0."""
+        local_tensors = {
+            0: torch.randn(4),
+            1: torch.randn(4),
+        }
+        lt = LocalTensor(local_tensors)
+        with self.assertRaises(RuntimeError):
+            lt.data_ptr()
+
+        # Native ops still work (dispatched per-rank via __torch_dispatch__)
+        with LocalTensorMode(lt._ranks):
+            result = lt + lt
+            self.assertIsInstance(result, LocalTensor)
+
     def test_sym_and_sym_or(self):
         node1 = LocalIntNode({0: 3, 1: 4})
         node2 = LocalIntNode({0: 10, 1: 10})

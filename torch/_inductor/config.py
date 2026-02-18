@@ -893,6 +893,8 @@ combo_kernel_max_num_args = 250
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, only pointwise kernels are eligible for combo kernel fusion.
+combo_kernels_pointwise_only = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1052,13 +1054,19 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
-    # Bucket exposed collectives first
-    bucket_exposed_first: bool = True
+    # Bucket exposed collectives first (None means auto)
+    bucket_exposed_first: bool | None = None
+
+    # Experimental setting to bucket only internode communications
+    bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
+
+    # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
+    prioritize_bucketing_during_scheduling: bool = True
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1330,13 +1338,6 @@ file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "
 
 enable_autograd_for_aot: bool = False
 
-_debug_cpu_to_tpu_pallas: bool = Config(
-    env_name_force="PALLAS_TARGET_TPU", default=False
-)
-pallas_take_first_jax_device_only: bool = Config(
-    env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
-)
-
 
 def get_worker_log_path() -> Optional[str]:
     log_loc = None
@@ -1502,9 +1503,6 @@ class cpp:
     use_constexpr_for_int_array = (
         os.environ.get("TORCHINDUCTOR_CPP_USE_CONSTEXPR_FOR_INT_ARRAY", "1") == "1"
     )
-
-    # threshold between two step reduction algorithm and welford reduction algorithm
-    use_two_step_variance_threshold = 1024
 
 
 class triton:
@@ -2273,6 +2271,9 @@ cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 # Backend to use for CUDA codegen either
 # "triton", "halide" (experimental) or "pallas" (experimental)
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
+
+# Backend to use for TPU codegen
+tpu_backend: Literal["pallas"] = "pallas"
 
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"

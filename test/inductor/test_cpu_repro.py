@@ -82,9 +82,7 @@ def _can_check_vec_metrics():
 
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
     if _can_check_vec_metrics():
-        assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels, (
-            f"Expected {num_expected_vec_kernels} vectorized kernels, but got {metrics.generated_cpp_vec_kernel_count}"
-        )
+        assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
 
 
 def simd_lengths_to_test():
@@ -2780,47 +2778,6 @@ class CPUReproTests(TestCase):
         actual = torch.compile(fn)(x)
         self.assertEqual(expected, actual, atol=1e-4, rtol=1e-4)
 
-    def test_two_step_variance(self):
-        M = 64
-        N = 1024
-
-        class L(torch.nn.Module):
-            def __init__(self, normalized_shape=N, eps=1e-5):
-                super().__init__()
-                self.layernorm = torch.nn.LayerNorm(normalized_shape, eps=eps)
-
-            def forward(self, x):
-                return self.layernorm(x)
-
-        mod = L().eval()
-        for mean, std in [
-            (0, 1e10),
-            (1e10, 10),
-            (1e10, 1e10),
-            (0, 1),
-            (0, 0.5),
-            (0.5, 1),
-            (0, 2),
-        ]:
-            x = torch.randn(M, N)
-            row_means = x.mean(dim=1, keepdim=True)
-            row_stds = x.std(dim=1, keepdim=True, unbiased=True)
-            x_norm = (x - row_means) / (row_stds + 1e-5)
-            x = x_norm * std + mean
-            input = (x,)
-            output_eager = mod(*input)
-            with torch.no_grad():
-                m = torch.compile(mod)
-                output_compiled = m(*input)
-            if mean == 1e10 or std == 1e10:
-                self.assertTrue(
-                    torch.allclose(output_eager, output_compiled, atol=1, rtol=1e-4)
-                )
-            else:
-                self.assertTrue(
-                    torch.allclose(output_eager, output_compiled, atol=1e-4, rtol=1e-4)
-                )
-
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -4755,7 +4712,7 @@ class CPUReproTests(TestCase):
             _, code = run_and_get_cpp_code(opt_m, x)
             self.assertTrue(same(m(x), opt_m(x)))
             # Two kernels: one for reduction, one pointwises
-            check_metrics_vec_kernel_count(4)
+            check_metrics_vec_kernel_count(2)
             FileCheck().check_count(
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
@@ -5762,6 +5719,38 @@ class CPUReproTests(TestCase):
         FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
             code
         )
+
+    @config.patch(freezing=True)
+    def test_add_layernorm(self):
+        """
+        Original PR: https://github.com/pytorch/pytorch/pull/141766
+        """
+        from torch.testing._internal.common_quantization import (
+            _static_reference_quantized_linear_module,
+        )
+
+        class Model(torch.nn.Module):
+            def __init__(self, example_input):
+                super().__init__()
+                self.dense = _static_reference_quantized_linear_module(
+                    N=768, K=768, bias=True, example_input=example_input
+                )
+                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
+
+            def forward(self, context_layer, hidden_states):
+                attention_output = self.dense(context_layer)
+                hidden_states = attention_output + hidden_states
+                layer_output = self.layernorm(hidden_states)
+                return layer_output
+
+        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
+        model = Model(example_batch[0]).eval()
+        model = torch.export.export(model, example_batch, strict=True).module()
+
+        with torch.no_grad():
+            metrics.reset()
+            torch.compile(model)(*example_batch)
+            check_metrics_vec_kernel_count(3)
 
     def test_dropout(self):
         class Model(nn.Module):

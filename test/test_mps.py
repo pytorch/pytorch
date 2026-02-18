@@ -809,6 +809,23 @@ class TestAvgPool(TestCaseMPS):
             self.assertEqual(out_mps, out_cpu, msg=msg)
 
 
+    def test_channels_last_storage_offset(self):
+        # Regression test: channels_last tensors with non-zero storage_offset produced wrong
+        # results on MPS because the Placeholder path for NHWC ops ignored storage_offset.
+        # Build a channels_last tensor with offset>0 via slice+reshape+permute.
+        x = torch.randn(1, 65, 64, device="mps")[:, 1:].reshape(1, 8, 8, 64).permute(0, 3, 1, 2)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        self.assertGreater(x.storage_offset(), 0)
+
+        pool_mps = F.avg_pool2d(x, 2)
+        pool_cpu = F.avg_pool2d(x.cpu(), 2)
+        self.assertEqual(pool_mps.cpu(), pool_cpu)
+
+        bn_mps = torch.nn.BatchNorm2d(64).eval().to("mps")(x)
+        bn_cpu = torch.nn.BatchNorm2d(64).eval()(x.cpu())
+        self.assertEqual(bn_mps.cpu(), bn_cpu)
+
+
 class TestMPS(TestCaseMPS):
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
@@ -12737,7 +12754,7 @@ class TestConsistency(TestCaseMPS):
 
             opt_dtype = None
             # CPU implementation is less precise than MPS one so compare MPS to full fp32
-            if dtype in [torch.float16, torch.bfloat16] and op.name == "grid_sampler_3d":
+            if dtype in [torch.float16, torch.bfloat16] and op.name in ["grid_sampler_2d", "grid_sampler_3d"]:
                 opt_dtype = torch.float32
             mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample, opt_dtype)
 
