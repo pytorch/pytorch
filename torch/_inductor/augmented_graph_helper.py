@@ -132,6 +132,19 @@ class AugmentedGraphHelper:
 
         return False
 
+    def _get_all_ancestors(self, node: fx.Node) -> OrderedSet[fx.Node]:
+        """Transitive ancestors through both data deps and extra deps."""
+        ancestors: OrderedSet[fx.Node] = OrderedSet()
+        stack: list[fx.Node] = list(node.all_input_nodes)
+        stack.extend(self.extra_deps.get(node, ()))
+        while stack:
+            n = stack.pop()
+            if n not in ancestors:
+                ancestors.add(n)
+                stack.extend(n.all_input_nodes)
+                stack.extend(self.extra_deps.get(n, ()))
+        return ancestors
+
     def transfer_erased_node_deps(
         self, erased_to_new: dict[fx.Node, fx.Node | None]
     ) -> None:
@@ -173,6 +186,26 @@ class AugmentedGraphHelper:
                         self.extra_deps[updated_use].discard(old_node)
                         self.extra_deps[updated_use].add(new_node)
                         self.extra_uses[new_node].add(updated_use)
+
+        # Transferred deps can create cycles when multiple erased nodes map to
+        # the same new_node (mutual extra deps) or when new_node has data deps
+        # on a node that now has a transferred extra dep back to new_node.
+        # The pre-merge has_path checks can't catch these because they only
+        # validate nodes being merged, not external nodes whose deps are
+        # redirected here.
+        # Removing the back-edge is safe: extra deps encode timeline ordering
+        # constraints ("A must run before B"). If B is already an ancestor of A
+        # through data deps, the ordering is already guaranteed — the extra dep
+        # is redundant and would only introduce a cycle.
+        new_nodes = OrderedSet(n for n in erased_merge_sets.values() if n is not None)
+        for new_node in new_nodes:
+            uses = list(self.extra_uses.get(new_node, ()))
+            if not uses:
+                continue
+            ancestors = self._get_all_ancestors(new_node)
+            for use in uses:
+                if use in ancestors:
+                    self.remove_extra_dep(n=use, dep=new_node)
 
         # Clean up erased nodes
         for old_node in erased_merge_sets:
