@@ -115,7 +115,7 @@ class InductorCodeSideTable:
 
     def get_callable(self, idx: int) -> InductorCompiledCallable:
         """Get the callable at the given index."""
-        assert idx in self.id_to_callable, f"Invalid inductor code index: {idx}"
+        assert idx in self.id_to_callable, f"Invalid inductor code index: {idx}"  # noqa: S101
         return self.id_to_callable[idx]
 
     def reset_table(self) -> None:
@@ -166,7 +166,7 @@ def inductor_compiled_code_fake(func, inputs):
         for x in pytree.tree_leaves(resolved.fake_outputs):
             if any(isinstance(s, torch.SymInt) for s in x.shape):
                 raise RuntimeError(
-                    "fake prop on inductor compiled code doesnt work SymInt outputs yet"
+                    "fake prop on inductor compiled code doesn't work with SymInt outputs yet"
                 )
         fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         return tuple([fake_mode.from_tensor(t) for t in resolved.fake_outputs])
