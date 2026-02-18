@@ -195,13 +195,21 @@ def check_files(
             )
         ]
 
-    # Parse JSON output from pyrefly
+    # Parse JSON output from pyrefly, which may emit multiple JSON objects
     try:
+        errors: list[dict[str, object]] = []
         if stdout:
-            result = json.loads(stdout)
-            errors = result.get("errors", [])
-        else:
-            errors = []
+            decoder = json.JSONDecoder()
+            idx = 0
+            while idx < len(stdout):
+                # Skip whitespace between JSON objects
+                while idx < len(stdout) and stdout[idx] in " \t\n\r":
+                    idx += 1
+                if idx >= len(stdout):
+                    break
+                result, end_idx = decoder.raw_decode(stdout, idx)
+                errors.extend(result.get("errors", []))
+                idx = end_idx
         errors = [error for error in errors if error["name"] != "deprecated"]
         rc = [
             LintMessage(
@@ -232,7 +240,7 @@ def check_files(
                 name="json-parse-error",
                 original=None,
                 replacement=None,
-                description=f"Failed to parse pyrefly JSON output: {e}\nRaw stdout (first 1000 chars): {stdout[:1000]}",
+                description=f"Failed to parse pyrefly JSON output: {e}\nRaw stdout: {stdout}",
             )
         ]
 
