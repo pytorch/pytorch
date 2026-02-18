@@ -58,6 +58,7 @@ class ConcaterIterDataPipe(IterDataPipe):
             yield from dp
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             # pyrefly: ignore [bad-argument-type]
             return sum(len(dp) for dp in self.datapipes)
@@ -707,6 +708,7 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
         yield from zip(*iterators, strict=False)
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             # pyrefly: ignore [bad-argument-type]
             return min(len(dp) for dp in self.datapipes)
