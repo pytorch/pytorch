@@ -78,14 +78,6 @@ def print_proxy_torch_dispatch_mode(
 @print.py_impl(FakeTensorMode)
 # pyre-ignore
 def print_fake_tensor_mode(mode, format_str: str, *args: object, **kwargs: object):
-    # Validate DTensor metadata if present (fake DTensors carry placement/mesh info)
-    from torch.distributed.tensor import DTensor
-
-    flat_args = pytree.arg_tree_leaves(*args, **kwargs)
-    for arg in flat_args:
-        if isinstance(arg, DTensor):
-            assert arg._spec is not None, "Fake DTensor must have a valid DTensorSpec"
-            assert arg._spec.mesh is not None, "Fake DTensor must have a valid DeviceMesh"
     return None
 
 
