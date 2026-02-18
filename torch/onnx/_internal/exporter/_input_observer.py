@@ -629,7 +629,7 @@ class InputObserverInfo:
         """Infers arguments based on the collected tensors.
 
         Args:
-            index_or_args_or_kwargs: If missing, the method selects one set of inputs
+            index_or_candidate: If missing, the method selects one set of inputs
                 among the available ones, usually the set of inputs containing
                 with the highest number of tensors.
                 It then replaces None values and missing tensors with empty tensors.
