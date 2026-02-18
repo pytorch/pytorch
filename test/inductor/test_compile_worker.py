@@ -164,32 +164,41 @@ class TestTimer(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
-    def test_sets_cuda_libdevice_path(self):
-        """Test that _set_triton_libdevice_path sets the CUDA toolkit's libdevice."""
-        from torch._inductor.runtime.compile_tasks import _set_triton_libdevice_path
+    @config.patch("compile_threads", 1)
+    def test_libdevice_path_no_subprocess(self):
+        """Test libdevice path is set with compile_threads=1 (no subprocess)."""
+        self._test_libdevice_path_with_compilation()
+
+    def test_libdevice_path_default_threads(self):
+        """Test libdevice path is set with default compile_threads (subprocess)."""
+        self._test_libdevice_path_with_compilation()
+
+    def _test_libdevice_path_with_compilation(self):
+        import torch
         from torch.utils.cpp_extension import CUDA_HOME
 
-        # Clear any cached result and env var
-        _set_triton_libdevice_path.cache_clear()
-        env_backup = os.environ.pop("TRITON_LIBDEVICE_PATH", None)
-        try:
-            _set_triton_libdevice_path()
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
 
-            if CUDA_HOME is not None:
-                expected = os.path.join(
-                    CUDA_HOME, "nvvm", "libdevice", "libdevice.10.bc"
-                )
-                if os.path.isfile(expected):
-                    self.assertEqual(
-                        os.environ.get("TRITON_LIBDEVICE_PATH"), expected
-                    )
-        finally:
-            # Restore original state
-            _set_triton_libdevice_path.cache_clear()
-            if env_backup is not None:
-                os.environ["TRITON_LIBDEVICE_PATH"] = env_backup
-            else:
-                os.environ.pop("TRITON_LIBDEVICE_PATH", None)
+        if CUDA_HOME is None:
+            self.skipTest("CUDA_HOME not set")
+
+        expected = os.path.join(CUDA_HOME, "nvvm", "libdevice", "libdevice.10.bc")
+        if not os.path.isfile(expected):
+            self.skipTest(f"libdevice not found at {expected}")
+
+        # Compile a simple function that uses pow (which uses libdevice)
+        @torch.compile
+        def fn(x):
+            return torch.pow(x, 2.0)
+
+        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        fn(x)
+
+        # Verify libdevice path was set
+        from triton import knobs
+
+        self.assertEqual(knobs.nvidia.libdevice_path, expected)
 
 
 if __name__ == "__main__":
