@@ -63,12 +63,16 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
+    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.utils._triton import has_triton
 
 
-DEVICE_COUNT = 4  # default
+if TEST_WITH_ROCM:
+    DEVICE_COUNT = min(4, max(2, torch.cuda.device_count()))
+else:
+    DEVICE_COUNT = 4
 
 if TEST_CUDA:
     DEVICE_TYPE = "cuda"
@@ -1683,12 +1687,14 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
                     )
                     continue
                 # barrier to ensure thread reading the same value
+                original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
                 original_compile_threads = torch._inductor.config.compile_threads
                 torch.distributed.barrier()
 
                 if mode == FullyShardMode.EAGER:
                     fully_shard_patch = original_fully_shard
                 elif mode == FullyShardMode.COMPILED_COMPUTE:
+                    torch._dynamo.config.skip_fsdp_hooks = True
                     torch._inductor.config.compile_threads = 1
                     fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
                 else:
@@ -1703,6 +1709,7 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
                 # other threads use patched func before this thread restores
                 torch.distributed.barrier()
                 func.__globals__[original_fully_shard.__name__] = original_fully_shard
+                torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
                 torch._inductor.config.compile_threads = original_compile_threads
 
         return wrapper
