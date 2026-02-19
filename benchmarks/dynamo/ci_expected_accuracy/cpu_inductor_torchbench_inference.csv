@@ -186,10 +186,6 @@ pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
-pytorch_CycleGAN_and_pix2pix,eager_fail_to_run,0
-
-
-
 pytorch_stargan,pass,0
 
 
