@@ -385,10 +385,23 @@ class SubgraphTemplate(KernelTemplate):
         self, decomp: Callable[..., Any], kwargs: dict[str, Any]
     ) -> str:
         """Generate a descriptive name for a decomposition variant with its parameters."""
+        import re
+
         base_name = decomp.__name__
         if not kwargs:
             return base_name
-        param_suffix = "_".join(f"{k}_{v}" for k, v in sorted(kwargs.items()))
+
+        def sanitize_value(v: Any) -> str:
+            """Convert a value to a valid Python identifier component."""
+            s = str(v)
+            # Replace invalid characters with underscores
+            s = re.sub(r"[^a-zA-Z0-9_]", "_", s)
+            # Ensure it doesn't start with a digit
+            if s and s[0].isdigit():
+                s = "_" + s
+            return s
+
+        param_suffix = "_".join(f"{k}_{sanitize_value(v)}" for k, v in sorted(kwargs.items()))
         return f"{base_name}_{param_suffix}"
 
     def _validate_non_tensor_kwargs(self, kwargs: dict[str, Any]) -> None:

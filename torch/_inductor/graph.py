@@ -96,6 +96,7 @@ from .lowering import (
     require_contiguous,
     tag_to_layout_constraint,
     unsupported_output_tensor,
+    user_lowerings,
 )
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -1391,8 +1392,31 @@ class GraphLowering(torch.fx.Interpreter):
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
+            elif (
+                target in user_lowerings
+                and target not in V.active_user_lowering_ops
+            ):
+                # User-registered lowering takes priority, with recursion guard
+                V.active_user_lowering_ops.add(target)
+                try:
+                    out = user_lowerings[target](*args, **kwargs)
+                finally:
+                    V.active_user_lowering_ops.discard(target)
+                # If user_lowering returns None, fall back to normal lowering
+                if out is None:
+                    if target in lowerings:
+                        out = lowerings[target](*args, **kwargs)
+                    else:
+                        out = fallback_handler(target, add_to_fallback_set=False)(
+                            *args, **kwargs
+                        )
+            elif target in lowerings:
+                out = lowerings[target](*args, **kwargs)
             else:
-                out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+                # Fallback for ops not in lowerings (e.g., custom ops during recursion)
+                out = fallback_handler(target, add_to_fallback_set=False)(
+                    *args, **kwargs
+                )
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
