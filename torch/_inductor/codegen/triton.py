@@ -1227,6 +1227,28 @@ class TritonOverrides(OpOverrides):
         return out
 
     @staticmethod
+    def div_rn(x, y):
+        """
+        Division with round-to-nearest rounding mode.
+        Always uses triton.language.div_rn for float32 inputs to match eager CUDA behavior.
+        """
+        x_dtype = getattr(x, "dtype", None)
+        y_dtype = getattr(y, "dtype", None)
+
+        if x_dtype == torch.float32 and y_dtype == torch.float32:
+            out = f"triton.language.div_rn({x}, {y})"
+        else:
+            # Fall back to regular division for non-float32 types
+            out = f"({x} / {y})"
+
+        if low_precision_fp_var(x) or low_precision_fp_var(y):
+            out_dtype = get_dtype_handler().truediv(x, y)
+            if out_dtype in (torch.float16, torch.float32):
+                out = f"{out}.to({triton_type(out_dtype)})"
+
+        return out
+
+    @staticmethod
     def mod(x, y):
         out = f"({x} % {y})"
         if low_precision_fp_var(x) or low_precision_fp_var(y):
@@ -1726,8 +1748,23 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.fmod({a}, {b})"
 
     @staticmethod
-    @maybe_upcast_float32()
     def pow(a, b):
+        # Check dtype before potential upcast - powf_cuda only supports fp32
+        a_dtype = getattr(a, "dtype", None)
+        if a_dtype == torch.float64:
+            # fp64: libdevice.pow matches eager exactly
+            return f"libdevice.pow({a}, {b})"
+
+        # Use inner helper with upcast decorator for fp32/fp16/bf16
+        return TritonOverrides._pow_impl(a, b)
+
+    @staticmethod
+    @maybe_upcast_float32()
+    def _pow_impl(a, b):
+        if config.eager_numerics.pow_precision:
+            # Use inline PTX pow that matches CUDA's powf exactly.
+            # libdevice.pow uses FTZ (flush-to-zero) which causes 1-3 ULP differences.
+            return f"triton_helpers.powf_cuda({a}, {b})"
         return f"libdevice.pow({a}, {b})"
 
     @staticmethod

@@ -2720,6 +2720,57 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         # is already float16 and the output is int64.
         self.assertNotIn(".to(tl.float16)", code[0])
 
+    def test_lerp_fma_precision(self):
+        # Test that lerp uses FMA to match CUDA's native lerp behavior.
+        # CUDA's lerp uses fma(weight, end-start, start) internally.
+        def fn(start, end, weight):
+            return torch.lerp(start, end, weight)
+
+        start = torch.randn(1000, device="cuda", dtype=torch.float32)
+        end = torch.randn(1000, device="cuda", dtype=torch.float32)
+        # Use weight similar to Adam's (1 - beta1) = 0.1
+        weight = 0.1
+        self.common(fn, [start, end, weight])
+
+    @config.patch("eager_numerics.pow_precision", True)
+    def test_pow_precision(self):
+        # Test that pow(scalar, tensor) matches eager bitwise when using
+        # eager_numerics.pow_precision, which uses inline PTX to match CUDA's powf.
+        def fn(exp):
+            return torch.pow(0.9, exp)
+
+        exp = torch.arange(1, 101, device="cuda", dtype=torch.float32)
+
+        eager_result = fn(exp)
+        compiled_result = torch.compile(fn)(exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    def test_pow_precision_fp64(self):
+        # Test that pow matches eager bitwise for fp64.
+        # libdevice.pow matches CUDA's pow for fp64 (no FTZ issues).
+        def fn(base, exp):
+            return torch.pow(base, exp)
+
+        base = torch.tensor([0.9, 0.999, 0.5, 0.8], device="cuda", dtype=torch.float64)
+        exp = torch.tensor(
+            [50.0, 100.0, 10.0, 20.0], device="cuda", dtype=torch.float64
+        )
+
+        eager_result = fn(base, exp)
+        compiled_result = torch.compile(fn)(base, exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    @config.patch("eager_numerics.division_rounding", True)
+    def test_reciprocal_precision_rounding(self):
+        # Test that reciprocal matches eager when division_rounding is enabled.
+        # This requires OpDecompositions.reciprocal to use float32 constant so
+        # that div_rn can be applied (the dtype check requires both operands float32).
+        def fn(x):
+            return torch.reciprocal(x)
+
+        x = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
+        self.common(fn, [x])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
