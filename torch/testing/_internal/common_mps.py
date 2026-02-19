@@ -926,10 +926,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.float32,
             ],  # missing `aten::lu_solve`.
-            "linalg.tensorsolve": [
-                torch.float16,
-                torch.float32,
-            ],  # missing `aten::lu_solve`.
             "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
