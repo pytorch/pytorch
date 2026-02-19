@@ -117,6 +117,8 @@ include_patterns = [
     'torchgen/**/*.pyi',
     'functorch/**/*.py',
     'functorch/**/*.pyi',
+    'tools/**/*.py',
+    'tools/**/*.pyi',
 ]
 exclude_patterns = []
 command = [
@@ -1141,6 +1143,8 @@ exclude_patterns = [
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    # Needs Python 3.12+
+    'torch/testing/_internal/py312_intrinsics.py',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     'test/quantization/__init__.py',
