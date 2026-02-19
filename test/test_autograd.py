@@ -15393,21 +15393,11 @@ class TestSelectiveActivationCheckpoint(TestCase):
         self.assertEqual(w_ref.grad, w_ckpt.grad)
 
     @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
-    def test_save_noop_without_sac(self):
-        # save() without SAC context should be a no-op (not error)
-        def fn(x):
-            y = x.sin()
-            checkpoint_save(y)
-            return y.cos()
-
-        x1 = torch.randn(4, requires_grad=True)
-        x2 = x1.clone().detach().requires_grad_(True)
-
-        # Reference
-        fn(x1).sum().backward()
-        # Checkpointed with save() but no SAC
-        checkpoint(fn, x2, use_reentrant=False).sum().backward()
-        self.assertEqual(x1.grad, x2.grad)
+    def test_save_errors_without_sac(self):
+        # save() without SAC context should error
+        x = torch.randn(4)
+        with self.assertRaisesRegex(RuntimeError, "save\\(\\) must be called inside"):
+            checkpoint_save(x)
 
 
 class TestAutogradMultipleDispatch(TestCase):

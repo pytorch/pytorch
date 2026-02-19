@@ -1545,12 +1545,27 @@ def save(tensor: torch.Tensor) -> None:
     Args:
         tensor: The tensor to save.
     """
-    if _current_caching_mode is None:
+    # During recompute (backward), save() is a no-op
+    if torch._C._current_graph_task_id() != -1:
         return
+
+    if _current_caching_mode is None:
+        # Under torch.compile, dynamo calls save() with FakeTensors during
+        # graph construction. The actual work happens during AOTAutograd tracing.
+        if isinstance(tensor, torch._subclasses.FakeTensor):
+            return
+        raise RuntimeError(
+            "save() must be called inside a function that is wrapped with "
+            "checkpoint() using a selective activation checkpoint context_fn."
+        )
 
     info = _current_caching_mode.tensor_tracker.get(tensor)
     if info is None:
-        return
+        raise RuntimeError(
+            "save() could not find the given tensor in the current "
+            "selective activation checkpoint context. Make sure the tensor "
+            "is an output of an operator within the checkpointed region."
+        )
 
     func, idx, any_ret_has_alias_info = info
     _current_caching_mode.storage[func][idx] = tree_map(
@@ -1569,12 +1584,31 @@ def _set_save_policy_for_partitioner(tensor, policy):
     mode = get_proxy_mode()
     if mode is None:
         return
-    proxy_tensor = mode.tracer.tensor_tracker.get(tensor)
+
+    # ProxyTorchDispatchMode sees tensors after FunctionalTensor is unwrapped
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+    unwrapped = mb_unwrap_functional_tensor(tensor)
+
+    proxy_tensor = mode.tracer.tensor_tracker.get(unwrapped)
     if proxy_tensor is None:
         return
     node = proxy_tensor.proxy.node
+
+    if _is_getitem_of_multi_output(node):
+        parent = node.args[0]
+        parent.meta["recompute"] = policy
+        parent.meta["ac_graph_id"] = 0
+
     node.meta["recompute"] = policy
-    node.meta["ac_graph_id"] = node.meta.get("ac_graph_id", 0)
+    node.meta["ac_graph_id"] = 0
+
+
+def _is_getitem_of_multi_output(node):
+    import operator
+    if node.target != operator.getitem:
+        return False
+    parent = node.args[0]
+    return "tensor_meta" not in parent.meta and node.op == "call_function"
 
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
