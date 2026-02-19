@@ -1331,6 +1331,7 @@ def _free_unbacked_symbols_with_path(
         )
         # TODO: DivideByKey needs to test divisibility at runtime!
 
+        # pyrefly: ignore [unsupported-operation]
         r[unbacked] = path + (DivideByKey(divisor),)
         if real is not None:
             if not isinstance(real, int):
@@ -1354,6 +1355,7 @@ def _free_unbacked_symbols_with_path(
         and s.rhs == 1
         and s.lhs in pending
     ):
+        # pyrefly: ignore [unsupported-operation]
         r[s.lhs] = path + (ConvertIntKey(),)
         if real is not None:
             if type(real) is not bool:
@@ -1405,6 +1407,7 @@ def compute_unbacked_bindings(
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
     )
+
     pending -= ignorable
     if not peek and pending:
         extra = (
@@ -3860,9 +3863,10 @@ class ShapeEnv:
         self.unique_ids: set[int] = set()
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
-        # when hint is overridden in mark_dynamic, the value stored in
-        # self.backed_var_to_val is the overridden hint.
-        # only used for backed dynamic shapes symbols.
+        # When hint is overridden in mark_dynamic, the value stored here
+        # is the overridden hint (this is the source of truth for backed
+        # hints). The override is also recorded in var_to_hint_override
+        # so it can be included in the FxGraphCache key.
         self.backed_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
         # Only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error in draft export.
@@ -3878,6 +3882,11 @@ class ShapeEnv:
         # A set of unbacked symbols that are inputs (i.e: not data dependent).
         self.unbacked_inputs: OrderedSet[sympy.Symbol] = OrderedSet()
         self.var_to_stack: dict[sympy.Symbol, CapturedTraceback] = {}
+        # User-provided hint overrides from mark_dynamic/mark_unbacked.
+        # Even though we never read hints for backed variables from this
+        # dict (backed hints are read from backed_var_to_val), we still
+        # want them to always be stored here, since this dict is used as
+        # part of the FxGraphCache key.
         self.var_to_hint_override: dict[sympy.Symbol, int] = {}
         # Maps a source to the *original* symbol that was assigned to it
         self.source_to_var: dict[str, sympy.Symbol] = {}
@@ -7186,8 +7195,12 @@ class ShapeEnv:
             )
 
             hint = self.backed_var_to_val.get(x)
-            if hint is None:
-                # NB: size_hint is int, not sympy.Expr, do not use int_oo here
+            if hint is None or isinstance(hint, SingletonInt):
+                # NB: size_hint is int, not sympy.Expr, do not use int_oo here.
+                # SingletonInt is used to represent jagged/nested tensor dimensions
+                # (e.g. the irregular ragged dimension). It cannot be converted to
+                # int, so we treat it the same as an unknown size. This matches the
+                # behavior of size_hint(), which returns None for SingletonInt.
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
                 size = int(hint)
@@ -7773,7 +7786,7 @@ class ShapeEnv:
 
             expr = orig_expr
 
-            # Fast path: try to quickly evaluate trivially true/false comparisons
+            # Try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
             fast_result = self._maybe_fast_eval_comparison(expr)
             if fast_result is not None:
@@ -7951,6 +7964,29 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
+    def _should_skip_static_eval(self, expr: SympyBoolean) -> bool:
+        """Check if we should skip _maybe_evaluate_static for the given expression.
+
+        Skips static evaluation for single unbacked symbol >= 0 (or 0 <= symbol)
+        when the symbol has unknown range [-int_oo, int_oo].
+        This pattern is common during tracing and doesn't benefit from static evaluation
+        since the symbol has no constraints.
+        Note that the first time this is called value range will be updated and next time
+        it's called (if any) we would call _maybe_evaluate_static and it would return True.
+        """
+        unbacked_sym = None
+        if isinstance(expr, sympy.GreaterThan) and expr.rhs == 0:
+            unbacked_sym = expr.lhs
+        elif isinstance(expr, sympy.LessThan) and expr.lhs == 0:
+            unbacked_sym = expr.rhs
+        if isinstance(unbacked_sym, sympy.Symbol) and symbol_is_type(
+            unbacked_sym, SymT.UNBACKED_INT
+        ):
+            vr = self.var_to_range[unbacked_sym]
+            if vr.lower == -int_oo and vr.upper == int_oo:
+                return True
+        return False
+
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def guard_or_defer_runtime_assert(
@@ -7969,33 +8005,13 @@ class ShapeEnv:
         expr = orig_expr
 
         # TODO: split conjunctions and evaluate them separately
-
-        # Fast path: check for trivially true comparisons like 0 <= sum_of_nonneg_symbols
-        # This avoids expensive _maybe_evaluate_static for this common pattern.
+        # Try to quickly evaluate trivially true/false comparisons
+        # using var_to_range, before calling expensive _maybe_evaluate_static.
         fast_result = self._maybe_fast_eval_comparison(expr)
         if fast_result is not None:
             return bool(fast_result)
 
-        # Skip _maybe_evaluate_static for single unbacked symbol >= 0 (or 0 <= symbol)
-        # when the symbol has unknown range [-int_oo, int_oo].
-        # This pattern is common during tracing and doesn't benefit from static evaluation
-        # since the symbol has no constraints.
-        # Note that the first time this is called value range will be updated and next time
-        # it's called (if any) we would call _maybe_evaluate_static and it would return True.
-        skip_static_eval = False
-        unbacked_sym = None
-        if isinstance(expr, sympy.GreaterThan) and expr.rhs == 0:
-            unbacked_sym = expr.lhs
-        elif isinstance(expr, sympy.LessThan) and expr.lhs == 0:
-            unbacked_sym = expr.rhs
-        if isinstance(unbacked_sym, sympy.Symbol) and symbol_is_type(
-            unbacked_sym, SymT.UNBACKED_INT
-        ):
-            vr = self.var_to_range[unbacked_sym]
-            if vr.lower == -int_oo and vr.upper == int_oo:
-                skip_static_eval = True
-
-        if skip_static_eval:
+        if self._should_skip_static_eval(expr):
             new_expr = expr
         else:
             static_expr = self._maybe_evaluate_static(expr)
