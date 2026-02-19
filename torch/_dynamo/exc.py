@@ -309,8 +309,6 @@ class UncapturedHigherOrderOpError(TorchDynamoException):
         )
 
 
-class IncorrectUsage(Exception):
-    pass
 
 
 # TODO: I'm a little uncertain about what error classification we should have
