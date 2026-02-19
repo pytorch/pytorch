@@ -2354,7 +2354,6 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
 def meta_addmm(
     self, mat1, mat2, out_dtype: Optional[torch.dtype] = None, *, alpha=1, beta=1
 ):
-    torch._check(self.dim() == 2, lambda: "bias must be 2D")
     torch._check(mat1.dim() == 2, lambda: "mat1 must be 2D")
     torch._check(mat2.dim() == 2, lambda: "mat2 must be 2D")
     N, M1 = mat1.shape
