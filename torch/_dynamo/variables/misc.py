@@ -1492,19 +1492,33 @@ class MethodWrapperVariable(VariableTracker):
         elif (self_obj is type.__dict__["__mro__"] and wrapper_name == "__get__") or (
             self_obj is type.__dict__["__dict__"] and wrapper_name == "__get__"
         ):
-            from .builder import SourcelessBuilder
-
-            if len(args) == 1 and not kwargs:
-                try:
-                    return SourcelessBuilder.create(
-                        tx, self.method_wrapper(args[0].as_python_constant())
-                    )
-                except AsPythonConstantNotImplementedError:
-                    pass
-
             attr_name = (
                 "__mro__" if self_obj is type.__dict__["__mro__"] else "__dict__"
             )
+
+            if len(args) == 1 and not kwargs:
+                try:
+                    value = self.method_wrapper(args[0].as_python_constant())
+                except AsPythonConstantNotImplementedError:
+                    pass
+                else:
+                    # Use a sourced variable when the descriptor is the
+                    # standard one from type (not overridden by a metaclass).
+                    source = args[0].source
+                    if source is not None:
+                        cls_val = args[0].as_python_constant()
+                        static_desc = inspect.getattr_static(type(cls_val), attr_name)
+                        if static_desc is self_obj:
+                            if attr_name == "__mro__":
+                                source = TypeMROSource(source)
+                            else:
+                                source = AttrSource(source, attr_name)
+                            return VariableTracker.build(tx, value, source)
+
+                    from .builder import SourcelessBuilder
+
+                    return SourcelessBuilder.create(tx, value)
+
             unimplemented(
                 gb_type=f"unsupported type.__dict__['{attr_name}'].__get__ call",
                 context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
@@ -1549,6 +1563,9 @@ class GetSetDescriptorVariable(VariableTracker):
         if name == "__get__" and self.source:
             source = AttrSource(self.source, "__get__")
             return VariableTracker.build(tx, self.desc.__get__, source)
+        elif name in ("__objclass__", "__name__"):
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, getattr(self.desc, name), source)
         else:
             return super().var_getattr(tx, name)
 
