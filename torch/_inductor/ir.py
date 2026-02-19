@@ -7060,8 +7060,8 @@ class SubgraphBuffer(ExternKernel):
                 "max_autotune_gemm_backends": "ATEN",
             }
             # Merge with user config_patches (e.g., coordinate_descent_tuning)
-            merged_patches = {**base_patches, **(config_patches or {})}
-            with inductor_config.patch(**merged_patches):
+            merged_patches: dict[str, Any] = {**base_patches, **(config_patches or {})}
+            with inductor_config.patch(merged_patches):
                 self.subgraph.run(*self.example_inputs)
 
             # Tag all operations in subgraph with config_patches

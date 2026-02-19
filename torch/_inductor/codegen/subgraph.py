@@ -175,7 +175,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
-        fn = lambda: bm_func([*sym_inputs, *args])
+
+        def fn() -> Any:
+            return bm_func([*sym_inputs, *args])
 
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(fn)
@@ -401,7 +403,9 @@ class SubgraphTemplate(KernelTemplate):
                 s = "_" + s
             return s
 
-        param_suffix = "_".join(f"{k}_{sanitize_value(v)}" for k, v in sorted(kwargs.items()))
+        param_suffix = "_".join(
+            f"{k}_{sanitize_value(v)}" for k, v in sorted(kwargs.items())
+        )
         return f"{base_name}_{param_suffix}"
 
     def _validate_non_tensor_kwargs(self, kwargs: dict[str, Any]) -> None:

@@ -8,8 +8,14 @@ from typing import Any, Optional, Union
 
 import torch
 from torch._inductor.codegen.subgraph import SubgraphTemplate
-from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, StorageBox, TensorBox
-from torch._inductor.lowering import lowerings, user_lowerings, validate_ir
+from torch._inductor.ir import (
+    Buffer,
+    FixedLayout,
+    ir_node_to_tensor,
+    StorageBox,
+    TensorBox,
+)
+from torch._inductor.lowering import user_lowerings, validate_ir
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -521,9 +527,7 @@ def autotune_custom_op(
             fake_output = op_overload(*fake_inputs, **fallback_kwargs)
 
         output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
-        output_stride = tuple(
-            convert_symint_to_expr(s) for s in fake_output.stride()
-        )
+        output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
 
         fallback_choice = _create_fallback_choice(name, op_overload, fallback_kwargs)
         fallback_choice.maybe_append_choice(
@@ -535,7 +539,7 @@ def autotune_custom_op(
                 size=output_size,
                 stride=output_stride,
             ),
-            )
+        )
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
@@ -638,7 +642,7 @@ def _prepare_configs_and_decompositions(
     default_impl: Callable[..., Any],
     runtime_kwargs: dict[str, Any],
     name: str,
-) -> tuple[list[Callable], list[dict[str, Any]]]:
+) -> tuple[list[Callable], list[dict[str, Any]], list[dict[str, Any]]]:
     """Prepare decompositions and merged kwargs from configs.
 
     Handles both static configs and dynamic config generation.
@@ -691,13 +695,15 @@ def _standard_lowering_fn(
     Returns None if no configs/decompositions available, signaling caller to
     use normal lowering.
     """
-    decompositions, non_tensor_args, config_patches_list = _prepare_configs_and_decompositions(
-        processed_configs,
-        config_generator,
-        tensor_inputs,
-        default_impl,
-        runtime_kwargs,
-        name,
+    decompositions, non_tensor_args, config_patches_list = (
+        _prepare_configs_and_decompositions(
+            processed_configs,
+            config_generator,
+            tensor_inputs,
+            default_impl,
+            runtime_kwargs,
+            name,
+        )
     )
 
     # If no decompositions, signal caller to use normal lowering
@@ -803,13 +809,15 @@ def _range_based_lowering_fn(
     log.info("=== Range-based Autotuning for %s ===", name)
     log.info("Dispatch on: %s[%d], Ranges: %s", tensor_name, dim_index, ranges)
 
-    decompositions, non_tensor_args, config_patches_list = _prepare_configs_and_decompositions(
-        processed_configs,
-        config_generator,
-        tensor_inputs,
-        default_impl,
-        runtime_kwargs,
-        name,
+    decompositions, non_tensor_args, config_patches_list = (
+        _prepare_configs_and_decompositions(
+            processed_configs,
+            config_generator,
+            tensor_inputs,
+            default_impl,
+            runtime_kwargs,
+            name,
+        )
     )
 
     range_to_best_impl_map: dict[RangeBounds, ImplConfig] = {}
@@ -888,7 +896,11 @@ def _range_based_lowering_fn(
         group = impl_groups[0]
         log.info("Only one implementation after grouping, directly inlining")
         return _lower_single_impl(
-            group.impl_func, group.impl_kwargs, runtime_kwargs, tensor_inputs, name,
+            group.impl_func,
+            group.impl_kwargs,
+            runtime_kwargs,
+            tensor_inputs,
+            name,
             config_patches=group.config_patches,
         )
 
@@ -1160,6 +1172,7 @@ def register_custom_op_autotuning(
         impl_fn = custom_op._init_fn
     elif isinstance(custom_op, torch._ops.OpOverload):
         op_overload = custom_op
+
         # For OpOverload, the default impl just calls the op itself.
         # When traced, this creates the op call that falls through to
         # normal Inductor lowerings (via V.active_user_lowering_ops guard).
