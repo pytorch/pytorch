@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
@@ -452,8 +453,16 @@ PyObject* PyNode::to_py_args(
          !py_fn->materialize_non_diff_grads)) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      input =
-          THPVariable_Wrap(zeros_without_gil(output_info[i], *device_guard));
+      if (output_info[i].has_template()) {
+        // DTensor case: use template to create zeros.
+        // Don't release GIL since new_zeros_symint on DTensor calls Python.
+        Variable zeros = output_info[i].zeros(*device_guard);
+        input = THPVariable_Wrap(zeros);
+      } else {
+        // NJT or plain tensor case: can release GIL
+        input =
+            THPVariable_Wrap(zeros_without_gil(output_info[i], *device_guard));
+      }
     }
     if (!input)
       throw_python_error();
@@ -771,15 +780,36 @@ static void _wrap_outputs(
     } else {
       if (is_executable) {
         // If one of the grad outputs is undefined, a correctly-shaped zeros
-        // should be used instead. To construct these for NJT, zeros_like() must
-        // be used until we have factory function support.
+        // should be used instead. To construct these for NJT or DTensor,
+        // zeros_like() must be used to preserve the tensor type. Failing to
+        // do this may result in undefined errors depending on the tensor
+        // subclass's behavior. DTensor will error out due to mixing DTensor
+        // and torch.Tensor in the following computation.
+        // Note: We specifically check for DTensor rather than all tensor
+        // subclasses to avoid affecting other subclasses that may not need
+        // this behavior.
         bool is_differentiable =
             (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
                  0 &&
              isDifferentiableType(wrapped_output->scalar_type()));
-        bool use_zeros_like =
-            is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
-        self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
+        bool output_is_dtensor = is_dtensor(obj);
+        bool output_is_nested = wrapped_output->is_nested();
+        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
+            (output_is_nested || output_is_dtensor);
+
+        // For DTensor outputs, store a tiny template tensor (scalar) that
+        // preserves the DTensor type/spec without holding the full tensor.
+        // This allows creating zeros via new_zeros_symint during backward
+        // while using minimal memory, compatible with activation checkpointing.
+        // NJT continues to use the_var since it needs zeros_like for structure.
+        self->output_info.emplace_back(
+            wrapped_output.value(),
+            use_zeros_like && output_is_nested);  // only NJT uses the_var
+
+        if (use_zeros_like && output_is_dtensor) {
+          // Store a scalar template that preserves DTensor type
+          self->output_info.back().save_template_for_zeros(wrapped_output.value());
+        }
       }
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
     }
