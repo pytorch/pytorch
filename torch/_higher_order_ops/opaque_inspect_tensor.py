@@ -4,11 +4,15 @@ import torch
 from torch._dynamo.decorators import leaf_function
 
 
+def _dist_initialized() -> bool:
+    return torch.distributed.is_available() and torch.distributed.is_initialized()
+
+
 def _rank_enabled(ranks: int | set[int] | None) -> bool:
     """Check if the current rank should print. None means all ranks."""
     if ranks is None:
         return True
-    if not torch.distributed.is_initialized():
+    if not _dist_initialized():
         return True
     rank = torch.distributed.get_rank()
     if isinstance(ranks, int):
@@ -19,7 +23,7 @@ def _rank_enabled(ranks: int | set[int] | None) -> bool:
 def _make_prefix(tag: str) -> str:
     """Build a prefix like '[rank 0][my_tag]' from the current rank and tag."""
     parts = []
-    if torch.distributed.is_initialized():
+    if _dist_initialized():
         parts.append(f"[rank {torch.distributed.get_rank()}]")
     if tag:
         parts.append(f"[{tag}]")
