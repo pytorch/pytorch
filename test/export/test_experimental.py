@@ -447,10 +447,7 @@ def forward(self, args_0):
         comparison in AOTAutograd's PytreeThunk.set() (utils.py:162).
         """
         from torch._functorch.aot_autograd import aot_export_module
-        from torch.nn.attention.flex_attention import (
-            create_block_mask,
-            flex_attention,
-        )
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         _register_blockmask_pytree()
 
