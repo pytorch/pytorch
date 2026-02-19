@@ -2499,7 +2499,36 @@ class PallasKernel(SIMDKernel):
                 and reduction_numel
             )
             if is_partial_reduction and n_reduction_dims > 0:
-                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+                reduction_axis = None
+                if n_reduction_dims == 1 and self.load_index_exprs:
+                    load_index = next(iter(self.load_index_exprs.values()))
+                    # Sort loop vars by stride (outer to inner) and use the
+                    # reduction var position as axis when disambiguation is needed.
+                    var_strides = []
+                    for var, entry in self.range_tree_nodes.items():
+                        coeff = load_index.coeff(var)
+                        if coeff == 0:
+                            continue
+                        stride = self._safe_int(coeff)
+                        if stride is None:
+                            continue
+                        var_strides.append((var, abs(stride), entry.is_reduction))
+                    var_strides.sort(key=lambda x: -x[1])
+                    # Only disambiguate the axis for the simple 2D case
+                    # (one pointwise dim + one reduction dim). For 3D+ cases,
+                    # pallas_partial_reduce already handles reshaping/layout.
+                    if len(var_strides) == 2 and sum(v[2] for v in var_strides) == 1:
+                        for axis, (_, _, is_reduction) in enumerate(var_strides):
+                            if is_reduction:
+                                reduction_axis = axis
+                                break
+                if reduction_axis is not None:
+                    reduction_expr = (
+                        f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, "
+                        f"{reduction_numel}, reduction_axis={reduction_axis})"
+                    )
+                else:
+                    reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_op}({value})"
