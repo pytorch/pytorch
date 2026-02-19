@@ -2321,6 +2321,20 @@ class OutputGraph(OutputGraphCommon):
             if self.cudagraph_annotation is not None:
                 gm.meta["cudagraph_annotation"] = self.cudagraph_annotation
 
+            # Collect cudagraph shape hints from placeholder nodes
+            cudagraph_shape_hints = {}
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    excluded = node.meta.get("cudagraph_excluded_dims")
+                    included = node.meta.get("cudagraph_included_dims")
+                    if excluded or included:
+                        cudagraph_shape_hints[node.name] = {
+                            "excluded_dims": excluded,
+                            "included_dims": included,
+                        }
+            if cudagraph_shape_hints:
+                gm.meta["cudagraph_shape_hints"] = cudagraph_shape_hints
+
             graph_code_log.debug(
                 "%s",
                 lazy_format_graph_code(
