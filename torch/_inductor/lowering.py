@@ -6980,7 +6980,13 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     to force rounding of the product before the FMA. This prevents Triton's
     compiler from fusing the multiplication with the FMA, matching eager's
     rounding behavior.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
     """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
     dtype = get_promoted_dtype(
         self,
         tensor1,
@@ -7102,7 +7108,13 @@ def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
     """
     Foreach version of addcmul with scalar value parameter.
     Uses foreach_group_loop for consistent grouping behavior.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
     """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
     realize_outputs = (
         len(V.graph.current_node.users) == 0
         or V.graph.current_node.target in inplace_foreach_ops
@@ -7120,13 +7132,30 @@ def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
 _register_foreach_lowering(aten._foreach_addcmul.Scalar, _foreach_addcmul_scalar)
 
 
+def _lerp_low_formula(weight_val, diff, start_val, use_fma):
+    """Low formula for lerp: start + weight * (end - start)"""
+    if use_fma:
+        return ops.fma(weight_val, diff, start_val)
+    else:
+        return ops.add(start_val, ops.mul(weight_val, diff))
+
+
+def _lerp_high_formula(one_minus_weight, diff, end_val, use_fma):
+    """High formula for lerp: end - (end - start) * (1 - weight)"""
+    if use_fma:
+        neg_one_minus_weight = ops.neg(one_minus_weight)
+        return ops.fma(neg_one_minus_weight, diff, end_val)
+    else:
+        return ops.sub(end_val, ops.mul(one_minus_weight, diff))
+
+
 @register_lowering(aten.lerp.Scalar, broadcast=True)
 def lerp_scalar(start, end, weight):
     """
     Computes linear interpolation using the same dual-formula approach as CUDA lerp.
 
-    For weight < 0.5: start + weight * (end - start)
-    For weight >= 0.5: end - (end - start) * (1 - weight)
+    For |weight| < 0.5: start + weight * (end - start)
+    For |weight| >= 0.5: end - (end - start) * (1 - weight)
 
     This dual-formula approach ensures numerical stability and exact results
     when weight equals 0 or 1.
@@ -7150,27 +7179,14 @@ def lerp_scalar(start, end, weight):
     def inner_fn(idx):
         start_val = start_loader(idx)
         end_val = end_loader(idx)
-
-        # Compute end - start
         diff = ops.sub(end_val, start_val)
 
         if use_high_formula:
-            # For weight >= 0.5: end - (end - start) * (1 - weight)
             one_minus_weight = ops.constant(1.0 - weight_float, dtype)
-            if use_fma:
-                # fma(-(1-weight), diff, end) = end - (1-weight)*diff
-                neg_one_minus_weight = ops.constant(-(1.0 - weight_float), dtype)
-                return ops.fma(neg_one_minus_weight, diff, end_val)
-            else:
-                return ops.sub(end_val, ops.mul(one_minus_weight, diff))
+            return _lerp_high_formula(one_minus_weight, diff, end_val, use_fma)
         else:
-            # For weight < 0.5: start + weight * (end - start)
             weight_val = ops.constant(weight_float, dtype)
-            if use_fma:
-                # fma(weight, diff, start) = weight*diff + start
-                return ops.fma(weight_val, diff, start_val)
-            else:
-                return ops.add(start_val, ops.mul(weight_val, diff))
+            return _lerp_low_formula(weight_val, diff, start_val, use_fma)
 
     return Pointwise.create(
         device=start.get_device(),
@@ -7185,8 +7201,8 @@ def lerp_tensor(start, end, weight):
     """
     Computes linear interpolation using the same dual-formula approach as CUDA lerp.
 
-    For weight < 0.5: start + weight * (end - start)
-    For weight >= 0.5: end - (end - start) * (1 - weight)
+    For |weight| < 0.5: start + weight * (end - start)
+    For |weight| >= 0.5: end - (end - start) * (1 - weight)
 
     This dual-formula approach ensures numerical stability and exact results
     when weight equals 0 or 1.
@@ -7208,24 +7224,13 @@ def lerp_tensor(start, end, weight):
         start_val = start_loader(idx)
         end_val = end_loader(idx)
         weight_val = weight_loader(idx)
-
-        # Compute end - start
         diff = ops.sub(end_val, start_val)
 
-        # Low formula: start + weight * (end - start)
-        if use_fma:
-            low_result = ops.fma(weight_val, diff, start_val)
-        else:
-            low_result = ops.add(start_val, ops.mul(weight_val, diff))
+        low_result = _lerp_low_formula(weight_val, diff, start_val, use_fma)
 
-        # High formula: end - (end - start) * (1 - weight)
         one_val = ops.constant(1.0, dtype)
         one_minus_weight = ops.sub(one_val, weight_val)
-        if use_fma:
-            neg_one_minus_weight = ops.neg(one_minus_weight)
-            high_result = ops.fma(neg_one_minus_weight, diff, end_val)
-        else:
-            high_result = ops.sub(end_val, ops.mul(one_minus_weight, diff))
+        high_result = _lerp_high_formula(one_minus_weight, diff, end_val, use_fma)
 
         # Select formula based on |weight| >= 0.5
         abs_weight = ops.abs(weight_val)
