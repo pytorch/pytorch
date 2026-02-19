@@ -497,6 +497,9 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
     return;
   }
 
+  // Save original shape before flattening for the LU output
+  auto A_original_sizes = A_t.sizes().vec();
+
   if (A_t.dim() > 3) {
     A_t = A_t.flatten(0, -3);
   }
@@ -508,8 +511,9 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
     status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
   }
 
-  resize_output(LU, A_t.sizes());
-  Tensor LU_ = LU;
+  // LU must keep the original (unflattened) shape for the backward pass
+  resize_output(LU, A_original_sizes);
+  Tensor LU_ = (LU.dim() > 3) ? LU.flatten(0, -3) : LU;
   if (!LU_.is_same(A_t)) {
     A_t = LU_.copy_(A_t);
   } else {
