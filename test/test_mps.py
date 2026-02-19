@@ -809,6 +809,23 @@ class TestAvgPool(TestCaseMPS):
             self.assertEqual(out_mps, out_cpu, msg=msg)
 
 
+    def test_channels_last_storage_offset(self):
+        # Regression test: channels_last tensors with non-zero storage_offset produced wrong
+        # results on MPS because the Placeholder path for NHWC ops ignored storage_offset.
+        # Build a channels_last tensor with offset>0 via slice+reshape+permute.
+        x = torch.randn(1, 65, 64, device="mps")[:, 1:].reshape(1, 8, 8, 64).permute(0, 3, 1, 2)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        self.assertGreater(x.storage_offset(), 0)
+
+        pool_mps = F.avg_pool2d(x, 2)
+        pool_cpu = F.avg_pool2d(x.cpu(), 2)
+        self.assertEqual(pool_mps.cpu(), pool_cpu)
+
+        bn_mps = torch.nn.BatchNorm2d(64).eval().to("mps")(x)
+        bn_cpu = torch.nn.BatchNorm2d(64).eval()(x.cpu())
+        self.assertEqual(bn_mps.cpu(), bn_cpu)
+
+
 class TestMPS(TestCaseMPS):
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
