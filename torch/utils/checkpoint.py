@@ -1410,28 +1410,12 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
-        kwargs = {} if kwargs is None else kwargs
-        policy = self.policy_fn(SelectiveCheckpointContext(is_recompute=True),
-                                func, *args, **kwargs)
-        if isinstance(policy, bool):
-            policy = _policy_from_bool(policy)
-
-        is_compiling = _is_compiling(func, args, kwargs)
-
         idx = self.func_counter[func]
         self.func_counter[func] += 1
 
-        # Check for a cached entry (from policy or save())
         cached = self.storage.get(func, {}).pop(idx, None)
         if cached is not None:
             out = tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), cached)
-        elif policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            if func not in self.storage:
-                raise RuntimeError(f"{func} encountered during backward, but not found in storage")
-            raise RuntimeError(
-                "Trying to backward an extra time. You are only allowed to backward once "
-                "on any region computed under selective activation checkpoint."
-            )
         else:
             out = func(*args, **kwargs)
         return out
