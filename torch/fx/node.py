@@ -53,9 +53,9 @@ Target: TypeAlias = Union[Callable[..., Any], str]
 class _LazyStackTrace:
     """Deferred stack trace that avoids expensive symbolization until accessed.
 
-    During tracing, we capture a raw CapturedTraceback (fast C++ address capture)
-    and a filter function, but defer the expensive symbolize_tracebacks() call
-    and string formatting until node.stack_trace is actually read.
+    Stores a raw CapturedTraceback and a filter function, but defers the
+    expensive symbolize_tracebacks() call and string formatting until
+    node.stack_trace is actually read.
     """
 
     __slots__ = ["_captured_tb", "_filter_fn", "_resolved"]
