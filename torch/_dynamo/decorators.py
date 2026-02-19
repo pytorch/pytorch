@@ -321,8 +321,8 @@ def _invoke_leaf_function_python(
     This enables @leaf_function to work with make_fx
     without relying on Dynamo to intercept the call.
     """
-    from torch._higher_order_ops.flat_apply import func_to_graphable
     from torch._higher_order_ops.invoke_leaf_function import (
+        _LeafCallable,
         convert_modules_to_states,
         invoke_leaf_function,
         make_leaf_function_wrappers,
@@ -353,9 +353,11 @@ def _invoke_leaf_function_python(
         real_impl, fake_impl, captured_out_spec
     )
 
-    _, real_fn_spec = func_to_graphable(wrapped_real)
-    _, fake_fn_spec = func_to_graphable(wrapped_fake)
-    flat_out = invoke_leaf_function(real_fn_spec, fake_fn_spec, input_spec, *flat_args)
+    real_fn_callable = _LeafCallable(wrapped_real)
+    fake_fn_callable = _LeafCallable(wrapped_fake)
+    flat_out = invoke_leaf_function(
+        real_fn_callable, fake_fn_callable, input_spec, *flat_args
+    )
 
     assert captured_out_spec[0] is not None
     return pytree.tree_unflatten(flat_out, captured_out_spec[0])
