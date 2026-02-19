@@ -5902,10 +5902,27 @@ class Scheduler:
         if reason := self._uses_cudagraph_unsafe_unbacked_symint(node):
             return reason
 
+        # Check for cudagraph-excluded symints (via cudagraph_exclude_sym_shape API)
+        if reason := self._uses_cudagraph_excluded_symint(node):
+            return reason
+
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
+        # but respect cudagraph_include_sym_shape API
         if config.triton.cudagraph_skip_dynamic_graphs:
-            if get_scheduler_node_symbol_uses(node):
-                return "dynamic shape ops"
+            node_symbols = get_scheduler_node_symbol_uses(node)
+            if node_symbols:
+                # Only check SIZE symbols (actual tensor dimensions), not INDEX or other internal symbols
+                # INDEX symbols (i0, i1) are loop variables derived from SIZE symbols
+                size_symbols = [
+                    sym for sym in node_symbols if symbol_is_type(sym, SymT.SIZE)
+                ]
+                if size_symbols:
+                    included = V.graph.cudagraph_included_symints
+                    non_included_symbols = [
+                        sym for sym in size_symbols if sym not in included
+                    ]
+                    if non_included_symbols:
+                        return "dynamic shape ops"
 
         return None
 
@@ -5959,6 +5976,24 @@ class Scheduler:
             for free_sym in simplified_sym.free_symbols:
                 if free_sym in unsafe_symints:
                     return f"uses cudagraph-unsafe unbacked symint: {free_sym}"
+
+        return None
+
+    def _uses_cudagraph_excluded_symint(
+        self, node: BaseSchedulerNode
+    ) -> Optional[str]:
+        """Check if a node uses any symints excluded via cudagraph_exclude_sym_shape."""
+        excluded_symints = V.graph.cudagraph_excluded_symints
+        if not excluded_symints:
+            return None
+
+        node_symbols = get_scheduler_node_symbol_uses(node)
+
+        for sym in node_symbols:
+            simplified_sym = V.graph.sizevars.simplify(sym)
+            for free_sym in simplified_sym.free_symbols:
+                if free_sym in excluded_symints:
+                    return f"uses cudagraph-excluded symint: {free_sym}"
 
         return None
 
