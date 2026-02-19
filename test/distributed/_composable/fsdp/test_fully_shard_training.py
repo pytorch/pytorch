@@ -4,7 +4,7 @@ import contextlib
 import copy
 import functools
 import itertools
-import random
+import threading
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable
@@ -1873,11 +1873,11 @@ class TestFSDPMissingParamGrad(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    def test_unused_param_has_grad(self):
+    def test_unused_param_grad_no_deadlock(self):
         if device_type.type == "cuda":
             torch.cuda.set_device(self.rank)
         device = torch.device(device_type.type, self.rank)
-        model = SomeUnusedParamModel(use_sometimes=random.choice([True, False])).to(
+        model = SomeUnusedParamModel(use_sometimes=self.rank == 0).to(
             device
         )
         cloned_param_list = [p.clone() for p in model.parameters()]
@@ -1888,9 +1888,27 @@ class TestFSDPMissingParamGrad(FSDPTest):
         loss = model(x).sum()
         loss.backward()
 
+        sync_done = threading.Event()
+        sync_thread = threading.Thread(
+            target=lambda: (torch.cuda.synchronize(device), sync_done.set()),
+            daemon=True
+        )
+        sync_thread.start()
+        local_ok = sync_done.wait(timeout=10)
+
+        gloo_pg = dist.new_group(backend="gloo")
+        result = torch.tensor([int(local_ok)])
+        dist.all_reduce(result, op=dist.ReduceOp.MIN, group=gloo_pg)
+        dist.destroy_process_group(gloo_pg)
+        
+        if result.item() == 0:
+            self.fail(
+                "Backward reduce-scatter deadlocked due to mismatched gradient " \
+                "tensor sizes across ranks."
+            )
+
         for param, param_clone in zip(model.parameters(), cloned_param_list, strict=True):
-            param_full = param.full_tensor()
-            assert torch.equal(param_full, param_clone), "FSDP should not modify the original parameters"
+            assert torch.equal(param.full_tensor(), param_clone), "FSDP should not modify the original parameters"
 
 
 if __name__ == "__main__":
