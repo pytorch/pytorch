@@ -2732,6 +2732,19 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         weight = 0.1
         self.common(fn, [start, end, weight])
 
+    @config.patch("eager_numerics.pow_precision", True)
+    def test_pow_precision(self):
+        # Test that pow(scalar, tensor) matches eager bitwise when using
+        # eager_numerics.pow_precision, which uses inline PTX to match CUDA's powf.
+        def fn(exp):
+            return torch.pow(0.9, exp)
+
+        exp = torch.arange(1, 101, device="cuda", dtype=torch.float32)
+
+        eager_result = fn(exp)
+        compiled_result = torch.compile(fn)(exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
