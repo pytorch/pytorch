@@ -20,6 +20,7 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 
 import functools
 import inspect
+import types
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -27,6 +28,7 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_member_type,
     is_opaque_reference_type,
@@ -39,7 +41,12 @@ from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
 from ..eval_frame import skip_code
-from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
+from ..exc import (
+    raise_observed_exception,
+    unimplemented,
+    UnsafeScriptObjectError,
+    Unsupported,
+)
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
@@ -258,6 +265,13 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 name,
             )
             if member_type is None:
+                # Special case: __bool__ and __len__ are used for truthiness checks.
+                # If they're not registered and the real object doesn't have them,
+                # raise ObservedAttributeError so the caller can fall back to
+                # treating the object as truthy (Python default behavior
+                if name in ("__bool__", "__len__") and not hasattr(real_obj, name):
+                    raise_observed_exception(AttributeError, tx)
+
                 unimplemented(
                     gb_type="Attempted to access unregistered member on an OpaqueObject",
                     context=f"value={real_obj}, attr={name}",
@@ -269,7 +283,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
-                if inspect.ismethod(value):
+                if inspect.ismethod(value) or isinstance(
+                    value, types.MethodWrapperType
+                ):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
@@ -278,7 +294,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             elif member_type == MemberType.INLINED:
                 value = getattr(real_obj, name)
-                if inspect.ismethod(value) and self.source is None:
+                if (
+                    inspect.ismethod(value)
+                    or isinstance(value, types.MethodWrapperType)
+                ) and self.source is None:
                     # When we don't have a source, fall back to call_method
                     # which creates a proxy node.
                     return LambdaVariable(
@@ -433,6 +452,36 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return super().as_python_constant()
 
     def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(
-            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+        try:
+            hash(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+            return True
+        except TypeError:
+            return False
+
+    def get_python_hash(self) -> int:
+        real_obj = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
         )
+        return hash(real_obj)
+
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, TorchScriptObjectVariable):
+            return False
+        real_self = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        real_other = (
+            other.value.real_obj
+            if isinstance(other.value, FakeScriptObject)
+            else other.value
+        )
+        return real_self == real_other
+
+    def get_real_value(self) -> Any:
+        if isinstance(self.value, FakeScriptObject):
+            return self.value.real_obj
+        return self.as_python_constant()

@@ -7,6 +7,7 @@ import copy
 import functools
 import itertools
 import sys
+import threading
 import types
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -593,7 +594,20 @@ class DTensorOpTestBase(MultiThreadedTestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        # Enable thread-safe lock for ShardingPropagator since we run
+        # multi-threaded tests.
+        from torch.distributed.tensor._sharding_prop import ShardingPropagator
+
+        self._orig_fake_mode_lock = ShardingPropagator._fake_mode_lock
+        ShardingPropagator._fake_mode_lock = threading.Lock()
         self._spawn_threads()
+
+    def tearDown(self) -> None:
+        # Restore the original (no-op) lock
+        from torch.distributed.tensor._sharding_prop import ShardingPropagator
+
+        ShardingPropagator._fake_mode_lock = self._orig_fake_mode_lock
+        super().tearDown()
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
