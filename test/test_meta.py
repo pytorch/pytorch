@@ -348,6 +348,9 @@ aten = torch.ops.aten
 
 CHECK_STRIDES = {
     torch.Tensor.__getitem__,
+    aten._fft_c2c.default,
+    aten._fft_c2r.default,
+    aten._fft_r2c.default,
 }
 
 CHECK_ALL_STRIDES = {
@@ -356,9 +359,6 @@ CHECK_ALL_STRIDES = {
 
 CHECK_STRIDES_SKIPS = {
     aten._conj_physical.default,
-    aten._fft_c2c.default,
-    aten._fft_c2r.default,
-    aten._fft_r2c.default,
     aten._linalg_svd.default,
     aten.binary_cross_entropy.default,
     aten.complex.default,
