@@ -66,8 +66,6 @@ quantized_decomposed = torch.ops.quantized_decomposed
 emulate_precision_decomps_to_exclude: OrderedSet[Any] = OrderedSet(
     [
         aten.addcmul,
-        aten.addcdiv,
-        aten.addcdiv_,
         aten._foreach_addcmul.Scalar,
         aten._foreach_addcdiv.Scalar,
     ]
