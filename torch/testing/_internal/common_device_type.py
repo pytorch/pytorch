@@ -1844,9 +1844,9 @@ def skipCUDAIfNoCusolver(fn):
     )(fn)
 
 
-# Skips a test if both cuSOLVER and MAGMA are not available
+# Skips a test if both cuSOLVER/hipSOLVER and MAGMA are not available
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
-    if has_cusolver():
+    if has_cusolver() or has_hipsolver():
         return fn
     else:
         # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA

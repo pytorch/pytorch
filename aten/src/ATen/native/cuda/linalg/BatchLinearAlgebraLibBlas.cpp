@@ -221,7 +221,8 @@ void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left
   // Workaround the following a bug on CUDA < 12.1
   // RuntimeError: CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling `cublasStrsmBatched
   // See https://github.com/pytorch/pytorch/issues/79191#issuecomment-1154222580
-#if defined(CUSOLVER_VERSION) && CUSOLVER_VERSION < 12100
+  // This workaround is not needed on ROCm
+#if !defined(USE_ROCM) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION < 12100
   constexpr auto max_batch_size = 524280;
   if (B.size(-1) > max_batch_size) {
     auto n_chunks = (B.size(-1) + max_batch_size - 1) / max_batch_size; // ceildiv
