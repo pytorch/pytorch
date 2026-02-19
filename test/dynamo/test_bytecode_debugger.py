@@ -173,8 +173,10 @@ class TestBytecodeDebugger(TestCase):
             # Step until we hit a CALL instruction (or PRECALL on Python 3.11)
             if sys.version_info >= (3, 12):
                 call_pattern = r">>>.*\[\d+\]:\s*CALL\b"
-            else:
+            elif sys.version_info >= (3, 11):
                 call_pattern = r">>>.*\[\d+\]:\s*PRECALL\b"
+            else:
+                call_pattern = r">>>.*\[\d+\]:\s*CALL_FUNCTION\b"
             while not re.search(call_pattern, output):
                 output = yield "s"
             # Get the stack at CALL/PRECALL
@@ -426,8 +428,10 @@ Stack (TOS at end):
             # Step until we hit a CALL instruction (or PRECALL on Python 3.11)
             if sys.version_info >= (3, 12):
                 call_pattern = r">>>.*\[\d+\]:\s*CALL\b"
-            else:
+            elif sys.version_info >= (3, 11):
                 call_pattern = r">>>.*\[\d+\]:\s*PRECALL\b"
+            else:
+                call_pattern = r">>>.*\[\d+\]:\s*CALL_FUNCTION\b"
             while not re.search(call_pattern, output):
                 output = yield "s"
 
