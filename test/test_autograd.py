@@ -4114,12 +4114,12 @@ class TestAutograd(TestCase):
         def fn(x):
             return x.sin().cos()
 
-        torch.set_default_device("cuda")
-        a = torch.tensor(1.0, requires_grad=True)
-        out = torch.utils.checkpoint.checkpoint(
-            fn, a, context_fn=context_fn, use_reentrant=False
-        )
-        out.backward()
+        with apply_device("cuda"):
+            a = torch.tensor(1.0, requires_grad=True)
+            out = torch.utils.checkpoint.checkpoint(
+                fn, a, context_fn=context_fn, use_reentrant=False
+            )
+            out.backward()
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
@@ -8252,7 +8252,39 @@ for shape in [(1,), ()]:
         self.assertTrue(pow2_sv.data is c)
         self.assertIsNone(pow2_sv.unpack_hook)
 
-    def test_cant_create_saved_tensors(self):
+    def test_saved_tensor_constructor_with_hooks(self):
+        pack_count = [0]
+        unpack_count = [0]
+
+        def pack_hook(x):
+            pack_count[0] += 1
+            return x
+
+        def unpack_hook(x):
+            unpack_count[0] += 1
+            return x
+
+        a = torch.randn(5, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            saved = torch._C._autograd._make_saved_tensor(a, is_output=False)
+            self.assertEqual(pack_count[0], 1)
+            self.assertEqual(unpack_count[0], 0)
+
+            unpacked = saved.unpack()
+            self.assertEqual(pack_count[0], 1)
+            self.assertEqual(unpack_count[0], 1)
+
+            unpacked2 = saved.unpack()
+            self.assertEqual(pack_count[0], 1)
+            self.assertEqual(unpack_count[0], 2)
+
+        # Check tensor equality outside the hooks context to avoid
+        # triggering additional pack hooks from assertEqual internals
+        self.assertEqual(unpacked, a)
+        self.assertEqual(unpacked2, a)
+
+    def test_saved_tensor_constructor_forbidden_without_flag(self):
+        a = torch.randn(5, requires_grad=True)
         with self.assertRaisesRegex(
             RuntimeError,
             "Trying to create a SavedTensor object from Python is forbidden",
