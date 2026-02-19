@@ -839,7 +839,17 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
         int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
 
         cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
-        auto* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
+        auto* row_indices_ptr = [&]() -> auto* {
+          auto* start = row_indices_start_ptr + mat_el_begin_idx;
+          // See the definition of `aligned_row_indices_buffer`
+          const auto is_misaligned_start = (reinterpret_cast<uintptr_t>(start) % 16) != 0;
+          if (is_misaligned_start && aligned_row_indices_buffer.defined()) {
+            aligned_row_indices_buffer.narrow(0, 0, sparse_nnz)
+              .copy_(indices_dim1.narrow(0, mat_el_begin_idx, sparse_nnz));
+            return aligned_row_indices_buffer.data_ptr<int64_t>();
+          }
+          return start;
+        }();
         auto* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
         scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
 
