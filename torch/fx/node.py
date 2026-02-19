@@ -49,6 +49,46 @@ base_types = typing.get_args(BaseArgumentTypes)
 
 Target: TypeAlias = Union[Callable[..., Any], str]
 
+
+class _LazyStackTrace:
+    """Deferred stack trace that avoids expensive symbolization until accessed.
+
+    During tracing, we capture a raw CapturedTraceback (fast C++ address capture)
+    and a filter function, but defer the expensive symbolize_tracebacks() call
+    and string formatting until node.stack_trace is actually read.
+    """
+
+    __slots__ = ["_captured_tb", "_filter_fn", "_resolved"]
+
+    def __new__(cls, captured_tb, filter_fn=None):
+        instance = super().__new__(cls)
+        instance._captured_tb = captured_tb
+        instance._filter_fn = filter_fn
+        instance._resolved = None
+        return instance
+
+    def resolve(self) -> Optional[str]:
+        if self._resolved is not None:
+            return self._resolved
+        if self._captured_tb is None:
+            return None
+        user_stack_summary = self._captured_tb.summary()
+        result = None
+        if user_stack_summary:
+            if self._filter_fn is not None:
+                user_stack_summary = self._filter_fn(user_stack_summary)
+            if user_stack_summary:
+                result = "".join(user_stack_summary.format()).strip()
+        self._captured_tb = None
+        self._filter_fn = None
+        self._resolved = result
+        return result
+
+    def __bool__(self) -> bool:
+        resolved = self.resolve()
+        return resolved is not None and len(resolved) > 0
+
+
 Argument = Optional[
     Union[
         tuple["Argument", ...],
@@ -554,7 +594,12 @@ class Node(_NodeBase):
 
         stack_trace would have the innermost frame at the end of the string.
         """
-        return self.meta.get("stack_trace", None)
+        val = self.meta.get("stack_trace", None)
+        if isinstance(val, _LazyStackTrace):
+            resolved = val.resolve()
+            self.meta["stack_trace"] = resolved
+            return resolved
+        return val
 
     @stack_trace.setter
     def stack_trace(self, trace: Optional[str]) -> None:

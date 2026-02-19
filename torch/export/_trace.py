@@ -99,6 +99,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeInfo
+from torch.fx.node import _LazyStackTrace
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -1237,7 +1238,10 @@ def _verify_stack_trace(graph_module: torch.fx.GraphModule) -> None:
         for node in graph_module.graph.nodes:
             stack_trace = node.meta.get("stack_trace", None)
             if node.op in ["call_function", "get_attr"]:
-                if not (stack_trace is None or isinstance(stack_trace, str)):
+                if not (
+                    stack_trace is None
+                    or isinstance(stack_trace, (str, _LazyStackTrace))
+                ):
                     raise SpecViolationError(
                         f"Node {node} of type {node.op} has invalid stack_trace metadata, "
                         f"expected a string or None but instead found: {stack_trace}"
