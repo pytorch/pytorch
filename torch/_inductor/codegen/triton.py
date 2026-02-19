@@ -3898,7 +3898,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         original_dtype = dtype
         if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
-            pytree.tree_map_(maybe_upcast, value)
+            value = pytree.tree_map(maybe_upcast, value)
             src_dtype = torch.float32 if should_upcast(src_dtype) else src_dtype
             dtype = torch.float32 if should_upcast(dtype) else dtype
 
