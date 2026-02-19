@@ -60,6 +60,7 @@ from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
+    InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -173,6 +174,7 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.distributed_c10d._resolve_group_name_by_ranks_and_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
+    "torch.distributed.destroy_process_group": SkipFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_symbolic_tracing": TorchInGraphFunctionVariable,
@@ -387,6 +389,8 @@ manual_torch_name_rule_map: dict[
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
     "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
+    "torch._utils_internal.justknobs_check": UserFunctionVariable,
+    "inspect.signature": InspectSignatureVariable,
 }
 
 
@@ -3803,7 +3807,7 @@ def _force_inline() -> Iterator[None]:
     When active, check_verbose() will skip all inline/skip decision logic and
     always return SkipResult(False, ...), meaning functions will be inlined.
 
-    See _make_inlined() in higher_order_ops.py which uses this to ensure that
+    See _make_inlined() in utils.py which uses this to ensure that
     a python function is fully traced to produce the needed variable trackers.
     """
     global _force_inline_flag

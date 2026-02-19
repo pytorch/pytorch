@@ -89,6 +89,12 @@ void launch_grouped_bgemm_ck_impl_dispatch(
             int end_k = offs_accessor[i];
             int k = end_k - start_k;
 
+            // Skip zero-sized groups but continue processing subsequent groups.
+            // Output for this group is pre-initialized to zeros (correct for K=0 matmul).
+            if (k <= 0) {
+                continue;
+            }
+
             //K dimension are sliced, hence select stride(1) always.
             //K dimension is always dimension 1, regardless of memory layout (row/column major)
             const void* group_a_ptr = a_ptr_base + start_k * mat_a.stride(1) * a_element_size;
@@ -365,7 +371,12 @@ void launch_grouped_bgemm_ck_impl_dispatch(
         TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions, mat A dim is ", mat_a_dim, ", mat B dim is ", mat_b_dim);
     }
 
-    TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
+    // TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
+    // If all groups were skipped (e.g., all K=0 in 2D-2D case), return early.
+    // Output is already pre-initialized to zeros which is the correct result.
+    if (p_a_ptrs.size() == 0) {
+        return;
+    }
 
     // Initialize d_ptrs with the correct size
     std::vector<std::array<const void*, 0>> d_ptrs(p_a_ptrs.size());
