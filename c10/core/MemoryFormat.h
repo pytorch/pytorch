@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/core/SymBool.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
@@ -104,15 +106,15 @@ inline bool is_channels_last_strides_2d_s4(
     const ArrayRef<T> strides) {
   T min = 0;
   // special case for trivial C dimension. default to NCHW
-  if (strides[1] == 0) {
+  if (TORCH_GUARD_OR_FALSE(sym_eq(strides[1], 0))) {
     return false;
   }
   // loop strides indices
   for (auto& d : {1, 3, 2, 0}) {
-    if (sizes[d] == 0) {
+    if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 0))) {
       return false;
     }
-    if (strides[d] < min) {
+    if (TORCH_GUARD_OR_FALSE(sym_lt(strides[d], min))) {
       return false;
     }
     // Fallback to NCHW as default layout for ambiguous cases
@@ -122,7 +124,7 @@ inline bool is_channels_last_strides_2d_s4(
     // a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
     // b. N11W contiguous Tensor sliced on the W-dimension.
     // ([N,1,1,1]@[W,W,W,W])
-    if (d == 0 && min == strides[1]) {
+    if (d == 0 && TORCH_GUARD_OR_FALSE(sym_eq(min, strides[1]))) {
       return false;
     }
     // This is necessary to:
@@ -133,7 +135,7 @@ inline bool is_channels_last_strides_2d_s4(
     //     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
     //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as channels_last
     min = strides[d];
-    if (sizes[d] > 1) {
+    if (TORCH_GUARD_OR_TRUE(sym_gt(sizes[d], 1))) {
       min *= sizes[d];
     }
   }
@@ -145,21 +147,21 @@ inline bool is_channels_last_strides_3d_s5(
     const ArrayRef<T> sizes,
     const ArrayRef<T> strides) {
   T min = 0;
-  if (strides[1] == 0) {
+  if (TORCH_GUARD_OR_FALSE(sym_eq(strides[1], 0))) {
     return false;
   }
   for (auto& d : {1, 4, 3, 2, 0}) {
-    if (sizes[d] == 0) {
+    if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 0))) {
       return false;
     }
-    if (strides[d] < min) {
+    if (TORCH_GUARD_OR_FALSE(sym_lt(strides[d], min))) {
       return false;
     }
-    if (d == 0 && min == strides[1]) {
+    if (d == 0 && TORCH_GUARD_OR_FALSE(sym_eq(min, strides[1]))) {
       return false;
     }
     min = strides[d];
-    if (sizes[d] > 1) {
+    if (TORCH_GUARD_OR_TRUE(sym_gt(sizes[d], 1))) {
       min *= sizes[d];
     }
   }
