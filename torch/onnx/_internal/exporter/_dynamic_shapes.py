@@ -382,8 +382,10 @@ def remap_dynamic_shapes_from_input_names(
     ]
 
     # Build a mapping: input_name -> original_param_name
-    # input_names may be longer than model params (e.g. includes output names),
-    # so only map up to the number of model parameters.
+    # input_names may be longer than the number of forward parameters (for example,
+    # when additional names are provided that do not correspond to inputs), so only
+    # map up to the number of model parameters. This remapping assumes a 1:1,
+    # ordered correspondence between input_names and the model's forward parameters.
     input_name_to_param: dict[str, str] = {}
     for i, param_name in enumerate(original_param_names):
         if i < len(input_names):
@@ -397,13 +399,21 @@ def remap_dynamic_shapes_from_input_names(
     if not needs_remapping:
         return dynamic_shapes
 
-    # Remap the keys
+    # Remap the keys, detecting collisions where multiple entries resolve
+    # to the same parameter name.
     remapped: dict[str, Any] = {}
     for key, value in dynamic_shapes.items():
         if key in input_name_to_param and key not in original_param_names:
-            remapped[input_name_to_param[key]] = value
+            target_key = input_name_to_param[key]
         else:
-            remapped[key] = value
+            target_key = key
+        if target_key in remapped:
+            raise ValueError(
+                f"Conflicting dynamic_shapes entries for parameter '{target_key}': "
+                f"both a previous key and '{key}' map to this parameter. "
+                "Please provide at most one dynamic_shapes specification per parameter."
+            )
+        remapped[target_key] = value
 
     return remapped
 

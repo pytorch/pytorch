@@ -765,6 +765,43 @@ class TestDynamicShapes(common_utils.TestCase):
         )
         self.assertEqual(result, {"x": {0: batch_dim}})
 
+    def test_remap_dynamic_shapes_collision_renamed_and_original(self):
+        """Test that providing both a renamed key and the original key for the same param raises."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x.relu()
+
+        model = SimpleModel()
+        # "bgr_image" remaps to "x", but "x" is also present → collision
+        dynamic_shapes = {"bgr_image": {0: "batch"}, "x": {0: "batch"}}
+        input_names = ["bgr_image"]
+        with self.assertRaises(ValueError):
+            _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+                model, dynamic_shapes, input_names
+            )
+
+    def test_remap_dynamic_shapes_collision_rename_to_other_param(self):
+        """Test collision when input_names renames one param to another param's name."""
+
+        class TwoInputModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        model = TwoInputModel()
+        # input_names=["y", "x"] means:
+        #   forward param "x" is renamed to "y"
+        #   forward param "y" is renamed to "x"
+        # dynamic_shapes uses both renamed names, which after remapping
+        # would both resolve correctly without collision.
+        dynamic_shapes = {"y": {0: "batch"}, "x": {0: "batch"}}
+        input_names = ["y", "x"]
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names
+        )
+        # "y" (input_name[0]) → param "x", "x" (input_name[1]) → param "y"
+        self.assertEqual(result, {"x": {0: "batch"}, "y": {0: "batch"}})
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
