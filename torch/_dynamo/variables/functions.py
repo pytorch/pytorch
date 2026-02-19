@@ -83,7 +83,6 @@ from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
     raise_type_error_exc,
-    ValueMutationExisting,
     ValueMutationNew,
     VariableTracker,
 )
@@ -388,15 +387,8 @@ class BaseUserFunctionVariable(VariableTracker):
         return self.source
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
-        source = self.get_source()
-        mutation = ValueMutationExisting() if source else ValueMutationNew()
         if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable(
-                self,
-                side_effects=tx.output.side_effects,
-                mutation_type=mutation,
-                source=source and AttrSource(source, "__dict__"),
-            )
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
 
     def call_method(

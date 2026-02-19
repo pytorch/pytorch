@@ -47,7 +47,7 @@ from ..utils import (
     raise_args_mismatch,
     specialize_symnode,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import ValueMutationExisting, ValueMutationNew, VariableTracker
 from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 
 
@@ -1953,6 +1953,19 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
 
 class DunderDictVariable(ConstDictVariable):
     """represents object.__dict__"""
+
+    @classmethod
+    def create(
+        cls, tx: "InstructionTranslator", vt: VariableTracker
+    ) -> "DunderDictVariable":
+        mutation = ValueMutationExisting() if vt.source else ValueMutationNew()
+        source = vt.source and AttrSource(vt.source, "__dict__")
+        return cls(
+            vt,
+            side_effects=tx.output.side_effects,
+            mutation_type=mutation,
+            source=source,
+        )
 
     def __init__(
         self,
