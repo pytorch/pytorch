@@ -247,7 +247,13 @@ def torch_dtype_to_jax(dtype: torch.dtype) -> str:
     return f"jnp.{dtype_name}"
 
 
-def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int) -> Any:
+def pallas_partial_reduce(
+    reduce_fn: Any,
+    v: Any,
+    pw_numel: int,
+    red_numel: int,
+    reduction_axis: int | None = None,
+) -> Any:
     """
     Helper for partial reductions in Pallas kernels.
 
@@ -262,28 +268,69 @@ def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int)
     Args:
         reduce_fn: The reduction function to apply (e.g., jnp.sum, jnp.max)
         v: The input array to reduce
+<<<<<<< HEAD
         pw_numel: The number of pointwise elements (used for axis detection)
         red_numel: The number of reduction elements (used for axis detection)
+=======
+        pw_numel: The number of pointwise elements
+        red_numel: The number of reduction elements
+        reduction_axis: Optional explicit axis for reduction disambiguation
+>>>>>>> 94703ecbb72 (Fix argmax/argmin partial-reduction axis disambiguation)
 
     Returns:
         Reduced array with keepdims-style shape
     """
     shape = tuple(v.shape)
+    red_axes: list[int] | None
+    if reduction_axis is not None:
+        axis = reduction_axis
+        if axis < 0:
+            axis += len(shape)
+        if axis < 0 or axis >= len(shape):
+            raise ValueError(
+                f"Invalid reduction_axis={reduction_axis} for shape={shape}"
+            )
+        red_axes = [axis]
+    else:
+        red_axes = None
+
     # Find contiguous axes whose product = red_numel (search from right)
-    red_axes = None
-    for i in range(len(shape) - 1, -1, -1):
-        prod = 1
-        for j in range(i, -1, -1):
-            prod *= shape[j]
-            if prod == red_numel:
-                red_axes = list(range(j, i + 1))
-                break
-        if red_axes is not None:
-            break
+    # when no explicit axis is provided or when the explicit axis would
+    # produce an output shape incompatible with pw_numel.
     if red_axes is None:
+<<<<<<< HEAD
         red_axes = [len(shape) - 1]
     result = reduce_fn(v, axis=tuple(red_axes), keepdims=True)
     return result
+=======
+        should_search_red_axes = True
+    else:
+        out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
+        should_search_red_axes = math.prod(out_shape) != pw_numel
+    if should_search_red_axes:
+        red_axes = None
+        for i in range(len(shape) - 1, -1, -1):
+            prod = 1
+            for j in range(i, -1, -1):
+                prod *= shape[j]
+                if prod == red_numel:
+                    red_axes = list(range(j, i + 1))
+                    break
+            if red_axes is not None:
+                break
+        if red_axes is None:
+            red_axes = [len(shape) - 1]
+    if red_axes is None:
+        raise RuntimeError("Failed to infer reduction axes for pallas_partial_reduce")
+
+    # Build output shape with 1s for reduced dimensions (keepdims style)
+    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
+    # Move pointwise axes to front, reduction axes to back
+    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
+    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
+    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
+    return result.reshape(out_shape)
+>>>>>>> 94703ecbb72 (Fix argmax/argmin partial-reduction axis disambiguation)
 
 
 def pallas_gpu_pad_inputs(inputs: list[Any], alignment: int = 128) -> list[Any]:
