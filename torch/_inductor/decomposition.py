@@ -37,7 +37,6 @@ from torch._prims_common import (
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
-from torch.utils._ordered_set import OrderedSet
 
 from . import config, inductor_prims
 from .utils import (
@@ -60,18 +59,6 @@ prims = torch.ops.prims
 quantized = torch.ops.quantized
 _quantized = torch.ops._quantized
 quantized_decomposed = torch.ops.quantized_decomposed
-
-# Ops that skip decomposition when emulate_precision_casts is enabled
-# to use the inductor lowering which preserves FMA semantics
-emulate_precision_decomps_to_exclude: OrderedSet[Any] = OrderedSet(
-    [
-        aten.addcmul,
-        aten.addcdiv,
-        aten.addcdiv_,
-        aten._foreach_addcmul.Scalar,
-        aten._foreach_addcdiv.Scalar,
-    ]
-)
 
 inductor_decompositions = get_decompositions(
     [
@@ -147,6 +134,11 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.lerp,
     aten._foreach_lerp.Scalar,
     aten._foreach_lerp.ScalarList,
+    aten.addcmul,
+    aten._foreach_addcmul.Scalar,
+    aten.addcdiv,
+    aten.addcdiv_,
+    aten._foreach_addcdiv.Scalar,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -918,18 +910,6 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
         return decompositions
     result = fast_random_decomps()
-
-    if config.emulate_precision_casts:
-        # Skip decomposition for addcmul/addcdiv ops to use the inductor lowering
-        # which preserves FMA semantics
-        def should_skip(op: Any) -> bool:
-            if op in emulate_precision_decomps_to_exclude:
-                return True
-            if hasattr(op, "overloadpacket"):
-                return op.overloadpacket in emulate_precision_decomps_to_exclude
-            return False
-
-        result = {k: v for k, v in result.items() if not should_skip(k)}
 
     return result
 
