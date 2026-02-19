@@ -5199,6 +5199,19 @@ class TemplateBuffer(OperationBuffer):
             None,
         )
 
+    def is_multi_outputs_template(self) -> bool:
+        """Whether this template produces multiple outputs via MultiOutputLayout."""
+        return isinstance(self.layout, MultiOutputLayout)
+
+    def can_fuse_multi_output_epilogue(self, snode: object) -> bool:
+        """Whether scheduler node can be fused as an epilogue of this multi-output template.
+
+        Returns ``False`` by default.  Subclasses may override to support
+        additional fusion patterns (e.g. epilogue fusion with multi-output
+        extraction and pointwise operations).
+        """
+        return False
+
 
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
