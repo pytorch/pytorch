@@ -1306,6 +1306,48 @@ class TestCustomOpAutoTune(TestCase):
             f"Memory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
         )
 
+    def test_cudagraph_memory_cleanup_benchmarker(self):
+        """Test that CUDA graph benchmarking cleans up memory without leaking."""
+        if self.device != "cuda":
+            self.skipTest("CUDA graph test requires CUDA device")
+
+        # Clear everything first
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        torch._C._cuda_clearCublasWorkspaces()
+
+        # Create test tensors
+        a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
+        b = torch.randn(256, 256, device=self.device, dtype=self.dtype)
+
+        # Use the actual benchmarking infrastructure with CUDA graph capture
+        benchmarker = torch._inductor.runtime.benchmarking.benchmarker
+
+        def mm_callable():
+            return torch.mm(a, b)
+
+        # This should capture into CUDA graph, benchmark, and clean up properly
+        _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+
+        memory_after_first = torch.cuda.memory_allocated()
+
+        # Run benchmarking again - memory should not grow
+        for _ in range(5):
+            _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+
+        memory_after_many = torch.cuda.memory_allocated()
+
+        # Memory should not grow significantly across multiple benchmark runs
+        self.assertEqual(
+            memory_after_many,
+            memory_after_first,
+            f"Memory leak detected: after_first={memory_after_first}, after_many={memory_after_many}",
+        )
+
 
 if __name__ == "__main__":
     run_tests()

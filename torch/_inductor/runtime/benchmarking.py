@@ -264,7 +264,7 @@ class Benchmarker:
         # Capture into CUDA graph, tracking the capture stream
         cuda_graph = torch.cuda.CUDAGraph()
         capture_stream_ptr = None
-        with torch.cuda.graph(cuda_graph):
+        with torch.cuda.graph(cuda_graph, capture_error_mode="thread_local"):
             capture_stream_ptr = torch.cuda.current_stream().cuda_stream
             _callable()
         torch.cuda.synchronize()
@@ -272,9 +272,8 @@ class Benchmarker:
         try:
             return self.benchmark_gpu(cuda_graph.replay, **kwargs)
         finally:
-            torch._C._cuda_clearCublasWorkspacesForStream(benchmark_stream.cuda_stream)
-            if capture_stream_ptr is not None:
-                torch._C._cuda_clearCublasWorkspacesForStream(capture_stream_ptr)
+            assert capture_stream_ptr is not None
+            torch._C._cuda_clearCublasWorkspacesForStream(capture_stream_ptr)
             del cuda_graph
 
 
