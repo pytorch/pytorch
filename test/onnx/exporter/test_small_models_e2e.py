@@ -594,6 +594,110 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         ):
             self.assertEqual(input.shape[0].value, expected_axis_name)
 
+    def test_export_with_input_names_and_dynamic_shapes_simple(self):
+        """Test that dynamic_shapes keyed by input_names works for simple models."""
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+
+        onnx_program = torch.onnx.export(
+            SimpleModel().eval(),
+            (torch.randn(1, 3, 224, 224),),
+            dynamo=True,
+            verbose=False,
+            input_names=["bgr_image"],
+            output_names=["output"],
+            dynamic_shapes={"bgr_image": {0: "batch"}},
+        )
+        self.assertIsNotNone(onnx_program)
+        # Verify the input was renamed
+        graph_input_names = [i.name for i in onnx_program.model.graph.inputs]
+        self.assertIn("bgr_image", graph_input_names)
+
+    def test_export_with_input_names_and_dynamic_shapes_nested(self):
+        """Test that flat input_names with dynamic_shapes works for nested input models."""
+
+        class NestedModel(torch.nn.Module):
+            def forward(
+                self,
+                x: torch.Tensor,
+                ys: list[torch.Tensor],
+                zs: dict[str, torch.Tensor],
+                c: torch.Tensor,
+            ):
+                y = ys[0] + ys[1] + zs["a"] + zs["b"]
+                return x + y, c
+
+        input = (
+            torch.ones(5),
+            [torch.zeros(5), torch.ones(5)],
+            {"a": torch.zeros(5), "b": torch.ones(5)},
+            torch.ones(6),
+        )
+        input_names = ["input_x", "input_y0", "input_y1", "input_a", "input_b", "input_c"]
+        dynamic_shapes = {
+            "input_x": {0: torch.export.Dim("dim", min=3)},
+            "input_y0": {0: torch.export.Dim("dim", min=3)},
+            "input_y1": {0: torch.export.Dim("dim", min=3)},
+            "input_a": {0: torch.export.Dim("dim", min=3)},
+            "input_b": {0: torch.export.Dim("dim", min=3)},
+            "input_c": {0: torch.export.Dim("dim_c", min=3)},
+        }
+
+        onnx_program = torch.onnx.export(
+            NestedModel().eval(),
+            input,
+            dynamo=True,
+            verbose=False,
+            input_names=input_names,
+            dynamic_shapes=dynamic_shapes,
+        )
+        self.assertIsNotNone(onnx_program)
+        graph_input_names = [i.name for i in onnx_program.model.graph.inputs]
+        for name in input_names:
+            self.assertIn(name, graph_input_names)
+
+    def test_export_with_input_names_and_dynamic_shapes_llm(self):
+        """Test input_names + dynamic_shapes for an LLM-style model (most popular architecture)."""
+
+        class SimpleLLM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = torch.nn.Embedding(100, 32)
+                self.linear = torch.nn.Linear(32, 100)
+
+            def forward(self, input_ids, attention_mask):
+                x = self.embed(input_ids)
+                x = x * attention_mask.unsqueeze(-1)
+                return self.linear(x)
+
+        model = SimpleLLM().eval()
+        batch, seq_len = 2, 10
+        input_ids = torch.randint(0, 100, (batch, seq_len))
+        attention_mask = torch.ones(batch, seq_len)
+
+        batch_dim = torch.export.Dim("batch")
+        seq_dim = torch.export.Dim("seq_len")
+
+        onnx_program = torch.onnx.export(
+            model,
+            (input_ids, attention_mask),
+            dynamo=True,
+            verbose=False,
+            input_names=["tokens", "mask"],
+            output_names=["logits"],
+            dynamic_shapes={
+                "tokens": {0: batch_dim, 1: seq_dim},
+                "mask": {0: batch_dim, 1: seq_dim},
+            },
+        )
+        self.assertIsNotNone(onnx_program)
+        graph_input_names = [i.name for i in onnx_program.model.graph.inputs]
+        self.assertIn("tokens", graph_input_names)
+        self.assertIn("mask", graph_input_names)
+
+
     def test_export_of_static_dim_constraints(self):
         # NOTE: This test is to ensure that the static dim constraints are respected.
         class Model(torch.nn.Module):

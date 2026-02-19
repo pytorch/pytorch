@@ -130,7 +130,7 @@ def export_compat(
     # instead of the original parameter names (e.g., "x").
     if not isinstance(model, torch.export.ExportedProgram):
         dynamic_shapes = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
-            model, dynamic_shapes, input_names
+            model, dynamic_shapes, input_names, args=args, kwargs=kwargs
         )
 
     dynamic_shapes_with_export_dim, need_axis_mapping = (

@@ -802,6 +802,53 @@ class TestDynamicShapes(common_utils.TestCase):
         # "y" (input_name[0]) → param "x", "x" (input_name[1]) → param "y"
         self.assertEqual(result, {"x": {0: "batch"}, "y": {0: "batch"}})
 
+    def test_remap_dynamic_shapes_nested_inputs(self):
+        """Test remapping with nested model inputs (lists, dicts).
+
+        When a model has nested inputs like (x, [y0, y1], {a, b}, c),
+        input_names are flat: ['input_x', 'input_y0', 'input_y1', 'input_a', 'input_b', 'input_c'].
+        dynamic_shapes should be unflattened into the nested tree structure.
+        """
+
+        model = NestedModelForDynamicShapes()
+        args = (
+            torch.ones(5),
+            [torch.zeros(5), torch.ones(5)],
+            {"a": torch.zeros(5), "b": torch.ones(5)},
+            torch.ones(4),
+        )
+        input_names = ["input_x", "input_y0", "input_y1", "input_a", "input_b", "input_c"]
+        dynamic_shapes = {
+            "input_x": {0: "dim"},
+            "input_y0": {0: "dim"},
+            "input_y1": {0: "dim"},
+            "input_a": {0: "dim"},
+            "input_b": {0: "dim"},
+            "input_c": {0: "dim_c"},
+        }
+        result = _dynamic_shapes.remap_dynamic_shapes_from_input_names(
+            model, dynamic_shapes, input_names, args=args
+        )
+        # Result should be a nested dict with original param names as keys
+        self.assertIsInstance(result, dict)
+        self.assertIn("x", result)
+        self.assertIn("ys", result)
+        self.assertIn("zs", result)
+        self.assertIn("c", result)
+        # x is a plain tensor -> {0: "dim"}
+        self.assertEqual(result["x"], {0: "dim"})
+        # ys is a list -> [{0: "dim"}, {0: "dim"}]
+        self.assertIsInstance(result["ys"], list)
+        self.assertEqual(len(result["ys"]), 2)
+        self.assertEqual(result["ys"][0], {0: "dim"})
+        self.assertEqual(result["ys"][1], {0: "dim"})
+        # zs is a dict -> {"a": {0: "dim"}, "b": {0: "dim"}}
+        self.assertIsInstance(result["zs"], dict)
+        self.assertEqual(result["zs"]["a"], {0: "dim"})
+        self.assertEqual(result["zs"]["b"], {0: "dim"})
+        # c is a plain tensor -> {0: "dim_c"}
+        self.assertEqual(result["c"], {0: "dim_c"})
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

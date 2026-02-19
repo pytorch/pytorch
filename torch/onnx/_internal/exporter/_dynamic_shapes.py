@@ -340,25 +340,42 @@ def remap_dynamic_shapes_from_input_names(
     model,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None,
     input_names: Sequence[str] | None,
+    args: tuple[Any, ...] = (),
+    kwargs: dict[str, Any] | None = None,
 ) -> dict[str, Any] | tuple[Any, ...] | list[Any] | None:
     """Remap dynamic_shapes dict keys from input_names to original model parameter names.
 
     When users provide ``input_names`` to rename ONNX inputs and also use
     ``dynamic_shapes`` as a dict keyed by those renamed names, ``torch.export.export``
-    will fail validation because it expects the original model parameter names.
+    will fail validation because it expects the original model parameter names
+    (and for nested inputs, a nested structure matching the input tree).
 
-    This function translates the dict keys back to the original parameter names
-    so that ``torch.export.export`` can accept them.
+    This function handles two cases:
+
+    1. **Simple inputs**: Model has flat parameters (e.g., ``forward(self, x, y)``).
+       The dict keys are remapped from input_names back to parameter names.
+
+    2. **Nested inputs**: Model has nested parameters (e.g.,
+       ``forward(self, x, ys: list, zs: dict, c)``). The ``input_names`` are flat
+       (one per tensor leaf), while ``torch.export`` expects a nested
+       ``dynamic_shapes`` structure. This function detects when ``dynamic_shapes``
+       is flat-keyed-by-input-names and unflattens it into the nested tree
+       structure using the actual ``args``/``kwargs``.
 
     Args:
         model: The model being exported.
-        dynamic_shapes: The dynamic shapes specification. Only dicts are remapped;
-            tuples/lists are positional and need no remapping.
+        dynamic_shapes: The dynamic shapes specification. Only dicts keyed by
+            input_names are remapped; tuples/lists are positional and need no
+            remapping.
         input_names: The user-provided input names for ONNX renaming.
+        args: The model's input arguments, used to recover the input tree structure
+            for nested inputs.
+        kwargs: The model's keyword arguments.
 
     Returns:
-        The dynamic_shapes with keys remapped to original parameter names, or
-        the original dynamic_shapes if no remapping is needed.
+        The dynamic_shapes with keys remapped to original parameter names (or
+        restructured into nested form), or the original dynamic_shapes if no
+        remapping is needed.
     """
     # Only remap when dynamic_shapes is a dict and input_names is provided
     if (
@@ -381,29 +398,72 @@ def remap_dynamic_shapes_from_input_names(
         not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
     ]
 
-    # Build a mapping: input_name -> original_param_name
-    # input_names may be longer than the number of forward parameters (for example,
-    # when additional names are provided that do not correspond to inputs), so only
-    # map up to the number of model parameters. This remapping assumes a 1:1,
-    # ordered correspondence between input_names and the model's forward parameters.
+    original_param_names_set = set(original_param_names)
+    ds_keys_set = set(dynamic_shapes.keys())
+
+    # If dynamic_shapes keys already match original parameter names, no remapping needed
+    if ds_keys_set.issubset(original_param_names_set):
+        return dynamic_shapes
+
+    # Check if each key is either an input_name or an original param name.
+    # This handles partial renames (e.g., {"renamed_x": ..., "y": ...})
+    # where some keys match input_names and others match original param names.
+    input_names_set = set(input_names)
+    all_valid_keys = input_names_set | original_param_names_set
+    if not ds_keys_set.issubset(all_valid_keys):
+        # Keys don't match original param names OR input_names — can't remap
+        return dynamic_shapes
+
+    # Build the ordered list of per-tensor dynamic_shapes, one per input_name.
+    # input_names defines the flat order.
+    flat_shapes_values = [dynamic_shapes.get(name) for name in input_names]
+
+    # Try to reconstruct the input tree from args/kwargs to detect nested inputs.
+    # If args/kwargs are not provided, we cannot detect nesting, so fall back
+    # to the simple key remapping path.
+    inputs_for_tree: list[Any] = []
+    if kwargs is None:
+        kwargs = {}
+    for idx, param_name in enumerate(original_param_names):
+        if idx < len(args):
+            inputs_for_tree.append(args[idx])
+        elif param_name in kwargs:
+            inputs_for_tree.append(kwargs[param_name])
+
+    # Check for nested inputs only when we have actual args to inspect
+    is_nested = False
+    if inputs_for_tree:
+        flat_inputs, tree_structure = _pytree.tree_flatten(inputs_for_tree)
+        num_flat_inputs = len(flat_inputs)
+        # Nested if flattening produces more leaves than parameters
+        is_nested = num_flat_inputs > len(original_param_names)
+
+    if is_nested:
+        # Nested case: the model has nested inputs (lists, dicts, etc.).
+        # Unflatten the flat per-input-name shapes into the nested tree structure.
+        # Only use the shapes for the actual input tensors (not extra output names).
+        shapes_for_inputs = flat_shapes_values[:num_flat_inputs]
+        nested_shapes = _pytree.tree_unflatten(shapes_for_inputs, tree_structure)
+
+        # Convert from list to dict keyed by original parameter names
+        result: dict[str, Any] = {}
+        for idx, param_name in enumerate(original_param_names):
+            if idx < len(nested_shapes):
+                result[param_name] = nested_shapes[idx]
+
+        return result
+
+    # Simple (non-nested) case or no args provided: each param maps to
+    # exactly one input_name. Do a direct key remapping.
+    remapped: dict[str, Any] = {}
+    # Build mapping: input_name -> original_param_name
     input_name_to_param: dict[str, str] = {}
     for i, param_name in enumerate(original_param_names):
         if i < len(input_names):
             input_name_to_param[input_names[i]] = param_name
 
-    # Check if any dynamic_shapes key needs remapping
-    needs_remapping = any(
-        key in input_name_to_param and key not in original_param_names
-        for key in dynamic_shapes
-    )
-    if not needs_remapping:
-        return dynamic_shapes
-
-    # Remap the keys, detecting collisions where multiple entries resolve
-    # to the same parameter name.
-    remapped: dict[str, Any] = {}
     for key, value in dynamic_shapes.items():
-        if key in input_name_to_param and key not in original_param_names:
+        if key in input_name_to_param and key not in original_param_names_set:
             target_key = input_name_to_param[key]
         else:
             target_key = key
