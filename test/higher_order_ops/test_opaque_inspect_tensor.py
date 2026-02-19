@@ -1,6 +1,7 @@
 # Owner(s): ["module: higher order operators"]
 """Tests for make_opaque_inspect_tensor_fn."""
 
+import unittest
 from collections.abc import Callable
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
@@ -18,7 +19,10 @@ from torch._higher_order_ops.opaque_inspect_tensor import make_opaque_inspect_te
 from torch.autograd import Function
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
-from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+if torch.distributed.is_available():
+    from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 def _extract_graph(fx_g, _, graph_cell):
@@ -765,6 +769,7 @@ class TestOpaqueInspectTensorEagerOnly(TestCase):
         self.assertIsNone(result)
 
 
+@unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
 @skipIfTorchDynamo("opaque_inspect_tensor tests manage their own compilation")
 class TestOpaqueInspectTensorDistributed(TestCase):
     """Tests for rank-aware tag printing using the fake distributed backend.
