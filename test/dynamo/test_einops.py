@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import unittest
+import warnings
 
 import torch
 from torch import nn
@@ -222,6 +223,15 @@ print(normalize_gm(graph.print_readable(print_output=False)))
         else:
             self.fail(method)
         self._run_in_subprocess(flag, method, einops_method, snippet)
+
+    def test_no_warning(self):
+        # checks that this doesn't produce any warnings
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return einops.rearrange(x, '... -> (...)')
+
+        x = torch.randn(5)
+        self.assertNotWarn(lambda: fn(x))
 
 
 instantiate_parametrized_tests(
