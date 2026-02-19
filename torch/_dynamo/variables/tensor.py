@@ -1547,6 +1547,11 @@ class TensorVariable(VariableTracker):
         *,
         value: VariableTracker | None = None,
     ) -> VariableTracker | None:
+        from torch._inductor import config as inductor_config
+
+        # Skip decomposition when precision matters - let it fall through to ATen
+        if inductor_config.emulate_precision_casts:
+            return None
         if value is not None and config.enable_dynamo_decompositions:
             result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
                 tx, [tensor1, tensor2], {}
