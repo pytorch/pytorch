@@ -427,8 +427,6 @@ class TestReductions(TestCase):
          allowed_dtypes=[torch.float32, torch.complex64])
     def test_ref_extremal_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with extremal values"""
-        if "xpu" in device and dtype is torch.complex64 and op.name == "mean":
-            self.skipTest("accuracy issue with this test, see https://github.com/intel/torch-xpu-ops/issues/2300")
         t = make_tensor((5,), dtype=dtype, device=device, exclude_zero=True)
         extremals = [0, 1, nan, inf, -inf]
         for extremal in extremals:
