@@ -25,7 +25,7 @@ from torch.utils._traceback import CapturedTraceback
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
 from .immutable_collections import immutable_dict, immutable_list
-from .node import Argument, base_types, Node, Target
+from .node import _LazyStackTrace, Argument, base_types, Node, Target
 from .operator_schemas import check_for_mutable_operation
 
 
@@ -265,12 +265,11 @@ class TracerBase:
         elif self.module_stack:
             node.meta["nn_module_stack"] = copy.copy(self.module_stack)
 
-        if self.record_stack_traces and not node.stack_trace:
-            user_stack_summary = CapturedTraceback.extract().summary()
-            if user_stack_summary:
-                user_stack_summary = self._filter_traceback_frames(user_stack_summary)
-                if user_stack_summary:
-                    node.stack_trace = "".join(user_stack_summary.format()).strip()
+        if self.record_stack_traces and "stack_trace" not in node.meta:
+            node.meta["stack_trace"] = _LazyStackTrace(
+                CapturedTraceback.extract(),
+                self._filter_traceback_frames,
+            )
 
         log.debug("create_node %s", node)
         return node
