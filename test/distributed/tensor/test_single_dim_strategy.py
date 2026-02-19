@@ -1146,8 +1146,14 @@ class TestFindLowestCostSharding(TestCase):
         )
 
     def test_pq_vs_full_expansion_data_driven(self):
-        """Data-driven comparison across mesh shapes, placements for mm."""
-        placement_options = [Shard(0), Shard(1), Replicate()]
+        """Data-driven comparison across mesh shapes, all placement types for mm.
+
+        Enumerates all combos of R, S(0), S(1), P(sum) for each mesh dim on
+        both inputs, across 1D/2D/3D meshes.
+        """
+        from itertools import product
+
+        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
         mesh_configs = [
             ("1d", torch.arange(4)),
             ("2d", torch.arange(4).reshape(2, 2)),
@@ -1158,29 +1164,14 @@ class TestFindLowestCostSharding(TestCase):
             mesh = DeviceMesh("cpu", mesh=mesh_tensor)
             ndim = mesh.ndim
 
-            # Generate placement combos for this mesh dimensionality
-            from itertools import product
-
             all_placements = list(product(placement_options, repeat=ndim))
 
             for left_pl in all_placements:
                 for right_pl in all_placements:
-                    with self.subTest(mesh=mesh_name, left=left_pl, right=right_pl):
+                    with self.subTest(
+                        mesh=mesh_name, left=left_pl, right=right_pl
+                    ):
                         self._compare_pq_vs_full_expansion(mesh, left_pl, right_pl)
-
-    def test_pq_vs_full_expansion_with_partial_inputs(self):
-        """Verify PQ search handles Partial inputs correctly."""
-        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
-
-        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
-        from itertools import product
-
-        all_placements = list(product(placement_options, repeat=mesh.ndim))
-
-        for left_pl in all_placements:
-            for right_pl in all_placements:
-                with self.subTest(left=left_pl, right=right_pl):
-                    self._compare_pq_vs_full_expansion(mesh, left_pl, right_pl)
 
     def test_strided_shard_fallback(self):
         """Verify PQ search returns None for StridedShard inputs."""
