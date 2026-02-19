@@ -1084,7 +1084,22 @@ def _test_worker_info_init_fn(worker_id):
         raise AssertionError("worker_info should have correct dataset copy")
     if hasattr(dataset, "value"):
         raise AssertionError("worker_info should have correct dataset copy")
-    for k in ["id", "num_workers", "seed", "dataset", "rng"]:
+    # test that WorkerInfo attributes are read-only
+    try:
+        worker_info.id = 3999
+    except RuntimeError as e:
+        if str(e) != "Cannot assign attributes to WorkerInfo objects":
+            raise AssertionError(
+                "Expected RuntimeError for WorkerInfo attribute assignment"
+            ) from None
+    try:
+        worker_info.a = 3
+    except RuntimeError as e:
+        if str(e) != "Cannot assign attributes to WorkerInfo objects":
+            raise AssertionError(
+                "Expected RuntimeError for WorkerInfo attribute assignment"
+            ) from None
+    for k in ["id", "num_workers", "seed", "dataset"]:
         if f"{k}=" not in repr(worker_info):
             raise AssertionError(f"Expected {k} in worker_info repr")
     dataset.value = [worker_id, os.getpid()]
