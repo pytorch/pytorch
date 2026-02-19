@@ -302,6 +302,7 @@ def fuse_reindexing(
 
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
+NWC_STRIDE_ORDER = [2, 0, 1]  # For Conv1d channels-last (N, W, C -> NWC)
 
 
 def get_fill_order(
@@ -6562,6 +6563,10 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_channels_last(cls, x: IRNode) -> IRNode:
         return cls.require_stride_order(x, NHWC_STRIDE_ORDER)
+
+    @classmethod
+    def require_channels_last_1d(cls, x: IRNode) -> IRNode:
+        return cls.require_stride_order(x, NWC_STRIDE_ORDER)
 
     @classmethod
     def require_channels_last_3d(cls, x: IRNode) -> IRNode:
