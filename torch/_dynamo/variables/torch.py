@@ -42,7 +42,12 @@ import torch.fx
 import torch.nn
 import torch.utils._pytree as _pytree
 from torch._C import DispatchKeySet
-from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from torch._dynamo.variables.constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    CONSTANT_VARIABLE_TRUE,
+    ConstantVariable,
+)
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
@@ -808,9 +813,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and isinstance(arg, UserDefinedObjectVariable)
                 and hasattr(arg.value, "__torch_function__")
             ):
-                return ConstantVariable.create(True)
+                return CONSTANT_VARIABLE_TRUE
             else:
-                return ConstantVariable.create(False)
+                return CONSTANT_VARIABLE_FALSE
 
         @register(
             torch.is_floating_point,
