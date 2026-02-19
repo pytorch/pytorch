@@ -682,9 +682,9 @@ class NNModuleVariable(VariableTracker):
         def wrap_values(
             items: Iterable[tuple[Any, Any]],
         ) -> "variables.ListIteratorVariable":
-            result = []
+            named_children: list[VariableTracker] = []
             for name, submod in items:
-                result.append(
+                named_children.append(
                     tx.output.register_attr_or_module(
                         submod,
                         key,
@@ -1098,7 +1098,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     self.var_getattr(tx, "_backward_hooks").realize().len()  # type: ignore[attr-defined]
                     or self.var_getattr(tx, "_backward_pre_hooks").realize().len()  # type: ignore[attr-defined]
                     or self.var_getattr(tx, "_forward_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_forward_hooks_with_kwargs")  # type: ignore[attr-defined]
+                    .realize()
+                    .len()
                     or self.var_getattr(tx, "_forward_pre_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_forward_pre_hooks_with_kwargs")  # type: ignore[attr-defined]
+                    .realize()
+                    .len()
                     or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
@@ -1112,7 +1118,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     fn = self.value_type.forward  # type: ignore[attr-defined]
 
         if self.source:
-            source = self.get_source_by_walking_mro(name)
+            source = self.get_source_by_walking_mro(tx, name)
         else:
             source = None
 
@@ -1130,7 +1136,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         )
         with ctx:
             if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
-                fn_vt = VariableTracker.build(tx, fn, source=source)
+                fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
                 # Ideally we would have just used VariableTracker.build(tx, fn,
@@ -1151,11 +1157,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
-                source = self.get_source_by_walking_mro(name)
+                source = self.get_source_by_walking_mro(tx, name)
             else:
                 source = None
 
-            fn_vt = VariableTracker.build(tx, fn, source=source)
+            fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
             return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
@@ -1165,8 +1171,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if isinstance(method, staticmethod):
-                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
-                fn_vt = VariableTracker.build(tx, method.__func__, source=source)
+                source = AttrSource(
+                    self.get_source_by_walking_mro(tx, name), "__func__"
+                )
+                fn_vt = VariableTracker.build(
+                    tx, method.__func__, source=source, realize=True
+                )
                 return fn_vt.call_function(tx, args, kwargs)
 
             if (
@@ -1244,7 +1254,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in (
             "_backward_hooks",
             "_backward_pre_hooks",
+            "_forward_hooks_with_kwargs",
             "_forward_hooks",
+            "_forward_pre_hooks_with_kwargs",
             "_forward_pre_hooks",
         ):
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
@@ -1270,7 +1282,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             self.source
             and name
             in (
+                "_forward_pre_hooks_with_kwargs",
                 "_forward_pre_hooks",
+                "_forward_hooks_with_kwargs",
                 "_forward_hooks",
             )
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
@@ -1311,7 +1325,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         directly look into the underlying datastructures. This saves a lot of
         compilation time.
         """
-        name_vt = variables.ConstantVariable(name)
+        from .builder import SourcelessBuilder
+
+        name_vt = SourcelessBuilder.create(tx, name)
         out = self.getattr_helper(tx, "_parameters", name_vt)
         if out is None:
             out = self.getattr_helper(tx, "_modules", name_vt)

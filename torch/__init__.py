@@ -31,7 +31,11 @@ from typing import (
     TYPE_CHECKING,
     TypeVar as _TypeVar,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
+from typing_extensions import (
+    deprecated as _deprecated,
+    ParamSpec as _ParamSpec,
+    TypeIs as _TypeIs,
+)
 
 
 # As a bunch of torch.packages internally still have this check
@@ -128,6 +132,7 @@ __all__ = [
     "sym_min",
     "sym_not",
     "sym_sum",
+    "thread_safe_generator",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -322,6 +327,11 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
 
 def _preload_cuda_deps(err: OSError | None = None) -> None:
     cuda_libs: list[tuple[str, str]] = [
+        # NOTE: Order matters! We must preload libcublasLt BEFORE libcublas to prevent
+        # libcublas from loading a mismatched system-wide libcublasLt via its RUNPATH.
+        # Without this, if a different CUDA Toolkit version exists in the system PATH,
+        # libcublas may load the wrong libcublasLt, causing symbol errors or runtime failures.
+        ("cublas", "libcublasLt.so.*[0-9]"),
         ("cublas", "libcublas.so.*[0-9]"),
         ("cudnn", "libcudnn.so.*[0-9]"),
         ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
@@ -1744,7 +1754,11 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-# TODO add deprecation annotation
+@_deprecated(
+    "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
+    Use _check(i >= 0) instead.",
+    category=FutureWarning,
+)
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -2131,7 +2145,14 @@ _tensor_classes: set[type["torch.Tensor"]] = set()
 from torch import amp as amp, random as random, serialization as serialization
 from torch._tensor_str import set_printoptions
 from torch.amp import autocast, GradScaler
-from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
+from torch.random import (
+    get_rng_state,
+    initial_seed,
+    manual_seed,
+    seed,
+    set_rng_state,
+    thread_safe_generator,
+)
 from torch.serialization import load, save
 
 
@@ -2618,7 +2639,7 @@ def compile(
           usage, as we will cache the workspace memory required for the invocation so that we
           do not have to reallocate it on subsequent runs.  Reduction of overhead is not guaranteed
           to work; today, we only reduce overhead for CUDA only graphs which do not mutate inputs.
-          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
+          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOGS=perf_hints
           to debug.
 
         - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
@@ -2969,12 +2990,14 @@ def _as_tensor_fullprec(t):
     """
     Like torch.as_tensor, but when given Python data types it will keep
     them in full precision.  Used for calling convention for Dynamo.
+    Python scalars (float, int) are always created on CPU to avoid being
+    affected by DeviceContext.
     """
     ty = type(t)
     if ty is builtins.float:
-        return torch.as_tensor(t, dtype=torch.float64)
+        return torch.as_tensor(t, dtype=torch.float64, device="cpu")
     elif ty is builtins.int:
-        return torch.as_tensor(t, dtype=torch.int64)
+        return torch.as_tensor(t, dtype=torch.int64, device="cpu")
     else:
         return torch.as_tensor(t)
 

@@ -1,0 +1,1151 @@
+{
+  "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, and PR-only labels.",
+  "repo": "pytorch/pytorch",
+  "count": 304,
+  "labels": [
+    {
+      "name": "actionable",
+      "description": "Clear what needs to be done to fix this issue"
+    },
+    {
+      "name": "better-on-discuss-forum",
+      "description": ""
+    },
+    {
+      "name": "dynamo-autograd-function",
+      "description": "Dynamo Autograd function (compile)"
+    },
+    {
+      "name": "dynamo-functorch",
+      "description": "Issues related to dynamo/compile on functorch transforms"
+    },
+    {
+      "name": "enhancement",
+      "description": "Not as big of a feature, but technically not a bug. Should be easy to fix"
+    },
+    {
+      "name": "feature",
+      "description": "A request for a proper, new feature."
+    },
+    {
+      "name": "function request",
+      "description": "A request for a new function or the addition of new arguments/modes to an existing function."
+    },
+    {
+      "name": "fx",
+      "description": ""
+    },
+    {
+      "name": "good first issue",
+      "description": "Good for new open source contributors"
+    },
+    {
+      "name": "has workaround",
+      "description": ""
+    },
+    {
+      "name": "high priority",
+      "description": "Crash, silent correctness, regression, or many users affected. Auto-adds triage review."
+    },
+    {
+      "name": "inference mode",
+      "description": "Everything related to InferenceMode guard"
+    },
+    {
+      "name": "large",
+      "description": "We think that this is a pretty chunky piece of work"
+    },
+    {
+      "name": "llm-amenable",
+      "description": ""
+    },
+    {
+      "name": "low priority",
+      "description": "We're unlikely to get around to doing this in the near future"
+    },
+    {
+      "name": "matrix multiplication",
+      "description": ""
+    },
+    {
+      "name": "module: 64-bit",
+      "description": "Problems related to incorrectly using 32-bit integers when 64-bit is needed (e.g., 8G tensors)"
+    },
+    {
+      "name": "module: __torch_dispatch__",
+      "description": ""
+    },
+    {
+      "name": "module: __torch_function__",
+      "description": ""
+    },
+    {
+      "name": "module: abi",
+      "description": "libtorch C++ ABI related problems"
+    },
+    {
+      "name": "module: accelerator",
+      "description": "Issues related to the shared accelerator API"
+    },
+    {
+      "name": "module: activation checkpointing",
+      "description": "Related to activation checkpointing"
+    },
+    {
+      "name": "module: advanced indexing",
+      "description": "Related to x[i] = y, index functions"
+    },
+    {
+      "name": "module: amp (automated mixed precision)",
+      "description": "autocast"
+    },
+    {
+      "name": "module: android",
+      "description": "Related to Android support"
+    },
+    {
+      "name": "module: aotdispatch",
+      "description": "umbrella label for AOTAutograd issues"
+    },
+    {
+      "name": "module: aotinductor",
+      "description": "aot inductor"
+    },
+    {
+      "name": "module: arm",
+      "description": "Related to ARM architectures builds of PyTorch. Includes Apple M1"
+    },
+    {
+      "name": "module: autograd",
+      "description": "Related to torch.autograd, and the autograd engine in general"
+    },
+    {
+      "name": "module: backend",
+      "description": "non-standard backend support"
+    },
+    {
+      "name": "module: batching",
+      "description": ""
+    },
+    {
+      "name": "module: bc-breaking",
+      "description": "Related to a BC-breaking change"
+    },
+    {
+      "name": "module: benchmark",
+      "description": "related to torch.utils.benchmark e.g. Timer"
+    },
+    {
+      "name": "module: bfloat16",
+      "description": ""
+    },
+    {
+      "name": "module: binaries",
+      "description": "Anything related to official binaries that we release to users"
+    },
+    {
+      "name": "module: bottleneck",
+      "description": "Related to torch.utils.bottleneck"
+    },
+    {
+      "name": "module: build",
+      "description": "Build system issues, compilation errors, including bazel build failures"
+    },
+    {
+      "name": "module: build warnings",
+      "description": "Related to warnings during build process"
+    },
+    {
+      "name": "module: ci",
+      "description": "Related to continuous integration"
+    },
+    {
+      "name": "module: codegen",
+      "description": "Issues related to the codegen for Aten and Autograd"
+    },
+    {
+      "name": "module: collect_env.py",
+      "description": "Related to collect_env.py, which collects system information about users"
+    },
+    {
+      "name": "module: compile ux",
+      "description": "UX issues related to torch.compile"
+    },
+    {
+      "name": "module: compile-time",
+      "description": "Compilation mechanism or time spent in (re)compilation, tracing, startup"
+    },
+    {
+      "name": "module: compiled autograd",
+      "description": "compiled_autograd"
+    },
+    {
+      "name": "module: complex",
+      "description": "Related to complex number support in PyTorch"
+    },
+    {
+      "name": "module: context parallel",
+      "description": "PyTorch Context Parallel"
+    },
+    {
+      "name": "module: convolution",
+      "description": "Problems related to convolutions (THNN, THCUNN, CuDNN)"
+    },
+    {
+      "name": "module: copy on write",
+      "description": "Related to copy on write"
+    },
+    {
+      "name": "module: core aten",
+      "description": "Related to change to the Core ATen opset"
+    },
+    {
+      "name": "module: correctness (silent)",
+      "description": "issue that returns an incorrect result silently"
+    },
+    {
+      "name": "module: cpp",
+      "description": "Related to C++ API"
+    },
+    {
+      "name": "module: cpp-extensions",
+      "description": "Related to torch.utils.cpp_extension"
+    },
+    {
+      "name": "module: cpu",
+      "description": "CPU specific problem (e.g., perf, algorithm)"
+    },
+    {
+      "name": "module: crash",
+      "description": "Problem manifests as a hard crash, as opposed to a RuntimeError"
+    },
+    {
+      "name": "module: cublas",
+      "description": "Problem related to cublas support"
+    },
+    {
+      "name": "module: cuda",
+      "description": "Related to torch.cuda, and CUDA support in general"
+    },
+    {
+      "name": "module: cuda graphs",
+      "description": "Ability to capture and then replay streams of CUDA kernels"
+    },
+    {
+      "name": "module: CUDACachingAllocator",
+      "description": ""
+    },
+    {
+      "name": "module: cudnn",
+      "description": "Related to torch.backends.cudnn, and CuDNN support"
+    },
+    {
+      "name": "module: custom-operators",
+      "description": "custom operators, custom ops, custom-operators, custom-ops"
+    },
+    {
+      "name": "module: data",
+      "description": "torch.utils.data"
+    },
+    {
+      "name": "module: data parallel",
+      "description": ""
+    },
+    {
+      "name": "module: dataloader",
+      "description": "Related to torch.utils.data.DataLoader and Sampler"
+    },
+    {
+      "name": "module: ddp",
+      "description": "Issues/PRs related distributed data parallel training"
+    },
+    {
+      "name": "module: deadlock",
+      "description": "Problems related to deadlocks (hang without exiting)"
+    },
+    {
+      "name": "module: debug-build",
+      "description": "Related to building and testing PyTorch in debug mode"
+    },
+    {
+      "name": "module: decompositions",
+      "description": "Topics related to decomposition (excluding PrimTorch)"
+    },
+    {
+      "name": "module: dependency bug",
+      "description": "Problem is not caused by us, but caused by an upstream library we use"
+    },
+    {
+      "name": "module: deploy",
+      "description": "related to torch deploy torchdeploy"
+    },
+    {
+      "name": "module: deprecation",
+      "description": ""
+    },
+    {
+      "name": "module: derivatives",
+      "description": "Related to derivatives of operators"
+    },
+    {
+      "name": "module: determinism",
+      "description": ""
+    },
+    {
+      "name": "module: DeviceMesh",
+      "description": ""
+    },
+    {
+      "name": "module: devx",
+      "description": "Related to PyTorch contribution experience (HUD, pytorchbot)"
+    },
+    {
+      "name": "module: dispatch",
+      "description": "DispatchStub, Type, void pointer table, c10 dispatch"
+    },
+    {
+      "name": "module: distance functions",
+      "description": ""
+    },
+    {
+      "name": "module: distributed_tool",
+      "description": "tools to help distributed training"
+    },
+    {
+      "name": "module: distributions",
+      "description": "Related to torch.distributions"
+    },
+    {
+      "name": "module: dlpack",
+      "description": ""
+    },
+    {
+      "name": "module: doc infra",
+      "description": "Related to pytorch.org/docs, deployment of, and serving"
+    },
+    {
+      "name": "module: docker",
+      "description": ""
+    },
+    {
+      "name": "module: docs",
+      "description": "Related to our documentation, both in docs/ and docblocks"
+    },
+    {
+      "name": "module: double backwards",
+      "description": "Problem is related to double backwards definition on an operator"
+    },
+    {
+      "name": "module: dtensor",
+      "description": "distributed tensor tag"
+    },
+    {
+      "name": "module: dynamic shapes",
+      "description": "Related to symbolic/dynamic shapes in torch.compile"
+    },
+    {
+      "name": "module: dynamo",
+      "description": "Related to TorchDynamo (torch.compile frontend/tracing)"
+    },
+    {
+      "name": "module: edge cases",
+      "description": "Adversarial inputs unlikely to occur in practice. Add when inputs are at dtype limits (torch.finfo.max/min), extreme tensor shapes, or unusual values that stress numerical limits."
+    },
+    {
+      "name": "module: elastic",
+      "description": "Related to torch.distributed.elastic"
+    },
+    {
+      "name": "module: embedding",
+      "description": ""
+    },
+    {
+      "name": "module: empty tensor",
+      "description": ""
+    },
+    {
+      "name": "module: error checking",
+      "description": "Bugs related to incorrect/lacking error checking"
+    },
+    {
+      "name": "module: expecttest",
+      "description": "Expect test related functionality"
+    },
+    {
+      "name": "module: fakeTensor",
+      "description": ""
+    },
+    {
+      "name": "module: fft",
+      "description": ""
+    },
+    {
+      "name": "module: first class dims",
+      "description": ""
+    },
+    {
+      "name": "module: flex attention",
+      "description": ""
+    },
+    {
+      "name": "module: floatx (formerly float8)",
+      "description": "For torch.float8_e5m2 and torch.float8_e4m3 and other sub 8-bit float types"
+    },
+    {
+      "name": "module: flop counter",
+      "description": "FlopCounterMode mode"
+    },
+    {
+      "name": "module: forward ad",
+      "description": ""
+    },
+    {
+      "name": "module: fsdp",
+      "description": ""
+    },
+    {
+      "name": "module: functional UX",
+      "description": ""
+    },
+    {
+      "name": "module: functionalization",
+      "description": "used for issues that are specific to functionalization (AOTAutograd bugs should start w aotdispatch)"
+    },
+    {
+      "name": "module: functorch",
+      "description": "Pertaining to torch.func or pytorch/functorch"
+    },
+    {
+      "name": "module: fx",
+      "description": ""
+    },
+    {
+      "name": "module: fx.passes",
+      "description": "Optimization passes written in FX (don't forget to select a more specific label)"
+    },
+    {
+      "name": "module: graph breaks",
+      "description": ""
+    },
+    {
+      "name": "module: guards",
+      "description": ""
+    },
+    {
+      "name": "module: half",
+      "description": "Related to float16 half-precision floats"
+    },
+    {
+      "name": "module: helion",
+      "description": ""
+    },
+    {
+      "name": "module: higher order operators",
+      "description": "torch.cond and similar"
+    },
+    {
+      "name": "module: hpu",
+      "description": "Issues related to the hpu device (Habana/Gaudi)"
+    },
+    {
+      "name": "module: hub",
+      "description": ""
+    },
+    {
+      "name": "module: inductor",
+      "description": "Related to TorchInductor (torch.compile codegen backend)"
+    },
+    {
+      "name": "module: infallible views",
+      "description": ""
+    },
+    {
+      "name": "module: infra",
+      "description": "Relates to CI infrastructure"
+    },
+    {
+      "name": "module: initialization",
+      "description": "Related to weight initialization on operators"
+    },
+    {
+      "name": "module: int overflow",
+      "description": ""
+    },
+    {
+      "name": "module: intel",
+      "description": "Specific to x86 architecture"
+    },
+    {
+      "name": "module: internals",
+      "description": "Related to internal abstractions in c10 and ATen"
+    },
+    {
+      "name": "module: interpolation",
+      "description": ""
+    },
+    {
+      "name": "module: ios",
+      "description": "Related to iOS support - build, API, Continuous Integration, document"
+    },
+    {
+      "name": "module: jetson",
+      "description": "Related to the Jetson builds by NVIDIA"
+    },
+    {
+      "name": "module: jiterator",
+      "description": ""
+    },
+    {
+      "name": "module: known issue",
+      "description": ""
+    },
+    {
+      "name": "module: language binding",
+      "description": "support for language bindings, including languages that aren't currently supported"
+    },
+    {
+      "name": "module: lazy",
+      "description": ""
+    },
+    {
+      "name": "module: library",
+      "description": "Related to torch.library (for registering ops from Python)"
+    },
+    {
+      "name": "module: linear algebra",
+      "description": "Issues related to specialized linear algebra operations in PyTorch; includes matrix multiply matmul"
+    },
+    {
+      "name": "module: lint",
+      "description": "Issues related to our Python/C++ lint rules (run by Travis)"
+    },
+    {
+      "name": "module: log classifier",
+      "description": "Issues related to CI log classification improvements"
+    },
+    {
+      "name": "module: logging",
+      "description": "Features which make it easier to tell what PyTorch is doing under the hood"
+    },
+    {
+      "name": "module: loss",
+      "description": "Problem is related to loss function"
+    },
+    {
+      "name": "module: LrScheduler",
+      "description": ""
+    },
+    {
+      "name": "module: lts",
+      "description": "related to Enterprise PyTorch"
+    },
+    {
+      "name": "module: m1",
+      "description": ""
+    },
+    {
+      "name": "module: macos",
+      "description": "Mac OS related issues"
+    },
+    {
+      "name": "module: magma",
+      "description": "related to magma linear algebra cuda support"
+    },
+    {
+      "name": "module: masked operators",
+      "description": "Masked operations"
+    },
+    {
+      "name": "module: memory format",
+      "description": "Memory format/layout related issues/changes (channels_last, nhwc)"
+    },
+    {
+      "name": "module: memory usage",
+      "description": "PyTorch is using more memory than it should, or it is leaking memory"
+    },
+    {
+      "name": "module: meta tensors",
+      "description": ""
+    },
+    {
+      "name": "module: minifier",
+      "description": ""
+    },
+    {
+      "name": "module: mkl",
+      "description": "Related to our MKL support"
+    },
+    {
+      "name": "module: mkldnn",
+      "description": "Related to Intel IDEEP or oneDNN (a.k.a. mkldnn) integration"
+    },
+    {
+      "name": "module: models",
+      "description": ""
+    },
+    {
+      "name": "module: molly-guard",
+      "description": "Features which help prevent users from committing common mistakes"
+    },
+    {
+      "name": "module: mpi",
+      "description": "Problems related to MPI support"
+    },
+    {
+      "name": "module: mps",
+      "description": "Related to Apple Metal Performance Shaders framework"
+    },
+    {
+      "name": "module: mta",
+      "description": "Issues related to multi-tensor apply kernels and foreach functions"
+    },
+    {
+      "name": "module: mtia",
+      "description": "Device MTIA related issues"
+    },
+    {
+      "name": "module: multi-gpu",
+      "description": "Problem is related to running on multiple GPUs"
+    },
+    {
+      "name": "module: multiprocessing",
+      "description": "Related to torch.multiprocessing"
+    },
+    {
+      "name": "module: multithreading",
+      "description": "Related to issues that occur when running on multiple CPU threads"
+    },
+    {
+      "name": "module: named tensor",
+      "description": "Named tensor support"
+    },
+    {
+      "name": "module: NaNs and Infs",
+      "description": "Problems related to NaN and Inf handling in floating point"
+    },
+    {
+      "name": "module: nativert",
+      "description": "Everything related to the ExecuTorch full runtime that lives in libtorch"
+    },
+    {
+      "name": "module: nccl",
+      "description": "Problems related to nccl support"
+    },
+    {
+      "name": "module: nestedtensor",
+      "description": "NestedTensor tag see issue #25032"
+    },
+    {
+      "name": "module: nn",
+      "description": "Related to torch.nn"
+    },
+    {
+      "name": "module: nn.utils.parametrize",
+      "description": ""
+    },
+    {
+      "name": "module: nnpack",
+      "description": "Related to our NNPack integration"
+    },
+    {
+      "name": "module: norms and normalization",
+      "description": ""
+    },
+    {
+      "name": "module: numba",
+      "description": ""
+    },
+    {
+      "name": "module: numerical-reproducibility",
+      "description": ""
+    },
+    {
+      "name": "module: numerical-stability",
+      "description": "Problems related to numerical stability of operations"
+    },
+    {
+      "name": "module: numpy",
+      "description": "Related to numpy support, and also numpy compatibility of our operators"
+    },
+    {
+      "name": "module: nvfuser",
+      "description": ""
+    },
+    {
+      "name": "module: onnx",
+      "description": "Related to torch.onnx"
+    },
+    {
+      "name": "module: op-unification",
+      "description": "Problem would be solved if we unified Caffe2 and PyTorch implementations of an operator"
+    },
+    {
+      "name": "module: opcheck",
+      "description": "Related to opcheck testing for custom operators"
+    },
+    {
+      "name": "module: openblas",
+      "description": ""
+    },
+    {
+      "name": "module: openmp",
+      "description": "Related to OpenMP (omp) support in PyTorch"
+    },
+    {
+      "name": "module: openreg",
+      "description": ""
+    },
+    {
+      "name": "module: optimizer",
+      "description": "Related to torch.optim"
+    },
+    {
+      "name": "module: padding",
+      "description": ""
+    },
+    {
+      "name": "module: pallas",
+      "description": "Pallas backend related issues"
+    },
+    {
+      "name": "module: partial aliasing",
+      "description": "Related to correctly supporting overlapping storages in operations"
+    },
+    {
+      "name": "module: performance",
+      "description": "Issues related to performance, either of kernel code or framework glue"
+    },
+    {
+      "name": "module: pickle",
+      "description": "Problems related to pickling of PyTorch objects"
+    },
+    {
+      "name": "module: pipelining",
+      "description": "Pipeline Parallelism"
+    },
+    {
+      "name": "module: pooling",
+      "description": ""
+    },
+    {
+      "name": "module: porting",
+      "description": "Issues related to porting TH/THNN legacy to ATen native"
+    },
+    {
+      "name": "module: POWER",
+      "description": "Issues specific to the POWER/ppc architecture"
+    },
+    {
+      "name": "module: primTorch",
+      "description": ""
+    },
+    {
+      "name": "module: printing",
+      "description": "Issues related to the printing format of tensors"
+    },
+    {
+      "name": "module: PrivateUse1",
+      "description": "private use"
+    },
+    {
+      "name": "module: protobuf",
+      "description": ""
+    },
+    {
+      "name": "module: ProxyTensor",
+      "description": "make_fx and related"
+    },
+    {
+      "name": "module: pruning",
+      "description": ""
+    },
+    {
+      "name": "module: pt2 accuracy",
+      "description": ""
+    },
+    {
+      "name": "module: pt2 optimizer",
+      "description": "Relating to torch.compile'd optim"
+    },
+    {
+      "name": "module: pt2-dispatcher",
+      "description": "PT2  dispatcher-related issues (e.g., aotdispatch, functionalization, faketensor, custom-op,"
+    },
+    {
+      "name": "module: pybind",
+      "description": "Related to our Python bindings / interactions with other Python libraries"
+    },
+    {
+      "name": "module: python array api",
+      "description": "Issues related to the Python Array API"
+    },
+    {
+      "name": "module: python dispatcher",
+      "description": ""
+    },
+    {
+      "name": "module: python frontend",
+      "description": "For issues relating to PyTorch's Python frontend"
+    },
+    {
+      "name": "module: python version",
+      "description": "Issues related to specific Python versions"
+    },
+    {
+      "name": "module: pytree",
+      "description": ""
+    },
+    {
+      "name": "module: random",
+      "description": "Related to random number generation in PyTorch (rng generator)"
+    },
+    {
+      "name": "module: reductions",
+      "description": ""
+    },
+    {
+      "name": "module: regression",
+      "description": "It used to work, and now it doesn't"
+    },
+    {
+      "name": "module: reinplacing",
+      "description": "inductor reinplacing, re-inplacing, auto-functionalization, auto functionalization, custom op"
+    },
+    {
+      "name": "module: risc-v",
+      "description": "All issues related to RISC-V architecture"
+    },
+    {
+      "name": "module: rnn",
+      "description": "Issues related to RNN support (LSTM, GRU, etc)"
+    },
+    {
+      "name": "module: rocm",
+      "description": "AMD GPU support for Pytorch"
+    },
+    {
+      "name": "module: rpc",
+      "description": "Related to RPC, distributed autograd, RRef, and distributed optimizer"
+    },
+    {
+      "name": "module: safe resize",
+      "description": ""
+    },
+    {
+      "name": "module: sanitizers",
+      "description": ""
+    },
+    {
+      "name": "module: scatter & gather ops",
+      "description": ""
+    },
+    {
+      "name": "module: scientific computing",
+      "description": ""
+    },
+    {
+      "name": "module: scipy compatibility",
+      "description": ""
+    },
+    {
+      "name": "module: sdpa",
+      "description": "All things related to torch.nn.functional.scaled_dot_product_attentiion"
+    },
+    {
+      "name": "module: selective build",
+      "description": ""
+    },
+    {
+      "name": "module: serialization",
+      "description": "Issues related to serialization (e.g., via pickle, or otherwise) of PyTorch objects"
+    },
+    {
+      "name": "module: shape checking",
+      "description": ""
+    },
+    {
+      "name": "module: single threaded",
+      "description": "Related to single-threaded execution"
+    },
+    {
+      "name": "module: sleef",
+      "description": "Problems related to SLEEF support"
+    },
+    {
+      "name": "module: sorting and selection",
+      "description": ""
+    },
+    {
+      "name": "module: sparse",
+      "description": "Related to torch.sparse"
+    },
+    {
+      "name": "module: special",
+      "description": "Functions with no exact solutions, analogous to those in scipy.special"
+    },
+    {
+      "name": "module: static linking",
+      "description": "Related to statically linked libtorch (we dynamically link by default)"
+    },
+    {
+      "name": "module: structured kernels",
+      "description": "Related to new structured kernels functionality"
+    },
+    {
+      "name": "module: symm_mem",
+      "description": "Issues and PRs of Symmetric Memory"
+    },
+    {
+      "name": "module: tbb",
+      "description": ""
+    },
+    {
+      "name": "module: tensor creation",
+      "description": ""
+    },
+    {
+      "name": "module: tensorboard",
+      "description": ""
+    },
+    {
+      "name": "module: tensorflow",
+      "description": ""
+    },
+    {
+      "name": "module: TensorIterator",
+      "description": ""
+    },
+    {
+      "name": "module: tensorpipe",
+      "description": "Related to Tensorpipe RPC Agent"
+    },
+    {
+      "name": "module: testing",
+      "description": "Issues related to the torch.testing module (not tests)"
+    },
+    {
+      "name": "module: tests",
+      "description": "Issues related to tests (not the torch.testing module)"
+    },
+    {
+      "name": "module: tf32",
+      "description": "Related to tf32 data format"
+    },
+    {
+      "name": "module: third_party",
+      "description": ""
+    },
+    {
+      "name": "module: threaded pg",
+      "description": "MultiThreaded ProcessGroup aka ProcessLocalGroup"
+    },
+    {
+      "name": "module: torchbind",
+      "description": ""
+    },
+    {
+      "name": "module: trace",
+      "description": "Related to structured logging under TORCH_TRACE trace_structured"
+    },
+    {
+      "name": "module: trigonometric functions",
+      "description": ""
+    },
+    {
+      "name": "module: type promotion",
+      "description": "Related to semantics of type promotion"
+    },
+    {
+      "name": "module: typing",
+      "description": "Related to mypy type annotations"
+    },
+    {
+      "name": "module: undefined reference",
+      "description": "Build issues that manifest as \"undefined reference\""
+    },
+    {
+      "name": "module: unknown",
+      "description": "We do not know who is responsible for this feature, bug, or test case."
+    },
+    {
+      "name": "module: unsigned int",
+      "description": "Related to the new uint16, uint32, uint64 types"
+    },
+    {
+      "name": "module: user triton",
+      "description": "related to ability to directly torch.compile triton kernels"
+    },
+    {
+      "name": "module: ux",
+      "description": ""
+    },
+    {
+      "name": "module: vectorization",
+      "description": "Related to SIMD vectorization, e.g., Vec256"
+    },
+    {
+      "name": "module: viewing and reshaping",
+      "description": ""
+    },
+    {
+      "name": "module: vision",
+      "description": ""
+    },
+    {
+      "name": "module: vllm",
+      "description": ""
+    },
+    {
+      "name": "module: vmap",
+      "description": ""
+    },
+    {
+      "name": "module: vulkan",
+      "description": ""
+    },
+    {
+      "name": "module: windows",
+      "description": "Windows support for PyTorch"
+    },
+    {
+      "name": "module: wsl",
+      "description": "Related to Windows Subsystem for Linux"
+    },
+    {
+      "name": "module: xla",
+      "description": "Related to XLA support"
+    },
+    {
+      "name": "module: xnnpack",
+      "description": ""
+    },
+    {
+      "name": "module: xpu",
+      "description": "Intel XPU related issues"
+    },
+    {
+      "name": "needs design",
+      "description": "We want to add this feature but we need to figure out how first"
+    },
+    {
+      "name": "needs reproduction",
+      "description": "Ensure you have actionable steps to reproduce the issue. Someone else needs to confirm the repro. Add when issue requires downloading external files (.zip, .pt, .pth, .pkl, .safetensors) or links to external storage (Google Drive, Dropbox) to reproduce."
+    },
+    {
+      "name": "needs research",
+      "description": "We need to decide whether or not this merits inclusion, based on research world"
+    },
+    {
+      "name": "newcomer",
+      "description": ""
+    },
+    {
+      "name": "oncall: cpu inductor",
+      "description": "CPU Inductor issues for Intel team to triage"
+    },
+    {
+      "name": "oncall: distributed",
+      "description": "Add this issue/PR to distributed oncall triage queue"
+    },
+    {
+      "name": "oncall: distributed checkpointing",
+      "description": "Oncall label should be attached to any issues related to distributed checkpointing."
+    },
+    {
+      "name": "oncall: export",
+      "description": "Add this issue/PR to Export oncall triage queue"
+    },
+    {
+      "name": "oncall: jit",
+      "description": "Add this issue/PR to JIT oncall triage queue"
+    },
+    {
+      "name": "oncall: mobile",
+      "description": "Related to mobile support, including iOS and Android"
+    },
+    {
+      "name": "oncall: package/deploy",
+      "description": "Add issue/PR to torch.package TODO board"
+    },
+    {
+      "name": "oncall: profiler",
+      "description": "profiler-related issues (cpu, gpu, kineto)"
+    },
+    {
+      "name": "oncall: pt2",
+      "description": "Add this issue/PR to PT2 (torch.compile/dynamo/inductor) oncall triage queue"
+    },
+    {
+      "name": "oncall: quantization",
+      "description": "Quantization support in PyTorch"
+    },
+    {
+      "name": "oncall: r2p",
+      "description": "Add this issue/PR to R2P (elastic) oncall triage queue"
+    },
+    {
+      "name": "oncall: releng",
+      "description": "In support of CI and Release Engineering"
+    },
+    {
+      "name": "oncall: speech_infra",
+      "description": "Speech Infra oncall"
+    },
+    {
+      "name": "oncall: visualization",
+      "description": "Related to visualization in PyTorch, e.g., tensorboard"
+    },
+    {
+      "name": "op-bench",
+      "description": "PyTorch/Caffe2 Operator Micro-benchmarks"
+    },
+    {
+      "name": "OSS contribution wanted",
+      "description": "PR from open source contributors welcome to solve this issue."
+    },
+    {
+      "name": "pipeline parallelism",
+      "description": "Issues related to https://pytorch.org/docs/master/pipeline.html"
+    },
+    {
+      "name": "proposal accepted",
+      "description": "The core team has reviewed the feature request and agreed it would be a useful addition to PyTorch"
+    },
+    {
+      "name": "release-feature-request",
+      "description": "This tag is to mark Feature Tracked for PyTorch OSS Releases"
+    },
+    {
+      "name": "security",
+      "description": ""
+    },
+    {
+      "name": "skipped",
+      "description": "Denotes a (flaky) test currently skipped in CI."
+    },
+    {
+      "name": "small",
+      "description": "We think this is a small issue to fix. Consider knocking off high priority small issues"
+    },
+    {
+      "name": "tensor subclass",
+      "description": "Related to tensor subclasses"
+    },
+    {
+      "name": "topic: fuzzer",
+      "description": ""
+    },
+    {
+      "name": "triage review",
+      "description": "Needs discussion at weekly triage meeting"
+    },
+    {
+      "name": "triaged",
+      "description": "This issue has been looked at a team member, and triaged and prioritized into an appropriate module"
+    },
+    {
+      "name": "upstream triton",
+      "description": "Upstream Triton Issue"
+    }
+  ]
+}

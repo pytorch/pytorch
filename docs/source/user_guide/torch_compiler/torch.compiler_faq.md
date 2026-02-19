@@ -566,7 +566,7 @@ with a {ref}`minimal reproducer <torch.compiler_troubleshooting>`.
 ### I `torch.compile` some NumPy code and I did not see any speed-up.
 
 The best place to start is the
-[tutorial with general advice for how to debug these sort of torch.compile issues](https://pytorch.org/docs/main/torch.compiler_faq.html#why-am-i-not-seeing-speedups).
+[tutorial with general advice for how to debug these sort of torch.compile issues](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_faq.html#why-am-i-not-seeing-speedups).
 
 Some graph breaks may happen because of the use of unsupported features. See
 {ref}`nonsupported-numpy-feats`. More generally, it is useful to keep in mind

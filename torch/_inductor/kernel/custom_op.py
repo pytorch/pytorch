@@ -260,9 +260,7 @@ def _adapt_user_input_gen_fns(
     user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]],
 ) -> dict[int, Callable[[Any], torch.Tensor]]:
     """Convert user input generators from name-based to index-based format.
-       Inductor autotune's input_gen_fns expects index of arg_names as key.
-
-    Uses V.graph.sizevars.size_hints() to guess best for dynamic shapes.
+    Inductor autotune's input_gen_fns expects index of arg_names as key.
     """
 
     name_to_index = {name: i for i, name in enumerate(arg_names)}
@@ -480,7 +478,6 @@ def autotune_custom_op(
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
         name=name,
-        # pyrefly: ignore [bad-argument-type]
         decompositions=decompositions,
         # pyrefly: ignore [no-matching-overload]
         input_nodes=list(inputs),

@@ -8,6 +8,15 @@
 
 namespace c10d {
 
+// ProcessGroupWrapper wraps a Backend for debugging purposes. It intercepts
+// collective operations to verify consistency across ranks before dispatching
+// to the wrapped backend.
+//
+// IMPORTANT: This wrapper must forward all Backend virtual methods to backend_.
+// When adding new virtual methods to Backend that are overridden by backends
+// like ProcessGroupNCCL, you must also add forwarding methods here. Otherwise,
+// those methods will fail when TORCH_DISTRIBUTED_DEBUG=DETAIL is set.
+// See https://github.com/pytorch/pytorch/issues/173538 for an example.
 class TORCH_API ProcessGroupWrapper : public Backend {
  public:
   explicit ProcessGroupWrapper(
@@ -118,6 +127,17 @@ class TORCH_API ProcessGroupWrapper : public Backend {
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;
+
+  // Forward methods to wrapped backend
+  bool supportsSplitting() const override;
+  bool supportsCoalescing() const override;
+  bool supportsTimeEstimation() const override;
+  c10::intrusive_ptr<Options> getBackendOptions() override;
+  std::shared_ptr<c10::Allocator> getMemAllocator() override;
+  at::Tensor allocateTensor(long size, at::TensorOptions options = {}) override;
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
+  ErrorType getError() override;
+  void eagerConnectSingleDevice(at::Device device) override;
 
   c10::intrusive_ptr<Backend> getWrappedPg() const;
 

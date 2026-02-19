@@ -39,7 +39,7 @@ import types
 import unittest
 import warnings
 import weakref
-from collections.abc import Sized
+from collections.abc import Generator, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -56,9 +56,11 @@ from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
+    _EvalFrameOverride,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
+    set_eval_frame_override,
     set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
@@ -67,6 +69,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -207,7 +210,7 @@ def get_example_inputs(key: str) -> list[Any]:
 
 
 @contextlib.contextmanager
-def _set_in_optimized_module():
+def _set_in_optimized_module() -> Generator[None, None, None]:
     # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
     # Prevents graph-breaking forward hooks from being registered & traced.
     # TODO(pianpwk): subsume this flag with better is_compiling() coverage
@@ -396,6 +399,7 @@ class OptimizedModule(torch.nn.Module):
         "_orig_mod",
         "dynamo_ctx",
         "_torchdynamo_orig_callable",
+        "_torchdynamo_wrapper_id",
         "get_compiler_config",
         "forward",
         "_forward",
@@ -424,7 +428,7 @@ class OptimizedModule(torch.nn.Module):
 
     def __len__(self) -> int:
         # Proxy the len call to the original module
-        # pyrefly: ignore [invalid-argument]
+        # pyrefly: ignore [invalid-argument, unsafe-overlap]
         if isinstance(self._orig_mod, Sized):
             return len(self._orig_mod)
         # Mimic python's default behavior for objects without a length
@@ -486,9 +490,7 @@ class OptimizedModule(torch.nn.Module):
         if not callable(self.dynamo_ctx.callback):
             raise RuntimeError("aot compile requires a callable dynamo callback.")
 
-        backend = innermost_fn(
-            self.dynamo_ctx.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
-        )
+        backend = innermost_backend(self.dynamo_ctx.callback)
         from torch._dynamo.aot_compile import aot_compile_module
 
         self.forward = aot_compile_module(model, inputs, hooks, backend)
@@ -551,14 +553,14 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name: str, val: Any) -> None:
+    def __setattr__(self, name: str, value: Any) -> None:
         # Allow patching over class attributes
         if hasattr(type(self), name):
-            return super().__setattr__(name, val)
+            return super().__setattr__(name, value)
 
         if name in OptimizedModule._opt_mod_attributes:
-            return super().__setattr__(name, val)
-        return setattr(self._orig_mod, name, val)
+            return super().__setattr__(name, value)
+        return setattr(self._orig_mod, name, value)
 
     def __delattr__(self, name: str) -> None:
         # This mirrors `__setattr__`
@@ -614,21 +616,42 @@ def always_false() -> bool:
     return False
 
 
-def innermost_fn(
-    fn: Callable[..., Any], unaltered_fn_attr: str = "_torchdynamo_orig_callable"
-) -> Callable[..., Any]:
+def innermost_fn(fn: Callable[..., Any]) -> Callable[..., Any]:
     """
     In case of nesting of _TorchDynamoContext calls, find the innermost
     function. TorchDynamo caches on fn.__code__ object, so its necessary to find
     the innermost function to pass on the optimize, run, disable etc.
     """
     unaltered_fn = fn
-    while hasattr(unaltered_fn, unaltered_fn_attr):
-        unaltered_fn = getattr(unaltered_fn, unaltered_fn_attr)
+    while (
+        hasattr(unaltered_fn, "_torchdynamo_orig_callable")
+        # Only follow the chain if _torchdynamo_wrapper_id matches id(fn).
+        # This prevents following chains in two cases:
+        # 1. Bound methods: id(bound_method) != id(wrapper_function), so we
+        #    won't unwrap through __func__ and lose the self binding.
+        # 2. functools.wraps copies: When functools.wraps copies
+        #    _torchdynamo_orig_callable from a wrapped function, the copied
+        #    _torchdynamo_wrapper_id won't match the outer wrapper's id.
+        and getattr(unaltered_fn, "_torchdynamo_wrapper_id", None) == id(unaltered_fn)
+    ):
+        unaltered_fn = unaltered_fn._torchdynamo_orig_callable
         assert callable(unaltered_fn), (
             f"A callable function is expected, but {type(unaltered_fn)} is provided."
         )
     return unaltered_fn
+
+
+def innermost_backend(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Unwrap backend wrapper chain via _torchdynamo_orig_backend to find the
+    innermost backend function.
+    """
+    while hasattr(fn, "_torchdynamo_orig_backend"):
+        fn = fn._torchdynamo_orig_backend
+        assert callable(fn), (
+            f"A callable function is expected, but {type(fn)} is provided."
+        )
+    return fn
 
 
 def make_set_enable_dynamic(enable: bool) -> Any:
@@ -643,7 +666,7 @@ def make_set_enable_dynamic(enable: bool) -> Any:
 
 
 @contextlib.contextmanager
-def set_enable_dynamic(enable: bool):
+def set_enable_dynamic(enable: bool) -> Generator[None, None, None]:
     cleanup = make_set_enable_dynamic(enable)()
     try:
         yield
@@ -702,6 +725,12 @@ def guard_collectives_hook(guard_eval_result: bool) -> bool:
 _not_set = object()
 
 
+def _get_eval_frame_override() -> _EvalFrameOverride:
+    if torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code:
+        return _EvalFrameOverride.ERROR
+    return _EvalFrameOverride.SKIP
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -739,7 +768,7 @@ class _TorchDynamoContext:
         patch_fn()
 
         # Save the backends so that we can reset them during torch._dynamo.reset
-        backend = innermost_fn(callback, unaltered_fn_attr="_torchdynamo_orig_backend")  # type: ignore[arg-type]
+        backend = innermost_backend(callback)  # type: ignore[arg-type]
         cached_backends.setdefault(id(backend), backend)  # type: ignore[arg-type]
 
         if dynamic is not None:
@@ -845,9 +874,7 @@ class _TorchDynamoContext:
                 fn,
                 example_inputs,
                 hooks=self._hooks,
-                backend=innermost_fn(
-                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
-                ),
+                backend=innermost_backend(self.callback),
                 dynamic=self._dynamic,
             )
 
@@ -865,6 +892,7 @@ class _TorchDynamoContext:
             # Save the function pointer to find the original callable while nesting
             # of decorators.
             new_mod._torchdynamo_orig_callable = mod.forward
+            new_mod._torchdynamo_wrapper_id = id(new_mod)
 
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
@@ -928,6 +956,11 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
+            prior_eval_frame_override: _EvalFrameOverride | None = None
+            if self.fullgraph:
+                prior_eval_frame_override = set_eval_frame_override(
+                    _get_eval_frame_override()
+                )
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
@@ -938,14 +971,20 @@ class _TorchDynamoContext:
                         return fn(*args, **kwargs)
                 # Skip nested compile during export (but not HOP internal compile)
                 # Only skip if there's an active TracingContext (nested), not for top-level export
-                if torch.compiler.is_exporting():
+                if (
+                    torch.compiler.is_exporting()
+                    and not config.force_compile_during_fx_trace
+                ):
                     from torch._higher_order_ops.utils import _in_hop_compile
 
                     if not _in_hop_compile():
                         if torch._guards.TracingContext.try_get() is not None:
                             return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
-                if is_fx_symbolic_tracing():
+                if (
+                    is_fx_symbolic_tracing()
+                    and not config.force_compile_during_fx_trace
+                ):
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
@@ -1002,6 +1041,8 @@ class _TorchDynamoContext:
                     set_eval_frame(None)
                     if prior_error_on_graph_break is not None:
                         _set_error_on_graph_break(prior_error_on_graph_break)
+                    if prior_eval_frame_override is not None:
+                        set_eval_frame_override(prior_eval_frame_override)
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
@@ -1025,6 +1066,7 @@ class _TorchDynamoContext:
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         compile_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        compile_wrapper._torchdynamo_wrapper_id = id(compile_wrapper)  # type: ignore[attr-defined]
 
         # when compiling user function instead of nn.Module
         # provide public api _fn.get_compiler_config()
@@ -1173,6 +1215,7 @@ class DisableContext(_TorchDynamoContext):
             mod = fn
             new_mod = OptimizedModule(mod, self)
             new_mod._torchdynamo_orig_callable = mod.forward
+            new_mod._torchdynamo_wrapper_id = id(new_mod)
             return new_mod
 
         if isinstance(fn, type):
@@ -1237,6 +1280,7 @@ class DisableContext(_TorchDynamoContext):
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+        _fn._torchdynamo_wrapper_id = id(_fn)  # type: ignore[attr-defined]
 
         _fn._torchdynamo_disable_recursive = True  # type: ignore[attr-defined]
 
@@ -1340,6 +1384,7 @@ def argument_names(
             and p.default is not inspect.Parameter.empty
         }
         # Get annotations for parameters and return value
+        # pyrefly: ignore [implicit-any]
         annotations = {}
         if sig.return_annotation:
             annotations = {"return": sig.return_annotation}
@@ -1707,6 +1752,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
     ) -> Any:
         dynamo_result_flat = args[0]
         lookup = [*dynamo_result_flat, *self.new_args]  # type: ignore[misc]
+        # pyrefly: ignore [implicit-any]
         new_results_flat = []
         for i in range(len(self.flat_results)):
             if self.matched_output_elements_positions[i] is not None:
@@ -1759,6 +1805,7 @@ class ExportResult(NamedTuple):
 
 # NOTE: this function only supports graphs created by Dynamo's OutputGraph module
 def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
+    # pyrefly: ignore [implicit-any]
     input_errors = []
     for node in graph.graph.find_nodes(op="placeholder"):
         # set in OutputGraph._call_user_compiler
@@ -1815,7 +1862,7 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
     ] + list(common_constant_types)
 
     def is_supported_type(val: Any) -> bool:
-        return isinstance(val, tuple(supported_types))
+        return isinstance(val, tuple(supported_types)) or is_opaque_type(type(val))
 
     value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
     # We only check that the outputs are not None. Inputs can be None.

@@ -7,7 +7,11 @@ from typing import Any, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import redirect_to_mode, reenter_make_fx
+from torch._higher_order_ops.utils import (
+    redirect_to_mode,
+    reenter_make_fx,
+    register_fake,
+)
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
@@ -72,6 +76,15 @@ def inductor_compiled_code_impl(func, inputs):
 redirect_to_mode(inductor_compiled_code, DebugMode)
 redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)
 redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
+
+
+@register_fake(inductor_compiled_code)
+def inductor_compiled_code_fake(func, inputs):
+    raise RuntimeError(
+        "Inductor compiled code cannot be run with FakeTensor inputs. "
+        "This can happen when torch.compile is called inside a FakeTensorMode. "
+        "Consider using backend='eager' or backend='aot_eager' instead."
+    )
 
 
 class WrapWithSetGradEnabled(HigherOrderOperator):
@@ -152,7 +165,10 @@ class DynamoBypassingWrapper(HigherOrderOperator):
 
         is_compiling = isinstance(wrapper_fn_or_key, str)
         if is_compiling:
-            assert isinstance(inner_fn, torch.fx.GraphModule)
+            if not isinstance(inner_fn, torch.fx.GraphModule):
+                raise AssertionError(
+                    f"expected inner_fn to be torch.fx.GraphModule, got {type(inner_fn)}"
+                )
             wrapper_fn = inner_fn.meta[wrapper_fn_or_key]
         else:
             wrapper_fn = wrapper_fn_or_key
@@ -350,9 +366,10 @@ def proxy_mode_key(
     import torch.fx.traceback as fx_traceback
     from torch.fx import Interpreter
 
-    assert proxy_mode.pre_dispatch, (
-        "post-dispatch mode should have inlined in the Autograd key"
-    )
+    if not proxy_mode.pre_dispatch:
+        raise AssertionError(
+            "post-dispatch mode should have inlined in the Autograd key"
+        )
     example_out = tag_activation_checkpoint(gmod, *args, **kwargs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
     proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)  # type: ignore[union-attr]

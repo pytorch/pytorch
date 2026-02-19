@@ -156,9 +156,10 @@ class ExperimentConfig:
     max_autotune: bool
 
     def __post_init__(self):
-        assert len(self.shape) == 6, (
-            "Shape must be of length 6"
-        )  # [B, Hq, M, Hkv, N, D]
+        if len(self.shape) != 6:
+            raise AssertionError(
+                f"Shape must be of length 6 [B, Hq, M, Hkv, N, D], got {len(self.shape)}"
+            )
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
@@ -212,7 +213,10 @@ def generate_inputs(
     q_shape = (batch_size, q_sequence_length, q_heads * head_dim)
     kv_shape = (batch_size, kv_sequence_length, kv_heads * head_dim)
 
-    assert q_heads % kv_heads == 0
+    if q_heads % kv_heads != 0:
+        raise AssertionError(
+            f"q_heads ({q_heads}) must be divisible by kv_heads ({kv_heads})"
+        )
 
     make_q = partial(
         torch.rand, q_shape, device=device, dtype=dtype, requires_grad=requires_grad
@@ -411,7 +415,8 @@ def run_single_backend_FA(
     mask_kwargs,
     backend: str,
 ) -> ExperimentResults:
-    assert backend in ["fav3", "fakv"]
+    if backend not in ["fav3", "fakv"]:
+        raise AssertionError(f"backend must be 'fav3' or 'fakv', got {backend}")
     # Generate callable for specific backend.
     if backend in ["fav3"]:
         FA = generate_FA_callable(
@@ -565,7 +570,8 @@ def calculate_speedup(
     if type == "fwd":
         return baseline_results.fwd_time / results.fwd_time
     elif type == "bwd":
-        assert results.bwd_time is not None
+        if results.bwd_time is None:
+            raise AssertionError("results.bwd_time must not be None for bwd speedup")
         return baseline_results.bwd_time / results.bwd_time
     else:
         raise ValueError(f"Invalid type {type}")
@@ -795,7 +801,10 @@ def generate_block_mask(attn_type: str, shape: tuple[int, ...]):
 
     mask_mod_kwargs = {}
 
-    assert attn_type != "document_mask" or not is_decoding
+    if attn_type == "document_mask" and is_decoding:
+        raise AssertionError(
+            "document_mask attention type is not supported in decoding mode"
+        )
     if attn_type == "document_mask":
         random.seed(0)
         lengths = generate_random_lengths(N * B, B)
@@ -997,7 +1006,8 @@ def generate_FD_callable(
 
     B, Hq, M, Hkv, N, D = shape
 
-    assert M == 1
+    if M != 1:
+        raise AssertionError(f"M must be 1 for FD callable, got {M}")
 
     def flash_attn_with_kvcache_renamed(q, k, v, **kwargs):
         return flash_attn_with_kvcache(q, k_cache=k, v_cache=v, **kwargs)
@@ -1139,7 +1149,8 @@ def generate_experiment_configs(
     backends: list[str],
     max_autotune: bool,
 ) -> list[ExperimentConfig]:
-    assert not (calculate_bwd and decoding), "Decoding does not support backward"
+    if calculate_bwd and decoding:
+        raise AssertionError("Decoding does not support backward")
 
     if decoding:
         q_kv_seq_lens = [(1, i) for i in seq_lens]  # only testing query length == 1
@@ -1171,7 +1182,10 @@ def generate_experiment_configs(
             if bsz <= 0:
                 continue
 
-        assert q_heads % kv_heads == 0
+        if q_heads % kv_heads != 0:
+            raise AssertionError(
+                f"q_heads ({q_heads}) must be divisible by kv_heads ({kv_heads})"
+            )
 
         all_configs.append(
             ExperimentConfig(

@@ -14,6 +14,7 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - 'ciflow/binaries/*'
+      - 'ciflow/binaries_libtorch/*'
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
 
@@ -1004,7 +1005,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -2189,7 +2190,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.11"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -3374,7 +3375,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.12"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -4559,7 +4560,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -5744,7 +5745,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.13t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -6929,7 +6930,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -8114,7 +8115,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.14t"
-      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.1 | intel-cmplr-lib-ur==2025.3.1 | intel-cmplr-lic-rt==2025.3.1 | intel-sycl-rt==2025.3.1 | oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.0 | onemkl-sycl-blas==2025.3.0 | onemkl-sycl-dft==2025.3.0 | onemkl-sycl-lapack==2025.3.0 | onemkl-sycl-rng==2025.3.0 | onemkl-sycl-sparse==2025.3.0 | dpcpp-cpp-rt==2025.3.1 | intel-opencl-rt==2025.3.1 | mkl==2025.3.0 | intel-openmp==2025.3.1 | tbb==2022.3.0 | tcmlib==1.4.1 | umf==1.0.2 | intel-pti==0.15.0
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: intel-cmplr-lib-rt==2025.3.2 | intel-cmplr-lib-ur==2025.3.2 | intel-cmplr-lic-rt==2025.3.2 | intel-sycl-rt==2025.3.2 | oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | onemkl-license==2025.3.1 | onemkl-sycl-blas==2025.3.1 | onemkl-sycl-dft==2025.3.1 | onemkl-sycl-lapack==2025.3.1 | onemkl-sycl-rng==2025.3.1 | onemkl-sycl-sparse==2025.3.1 | dpcpp-cpp-rt==2025.3.2 | intel-opencl-rt==2025.3.2 | mkl==2025.3.1 | intel-openmp==2025.3.2 | tbb==2022.3.1 | tcmlib==1.4.1 | umf==1.0.3 | intel-pti==0.16.0
     steps:
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
@@ -8333,6 +8334,241 @@ jobs:
       GPU_ARCH_TYPE: xpu
       DESIRED_PYTHON: "3.14t"
       build_name: wheel-py3_14t-xpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cpu-shared-with-deps-release-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_10-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cpu
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          path: pytorch
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cpu
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cpu-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cpu-shared-with-deps-release-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cpu-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda12_6-shared-with-deps-release-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_10-cuda12_6-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu126
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          path: pytorch
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda12_6
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda12_6-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda12_6-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_6-shared-with-deps-release-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_6-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda12_8-shared-with-deps-release-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_10-cuda12_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu128
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          path: pytorch
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda12_8
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda12_8-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda12_8-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_8-shared-with-deps-release-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_8-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda13_0-shared-with-deps-release-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_10-cuda13_0-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu130
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          path: pytorch
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda13_0
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda13_0-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda13_0-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda13_0-shared-with-deps-release-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda13_0-shared-with-deps-release
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml

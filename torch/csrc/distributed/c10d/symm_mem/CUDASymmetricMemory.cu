@@ -1,3 +1,4 @@
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
@@ -61,8 +62,8 @@ AllocationRef::~AllocationRef() {
 #endif
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
-  C10_HIP_CHECK(hipMemRelease(handle));
+  C10_CUDA_CHECK(hipMemUnmap(reinterpret_cast<hipDeviceptr_t>(ptr), block_size));
+  C10_CUDA_CHECK(hipMemRelease(handle));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -141,7 +142,10 @@ bool CUDASymmetricMemory::has_multicast_support() {
 }
 
 void* CUDASymmetricMemory::get_multicast_ptr() {
-  return pai_->mc_addr_;
+  if (!has_multicast_support()) {
+    return nullptr;
+  }
+  return static_cast<char*>(pai_->mc_addr_) + offset_;
 }
 
 size_t CUDASymmetricMemory::get_offset() {
@@ -392,12 +396,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
   prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
 
   size_t granularity;
-  C10_HIP_CHECK(hipMemGetAllocationGranularity(
+  C10_CUDA_CHECK(hipMemGetAllocationGranularity(
       &granularity, &prop, hipMemAllocationGranularityRecommended));
   block_size = at::round_up(block_size, granularity);
 
   HandleType handle;
-  C10_HIP_CHECK(hipMemCreate(
+  C10_CUDA_CHECK(hipMemCreate(
       reinterpret_cast<hipMemGenericAllocationHandle_t*>(&handle),
       block_size,
       &prop,
@@ -619,7 +623,7 @@ template <bool use_fabric_handle>
 c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     void* ptr,
     c10::intrusive_ptr<Block> block,
-    const GroupInfo& group_info) {
+    const std::string& group_name) {
 #if defined(USE_ROCM)
   using BlockHandleType = int;
 #else
@@ -634,9 +638,10 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     LOG(INFO) << "using fabric handle to import symmetric memory handles.";
   }
 
-  auto store = group_info.store;
-  int rank = group_info.rank;
-  int world_size = group_info.world_size;
+  auto group = resolve_process_group(group_name);
+  auto rank = group->getRank();
+  auto world_size = group->getSize();
+  auto store = group->getStore();
 
   // Currently, IpcChannel is using a file based socket for inter-process
   // communication
@@ -657,7 +662,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
                         : CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
       0));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemExportToShareableHandle(
+  C10_CUDA_CHECK(hipMemExportToShareableHandle(
       &block_handle,
       block->alloc_ref->handle,
       hipMemHandleTypePosixFileDescriptor,
@@ -721,7 +726,7 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
           CU_MEM_HANDLE_TYPE_FABRIC));
     }
 #elif defined(USE_ROCM)
-    C10_HIP_CHECK(hipMemImportFromShareableHandle(
+    C10_CUDA_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
 #if ROCM_VERSION >= 70100
         reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
@@ -779,8 +784,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       mc_addr,
       block->buffer_size,
       block->device_idx,
-      group_info.rank,
-      group_info.world_size);
+      rank,
+      world_size);
 
   return pai;
 }
@@ -822,14 +827,13 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   auto it = block->symm_mems.find(group_name_);
   if (it == block->symm_mems.end()) {
     // Create PeerAllocInfo for this block (this is the costly part)
-    auto group_info = get_group_info(group_name_);
     TORCH_INTERNAL_ASSERT(
         handle_type_ != Expandable_Segments_Handle_Type::UNSPECIFIED)
     bool use_fabric =
         handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE;
     // PeerAllocInfo captures this block's rendezvous info
-    auto pai = use_fabric ? make_peer_alloc_info<true>(ptr, block, group_info)
-                          : make_peer_alloc_info<false>(ptr, block, group_info);
+    auto pai = use_fabric ? make_peer_alloc_info<true>(ptr, block, group_name_)
+                          : make_peer_alloc_info<false>(ptr, block, group_name_);
     // Cache it with the group name
     it = block->symm_mems.emplace(group_name_, pai).first;
   }

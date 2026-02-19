@@ -788,7 +788,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
+`torch.compile documentation <https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler.html>`__
 
 Operator Tags
 ------------------------------------

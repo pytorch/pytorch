@@ -52,7 +52,13 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import keystr, tree_all, tree_map, tree_map_with_path
+from torch.utils._pytree import (
+    keystr,
+    tree_all,
+    tree_map,
+    tree_map_only,
+    tree_map_with_path,
+)
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
@@ -82,6 +88,8 @@ _RECORD_TRITON_OUTPUTS = False
 _TRITON_OUTPUT_HASH_FN = None
 # Annotates kernel input hashes, and stores them in call.pre_hashes
 _TRITON_INPUT_HASH_FN = None
+# Counter for active DebugMode instances (fast path for get_active_debug_mode)
+_ACTIVE_DEBUG_MODE_COUNT = 0
 
 
 def _stringify_shape(shape) -> str:
@@ -406,8 +414,6 @@ class _OpCall(_DebugCall):
 
 
 class _RedistributeCall(_DebugCall):
-    """Redistribute call from DTensor dispatch"""
-
     def __init__(
         self,
         arg,
@@ -416,12 +422,15 @@ class _RedistributeCall(_DebugCall):
         transform_info_str,
         call_depth,
         stack=False,
+        is_explicit=False,
     ) -> None:
         super().__init__(call_depth, stack=stack)
         self.arg = arg
         self.src_placement = src_placement
         self.dst_placement = dst_placement
         self.transform_info_str = transform_info_str
+        self.is_explicit = is_explicit
+        self.is_outer_call = isinstance(arg, int)
 
         self.arg_str: str | None = None
 
@@ -444,7 +453,17 @@ class _RedistributeCall(_DebugCall):
             dst_placement_str = _arg_to_str(self.dst_placement, attributes)
             placement_str = f"{src_placement_str} -> {dst_placement_str}"
 
-        base_str = f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
+        # DebugMode will add redistribute_input logs at 2 levels,
+        # once per redistribute decision, and once per redistributed input.
+        # We only annotate [implicit/explicit] logs on the former (outer-level call).
+        if self.is_outer_call:
+            annotation = " [implicit] "
+        elif self.is_explicit:
+            annotation = " [explicit] "
+        else:
+            annotation = ""
+
+        base_str = f"{REDISTRIBUTE_FUNC}{annotation}({arg_str}, {placement_str})"
         if self.output_str:
             base_str += self.output_str
         return base_str
@@ -463,6 +482,22 @@ class _RedistributeCall(_DebugCall):
             yield [arg, self.src_placement, self.dst_placement]
         yield {}
         yield self.call_depth
+
+
+class _OutputPlacementCall(_DebugCall):
+    """Records output placement for a DTensor op."""
+
+    def __init__(self, placements_str: str, call_depth: int) -> None:
+        super().__init__(call_depth)
+        self.placements_str = placements_str
+
+    def stringify_args(
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
+    ) -> None:
+        pass  # Already stringified
+
+    def render(self, attributes: list[str]) -> str:
+        return f"-> output: {self.placements_str}"
 
 
 class _TritonKernelCall(_DebugCall):
@@ -956,8 +991,8 @@ class DebugMode(TorchDispatchMode):
         return result
 
     def __enter__(self):
-        self.reset()
-
+        global _ACTIVE_DEBUG_MODE_COUNT
+        _ACTIVE_DEBUG_MODE_COUNT += 1
         if self.record_torchfunction:
             torch._C._push_on_torch_function_stack(self)
 
@@ -974,6 +1009,8 @@ class DebugMode(TorchDispatchMode):
 
     # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
+        global _ACTIVE_DEBUG_MODE_COUNT
+        _ACTIVE_DEBUG_MODE_COUNT -= 1
         super().__exit__(*args)
         if self.record_nn_module:
             self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
@@ -1070,6 +1107,7 @@ class DebugMode(TorchDispatchMode):
         src_placement,
         dst_placement,
         transform_info_str: str | None = None,
+        is_explicit: bool = False,
     ):
         try:
             self._record_call(
@@ -1080,12 +1118,25 @@ class DebugMode(TorchDispatchMode):
                     transform_info_str=transform_info_str,
                     call_depth=self.call_depth + 1,
                     stack=self.record_stack_trace,
+                    is_explicit=is_explicit,
                 )
             )
             self.call_depth += 1
             yield
         finally:
             self.call_depth -= 1
+
+    def record_output_placements(self, output_spec) -> None:
+        """Record output placements for a DTensor op as a separate line."""
+        if not self.record_output:
+            return
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+        placements_str = str(
+            tree_map_only(DTensorSpec, _stringify_dtensor_spec, output_spec)
+        )
+        call = _OutputPlacementCall(placements_str, self.call_depth + 1)
+        self._record_call(call)
 
     def record_triton_kernel(
         self, kernel_name: str, kwargs: dict[str, Any]
@@ -1534,6 +1585,9 @@ class DebugMode(TorchDispatchMode):
 
 
 def get_active_debug_mode() -> DebugMode | None:
+    # Fast path: if no DebugMode is active, skip the stack walk
+    if _ACTIVE_DEBUG_MODE_COUNT == 0:
+        return None
     debug_mode = None
     for mode in _get_current_dispatch_mode_stack():
         if isinstance(mode, DebugMode):

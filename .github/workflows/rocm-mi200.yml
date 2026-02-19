@@ -8,8 +8,7 @@ on:
       - ciflow/rocm-mi200/*
   workflow_dispatch:
   schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
-    - cron: 0 */3 * * *
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
 
 
 concurrency:

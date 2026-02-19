@@ -247,7 +247,6 @@ class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     def test_post_acc_grad_hook_runs(self):
         param_name_to_hook_count = collections.defaultdict(int)
 

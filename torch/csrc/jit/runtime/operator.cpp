@@ -124,14 +124,6 @@ struct OperatorRegistry {
     if (it == operators_by_sig_literal.end()) {
       auto op_ptr_it =
           operators_by_sig.find(canonicalSchemaString(parseSchema(name)));
-      // Handy debugging code that dumps all operators we know about on mismatch
-#if 0
-      if (op_ptr_it == operators_by_sig.end()) {
-        for (auto & entry : operators_by_sig) {
-          std::cout << entry.first << std::endl;
-        }
-      }
-#endif
       TORCH_CHECK(
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",

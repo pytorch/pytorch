@@ -87,7 +87,7 @@ class TestCuteDSLTemplate(TestCase):
         self.assertIsInstance(imports, str)
 
         lines = imports.strip().split("\n")
-        self.assertEqual(len(lines), 7)
+        self.assertEqual(len(lines), 8)
 
     def test_render_includes_imports(self):
         template_source = """@cute.kernel

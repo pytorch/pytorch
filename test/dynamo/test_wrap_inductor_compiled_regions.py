@@ -1064,6 +1064,21 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
+    def test_fake_tensor_mode_raises_error(self):
+        """Test that running compiled code inside FakeTensorMode raises a clear error"""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            model = torch.nn.Linear(4, 4)
+            inp = torch.rand(4, 4)
+
+            with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Inductor compiled code cannot be run with FakeTensor inputs",
+                ):
+                    torch.compile(model)(inp)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

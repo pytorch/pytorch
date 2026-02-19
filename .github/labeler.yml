@@ -124,7 +124,14 @@
 - torchgen/aoti/**
 - torchgen/gen_aoti_c_shim.py
 
+"release notes: distributed (dtensor)":
+- torch/distributed/_tensor/**
+- torch/distributed/tensor/**
+
 "ciflow/vllm":
+- .github/ci_commit_pins/vllm.txt
+
+"ci-refresh-hf-cache":
 - .github/ci_commit_pins/vllm.txt
 
 "ciflow/inductor-pallas":

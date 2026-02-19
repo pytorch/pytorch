@@ -3,6 +3,7 @@
 import sys
 from collections.abc import Callable
 from typing import Optional, Union
+from typing_extensions import TypeAliasType
 
 import torch
 from torch import Tensor
@@ -21,15 +22,9 @@ from .stubs import *  # noqa: F403
 
 
 # ensure __module__ is set correctly for public APIs
-if sys.version_info < (3, 12):
-    ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
-    ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
-else:
-    from typing import TypeAliasType
-
-    ObserverOrFakeQuantize = TypeAliasType(
-        "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
-    )
+ObserverOrFakeQuantize = TypeAliasType(
+    "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
+)
 
 
 __all__ = [
@@ -40,6 +35,7 @@ __all__ = [
     "FixedQParamsObserver",
     "FusedMovingAvgObsFakeQuantize",
     "HistogramObserver",
+    # pyrefly: ignore [bad-dunder-all]
     "MatchAllNode",
     "MinMaxObserver",
     "MovingAverageMinMaxObserver",
@@ -47,6 +43,7 @@ __all__ = [
     "NoopObserver",
     "ObserverBase",
     "ObserverOrFakeQuantize",
+    # pyrefly: ignore [bad-dunder-all]
     "Pattern",
     "PerChannelMinMaxObserver",
     "PlaceholderObserver",
@@ -106,6 +103,7 @@ __all__ = [
     "fuse_modules_qat",
     "fused_per_channel_wt_fake_quant_range_neg_127_to_127",
     "fused_wt_fake_quant_range_neg_127_to_127",
+    # pyrefly: ignore [bad-dunder-all]
     "get_combined_dict",
     "get_default_compare_output_module_list",
     "get_default_custom_config_dict",
