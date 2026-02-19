@@ -72,7 +72,7 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues,
                           bool upper,
                           bool compute_eigenvectors);
 
-#if defined(CUSOLVER_VERSION)
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
 void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues,
                                const Tensor& eigenvectors,
                                const Tensor& input,
