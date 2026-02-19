@@ -2752,7 +2752,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             return torch.pow(base, exp)
 
         base = torch.tensor([0.9, 0.999, 0.5, 0.8], device="cuda", dtype=torch.float64)
-        exp = torch.tensor([50.0, 100.0, 10.0, 20.0], device="cuda", dtype=torch.float64)
+        exp = torch.tensor(
+            [50.0, 100.0, 10.0, 20.0], device="cuda", dtype=torch.float64
+        )
 
         eager_result = fn(base, exp)
         compiled_result = torch.compile(fn)(base, exp)
