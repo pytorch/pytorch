@@ -500,6 +500,8 @@ class SideEffects:
             variable_cls = FrozenDataClassVariable
         elif issubclass(user_cls, BaseException):
             variable_cls = variables.UserDefinedExceptionObjectVariable
+        elif variables.InspectVariable.is_matching_class(user_cls):
+            variable_cls = variables.InspectVariable
         assert issubclass(variable_cls, variables.UserDefinedObjectVariable)
         return variable_cls
 

@@ -35,7 +35,7 @@ functionalize_rng_ops = False
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", "1") != "0"
 
-# Enables optional asserts in hotpath code to check for errors.  If
+# Enables optional asserts in hotpath code to check for errors. If
 # you are seeing weird accuracy problems, try turning this on.
 # This is currently off by default as it will harm tracing time,
 # but it is on by default for aot_eager.
@@ -77,7 +77,7 @@ bundled_autograd_cache: bool = False
 bypass_autograd_cache_key: bool = False
 
 # Whether or not to normalize placeholder names in graphs
-# from dynaom in AOTAutogradCache
+# from dynamo in AOTAutogradCache
 autograd_cache_normalize_inputs = not is_fbcode()
 
 # Enable debug mode at first invocation to check if custom ops are valid.
@@ -141,7 +141,7 @@ view_replay_for_aliased_outputs = not is_fbcode()
 max_dist_from_bw = 1000
 
 
-# Bans recomputation of nodes that are reading from nodes that is far before
+# Bans recomputation of nodes that are reading from nodes that are far before
 # the current node
 ban_recompute_used_far_apart = True
 # Breaks up long chain of fusible ops, as otherwise we can have an arbitrarily
@@ -196,7 +196,7 @@ activation_memory_budget = 1.0
 activation_memory_budget_runtime_estimator = "flops"
 
 # This controls the solver used for the 0-1 knapsack. By default we use a
-# quantized DP solution ("dp"). The other approaches are a "greedy", a "ilp"
+# quantized DP solution ("dp"). The other approaches are a "greedy", an "ilp"
 # (which has a scipy dependency) and "dp_knapsack_sliding_hirschberg", which
 # used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
@@ -292,7 +292,7 @@ fake_tensor_crossref = False
 fake_tensor_propagate_real_tensors = False
 
 # AOTDispatcher traces out a backward graph at the time of the forward pass.
-# This flags controls whether or not that backward graph gets autocast behavior
+# This flag controls whether or not that backward graph gets autocast behavior
 # applied to it.
 #
 # The options are either:
@@ -325,7 +325,7 @@ fake_tensor_propagate_real_tensors = False
 #       z.backward()
 backward_pass_autocast = "same_as_forward"
 
-# This controls whether we collect donated buffer. This flag must be set
+# This controls whether we collect donated buffers. This flag must be set
 # False if a user wants to retain_graph=True for backward.
 donated_buffer = not is_fbcode()
 
@@ -349,7 +349,7 @@ generate_fake_kernels_from_real_mismatches = False
 # CPU, or "cuda" to prefer CUDA devices over CPU.
 fake_tensor_prefer_device_type: Optional[str] = None
 
-# CUDAGraph save run_with_rng functionalization.
+# CUDAGraph safe run_with_rng functionalization.
 # TODO: turn on by default
 graphsafe_rng_functionalization = True
 
@@ -369,7 +369,7 @@ strict_autograd_cache = False
 # Note [Recomputing collectives in the partitioner]
 # The purpose of this config is as follows:
 # - We have many passes in the compiler (min-cut partitioning, DCE, etc)
-#   which can reorder or ,delete duplicate nodes in the graph
+#   which can reorder or delete duplicate nodes in the graph
 # - If any of these passes reorder/delete/duplicate a collective
 #   in a setting where the compiler is being run independently on multiple
 #   ranks, we run the risk that the compiler will make a different decision on
@@ -402,7 +402,7 @@ disable_guess_zero_tangent_for_mutated_input_subclass = False
 guess_tangent_strides_as_outputs = False
 
 # This is a temporary config to ensure all ranks take the same decision in the partitioner
-# it will untimately be removed once we share size_hints across ranks through compiler collectives
+# it will ultimately be removed once we share size_hints across ranks through compiler collectives
 _sync_decision_cross_ranks = False
 
 # By default apply inlined saved_tensors_hooks only for "donated" buffers.
