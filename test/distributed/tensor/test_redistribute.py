@@ -445,10 +445,15 @@ class RedistributeTest(DTensorTestBase):
                 replica_tensor, device_mesh, [partial_spec]
             )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
-        # test it successfully zero out the contents on other ranks
-        self.assertEqual(
-            replica_tensor.to_local() / self.world_size, partial_tensor.to_local()
-        )
+        # rank 0 keeps full value, others get zeros
+        if not self.is_local_tensor_enabled:
+            if self.rank == 0:
+                self.assertEqual(replica_tensor.to_local(), partial_tensor.to_local())
+            else:
+                self.assertEqual(
+                    torch.zeros_like(replica_tensor.to_local()),
+                    partial_tensor.to_local(),
+                )
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
         # replicate to partial on sub groups
@@ -467,11 +472,37 @@ class RedistributeTest(DTensorTestBase):
             )
         self.assertEqual(partial_tensor.size(), local_tensor.size())
 
-        self.assertEqual(
-            replica_tensor.to_local() / self.world_size,
-            partial_tensor.to_local(),
-        )
+        # rank (0,0) on 2D mesh keeps full value, others get zeros
+        if not self.is_local_tensor_enabled:
+            coord = device_mesh.get_coordinate()
+            if coord[0] == 0 and coord[1] == 0:
+                self.assertEqual(
+                    replica_tensor.to_local(),
+                    partial_tensor.to_local(),
+                )
+            else:
+                self.assertEqual(
+                    torch.zeros_like(replica_tensor.to_local()),
+                    partial_tensor.to_local(),
+                )
         self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    @parametrize("compile_on_one_rank", [False, True])
+    def test_replicate_to_partial_roundtrip_exact(self, compile_on_one_rank):
+        with torch.distributed.config.patch(compile_on_one_rank=compile_on_one_rank):
+            device_mesh = self.build_device_mesh()
+            local_tensor = torch.randn(12, 3, device=self.device_type)
+
+            # Compile the full round-trip: distribute as Partial (which calls
+            # the custom op via _partition_value) then reduce back to Replicate.
+            @torch.compile
+            def roundtrip(tensor, mesh):
+                partial_dt = distribute_tensor(tensor, mesh, [Partial()])
+                return partial_dt.redistribute(mesh, [Replicate()])
+
+            result = roundtrip(local_tensor.to(self.device_type), device_mesh)
+            self.assertEqual(result.to_local(), local_tensor.to(self.device_type))
 
     @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
@@ -867,12 +898,18 @@ class RedistributeTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
             # Verify the local tensor content is correct based on the reduce_op
-            if reduce_op == "sum":
-                # For sum, the local tensor should be divided by world_size
-                self.assertEqual(
-                    replica_tensor.to_local() / self.world_size,
-                    partial_tensor.to_local(),
-                )
+            if reduce_op == "sum" and not self.is_local_tensor_enabled:
+                # For sum, rank 0 keeps full value, others get zeros
+                if self.rank == 0:
+                    self.assertEqual(
+                        replica_tensor.to_local(),
+                        partial_tensor.to_local(),
+                    )
+                else:
+                    self.assertEqual(
+                        torch.zeros_like(replica_tensor.to_local()),
+                        partial_tensor.to_local(),
+                    )
             elif reduce_op in ("avg", "min", "max"):
                 # For avg/min/max, the R->P transition is a no-op (identity)
                 self.assertEqual(
