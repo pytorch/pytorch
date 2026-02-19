@@ -616,7 +616,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
                 return batch * 5
 
         compiled_func = torch.compile(func)
-        compiled_func(torch.ones((100,), device=device), self.process_group, self.rank)
+        compiled_func(torch.ones((100,), device=device), self.pg, self.rank)
         dist.barrier()
 
 

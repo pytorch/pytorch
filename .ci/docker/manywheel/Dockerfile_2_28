@@ -154,7 +154,7 @@ RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 # replace the libdrm in /opt/amdgpu with custom amdgpu.ids lookup path
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
-RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
+RUN bash ./install_rocm_drm.sh /opt/amdgpu && rm install_rocm_drm.sh
 # ROCm 6.4 rocm-smi depends on system drm.h header
 RUN yum install -y libdrm-devel
 ENV MKLROOT /opt/intel
