@@ -1,4 +1,4 @@
-g1234# Copyright (c) Meta Platforms, Inc. and affiliates
+# Copyright (c) Meta Platforms, Inc. and affiliates
 """
 Strategy validation for DTensor sharding rules.
 
