@@ -531,6 +531,22 @@ class PyCodegen:
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
 
+    def pop_null(self) -> list[Instruction]:
+        # POP_TOP doesn't work for null, so we pop nulls by pushing in a
+        # nop function, calling it (which consumes the null), and popping the result.
+        assert sys.version_info >= (3, 11)
+        return [
+            self.create_load_const_unchecked(lambda: None),
+            # 3.13 swapped NULL and callable
+            *(
+                (create_instruction("SWAP", arg=2),)
+                if sys.version_info >= (3, 13)
+                else ()
+            ),
+            *create_call_function(0, False),
+            create_instruction("POP_TOP"),
+        ]
+
     def pop_top(self) -> None:
         self.append_output(create_instruction("POP_TOP"))
 

@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_exceptions.py b/test/dynamo/cpython/3_13/test_exceptions.py
-index c91f6662948..3a62dec411c 100644
+index c91f6662948..b04b92656c1 100644
 --- a/test/dynamo/cpython/3_13/test_exceptions.py
 +++ b/test/dynamo/cpython/3_13/test_exceptions.py
 @@ -1,3 +1,59 @@
@@ -286,6 +286,31 @@ index c91f6662948..3a62dec411c 100644
  
          with captured_stderr() as stderr:
              try:
+@@ -1517,18 +1585,18 @@ class ExceptionTests(unittest.TestCase):
+                 recurse_in_body_and_except()
+ 
+         recursionlimit = sys.getrecursionlimit()
+-        try:
+-            set_relative_recursion_limit(10)
+-            for func in (recurse_in_except, recurse_after_except, recurse_in_body_and_except):
+-                with self.subTest(func=func):
++        for func in (recurse_in_except, recurse_after_except, recurse_in_body_and_except):
++            with self.subTest(func=func):
++                try:
++                    set_relative_recursion_limit(10)
+                     try:
+                         func()
+                     except RecursionError:
+                         pass
+                     else:
+                         self.fail("Should have raised a RecursionError")
+-        finally:
+-            sys.setrecursionlimit(recursionlimit)
++                finally:
++                    sys.setrecursionlimit(recursionlimit)
+ 
+ 
+     @cpython_only
 @@ -1602,8 +1670,9 @@ class ExceptionTests(unittest.TestCase):
          self.assertTrue(issubclass(error3, error2))
  
