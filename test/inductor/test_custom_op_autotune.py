@@ -887,59 +887,16 @@ class TestCustomOpAutoTune(TestCase):
         torch.testing.assert_close(result, test_mat1 @ test_mat2, rtol=1e-1, atol=1e-1)
 
     @skipIfXpu
-    def test_aten_mm_autotuning_integration(self):
-        """Test that registered aten.mm autotuning is invoked."""
-        from torch._inductor.kernel.custom_op import (
-            clear_aten_autotuning_registry,
-            get_registered_aten_autotuning,
-        )
-
-        clear_aten_autotuning_registry()
-        self.assertIsNone(get_registered_aten_autotuning(torch.ops.aten.mm.default))
-
-        def batch1_decompose(mat1, mat2):
-            return (mat1.unsqueeze(2) * mat2.unsqueeze(0)).sum(dim=1)
-
-        register_custom_op_autotuning(
-            torch.ops.aten.mm.default,
-            configs=[CustomOpConfig(batch1_decompose)],
-            name="test_mm_autotuned",
-            default_impl=torch.mm,
-            input_gen_fns={
-                "mat1": lambda t: torch.randn_like(t, device=self.device) * 0.1,
-                "mat2": lambda t: torch.randn_like(t, device=self.device) * 0.1,
-            },
-        )
-
-        self.assertIsNotNone(get_registered_aten_autotuning(torch.ops.aten.mm.default))
-
-        test_a = torch.randn(4, 64, device=self.device, dtype=self.dtype)
-        test_b = torch.randn(64, 32, device=self.device, dtype=self.dtype)
-
-        @torch.compile
-        def test_model(a, b):
-            return torch.mm(a, b)
-
-        torch._dynamo.reset()
-        with config.patch(max_autotune=True, fx_graph_cache=False):
-            result = test_model(test_a, test_b)
-
-        torch.testing.assert_close(result, torch.mm(test_a, test_b), rtol=1e-1, atol=1e-1)
-        clear_aten_autotuning_registry()
-
-    @skipIfXpu
     def test_aten_mm_multi_decomp_range_dispatch(self):
         """Test aten.mm with multiple decompositions and range-based dispatch.
 
         Registers batch1_decompose, split_k variants, and lets autotuning pick
         the best for each size range.
         """
-        from torch._inductor.kernel.custom_op import (
-            clear_aten_autotuning_registry,
-            get_registered_aten_autotuning,
-        )
+        from torch._inductor.lowering import user_lowerings
 
-        clear_aten_autotuning_registry()
+        # Clear any previous registration
+        user_lowerings.pop(torch.ops.aten.mm.default, None)
 
         def batch1_decompose(mat1, mat2):
             """Decompose mm to unsqueeze+mul+sum - good for m=1."""
@@ -994,7 +951,6 @@ class TestCustomOpAutoTune(TestCase):
                 CustomOpConfig(split_k_16, config_patches=config_patches),
             ],
             name="test_mm_multi_decomp",
-            default_impl=torch.mm,
             dispatch_on={"tensor_name": "mat1", "dim": 0},
             split_points=[4, 32],  # Ranges: [1,4], [5,32], [33,inf] - batch1 wins small, split_k_16 wins mid
             benchmark_with_cudagraphs=True,
@@ -1004,7 +960,7 @@ class TestCustomOpAutoTune(TestCase):
             },
         )
 
-        self.assertIsNotNone(get_registered_aten_autotuning(torch.ops.aten.mm.default))
+        self.assertIn(torch.ops.aten.mm.default, user_lowerings)
 
         # Use router_256 shape: K=6144, N=256, fp32
         # This shape shows batch1 winning at B=1-4 and split_k_16 winning at B=8-16
@@ -1032,7 +988,54 @@ class TestCustomOpAutoTune(TestCase):
                 expected = torch.mm(test_a_sized, test_b)
                 torch.testing.assert_close(result, expected, rtol=1e-1, atol=1e-1)
 
-        clear_aten_autotuning_registry()
+        user_lowerings.pop(torch.ops.aten.mm.default, None)
+
+    @skipIfXpu
+    def test_empty_config_generator_falls_back_to_triton(self):
+        """Test that empty config_generator falls back to normal mm autotuning.
+
+        When config_generator returns empty list, the user_lowering returns None
+        and graph.py falls back to the normal lowering (triton mm autotuning).
+        """
+        from torch._inductor.lowering import user_lowerings
+
+        user_lowerings.pop(torch.ops.aten.mm.default, None)
+
+        # Config generator that returns empty - should trigger fallback
+        def empty_config_gen(fake_tensors):
+            return []
+
+        register_custom_op_autotuning(
+            torch.ops.aten.mm.default,
+            config_generator=empty_config_gen,
+            name="test_empty_fallback",
+        )
+
+        self.assertIn(torch.ops.aten.mm.default, user_lowerings)
+
+        # Use shapes that will trigger triton autotuning
+        test_a = torch.randn(64, 128, device=self.device, dtype=self.dtype)
+        test_b = torch.randn(128, 64, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(a, b):
+            return torch.mm(a, b)
+
+        torch._dynamo.reset()
+        # Enable max_autotune with TRITON backend
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+            fx_graph_cache=False,
+        ):
+            result = test_model(test_a, test_b)
+
+        # Verify correctness
+        torch.testing.assert_close(
+            result, torch.mm(test_a, test_b), rtol=1e-1, atol=1e-1
+        )
+
+        user_lowerings.pop(torch.ops.aten.mm.default, None)
 
 
 if __name__ == "__main__":
