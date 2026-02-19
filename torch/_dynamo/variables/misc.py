@@ -73,7 +73,7 @@ from .base import (
     raise_type_error_exc,
     VariableTracker,
 )
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
@@ -581,7 +581,7 @@ class ExceptionVariable(VariableTracker):
         # raise ... from ...
         self.__cause__: VariableTracker = CONSTANT_VARIABLE_NONE
         # Boolean flag that controls whether the __context__ attribute is set
-        self.__suppress_context__: VariableTracker = ConstantVariable(False)
+        self.__suppress_context__: VariableTracker = CONSTANT_VARIABLE_FALSE
         # Contains the call stack where the exception was raised.
         self.__traceback__: VariableTracker = CONSTANT_VARIABLE_NONE
         # The user stack at the time this exception was first raised.
@@ -640,7 +640,7 @@ class ExceptionVariable(VariableTracker):
                 ),
             ):
                 self.__cause__ = val
-                self.__suppress_context__ = variables.ConstantVariable(True)
+                self.__suppress_context__ = variables.CONSTANT_VARIABLE_TRUE
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
@@ -1391,9 +1391,9 @@ class GetAttrVariable(VariableTracker):
             obj = self.obj
             key = args[0].as_python_constant()
             if obj.has_key_in_generic_dict(tx, key):
-                return variables.ConstantVariable(True)
+                return variables.CONSTANT_VARIABLE_TRUE
             else:
-                return variables.ConstantVariable(False)
+                return variables.CONSTANT_VARIABLE_FALSE
 
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):
