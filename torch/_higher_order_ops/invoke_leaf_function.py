@@ -17,6 +17,36 @@ from torch.nn.utils.stateless import _reparametrize_module
 
 _leaf_function_module_retriever: Callable[[int], Any] | None = None
 
+# Separate storage for the make_fx / _invoke_leaf_function_python path.
+# We can't use Dynamo's register_user_object because it requires a Source
+# (for bytecode generation) and adds entries to index_to_bytecode_constructor.
+# In the make_fx path we have neither a Source nor bytecode generation, so we
+# maintain our own dict keyed by negative indices to avoid collisions with
+# Dynamo's non-negative indices.
+_makefx_module_storage: dict[int, torch.nn.Module] = {}
+_makefx_next_index = 0
+
+
+def store_makefx_modules(modules: list[torch.nn.Module]) -> tuple[int, ...]:
+    """Store modules for the make_fx path and return their assigned indices.
+
+    Uses negative indices to avoid collisions with Dynamo's register_user_object
+    which uses non-negative indices.
+    """
+    global _makefx_next_index
+    indices = []
+    for mod in modules:
+        _makefx_next_index -= 1
+        _makefx_module_storage[_makefx_next_index] = mod
+        indices.append(_makefx_next_index)
+    return tuple(indices)
+
+
+def reset_makefx_module_storage() -> None:
+    global _makefx_next_index
+    _makefx_next_index = 0
+    _makefx_module_storage.clear()
+
 
 class _LeafCallable(OpaqueBase):
     def __init__(self, fn: Callable) -> None:
@@ -48,6 +78,26 @@ class LeafModuleState(NamedTuple):
     named_buffers: dict[str, torch.Tensor]
 
 
+def convert_modules_to_states(values: Any, module_to_index: dict[int, int]) -> Any:
+    """Replace nn.Module instances in a pytree with LeafModuleState objects.
+
+    Args:
+        values: A pytree of values that may contain nn.Module instances.
+        module_to_index: Mapping from id(module) to its integer index.
+    """
+
+    def module_to_state(val: Any) -> Any:
+        if isinstance(val, torch.nn.Module):
+            return LeafModuleState(
+                nn_module_index=module_to_index[id(val)],
+                named_parameters=dict(val.named_parameters()),
+                named_buffers=dict(val.named_buffers()),
+            )
+        return val
+
+    return pytree.tree_map(module_to_state, values)
+
+
 @dataclass
 class GradientInfo:
     """
@@ -66,6 +116,15 @@ class GradientInfo:
 
 
 def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
+    # Check make_fx storage first (used by _invoke_leaf_function_python).
+    # Fall back to the Dynamo retriever (used by the compiled path).
+    if nn_module_index in _makefx_module_storage:
+        if nn_module_index >= 0:
+            raise RuntimeError(
+                f"Expected negative nn_module_index for non-strict trace over leaf_function, but got {nn_module_index}."
+            )
+        return _makefx_module_storage[nn_module_index]
+
     if _leaf_function_module_retriever is None:
         raise RuntimeError("Leaf function module retriever not set.")
 
@@ -199,6 +258,49 @@ def flatten_args_with_modules(
     return pytree.tree_leaves(expanded)
 
 
+def make_leaf_function_wrappers(
+    real_fn: Callable[..., Any],
+    fake_fn: Callable[..., Any],
+    captured_out_spec: list[pytree.TreeSpec | None],
+) -> tuple[Callable[..., tuple[Any, ...]], Callable[..., tuple[Any, ...]]]:
+    """Wrap real_fn and fake_fn to flatten outputs and capture the output TreeSpec.
+
+    Both wrappers share the same captured output spec: the first call (typically
+    fake_fn during tracing) records it, and subsequent calls verify consistency.
+    The caller passes in a single-element list and reads captured_out_spec[0]
+    after the wrappers have been called.
+
+    Used by both the Dynamo path (_call_leaf_function in torch.py) and the
+    make_fx path (_invoke_leaf_function_python in decorators.py).
+    """
+
+    def _wrap(fn: Callable[..., Any]) -> Callable[..., tuple[Any, ...]]:
+        if len(captured_out_spec) != 1:
+            raise RuntimeError(
+                f"captured_out_spec must be a single-element list, got length {len(captured_out_spec)}"
+            )
+
+        def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+            out = fn(*args, **kwargs)
+
+            flat_out, out_spec = pytree.tree_flatten(out)
+            if captured_out_spec[0] is None:
+                captured_out_spec[0] = out_spec
+            elif captured_out_spec[0] != out_spec:
+                raise AssertionError(
+                    f"leaf_function output structure mismatch: "
+                    f"expected {captured_out_spec[0]}, got {out_spec}. "
+                    f"This can happen if the real function and fake function return "
+                    f"different pytree structures (e.g., dict vs tuple, different number "
+                    f"of elements). Ensure both functions return the same structure."
+                )
+            return tuple(flat_out)
+
+        return wrapper
+
+    return _wrap(real_fn), _wrap(fake_fn)
+
+
 def autograd_grad_with_gradient_info(
     output_infos: Sequence[GradientInfo | None],
     input_infos: Sequence[GradientInfo | None],
@@ -286,7 +388,9 @@ def _make_forward(
     def forward(*args, **kwargs):
         effective_keys = include_keys
         if include_keys.has(DispatchKey.PythonDispatcher):
-            effective_keys = include_keys.remove(DispatchKey.PythonDispatcher)
+            effective_keys = effective_keys.remove(DispatchKey.PythonDispatcher)
+        if effective_keys.has(DispatchKey.Python):
+            effective_keys = effective_keys.remove(DispatchKey.Python)
         with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
                 outputs = fn(*args, **kwargs)
@@ -377,10 +481,14 @@ class InvokeLeafFunction(HigherOrderOperator):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import _maybe_fake_prop_ignore_unbacked
 
-        with unflatten_args_with_modules(flat_args, input_spec) as (args, kwargs):
-            fake_outputs = _maybe_fake_prop_ignore_unbacked(
-                lambda *a: fake_fn_callable(*a, **kwargs), tuple(args)
-            )
+        def run_fake(*unfunc_flat_args):
+            with unflatten_args_with_modules(unfunc_flat_args, input_spec) as (
+                args,
+                kwargs,
+            ):
+                return fake_fn_callable(*args, **kwargs)
+
+        fake_outputs = _maybe_fake_prop_ignore_unbacked(run_fake, flat_args)
 
         gen = HopSchemaGenerator(self)
         gen.add_arg("real_fn_callable", real_fn_callable)
