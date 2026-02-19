@@ -1602,17 +1602,9 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 #endif // ROCSOLVER_SYEVD_BATCHED_ENABLED
     linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #else // not USE_ROCM
-  if (batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
-    // Use syevjBatched for batched matrix operation when matrix size <= 32
-    // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
-    linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-  } else if (eigenvectors.scalar_type() == at::kFloat && eigenvectors.size(-1) >= 32 && eigenvectors.size(-1) <= 512) {
-    // syevj is better than syevd for float32 dtype and matrix sizes 32x32 - 512x512
-    // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
-    linalg_eigh_cusolver_syevj(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-  } else {
-    linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-  }
+
+  linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+
 #endif
 }
 
