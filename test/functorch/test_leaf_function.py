@@ -3,12 +3,14 @@
 """Tests for @leaf_function with make_fx and aot_function."""
 
 from functools import partial
+from unittest.mock import patch
 
 import torch
 import torch._dynamo.config as config
-from functorch.compile import aot_function, nop
+from functorch.compile import aot_function, make_boxed_func, nop
 from torch._dynamo.decorators import leaf_function
 from torch._dynamo.testing import normalize_gm
+from torch._higher_order_ops.effects import with_effects
 from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
@@ -16,14 +18,22 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
-    return fx_g
+    return make_boxed_func(fx_g)
 
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
 class TestLeafFunctionMakeFx(TestCase):
     def _has_invoke_leaf_function_node(self, gm):
         for node in gm.graph.nodes:
-            if node.op == "call_function" and node.target is invoke_leaf_function:
+            if node.op != "call_function":
+                continue
+            if node.target is invoke_leaf_function:
+                return True
+            if (
+                node.target is with_effects
+                and len(node.args) >= 2
+                and node.args[1] is invoke_leaf_function
+            ):
                 return True
         return False
 
@@ -423,6 +433,116 @@ class GraphModule(torch.nn.Module):
         out_compiled.backward()
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+    def test_aot_function_none_gradient(self):
+        @leaf_function
+        def my_fn(x, y):
+            return (x @ x,)
+
+        @my_fn.register_fake
+        def my_fn_fake(x, y):
+            return (x @ x,)
+
+        def f(x, y):
+            return my_fn(x, y)[0]
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        x = torch.randn(1, 1, requires_grad=True)
+        y = torch.randn(1, 1, requires_grad=True)
+        x_clone = x.clone().detach().requires_grad_(True)
+        y_clone = y.clone().detach().requires_grad_(True)
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+        )
+
+        out_eager = f(x, y)
+        out_compiled = compiled_f(x_clone, y_clone)
+        self.assertEqual(out_eager, out_compiled)
+
+        out_eager.sum().backward()
+        out_compiled.sum().backward()
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y_clone.grad, [[0]])
+
+    def test_aot_function_print(self):
+        printed = []
+
+        @leaf_function
+        def my_fn(x, y):
+            z = x @ y
+            print(z)
+            return None
+
+        @my_fn.register_fake
+        def my_fn_fake(x, y):
+            return None
+
+        def f(x, y):
+            my_fn(x, y)
+            return x.sum()
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        x = torch.randn(1, 1, requires_grad=True)
+        y = torch.randn(1, 1, requires_grad=True)
+        x_clone = x.clone().detach().requires_grad_(True)
+        y_clone = y.clone().detach().requires_grad_(True)
+        z = x @ y
+
+        compiled_f = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+        )
+
+        with patch("builtins.print", lambda *args, **kwargs: printed.append(args)):
+            out_eager = f(x, y)
+            out_compiled = compiled_f(x_clone, y_clone)
+        self.assertEqual(out_eager, out_compiled)
+
+        # Both eager and compiled should have printed a tensor via print(z)
+        self.assertEqual(len(printed), 2)
+        self.assertIsInstance(printed[0][0], torch.Tensor)
+        self.assertIsInstance(printed[1][0], torch.Tensor)
+        self.assertEqual(printed[0][0], z)
+        self.assertEqual(printed[1][0], z)
+
+        out_eager.sum().backward()
+        out_compiled.sum().backward()
+
+        self.assertExpectedInline(
+            normalize_gm(fw_graph_cell[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[0]", primals_2: "f32[1, 1]", primals_3: "f32[1, 1]"):
+        _tree_spec_constant0 = self._tree_spec_constant0
+        _tree_spec_constant1 = self._tree_spec_constant1
+        _tree_spec_constant2 = self._tree_spec_constant2
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _tree_spec_constant0, _tree_spec_constant1, _tree_spec_constant2, primals_2, primals_3, requires_grad_indices = (0, 1));  primals_1 = _tree_spec_constant0 = _tree_spec_constant1 = _tree_spec_constant2 = primals_3 = None
+
+        getitem: "f32[0]" = with_effects[0];  with_effects = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(primals_2);  primals_2 = None
+        return (getitem, sum_1)
+""",  # noqa: B950
+        )
+
+        # backward doesn't have leaf function because the result of leaf function is not in final output
+        self.assertExpectedInline(
+            normalize_gm(bw_graph_cell[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[]"):
+        expand: "f32[1, 1]" = torch.ops.aten.expand.default(tangents_1, [1, 1]);  tangents_1 = None
+        return (expand, None)
+""",  # noqa: B950
+        )
 
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
