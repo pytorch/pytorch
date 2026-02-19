@@ -53,6 +53,10 @@ class ConstantVariable(VariableTracker):
 
     @overload
     @staticmethod
+    def create(value: Literal[False]) -> Never: ...
+
+    @overload
+    @staticmethod
     def create(value: bool) -> "ConstantVariable": ...
 
     # TODO: Refactor to make these return ConstantVariable
@@ -385,6 +389,7 @@ its type to `common_constant_types`.
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
 CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
+CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
 
 
 class EnumVariable(VariableTracker):
