@@ -2365,8 +2365,7 @@ class InstructionTranslatorBase(
                 self._attach_traceback_to_exception(curr_exc)
                 cause = self._create_exception_type(from_vt)
                 curr_exc.call_method(
-                    # pyrefly: ignore [bad-argument-type]
-                    self,
+                    self,  # pyrefly: ignore [bad-argument-type]
                     "__setattr__",
                     [VariableTracker.build(self, "__cause__"), cause],
                     {},
