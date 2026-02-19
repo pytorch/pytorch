@@ -10,7 +10,7 @@ project(pthreadpool-download NONE)
 
 include(ExternalProject)
 ExternalProject_Add(pthreadpool
-  GIT_REPOSITORY https://github.com/Maratyszcza/pthreadpool.git
+  GIT_REPOSITORY git@github.com:google/pthreadpool.git
   GIT_TAG master
   SOURCE_DIR "${CONFU_DEPENDENCIES_SOURCE_DIR}/pthreadpool"
   BINARY_DIR "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
