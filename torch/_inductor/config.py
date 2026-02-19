@@ -893,6 +893,8 @@ combo_kernel_max_num_args = 250
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, only pointwise kernels are eligible for combo kernel fusion.
+combo_kernels_pointwise_only = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1052,8 +1054,11 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
-    # Bucket exposed collectives first
-    bucket_exposed_first: bool = True
+    # Bucket exposed collectives first (None means auto)
+    bucket_exposed_first: bool | None = None
+
+    # Experimental setting to bucket only internode communications
+    bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
@@ -2266,6 +2271,9 @@ cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 # Backend to use for CUDA codegen either
 # "triton", "halide" (experimental) or "pallas" (experimental)
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
+
+# Backend to use for TPU codegen
+tpu_backend: Literal["pallas"] = "pallas"
 
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"

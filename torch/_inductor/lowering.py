@@ -58,7 +58,7 @@ from torch.utils._sympy.functions import (
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import decompositions, get_decompositions
+from .decomposition import decompositions, decomps_to_exclude, get_decompositions
 from .ir import (
     BaseView,
     DtypeView,
@@ -353,7 +353,7 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
         x.get_size()
     ):
         return x
-    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
     cur_device = x.get_device()
     if (
         cur_device is not None
@@ -739,6 +739,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if not isinstance(input, (list, tuple)):
                 broadcast_inputs.append([input] * len(a_list_input))
             else:
+                # pyrefly: ignore [bad-argument-type]
                 broadcast_inputs.append(input)
 
         groups = group_foreach_args(zip(*broadcast_inputs))
@@ -1182,7 +1183,7 @@ def expand(x, sizes):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.size_hint_or_throw(
+        x_size_product = V.graph.sizevars.guarding_hint_or_throw(
             sympy_product(x.get_size())
         )
         # TODO: It would be better to realize the input if any of its sizes
@@ -1192,7 +1193,7 @@ def expand(x, sizes):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
-                V.graph.sizevars.size_hint_or_throw(sympy_product(sizes))
+                V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
                 // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -1251,13 +1252,16 @@ def repeat(x, repeats):
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
+    # TODO Laith is there better check
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint_or_throw(sympy_product(old_size))
+        old_size_product = V.graph.sizevars.guarding_hint_or_throw(
+            sympy_product(old_size)
+        )
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
             x.mark_reuse(
-                V.graph.sizevars.size_hint_or_throw(sympy_product(new_size))
+                V.graph.sizevars.guarding_hint_or_throw(sympy_product(new_size))
                 // old_size_product
             )
 
@@ -1964,14 +1968,16 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
     if offset_negative:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
-                original_shape[dim1] + offset, original_shape[dim2]
+                original_shape[dim1] + offset,
+                original_shape[dim2],
             ),
             0,  # type: ignore[arg-type]
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
-                original_shape[dim1], original_shape[dim2] - offset
+                original_shape[dim1],
+                original_shape[dim2] - offset,
             ),
             0,  # type: ignore[arg-type]
         )
@@ -2137,9 +2143,9 @@ def unfold(x, dimension, size, step):
     sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint_or_throw(dim_size) > 0:
+    if sizevars.guarding_hint_or_throw(dim_size) > 0:
         x.mark_reuse(
-            sizevars.size_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
+            sizevars.guarding_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
         )
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
@@ -2303,15 +2309,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    # When emulate_precision_casts is enabled, we skip decomposing addcmul ops
-    # to use the inductor lowering which preserves FMA semantics.
-    # For _foreach_addcdiv, we use the native CUDA kernel.
-    skip_decomp_for_precision = config.emulate_precision_casts and op in {
-        aten.addcmul,
-        aten._foreach_addcmul.Scalar,
-        aten._foreach_addcdiv.Scalar,
-    }
-    assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
+    def is_in_exclude_set(op, exclude_set):
+        if op in exclude_set:
+            return True
+        if hasattr(op, "overloadpacket"):
+            return op.overloadpacket in exclude_set
+        return False
+
+    skip_decomp = is_in_exclude_set(op, decomps_to_exclude)
+    assert op not in decompositions or override_decomp or skip_decomp, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
@@ -3711,7 +3717,7 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    stride = [V.graph.sizevars.size_hint_or_throw(s) for s in stride]
+    stride = V.graph.sizevars.guarding_hints_or_throw(stride)
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
 
@@ -6280,6 +6286,15 @@ def _make_reduction_inner(
 
 def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
+        # For argmax/argmin on boolean tensors, cast to int32 first to ensure
+        # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
+        # Only apply on Triton backend; MPS handles bool comparisons natively.
+        if (
+            reduction_type in ("argmax", "argmin")
+            and x.get_dtype() == torch.bool
+            and is_triton(x)
+        ):
+            x = to_dtype(x, torch.int32)
         kwargs = _make_reduction_inner(
             x,
             axis=axis,
@@ -7064,6 +7079,123 @@ def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
 
 
 _register_foreach_lowering(aten._foreach_addcmul.Scalar, _foreach_addcmul_scalar)
+
+
+def _lerp_low_formula(weight_val, diff, start_val, use_fma):
+    """Low formula for lerp: start + weight * (end - start)"""
+    if use_fma:
+        return ops.fma(weight_val, diff, start_val)
+    else:
+        return ops.add(start_val, ops.mul(weight_val, diff))
+
+
+def _lerp_high_formula(one_minus_weight, diff, end_val, use_fma):
+    """High formula for lerp: end - (end - start) * (1 - weight)"""
+    if use_fma:
+        neg_one_minus_weight = ops.neg(one_minus_weight)
+        return ops.fma(neg_one_minus_weight, diff, end_val)
+    else:
+        return ops.sub(end_val, ops.mul(one_minus_weight, diff))
+
+
+@register_lowering(aten.lerp.Scalar, broadcast=True)
+def lerp_scalar(start, end, weight):
+    """
+    Computes linear interpolation using the same dual-formula approach as CUDA lerp.
+
+    For |weight| < 0.5: start + weight * (end - start)
+    For |weight| >= 0.5: end - (end - start) * (1 - weight)
+
+    This dual-formula approach ensures numerical stability and exact results
+    when weight equals 0 or 1.
+    """
+    dtype = get_promoted_dtype(
+        start,
+        end,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    start_loader = start.make_loader()
+    end_loader = end.make_loader()
+
+    use_fma = dtype.is_floating_point and not torch.version.hip
+    # Determine which formula to use based on weight value
+    # Convert to float for comparison in case weight is a sympy expression
+    weight_float = float(weight)
+    # Use -weight_float if negative to get absolute value (avoid shadowed abs)
+    use_high_formula = (weight_float if weight_float >= 0 else -weight_float) >= 0.5
+
+    def inner_fn(idx):
+        start_val = start_loader(idx)
+        end_val = end_loader(idx)
+        diff = ops.sub(end_val, start_val)
+
+        if use_high_formula:
+            one_minus_weight = ops.constant(1.0 - weight_float, dtype)
+            return _lerp_high_formula(one_minus_weight, diff, end_val, use_fma)
+        else:
+            weight_val = ops.constant(weight_float, dtype)
+            return _lerp_low_formula(weight_val, diff, start_val, use_fma)
+
+    return Pointwise.create(
+        device=start.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=start.get_size(),
+    )
+
+
+@register_lowering(aten.lerp.Tensor, broadcast=True)
+def lerp_tensor(start, end, weight):
+    """
+    Computes linear interpolation using the same dual-formula approach as CUDA lerp.
+
+    For |weight| < 0.5: start + weight * (end - start)
+    For |weight| >= 0.5: end - (end - start) * (1 - weight)
+
+    This dual-formula approach ensures numerical stability and exact results
+    when weight equals 0 or 1.
+    """
+    dtype = get_promoted_dtype(
+        start,
+        end,
+        weight,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    start_loader = start.make_loader()
+    end_loader = end.make_loader()
+    weight_loader = weight.make_loader()
+
+    use_fma = dtype.is_floating_point and not torch.version.hip
+
+    def inner_fn(idx):
+        start_val = start_loader(idx)
+        end_val = end_loader(idx)
+        weight_val = weight_loader(idx)
+        diff = ops.sub(end_val, start_val)
+
+        low_result = _lerp_low_formula(weight_val, diff, start_val, use_fma)
+
+        one_val = ops.constant(1.0, dtype)
+        one_minus_weight = ops.sub(one_val, weight_val)
+        high_result = _lerp_high_formula(one_minus_weight, diff, end_val, use_fma)
+
+        # Select formula based on |weight| >= 0.5
+        abs_weight = ops.abs(weight_val)
+        threshold = ops.constant(0.5, dtype)
+        use_high = ops.ge(abs_weight, threshold)
+        return ops.where(use_high, high_result, low_result)
+
+    return Pointwise.create(
+        device=start.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=start.get_size(),
+    )
+
+
+register_foreach_pointwise(aten._foreach_lerp.Scalar, lerp_scalar)
 
 
 register_pointwise_numeric_ldf64(aten.cos)

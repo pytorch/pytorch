@@ -2706,6 +2706,44 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(compile_decimal, Decimal(0))
 
+    @config.patch(
+        {"triton.use_block_ptr": True, "triton.codegen_upcast_to_fp32": False}
+    )
+    def test_float16_reduction_with_int_output(self):
+        @torch.compile
+        def fn(input: torch.Tensor) -> torch.Tensor:
+            return torch.argmax(input, dim=0)
+
+        input = torch.randn(20, 20, device="cuda", dtype=torch.float16)
+        _, code = run_and_get_code(fn, input)
+        # There should not be any conversions to float16 in this code, since the input
+        # is already float16 and the output is int64.
+        self.assertNotIn(".to(tl.float16)", code[0])
+
+    def test_lerp_fma_precision(self):
+        # Test that lerp uses FMA to match CUDA's native lerp behavior.
+        # CUDA's lerp uses a dual-formula approach:
+        # For |weight| < 0.5: start + weight * (end - start)
+        # For |weight| >= 0.5: end - (end - start) * (1 - weight)
+        start = torch.randn(1000, device="cuda", dtype=torch.float32)
+        end = torch.randn(1000, device="cuda", dtype=torch.float32)
+
+        @torch.compile
+        def fn(start, end, weight):
+            return torch.lerp(start, end, weight)
+
+        # Test low weight (uses low formula)
+        weight_low = 0.1
+        result = fn(start, end, weight_low)
+        expected = torch.lerp(start, end, weight_low)
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
+        # Test high weight (uses high formula)
+        weight_high = 0.7
+        result = fn(start, end, weight_high)
+        expected = torch.lerp(start, end, weight_high)
+        self.assertEqual(result, expected, atol=0, rtol=0)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
