@@ -57,6 +57,10 @@ inline void check_inputs_nll_loss2d(
       "but got input of dimension: ",
       input.dim());
   TORCH_CHECK(
+      target.scalar_type() == kLong || target.scalar_type() == kByte,
+      "expected target dtype to be Long or Byte, but got ",
+      target.scalar_type());
+  TORCH_CHECK(
       !weight.defined() || weight.numel() == input.size(1),
       "weight tensor should be defined either for all or no classes");
 

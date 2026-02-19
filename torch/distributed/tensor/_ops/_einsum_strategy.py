@@ -132,6 +132,12 @@ def gen_einsum_strategies(
         strategies_over_one_mesh_dim.append(placement_list)
 
     # split contracting dim
+    # NOTE: This is the only strategy that produces a Partial output, and it
+    # hardcodes Partial("sum"). No strategy accepts Partial as an input
+    # placement, so Partial inputs are always redistributed to Shard or
+    # Replicate. This means Partial("avg") inputs cannot be preserved through
+    # the op. Use gen_single_dim_einsum_strategies with per-input linearity
+    # for proper Partial support.
     for contracting_dim in edims.contracting_dims:
         # Contracting dim can shard on same device axis for both inputs. This
         # results in the output being Partial on that device axis. For example:
