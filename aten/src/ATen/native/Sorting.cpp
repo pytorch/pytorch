@@ -206,9 +206,7 @@ QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
 }
 
 void quantile_checks(const Tensor& self, const Tensor& q) {
-  if (!isTensorSubclassLike(self)) {
-    TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
-  }
+  TORCH_SYM_CHECK(self.sym_numel().sym_gt(0), "quantile() input tensor must be non-empty");
   TORCH_CHECK(q.dim() <= 1, "quantile() q must be a scalar or 1D tensor");
   TORCH_CHECK(
       self.scalar_type() == kFloat || self.scalar_type() == kDouble,
@@ -240,7 +238,7 @@ std::vector<int64_t> quantile_output_shape(
     out_shape = std::vector<int64_t>(self.dim(), 1);
   }
   if (q.dim() > 0) {
-    out_shape.insert(out_shape.begin(), q.size(0));
+    out_shape.insert(out_shape.begin(), q.sym_numel());
   }
 
   return out_shape;
