@@ -632,7 +632,7 @@ def _prepare_configs_and_decompositions(
     default_impl: Callable[..., Any],
     runtime_kwargs: dict[str, Any],
     name: str,
-) -> tuple[list[Callable], list[dict[str, Any]]]:
+) -> tuple[list[Callable], list[dict[str, Any]], list[dict[str, Any]]]:
     """Prepare decompositions and merged kwargs from configs.
 
     Handles both static configs and dynamic config generation.
@@ -681,13 +681,15 @@ def _standard_lowering_fn(
     benchmark_with_cudagraphs: bool = False,
 ) -> Any:
     """Standard autotuning lowering function."""
-    decompositions, non_tensor_args, config_patches_list = _prepare_configs_and_decompositions(
-        processed_configs,
-        config_generator,
-        tensor_inputs,
-        default_impl,
-        runtime_kwargs,
-        name,
+    decompositions, non_tensor_args, config_patches_list = (
+        _prepare_configs_and_decompositions(
+            processed_configs,
+            config_generator,
+            tensor_inputs,
+            default_impl,
+            runtime_kwargs,
+            name,
+        )
     )
 
     result = autotune_custom_op(
@@ -789,13 +791,15 @@ def _range_based_lowering_fn(
     log.info("=== Range-based Autotuning for %s ===", name)
     log.info("Dispatch on: %s[%d], Ranges: %s", tensor_name, dim_index, ranges)
 
-    decompositions, non_tensor_args, config_patches_list = _prepare_configs_and_decompositions(
-        processed_configs,
-        config_generator,
-        tensor_inputs,
-        default_impl,
-        runtime_kwargs,
-        name,
+    decompositions, non_tensor_args, config_patches_list = (
+        _prepare_configs_and_decompositions(
+            processed_configs,
+            config_generator,
+            tensor_inputs,
+            default_impl,
+            runtime_kwargs,
+            name,
+        )
     )
 
     range_to_best_impl_map: dict[RangeBounds, ImplConfig] = {}
@@ -874,7 +878,11 @@ def _range_based_lowering_fn(
         group = impl_groups[0]
         log.info("Only one implementation after grouping, directly inlining")
         return _lower_single_impl(
-            group.impl_func, group.impl_kwargs, runtime_kwargs, tensor_inputs, name,
+            group.impl_func,
+            group.impl_kwargs,
+            runtime_kwargs,
+            tensor_inputs,
+            name,
             config_patches=group.config_patches,
         )
 

@@ -175,7 +175,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
-        fn = lambda: bm_func([*sym_inputs, *args])
+
+        def fn() -> Any:
+            return bm_func([*sym_inputs, *args])
 
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(fn)
