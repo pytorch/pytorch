@@ -767,7 +767,7 @@ class TestFX(JitTestCase):
 
         graph = tracer.trace(M())
         # saving the original list because we will insert new nodes as a part of a test
-        stack_traces = "\n".join([node.meta.get("stack_trace", "") for node in graph.nodes])
+        stack_traces = "\n".join([node.stack_trace or "" for node in graph.nodes])
         FileCheck().check_count(
             "c = a + b", 1, exactly=True
         ).run(stack_traces.strip())
