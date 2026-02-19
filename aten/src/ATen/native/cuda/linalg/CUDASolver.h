@@ -2,8 +2,9 @@
 
 #include <ATen/cuda/CUDAContext.h>
 
-#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000
+#if (defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 11000) || defined(USE_ROCM)
 // cuSOLVER version >= 11000 includes 64-bit API
+// ROCm/hipSOLVER supports the 64-bit API for xpotrf, xpotrs, xgeqrf
 #define USE_CUSOLVER_64_BIT
 #endif
 
@@ -577,6 +578,9 @@ template <>
 void xgeqrf<c10::complex<double>>(
     CUDASOLVER_XGEQRF_ARGTYPES(c10::complex<double>));
 
+// hipsolverDnXsyevd is not yet supported on ROCm
+#if !defined(USE_ROCM)
+
 #define CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t) \
   cusolverDnHandle_t handle, cusolverDnParams_t params,          \
       cusolverEigMode_t jobz, cublasFillMode_t uplo, int64_t n,  \
@@ -626,6 +630,8 @@ void xsyevd<c10::complex<float>, float>(
 template <>
 void xsyevd<c10::complex<double>, double>(
     CUDASOLVER_XSYEVD_ARGTYPES(c10::complex<double>, double));
+
+#endif // !defined(USE_ROCM) -- xsyevd not supported on ROCm
 
 
 

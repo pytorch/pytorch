@@ -1542,6 +1542,9 @@ void xgeqrf<c10::complex<double>>(CUDASOLVER_XGEQRF_ARGTYPES(c10::complex<double
       info));
 }
 
+// hipsolverDnXsyevd is not yet supported on ROCm
+#if !defined(USE_ROCM)
+
 template <>
 void xsyevd_bufferSize<float>(
     cusolverDnHandle_t handle,
@@ -1789,6 +1792,8 @@ void xsyevd<c10::complex<double>, double>(
       workspaceInBytesOnHost,
       info));
 }
+
+#endif // !defined(USE_ROCM) -- xsyevd not supported on ROCm
 
 // cuSOLVER Xgeev bindings (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
 #if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)

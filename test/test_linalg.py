@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import \
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
+    (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest)
@@ -435,7 +435,7 @@ class TestLinalg(TestCase):
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
         # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        include_m_l_n_case = (has_cusolver() or device == 'cpu')
+        include_m_l_n_case = (has_cusolver() or has_hipsolver() or device == 'cpu')
         matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
@@ -1359,7 +1359,7 @@ class TestLinalg(TestCase):
                     continue
 
                 # We need LAPACK or equivalent
-                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver()) or
+                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver() and not has_hipsolver()) or
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case((S, S) , ord, keepdim, norm_dtype)
@@ -1615,7 +1615,7 @@ class TestLinalg(TestCase):
                 if dtype == torch.float16 or dtype == torch.bfloat16:
                     continue
                 # We need LAPACK or equivalent
-                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver()) or
+                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver() and not has_hipsolver()) or
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case(make_arg(shape), ord, dim, keepdim)
@@ -7128,7 +7128,10 @@ class TestLinalg(TestCase):
         backends = ["default"]
 
         if torch.device(device).type == 'cuda':
-            backends.append("cusolver")
+            if torch.cuda.has_magma:
+                backends.append("magma")
+            if has_cusolver() or has_hipsolver():
+                backends.append("cusolver")
 
         def gen_matrices():
             rhs = 3
