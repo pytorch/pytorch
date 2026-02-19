@@ -82,7 +82,7 @@ def make_opaque_inspect_tensor_fn(
           completes, so ``bwd_f`` still executes at runtime but
           ``invoke_leaf_function`` does not appear in the backward graph. If
           ``opaque_inspect`` is called on an **intermediate tensor** (one
-          computed inside the compiled function, e.g., a module output), the
+          computed inside the compiled function), the
           hook fires *during* the backward pass and ``invoke_leaf_function``
           appears in the backward graph.
         - With ``make_fx``, ``bwd_f`` always appears as an explicit
@@ -134,44 +134,7 @@ def make_opaque_inspect_tensor_fn(
         [inputs][bwd]
             torch.Size([2, 4])
 
-    Example — instrument all modules in a model::
-
-        >>> import torch.nn as nn
-        >>> import torch.utils._pytree as pytree
-        >>>
-        >>> def install_debug_prints(model: nn.Module) -> None:
-        ...     for name, module in model.named_modules():
-        ...         tag = f"{module.__class__.__name__}:{name}"
-        ...         opaque_inspect = make_opaque_inspect_tensor_fn(
-        ...             fwd_f=lambda t: print(f"  {t.shape} mean={t.mean():.4f}"),
-        ...             bwd_f=lambda t: print(f"  {t.shape} mean={t.mean():.4f}"),
-        ...         )
-        ...         orig_forward = module.forward
-        ...         def wrapped(*args, _orig=orig_forward, _opaque_inspect=opaque_inspect, _tag=tag, **kwargs):
-        ...             out = _orig(*args, **kwargs)
-        ...             pytree.tree_map_only(torch.Tensor, lambda t: _opaque_inspect(t, tag=_tag), out)
-        ...             return out
-        ...         module.forward = wrapped
-        >>>
-        >>> model = nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 4))
-        >>> install_debug_prints(model)
-        >>> compiled_model = torch.compile(model, backend="aot_eager")
-        >>> out = compiled_model(torch.randn(2, 8, requires_grad=True))
-        [Linear:0][fwd]
-          torch.Size([2, 16]) mean=...
-        [ReLU:1][fwd]
-          torch.Size([2, 16]) mean=...
-        [Linear:2][fwd]
-          torch.Size([2, 4]) mean=...
-        >>> out.sum().backward()
-        [Linear:2][bwd]
-          torch.Size([2, 4]) mean=...
-        [ReLU:1][bwd]
-          torch.Size([2, 16]) mean=...
-        [Linear:0][bwd]
-          torch.Size([2, 16]) mean=...
-
-    Example — inside a custom autograd function::
+    Example — inspect inside a custom autograd function::
 
         >>> from torch.autograd import Function
         >>> opaque_inspect = make_opaque_inspect_tensor_fn(
