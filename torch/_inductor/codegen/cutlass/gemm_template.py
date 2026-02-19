@@ -1526,6 +1526,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             op.epilogue_schedule,  # type: ignore[attr-defined]
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
             V.graph.sizevars.size_hint,
+            kernel_schedule=op.kernel_schedule,
         )
 
         return (

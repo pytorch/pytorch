@@ -40,6 +40,9 @@ if try_import_cutlass():
     from cutlass_cppgen.backend.evt.backend.emitter_base import (  # type: ignore[import-not-found]
         FusionCallbacks,
     )
+    from cutlass_cppgen.backend.evt.backend.sm100_emitter import (
+        Sm100CollectiveEpilogue,  # type: ignore[import-not-found]
+    )
     from cutlass_cppgen.backend.evt.backend.sm90_emitter import (  # type: ignore[import-not-found]
         CollectiveEpilogue,
     )
@@ -122,6 +125,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         epilogue_schedule: EpilogueScheduleType,
         name_to_buffer: dict[str, Buffer],
         size_hint_fn: Callable[[Union[Expr, int]], int],
+        kernel_schedule: Any | None = None,
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str, EVTArgRenames]:
         cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
@@ -129,13 +133,23 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         epilogue_functor = _trace(fn_src, example_tensors, cuda_arch, **kwargs)
         visitor = EpilogueFunctorVisitor(cuda_arch, epilogue_functor)
         fusion_callbacks = FusionCallbacks(visitor.graph, cuda_arch, emit_CD=False)
-        collective_epilogue = CollectiveEpilogue(
-            tile_description,
-            epilogue_schedule,
-            accum_type,
-            output_type,
-            fusion_callbacks,
-        )
+        if cuda_arch < 100:
+            collective_epilogue = CollectiveEpilogue(
+                tile_description,
+                epilogue_schedule,
+                accum_type,
+                output_type,
+                fusion_callbacks,
+            )
+        else:
+            collective_epilogue = Sm100CollectiveEpilogue(
+                tile_description=tile_description,
+                kernel_schedule=kernel_schedule,
+                epilogue_schedule=epilogue_schedule,
+                element_accumulator=accum_type,
+                element_d=output_type,
+                fusion_callbacks=fusion_callbacks,
+            )
         evt_name, evt_code = collective_epilogue.emit()
         evt_args, arg_renames = _render_argument_type(
             epilogue_functor, name_to_buffer, size_hint_fn
