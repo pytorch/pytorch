@@ -3980,8 +3980,8 @@ class ShapeEnv:
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
-        # Separate counter tracking only replacement/divisible changes,
-        # used by SymNode.expr cache to avoid spurious invalidation from
+        # Separate counter tracking only replacement changes, used by
+        # SymNode.expr cache to avoid spurious invalidation from
         # deferred runtime asserts.
         self._replacements_version_counter = 0
 
