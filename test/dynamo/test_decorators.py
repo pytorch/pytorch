@@ -3308,8 +3308,8 @@ class GraphModule(torch.nn.Module):
         mod = SimpleModule()
         x = torch.randn(3, 3)
 
-        result = mod(x)
-        self.assertEqual(result[0].shape, (3, 3))
+        with self.assertRaisesRegex(Exception, "requires a fake implementation"):
+            mod(x)
 
         compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Exception, "requires a fake implementation"):
@@ -3364,8 +3364,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
 
         x_eager = x.clone()
-        result_eager = fn(x_eager)
-        self.assertEqual(result_eager[0], x + 1)
+        with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
+            fn(x_eager)
 
         compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
         with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
