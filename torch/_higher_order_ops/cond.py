@@ -168,7 +168,8 @@ def cond(
             are allowed in a branch)
 
           - The function can perform in-place mutations on its input tensors.
-            However, after cond, mutated inputs will be returned as new tensors that do not share object identity with the original inputs.
+            However, after cond, mutated inputs will be returned as new tensors that
+            do not share object identity with the original inputs.
 
     """
     if torch.compiler.is_dynamo_compiling():
