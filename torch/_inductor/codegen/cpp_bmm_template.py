@@ -49,7 +49,7 @@ extern "C"
     constexpr int64_t num_threads = {{num_threads}};
     int64_t B_single_thread_block = (B / num_threads) * num_threads;
 
-    {%- set use_dynamic_threads = (config.cpp.threads < 1) and (num_threads == os.cpu_count()) %}
+    {%- set use_dynamic_threads = (config.cpp.threads < 1) and (num_threads == cpu_count) %}
     {%- if use_dynamic_threads %}
     #pragma omp parallel for
     {%- else %}

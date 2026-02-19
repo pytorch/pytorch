@@ -46,7 +46,7 @@ extern "C" {{export_declaration}}
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
 {%- if num_threads > 1 %}
-    {%- set use_dynamic_threads = (config.cpp.threads < 1) and (num_threads == os.cpu_count()) %}
+    {%- set use_dynamic_threads = (config.cpp.threads < 1) and (num_threads == cpu_count) %}
     {%- if use_dynamic_threads %}
     #pragma omp parallel
     {%- else %}
