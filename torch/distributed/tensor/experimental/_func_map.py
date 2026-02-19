@@ -28,7 +28,7 @@ _WARNINGS_SHOWN: set[str] = set()
 def _warn_once(msg: str) -> None:
     if msg not in _WARNINGS_SHOWN:
         _WARNINGS_SHOWN.add(msg)
-        warnings.warn(msg, stacklevel=3)
+        warnings.warn(msg, stacklevel=2)
 
 
 PlacementType = Optional[Sequence[Placement]]
@@ -331,7 +331,8 @@ def _local_map_wrapped(
             # this function is applied to at least one DTensor argument
             seen_dtensor_arg = True
 
-            # Warn if input is unevenly sharded and user hasn't opted in
+            # Warn if input is unevenly sharded and user hasn't opted in.
+            # TODO: make this a hard error in the next PyTorch release.
             if not allow_uneven_sharding and out_shapes is None:
                 for mesh_dim, p in enumerate(arg.placements):
                     if (
@@ -344,7 +345,9 @@ def _local_map_wrapped(
                             f"{arg.device_mesh.size(mesh_dim)} ranks). "
                             "Output global shapes will be incorrect. Use "
                             "allow_uneven_sharding=True or out_shapes to "
-                            "handle uneven sharding correctly."
+                            "handle uneven sharding correctly. "
+                            "This will become a hard error in the next "
+                            "PyTorch release."
                         )
                         break
 
@@ -419,12 +422,15 @@ def _local_map_wrapped(
             f" {len(flat_out)} is expected!"
         )
         for out_idx, (out, spec) in enumerate(zip(flat_out, out_placements_tuple)):
+            placements: Sequence[Placement] | None = spec
             if isinstance(out, torch.Tensor):
                 assert not isinstance(out, DTensor), (
                     f"torch.Tensor output expected but received {type(out)}: {out}"
                 )
 
-                if spec is not None and any(isinstance(p, Shard) for p in spec):
+                if placements is not None and any(
+                    isinstance(p, Shard) for p in placements
+                ):
                     if out_shapes is not None and out_idx < len(out_shapes):
                         # user provided shape - use it directly (zero overhead)
                         provided_shape = out_shapes[out_idx]
@@ -442,7 +448,7 @@ def _local_map_wrapped(
                             _allgather_global_shape_uneven_sharding(
                                 out,
                                 device_mesh,
-                                spec,
+                                placements,
                             )
                         )
                     else:
@@ -451,16 +457,15 @@ def _local_map_wrapped(
                             _infer_global_shape_local_even_sharding(
                                 out,
                                 device_mesh,
-                                spec,
+                                placements,
                             )
                         )
 
                     flat_dist_out.append(
-                        # pyrefly: ignore [bad-argument-type]
                         DTensor.from_local(
                             out,
                             device_mesh,
-                            spec,
+                            placements,
                             run_check=False,
                             shape=global_shape,
                             stride=global_stride,
@@ -468,12 +473,13 @@ def _local_map_wrapped(
                     )
                 else:
                     flat_dist_out.append(
-                        # pyrefly: ignore [bad-argument-type]
-                        DTensor.from_local(out, device_mesh, spec, run_check=False)
+                        DTensor.from_local(
+                            out, device_mesh, placements, run_check=False
+                        )
                     )
             else:
-                assert spec is None, (
-                    f"Non-tensor output {out} expects None placements but received {spec}!"
+                assert placements is None, (
+                    f"Non-tensor output {out} expects None placements but received {placements}!"
                 )
 
                 flat_dist_out.append(out)
