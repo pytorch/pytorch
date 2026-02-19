@@ -505,7 +505,7 @@ def foreach_reduce(
         for i, (fsdp_param, unsharded_grad) in enumerate(
             zip(fsdp_params, unsharded_grads)
         ):
-            if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
+            if fsdp_param is None or (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
                 continue
             if unsharded_grad.size(shard_dim) % world_size != 0:
                 raise AssertionError(
@@ -606,6 +606,9 @@ def foreach_reduce(
         for padded_unsharded_size, fsdp_param in zip(
             padded_unsharded_sizes, fsdp_params
         ):
+            if fsdp_param is None:
+                flat_grad_offset += padded_unsharded_size.numel() // world_size
+                continue
             # Assume even sharding for Shard(i), i > 0; otherwise would require
             # copy-out for contiguous strides
             new_sharded_grad = torch.as_strided(

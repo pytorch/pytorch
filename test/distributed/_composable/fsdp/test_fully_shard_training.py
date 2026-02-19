@@ -1880,6 +1880,7 @@ class TestFSDPMissingParamGrad(FSDPTest):
         model = SomeUnusedParamModel(use_sometimes=random.choice([True, False])).to(
             device
         )
+        cloned_param_list = [p.clone() for p in model.parameters()]
         fully_shard(model)
 
         x = torch.randn(2, 8, device=device)
@@ -1887,16 +1888,9 @@ class TestFSDPMissingParamGrad(FSDPTest):
         loss = model(x).sum()
         loss.backward()
 
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                self.assertIsNotNone(
-                    param.grad, f"{name} has no grad on rank {self.rank}"
-                )
-            else:
-                self.assertIsNone(
-                    param.grad,
-                    f"frozen {name} should not have grad on rank {self.rank}",
-                )
+        for param, param_clone in zip(model.parameters(), cloned_param_list, strict=True):
+            param_full = param.full_tensor()
+            assert torch.equal(param_full, param_clone), "FSDP should not modify the original parameters"
 
 
 if __name__ == "__main__":

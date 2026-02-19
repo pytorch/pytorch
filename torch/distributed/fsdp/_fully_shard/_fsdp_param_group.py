@@ -544,7 +544,7 @@ class FSDPParamGroup:
                     # Need a way to account for the "missing" grads that are not in `unsharded_grads` to ensure
                     # reduce-scatter has the same input sizes across ranks.
                     zero_grad = self._zero_buf.expand(fsdp_param._orig_size)
-                    fsdp_params_with_grad.append(fsdp_param)
+                    fsdp_params_with_grad.append(None)
                     unsharded_grads.append(zero_grad)
 
             if self.reshard_after_backward:
