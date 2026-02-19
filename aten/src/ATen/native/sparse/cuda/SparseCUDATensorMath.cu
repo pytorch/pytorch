@@ -782,6 +782,28 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   }();
   int64_t* mat_el_end_indices = mat_el_end_indices_host.data_ptr<int64_t>();
 
+  // SpMV bug on CUDA < 13.1 -> COO row index array needs to be 16-byte aligned,
+  // so we use a buffer to copy into for misaglined sub-arrays.
+  auto aligned_row_indices_buffer = [&]() -> Tensor {
+#if defined(USE_CUDA) && CUDA_VERSION < 13010
+    if (dim_k == 1) {
+      // indices_dim1 is aligned to 8(=1) or 16 bytes(=0).
+      const int64_t row_alignment_parity = (indices_dim1.data_ptr<uintptr_t>() % 16) / 8;
+      const auto* end_indices = mat_el_end_indices_host.data_ptr<int64_t>();
+      auto max_nnz = row_alignment_parity * end_indices[0];
+      for (const auto i : c10::irange(1, num_matrices)) {
+        const auto curr_nnz = end_indices[i] - end_indices[i - 1];
+        max_nnz = std::max(
+          ((end_indices[i] + row_alignment_parity) & 1) * curr_nnz,
+          curr_nnz
+        );
+      }
+      return max_nnz ? at::empty({max_nnz}, indices.options()) : Tensor{};
+    }
+#endif
+    return Tensor{};
+  }();
+
 #if defined(USE_CUDA) && CUDA_VERSION < 13010
   const auto max_nnz = mat_el_end_indices_host.max().item<int64_t>();
   auto row_indices_buffer = at::empty({max_nnz}, indices.options());
