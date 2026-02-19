@@ -15,7 +15,8 @@
 // cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,
 // (which is cusolver version 11101 in the header), so we only use cusolver potrf batched
 // if cuda version is >= 11.3
-#if CUSOLVER_VERSION >= 11101
+// hipSOLVER supports potrfBatched
+#if defined(USE_ROCM) || CUSOLVER_VERSION >= 11101
   constexpr bool use_cusolver_potrf_batched_ = true;
 #else
   constexpr bool use_cusolver_potrf_batched_ = false;
@@ -25,7 +26,8 @@
 // (which is cusolver version 11102 in the header), so we only use cusolver syevj batched
 // if cuda version is >= 11.3.1
 // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-793626268 and https://github.com/cupy/cupy/issues/4847
-#if CUSOLVER_VERSION >= 11102
+// hipSOLVER supports syevjBatched
+#if defined(USE_ROCM) || CUSOLVER_VERSION >= 11102
   constexpr bool use_cusolver_syevj_batched_ = true;
 #else
   constexpr bool use_cusolver_syevj_batched_ = false;

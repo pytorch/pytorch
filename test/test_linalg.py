@@ -430,7 +430,7 @@ class TestLinalg(TestCase):
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
         # cases m < n are only supported on CPU and for cuSOLVER path on CUDA
         m_l_n_sizes = [(m // 2, m) for m in ms]
-        include_m_l_n_case = (has_cusolver() or device == 'cpu')
+        include_m_l_n_case = (has_cusolver() or has_hipsolver() or device == 'cpu')
         matrix_sizes = m_ge_n_sizes + (m_l_n_sizes if include_m_l_n_case else [])
         batches = [(), (2,), (2, 2), (2, 2, 2)]
         # we generate matrices with singular values sampled from a normal distribution,
@@ -1355,7 +1355,7 @@ class TestLinalg(TestCase):
                     continue
 
                 # We need LAPACK or equivalent
-                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver()) or
+                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver() and not has_hipsolver()) or
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case((S, S) , ord, keepdim, norm_dtype)
@@ -1611,7 +1611,7 @@ class TestLinalg(TestCase):
                 if dtype == torch.float16 or dtype == torch.bfloat16:
                     continue
                 # We need LAPACK or equivalent
-                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver()) or
+                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver() and not has_hipsolver()) or
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case(make_arg(shape), ord, dim, keepdim)
@@ -6935,7 +6935,7 @@ class TestLinalg(TestCase):
         if torch.device(device).type == 'cuda':
             if torch.cuda.has_magma:
                 backends.append("magma")
-            if has_cusolver():
+            if has_cusolver() or has_hipsolver():
                 backends.append("cusolver")
 
         def gen_matrices():
