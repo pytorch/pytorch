@@ -1643,15 +1643,15 @@ class TestSparse(TestSparseBase):
         row_indices = m1_sparse.indices()[1]
         del m1
 
-        # Row indices for odd matrices should be misaligned
+        # Row indices for odd matrices should be 16-byte aligned
         for i in range(1, batch, 2):
             self.assertTrue(
-                (row_indices[i * nrows].data_ptr() % 16) != (row_indices.data_ptr() % 16)
+                (row_indices[i * nrows].data_ptr() % 16) == 0
             )
-        # Row indices for even matrices should be aligned
+        # Row indices for even matrices should be 8-byte aligned
         for i in range(0, batch, 2):
             self.assertTrue(
-                (row_indices[i * nrows].data_ptr() % 16) == (row_indices.data_ptr() % 16)
+                (row_indices[i * nrows].data_ptr() % 16) == 8
             )
 
         res = torch.bmm(m1_sparse, m2)

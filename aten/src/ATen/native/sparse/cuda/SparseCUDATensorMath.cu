@@ -787,24 +787,20 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   auto aligned_row_indices_buffer = [&]() -> Tensor {
 #if defined(USE_CUDA) && CUDA_VERSION < 13010
     if (dim_k == 1) { // implies cusparseSpMV
-      const auto* end_indices = mat_el_end_indices_host.data_ptr<int64_t>();
-      // Find lenght of buffer needed {
-      // indices_dim1 is aligned to 8(=1) or 16 bytes(=0).
-      const int64_t row_alignment_parity = (reinterpret_cast<uintptr_t>(indices_dim1.data_ptr()) % 16) / 8;
+      const auto* row_indices_start_ptr = indices_dim1.data_ptr<int64_t>();
+      const auto* mat_end_offsets_ptr = mat_el_end_indices_host.data_ptr<int64_t>();
       int64_t max_nnz = 0;
-      int64_t start_idx = 0;
+      int64_t start_offset = 0;
       for (const auto i : c10::irange(num_matrices)) {
-        const auto end_idx = end_indices[i];
-        const auto curr_nnz = end_idx - start_idx;
-        max_nnz = std::max(
-          // count nnz only for misaligned locations, i.e.
-          // parity(start_idx) != parity(row_alignment_parity)
-          ((start_idx ^ row_alignment_parity) & 1) * curr_nnz,
-          max_nnz
+        const auto* row_indices_ptr = row_indices_start_ptr + start_offset;
+        const int64_t row_indices_ptr_not_aligned = (
+            (reinterpret_cast<uintptr_t>(row_indices_ptr) % 16) / 8
         );
-        start_idx = end_idx;
+        const auto end_offset = mat_end_offsets_ptr[i];
+        const auto nnz = end_offset - start_offset;
+        max_nnz = std::max(row_indices_ptr_not_aligned * nnz, max_nnz);
+        start_offset = end_offset;
       }
-      // }
       return max_nnz ? at::empty({max_nnz}, indices.options()) : Tensor{};
     }
 #endif
@@ -842,9 +838,8 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
       ) {
         int64_t mat_el_end_idx = mat_el_end_indices[cur_mat_num];
 
-        // Create tensors to view just the current set of matrices
+        // Create variables to view just the current set of matrices
         int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
-
         cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
         auto* row_indices_ptr = [&]() -> auto* {
           auto* start = row_indices_start_ptr + mat_el_begin_idx;
