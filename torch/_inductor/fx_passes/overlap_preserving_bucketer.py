@@ -10,7 +10,6 @@ from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
     _schedulable_wait_node,
-    bucket_key,
     BucketMode,
     get_full_bucket_key,
     has_mergeable_all_gather_convert_dtype,
@@ -312,8 +311,8 @@ class OverlapPreservingBucketer:
                 OrderedSet
             )
             for start in collectives:
-                key = bucket_key(start, self.bucket_mode)
-                if key is not None:
+                key = get_full_bucket_key(start, self.bucket_mode)
+                if key[1] is not None:
                     grouped_collectives[key].add(start)
 
             for key, collective_group in grouped_collectives.items():
