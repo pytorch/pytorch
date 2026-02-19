@@ -1,7 +1,6 @@
 # Owner(s): ["module: spin"]
 
 import shutil
-
 from pathlib import Path
 
 from spin.tests.testutil import spin
@@ -25,7 +24,6 @@ def test_autotype(main_pkg, tmp_path):
         typed_contents = f.read()
 
     assert typed_contents == retyped_contents
-
 
 
 if __name__ == "__main__":

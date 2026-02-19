@@ -3,6 +3,7 @@ import pathlib
 
 import pytest
 
+
 def dir_switcher(path):
     # Pre-test code
     cwd = os.getcwd()
