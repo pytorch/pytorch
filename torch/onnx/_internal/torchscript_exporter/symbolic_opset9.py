@@ -3076,6 +3076,7 @@ def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps):
     x2_l2 = symbolic_helper._reducesum_helper(
         g, mul(g, x2, x2), axes_i=[dim], keepdims_i=0
     )
+    # pyrefly: ignore [no-matching-overload]
     div_tens = max(
         g, sqrt(g, mul(g, x1_l2, x2_l2)), g.op("Constant", value_t=torch.tensor([eps]))
     )
@@ -6319,7 +6320,9 @@ def prim_min(g: jit_utils.GraphContext, self, other=None):
     if not other:
         if symbolic_helper._is_packed_list(self):
             self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
+        # pyrefly: ignore [no-matching-overload]
         return min(g, self)
+    # pyrefly: ignore [no-matching-overload]
     return min(g, self, other)
 
 
