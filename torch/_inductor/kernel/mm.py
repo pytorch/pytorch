@@ -626,6 +626,17 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    # When K == 1, decompose to pointwise ops: beta * inp + alpha * (mat1 * mat2)
+    if mat1.get_device().type in ["cuda"] and layout is None:
+        mm_result = _try_decompose_mm_k1(mat1, mat2)
+        if mm_result is not None:
+            if alpha != 1:
+                mm_result = lowerings[aten.mul](alpha, mm_result)
+            if beta == 0:
+                return mm_result
+            bias = inp if beta == 1 else lowerings[aten.mul](beta, inp)
+            return lowerings[aten.add](bias, mm_result)
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
