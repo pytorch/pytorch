@@ -3082,6 +3082,18 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     best_choice = min(fallback_choices, key=lambda c: timings[c])
 
+        # Test-only: force choosing decomposition (non-fallback) if available
+        if config.test_configs.force_custom_op_decomposition:
+
+            def is_fallback(c: ChoiceCaller) -> bool:
+                return isinstance(c, ExternKernelCaller) and getattr(
+                    c.choice, "use_fallback_kernel", False
+                )
+
+            non_fallback_choices = [c for c in timings if not is_fallback(c)]
+            if non_fallback_choices:
+                best_choice = min(non_fallback_choices, key=lambda c: timings[c])
+
         choice = best_choice
         node = choice.output_node()
 
