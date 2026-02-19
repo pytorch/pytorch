@@ -1,6 +1,7 @@
 from ._flat_param import FlatParameter as FlatParameter
 from ._fully_shard import (
     CPUOffloadPolicy,
+    DataParallelMeshDimNames,
     FSDPModule,
     fully_shard,
     MixedPrecisionPolicy,
@@ -49,6 +50,7 @@ __all__ = [
     "StateDictType",
     # FSDP2
     "CPUOffloadPolicy",
+    "DataParallelMeshDimNames",
     "FSDPModule",
     "fully_shard",
     "MixedPrecisionPolicy",
@@ -60,6 +62,7 @@ __all__ = [
 
 # Set namespace for exposed private names
 CPUOffloadPolicy.__module__ = "torch.distributed.fsdp"
+DataParallelMeshDimNames.__module__ = "torch.distributed.fsdp"
 FSDPModule.__module__ = "torch.distributed.fsdp"
 fully_shard.__module__ = "torch.distributed.fsdp"
 MixedPrecisionPolicy.__module__ = "torch.distributed.fsdp"

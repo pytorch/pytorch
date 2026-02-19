@@ -13,6 +13,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from ._fsdp_common import (
     _is_composable_with_fsdp,
     DataParallelMeshInfo,
+    DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Any
 
-    from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+    from ._fsdp_api import DataParallelMeshDimNames, MixedPrecisionPolicy, OffloadPolicy
     from ._fsdp_state import FSDPState
 
 
@@ -42,13 +43,36 @@ def _validate_module(module: nn.Module, func_name: str) -> None:
         )
 
 
-def _validate_mesh(mesh: "DeviceMesh") -> None:
+def _validate_mesh(
+    mesh: "DeviceMesh",
+    dp_mesh_dim_names: "DataParallelMeshDimNames | None" = None,
+) -> None:
     """
     Validate that the mesh can be used with fully_shard.
 
-    Raises ValueError if the mesh is not 1D or 2D.
-    Raises AssertionError if the mesh is 2D but mesh_dim_names is not specified.
+    When ``dp_mesh_dim_names`` is provided, validates that the named dims
+    exist in the mesh and at least one of shard/replicate is set.
+    Otherwise raises ValueError if the mesh is not 1D or 2D.
     """
+    if dp_mesh_dim_names is not None:
+        if dp_mesh_dim_names.shard is None and dp_mesh_dim_names.replicate is None:
+            raise ValueError(
+                "At least one of shard or replicate must be set in dp_mesh_dim_names"
+            )
+        if mesh.mesh_dim_names is None:
+            raise ValueError(
+                "mesh must have mesh_dim_names when dp_mesh_dim_names is provided"
+            )
+        names_to_check: list[str] = list(dp_mesh_dim_names.shard_names)
+        if dp_mesh_dim_names.replicate is not None:
+            names_to_check.append(dp_mesh_dim_names.replicate)
+        for name in names_to_check:
+            if name not in mesh.mesh_dim_names:
+                raise ValueError(
+                    f"Mesh dim name '{name}' not found in mesh.mesh_dim_names "
+                    f"{mesh.mesh_dim_names}"
+                )
+        return
     if mesh.ndim not in (1, 2):
         raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
     if mesh.ndim == 2 and mesh.mesh_dim_names is None:
@@ -57,16 +81,76 @@ def _validate_mesh(mesh: "DeviceMesh") -> None:
         )
 
 
-def _get_mesh_info(mesh: "DeviceMesh") -> "FSDPMeshInfo":
+def _get_mesh_info(
+    mesh: "DeviceMesh",
+    dp_mesh_dim_names: "DataParallelMeshDimNames | None" = None,
+) -> "DataParallelMeshInfo":
     """
     Get the appropriate mesh info for the given mesh.
 
+    When ``dp_mesh_dim_names`` is provided, extracts the DP submesh from the
+    full SPMD mesh and returns FSDPMeshInfo, HSDPMeshInfo, or DDPMeshInfo
+    with ``dp_mesh_dim_names`` set and ``is_spmd_mesh`` as True.
+
     Returns FSDPMeshInfo for 1D mesh, HSDPMeshInfo for 2D mesh.
     """
+    if dp_mesh_dim_names is not None:
+        return _get_mesh_info_from_named_dims(mesh, dp_mesh_dim_names)
     if mesh.ndim == 1:
         return FSDPMeshInfo(mesh, shard_mesh_dim=0)
     else:
         return HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+
+
+def _get_mesh_info_from_named_dims(
+    mesh: "DeviceMesh",
+    dp_mesh_dim_names: "DataParallelMeshDimNames",
+) -> "DataParallelMeshInfo":
+    shard_names = dp_mesh_dim_names.shard_names
+    replicate = dp_mesh_dim_names.replicate
+
+    mesh_info: DataParallelMeshInfo
+    if len(shard_names) == 0:
+        # Replicate-only (DDP)
+        assert replicate is not None
+        dp_mesh = mesh[replicate]
+        mesh_info = DDPMeshInfo(
+            dp_mesh, replicate_mesh_dim=0, dp_mesh_dim_names=dp_mesh_dim_names
+        )
+    elif len(shard_names) == 1 and replicate is None:
+        # 1D FSDP
+        dp_mesh = mesh[shard_names[0]]
+        mesh_info = FSDPMeshInfo(
+            dp_mesh, shard_mesh_dim=0, dp_mesh_dim_names=dp_mesh_dim_names
+        )
+    elif len(shard_names) == 1 and replicate is not None:
+        # HSDP: 2D submesh with replicate dim first, shard dim second
+        dp_mesh = mesh[replicate, shard_names[0]]
+        mesh_info = HSDPMeshInfo(
+            dp_mesh,
+            shard_mesh_dim=1,
+            replicate_mesh_dim=0,
+            dp_mesh_dim_names=dp_mesh_dim_names,
+        )
+    elif len(shard_names) > 1 and replicate is None:
+        # Multi-shard FSDP: flatten multiple shard dims into one
+        dp_mesh = mesh[shard_names]._flatten("_".join(shard_names))
+        mesh_info = FSDPMeshInfo(
+            dp_mesh, shard_mesh_dim=0, dp_mesh_dim_names=dp_mesh_dim_names
+        )
+    else:
+        # Multi-shard HSDP: replicate + flattened shard dims
+        assert len(shard_names) > 1 and replicate is not None
+        shard_mesh = mesh[shard_names]._flatten("_".join(shard_names))
+        replicate_mesh = mesh[replicate]
+        dp_mesh = DeviceMesh._concatenate([replicate_mesh, shard_mesh])
+        mesh_info = HSDPMeshInfo(
+            dp_mesh,
+            shard_mesh_dim=1,
+            replicate_mesh_dim=0,
+            dp_mesh_dim_names=dp_mesh_dim_names,
+        )
+    return mesh_info
 
 
 def _get_post_forward_mesh_info(
