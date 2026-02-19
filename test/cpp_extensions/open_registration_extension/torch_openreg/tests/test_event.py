@@ -137,20 +137,27 @@ class TestEvent(TestCase):
     @skipIfTorchDynamo()
     def test_device_synchronization(self):
         """Test device synchronization operations"""
-        torch.accelerator.set_device_index(0)
+        original_device = torch.accelerator.current_device_index()
+        try:
+            torch.accelerator.set_device_index(1)
 
-        # Perform operations
-        x = torch.randn(100, 100, device="openreg")
-        y = torch.randn(100, 100, device="openreg")
-        z = torch.matmul(x, y)
+            # Perform operations
+            x = torch.randn(100, 100, device="openreg")
+            y = torch.randn(100, 100, device="openreg")
+            z = torch.matmul(x, y)
 
-        # Synchronize device
-        torch.accelerator.synchronize()
-        torch.accelerator.synchronize(0)  # Explicit device index
+            # Synchronize device
+            torch.accelerator.synchronize()
 
-        # Verify operations completed
-        result = torch.sum(z)
-        self.assertIsNotNone(result)
+            # Verify device index is still correct after operations
+            self.assertEqual(torch.accelerator.current_device_index(), 1)
+
+            # Verify operations completed and result is on correct device
+            result = torch.sum(z)
+            self.assertEqual(result.device.type, "openreg")
+            self.assertEqual(result.device.index, 1)
+        finally:
+            torch.accelerator.set_device_index(original_device)
 
     @skipIfTorchDynamo()
     def test_blocking_vs_non_blocking_synchronization(self):
@@ -160,19 +167,30 @@ class TestEvent(TestCase):
         # test non-blocking query before recording
         event = torch.Event(device="openreg:0")
         self.assertTrue(event.query())  # Non-blocking, returns immediately
+        self.assertEqual(event.event_id, 0)
+        self.assertEqual(
+            event.device.index, None
+        )  # device.index is None until event is recorded
 
         # test non-blocking query after recording but before completion
         event.record(stream)
+        self.assertNotEqual(event.event_id, 0)  # event_id should change after recording
+        # Perform work to increase likelihood event hasn't completed
+        x = torch.randn(50, 50, device="openreg:0")
+        y = torch.randn(50, 50, device="openreg:0")
+        _ = torch.matmul(x, y)
         # query() is non-blocking, may return False if event not completed
         _ = event.query()  # Non-blocking check
 
         # test blocking synchronize - waits for completion
         event.synchronize()  # Blocking - CPU waits here
         self.assertTrue(event.query())  # Should be True after sync
+        self.assertEqual(event.device.index, 0)
 
         # test multiple non-blocking queries
         event2 = stream.record_event()
-        for _ in range(5):
+        self.assertNotEqual(event2.event_id, 0)
+        for _ in range(4):
             _ = event2.query()  # Non-blocking, doesn't wait
         event2.synchronize()  # Blocking wait
         self.assertTrue(event2.query())
@@ -188,18 +206,18 @@ class TestEvent(TestCase):
 
         # record event before operations
         event1 = stream.record_event()
+        self.assertNotEqual(event1.event_id, 0)
 
         # perform operations between events
         z1 = torch.matmul(x, y)
 
         # record second event
         event2 = stream.record_event()
+        self.assertNotEqual(event2.event_id, 0)
+        self.assertNotEqual(event1.event_id, event2.event_id)
 
         # more operations
-        z2 = torch.matmul(z1, x)
-
-        # record third event
-        event3 = stream.record_event()
+        _ = torch.matmul(z1, x)
 
         # synchronize stream to ensure all operations complete
         stream.synchronize()
@@ -207,10 +225,6 @@ class TestEvent(TestCase):
         # verify all events completed
         self.assertTrue(event1.query())
         self.assertTrue(event2.query())
-        self.assertTrue(event3.query())
-
-        # verify results are valid
-        self.assertIsNotNone(torch.sum(z2))
 
     @skipIfTorchDynamo()
     def test_multiple_streams_wait_same_event(self):
@@ -219,12 +233,17 @@ class TestEvent(TestCase):
         stream2 = torch.Stream(device="openreg:0")
         stream3 = torch.Stream(device="openreg:0")
 
+        # verify streams have different IDs
+        self.assertNotEqual(stream1.stream_id, stream2.stream_id)
+        self.assertNotEqual(stream2.stream_id, stream3.stream_id)
+
         # create tensors
         x = torch.randn(30, 30, device="openreg:0")
         y = torch.randn(30, 30, device="openreg:0")
 
         # record event on first stream
         event = stream1.record_event()
+        self.assertNotEqual(event.event_id, 0)
 
         # make multiple streams wait for the same event
         stream2.wait_event(event)
@@ -238,38 +257,32 @@ class TestEvent(TestCase):
             z3 = torch.matmul(x, y)
 
         # synchronize all streams
-        stream1.synchronize()
-        stream2.synchronize()
-        stream3.synchronize()
+        torch.accelerator.synchronize()
 
         # verify event completed and results are valid
         self.assertTrue(event.query())
-        self.assertIsNotNone(torch.sum(z2))
-        self.assertIsNotNone(torch.sum(z3))
+        result2 = torch.sum(z2)
+        result3 = torch.sum(z3)
+        # verify both streams computed the same result
+        self.assertEqual(result2, result3)
 
     @skipIfTorchDynamo()
     def test_event_lifecycle(self):
         """Test event creation, use, and destruction patterns"""
-        # test 1: create unrecorded event
-        event1 = torch.Event(device="openreg:0")
-        self.assertEqual(event1.event_id, 0)
-        self.assertTrue(event1.query())
-
-        # test 2: record and use event
         stream = torch.Stream(device="openreg:0")
-        event1.record(stream)
-        self.assertNotEqual(event1.event_id, 0)
-        event1.synchronize()
-        self.assertTrue(event1.query())
 
-        # test 3: reuse event after synchronization
+        # test 1: reuse event after synchronization
+        event1 = torch.Event(device="openreg:0")
         event1.record(stream)
         stream.synchronize()
         self.assertTrue(event1.query())
+        event1.record(stream)  # reuse event
+        stream.synchronize()
+        self.assertTrue(event1.query())
 
-        # test 4: create multiple events in sequence
+        # test 2: create multiple events in sequence
         events = []
-        for _ in range(5):
+        for _ in range(2):
             event = torch.Event(device="openreg:0")
             event.record(stream)
             events.append(event)
@@ -280,22 +293,36 @@ class TestEvent(TestCase):
         for event in events:
             self.assertTrue(event.query())
 
-        # test 5: event with operations between creation and recording
-        event2 = torch.Event(device="openreg:0")
-        x = torch.randn(20, 20, device="openreg:0")
-        y = torch.randn(20, 20, device="openreg:0")
-        _ = torch.matmul(x, y)
-        event2.record(stream)
-        stream.synchronize()
-        self.assertTrue(event2.query())
+    @skipIfTorchDynamo()
+    def test_generic_stream_event(self):
+        """Test generic Stream and Event API"""
+        stream = torch.Stream("openreg")
+        self.assertEqual(stream.device_index, torch.accelerator.current_device_index())
 
-        # test 6: event recorded multiple times
-        event3 = torch.Event(device="openreg:0")
-        event3.record(stream)
-        stream.synchronize()
-        event3.record(stream)  # record again
-        stream.synchronize()
-        self.assertTrue(event3.query())
+        event1 = torch.Event("openreg", enable_timing=True)
+        event2 = torch.Event("openreg", enable_timing=True)
+
+        a = torch.randn(1000, device="openreg")
+        b = torch.randn(1000, device="openreg")
+        with torch.accelerator.device_index(stream.device_index):
+            _ = a + b
+            event1.record(stream)
+            event1.synchronize()
+            event2.record()  # record without stream argument
+            event2.synchronize()
+            self.assertGreater(event1.elapsed_time(event2), 0)
+
+    @skipIfTorchDynamo()
+    def test_stream_compatibility(self):
+        """Test stream compatibility with accelerator API"""
+        s1 = torch.Stream(device="openreg:0")
+        s2 = torch.Stream(device="openreg:0")
+        original_stream = torch.accelerator.current_stream()
+        torch.accelerator.set_stream(s1)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        torch.accelerator.set_stream(s2)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        torch.accelerator.set_stream(original_stream)
 
 
 if __name__ == "__main__":

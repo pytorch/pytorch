@@ -136,6 +136,7 @@ class TestDevice(TestCase):
         # Query device name
         device = torch.device("openreg:0")
         self.assertEqual(device.type, "openreg")
+        self.assertEqual(device.index, 0)
         device_str = str(device)
         self.assertIn("openreg", device_str)
         self.assertIn("0", device_str)
@@ -148,10 +149,19 @@ class TestDevice(TestCase):
         self.assertIsInstance(supported_dtypes, set)
         self.assertGreater(len(supported_dtypes), 0)
 
+        # Verify capability consistency across devices
+        capability1 = torch.accelerator.get_device_capability("openreg:1")
+        self.assertEqual(
+            capability["supported_dtypes"], capability1["supported_dtypes"]
+        )
+
         # Query device memory information
         try:
             memory_info = torch.accelerator.get_memory_info()
             self.assertIsInstance(memory_info, dict)
+            # Verify memory_info has expected structure if available
+            if "allocated" in memory_info:
+                self.assertGreaterEqual(memory_info["allocated"], 0)
         except (AttributeError, NotImplementedError):
             # If get_memory_info is not available or not implemented, skip memory check
             pass
@@ -164,7 +174,12 @@ class TestDevice(TestCase):
         x = torch.randn(2, 3, device="openreg")
         y = torch.randn(2, 3, device="openreg")
         z = x + y
-        _ = torch.sum(z)
+        result = torch.sum(z)
+
+        # Verify tensors are on correct device
+        self.assertEqual(x.device.index, original_device)
+        self.assertEqual(z.device.index, original_device)
+        self.assertEqual(result.device.index, original_device)
 
         # Device should remain unchanged
         self.assertEqual(torch.accelerator.current_device_index(), original_device)
@@ -175,7 +190,11 @@ class TestDevice(TestCase):
 
         # Perform more operations
         a = torch.randn(5, 5, device="openreg")
-        _ = torch.matmul(a, a)
+        result2 = torch.matmul(a, a)
+
+        # Verify tensor is on device 1
+        self.assertEqual(a.device.index, 1)
+        self.assertEqual(result2.device.index, 1)
 
         # Device should still be 1
         self.assertEqual(torch.accelerator.current_device_index(), 1)
@@ -191,6 +210,9 @@ class TestDevice(TestCase):
         try:
             with torch.accelerator.device_index(1):
                 self.assertEqual(torch.accelerator.current_device_index(), 1)
+                # Create tensor in context
+                x = torch.randn(2, 2, device="openreg")
+                self.assertEqual(x.device.index, 1)
                 # Simulate an exception
                 raise ValueError("Test exception")
         except ValueError:
@@ -214,6 +236,7 @@ class TestDevice(TestCase):
 
     def test_concurrent_device_operations(self):
         """Test concurrent device operations from multiple threads"""
+        original_device = torch.accelerator.current_device_index()
         num_threads = 4
         num_operations = 50
         errors = []
@@ -240,7 +263,17 @@ class TestDevice(TestCase):
                     x = torch.randn(10, 10, device="openreg")
                     y = torch.randn(10, 10, device="openreg")
                     z = torch.matmul(x, y)
-                    _ = torch.sum(z)
+                    result = torch.sum(z)
+
+                    # Verify tensors are on correct device
+                    if x.device.index != device_idx:
+                        errors.append(
+                            f"Thread {thread_id}: Tensor x on wrong device, expected {device_idx}, got {x.device.index}"
+                        )
+                    if result.device.index != device_idx:
+                        errors.append(
+                            f"Thread {thread_id}: Result tensor on wrong device, expected {device_idx}, got {result.device.index}"
+                        )
 
                     # Verify device didn't change unexpectedly
                     if torch.accelerator.current_device_index() != device_idx:
@@ -261,7 +294,7 @@ class TestDevice(TestCase):
         self.assertEqual(len(errors), 0, f"Errors occurred: {errors}")
 
         # Restore original device
-        torch.accelerator.set_device_index(0)
+        torch.accelerator.set_device_index(original_device)
 
     def test_device_initialization_state(self):
         """Test device initialization and state management"""
@@ -312,7 +345,10 @@ class TestDevice(TestCase):
 
         # can still create tensors after error
         z = torch.randn(5, 5, device="openreg")
-        self.assertEqual(z.device.type, "openreg")
+        self.assertEqual(z.device.index, original_device)
+        # Verify tensor operations still work
+        w = torch.randn(5, 5, device="openreg")
+        _ = torch.matmul(z, w)  # Operation should complete successfully
 
 
 if __name__ == "__main__":

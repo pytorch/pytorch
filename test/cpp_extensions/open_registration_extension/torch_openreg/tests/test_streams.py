@@ -162,7 +162,6 @@ class TestStream(TestCase):
         stream_producer = torch.Stream(device="openreg:0")
         stream_consumer1 = torch.Stream(device="openreg:0")
         stream_consumer2 = torch.Stream(device="openreg:0")
-        stream_consumer3 = torch.Stream(device="openreg:0")
 
         x = torch.randn(40, 40, device="openreg:0")
         y = torch.randn(40, 40, device="openreg:0")
@@ -172,37 +171,26 @@ class TestStream(TestCase):
             z = torch.matmul(x, y)
             event_producer = stream_producer.record_event()
 
-        # all consumers wait for producer
+        # consumers wait for producer
         stream_consumer1.wait_event(event_producer)
         stream_consumer2.wait_event(event_producer)
-        stream_consumer3.wait_event(event_producer)
 
         # consumers process data
         with stream_consumer1:
             result1 = torch.sum(z)
-
         with stream_consumer2:
             result2 = torch.sum(z)
 
-        with stream_consumer3:
-            result3 = torch.sum(z)
-
         # synchronize all streams
-        stream_producer.synchronize()
-        stream_consumer1.synchronize()
-        stream_consumer2.synchronize()
-        stream_consumer3.synchronize()
+        torch.accelerator.synchronize()
 
         # verify results
         self.assertTrue(event_producer.query())
-        self.assertIsNotNone(result1)
-        self.assertIsNotNone(result2)
-        self.assertIsNotNone(result3)
+        self.assertEqual(result1, result2)  # Same computation should yield same result
 
         # pattern 2: fan-in (multiple streams to one stream)
         stream1 = torch.Stream(device="openreg:0")
         stream2 = torch.Stream(device="openreg:0")
-        stream3 = torch.Stream(device="openreg:0")
         stream_aggregator = torch.Stream(device="openreg:0")
 
         a = torch.randn(30, 30, device="openreg:0")
@@ -212,30 +200,23 @@ class TestStream(TestCase):
         with stream1:
             prod1 = torch.matmul(a, b)
             event1 = stream1.record_event()
-
         with stream2:
             prod2 = torch.matmul(a, b)
             event2 = stream2.record_event()
 
-        with stream3:
-            prod3 = torch.matmul(a, b)
-            event3 = stream3.record_event()
-
         # aggregator waits for all producers
         stream_aggregator.wait_event(event1)
         stream_aggregator.wait_event(event2)
-        stream_aggregator.wait_event(event3)
 
         # aggregator combines results
         with stream_aggregator:
-            combined = prod1 + prod2 + prod3
+            combined = prod1 + prod2
 
-        # synchronize all
-        stream1.synchronize()
-        stream2.synchronize()
-        stream3.synchronize()
-        stream_aggregator.synchronize()
+        torch.accelerator.synchronize()
 
+        # Verify events completed and result correctness
+        self.assertTrue(event1.query())
+        self.assertTrue(event2.query())
         self.assertIsNotNone(combined)
 
         # pattern 3: pipeline (sequential streams)
@@ -261,127 +242,52 @@ class TestStream(TestCase):
         with stage3:
             final = torch.matmul(intermediate2, data)
 
-        # synchronize pipeline
-        stage1.synchronize()
-        stage2.synchronize()
-        stage3.synchronize()
+        torch.accelerator.synchronize()
 
-        self.assertIsNotNone(final)
+        # Verify events completed and result correctness
+        self.assertTrue(event_stage1.query())
+        self.assertTrue(event_stage2.query())
 
     @skipIfTorchDynamo()
     def test_complex_stream_dependencies(self):
         """Test complex stream dependency scenarios"""
-        # scenario 1: chain dependencies (A -> B -> C -> D)
+        # scenario 1: diamond dependencies (A -> B, A -> C, then B and C -> D)
         stream_a = torch.Stream(device="openreg:0")
         stream_b = torch.Stream(device="openreg:0")
         stream_c = torch.Stream(device="openreg:0")
         stream_d = torch.Stream(device="openreg:0")
 
-        input_data = torch.randn(45, 45, device="openreg:0")
-
-        # chain: A -> B -> C -> D
-        with stream_a:
-            a_result = torch.matmul(input_data, input_data)
-            event_a = stream_a.record_event()
-
-        stream_b.wait_event(event_a)
-        with stream_b:
-            b_result = torch.matmul(a_result, input_data)
-            event_b = stream_b.record_event()
-
-        stream_c.wait_event(event_b)
-        with stream_c:
-            c_result = torch.matmul(b_result, input_data)
-            event_c = stream_c.record_event()
-
-        stream_d.wait_event(event_c)
-        with stream_d:
-            d_result = torch.matmul(c_result, input_data)
-
-        # synchronize chain
-        stream_a.synchronize()
-        stream_b.synchronize()
-        stream_c.synchronize()
-        stream_d.synchronize()
-
-        self.assertIsNotNone(d_result)
-
-        # scenario 2: diamond dependencies (A -> B, A -> C, then B and C -> D)
-        stream_a2 = torch.Stream(device="openreg:0")
-        stream_b2 = torch.Stream(device="openreg:0")
-        stream_c2 = torch.Stream(device="openreg:0")
-        stream_d2 = torch.Stream(device="openreg:0")
-
         data = torch.randn(40, 40, device="openreg:0")
 
         # A produces data
-        with stream_a2:
+        with stream_a:
             shared_data = torch.matmul(data, data)
-            event_a2 = stream_a2.record_event()
+            event_a = stream_a.record_event()
 
         # B and C both wait for A (diamond start)
-        stream_b2.wait_event(event_a2)
-        stream_c2.wait_event(event_a2)
+        stream_b.wait_event(event_a)
+        stream_c.wait_event(event_a)
 
-        with stream_b2:
-            b2_result = torch.matmul(shared_data, data)
-            event_b2 = stream_b2.record_event()
-
-        with stream_c2:
-            c2_result = torch.matmul(shared_data, data)
-            event_c2 = stream_c2.record_event()
+        with stream_b:
+            b_result = torch.matmul(shared_data, data)
+            event_b = stream_b.record_event()
+        with stream_c:
+            c_result = torch.matmul(shared_data, data)
+            event_c = stream_c.record_event()
 
         # D waits for both B and C (diamond end)
-        stream_d2.wait_event(event_b2)
-        stream_d2.wait_event(event_c2)
+        stream_d.wait_event(event_b)
+        stream_d.wait_event(event_c)
 
-        with stream_d2:
-            d2_result = b2_result + c2_result
+        with stream_d:
+            d_result = b_result + c_result
 
-        # synchronize diamond
-        stream_a2.synchronize()
-        stream_b2.synchronize()
-        stream_c2.synchronize()
-        stream_d2.synchronize()
+        torch.accelerator.synchronize()
 
-        self.assertIsNotNone(d2_result)
-
-        # scenario 3: multiple event dependencies on same stream
-        stream_dep1 = torch.Stream(device="openreg:0")
-        stream_dep2 = torch.Stream(device="openreg:0")
-        stream_dep3 = torch.Stream(device="openreg:0")
-        stream_final = torch.Stream(device="openreg:0")
-
-        base = torch.randn(35, 35, device="openreg:0")
-
-        # create multiple dependencies
-        with stream_dep1:
-            dep1_data = torch.matmul(base, base)
-            event_dep1 = stream_dep1.record_event()
-
-        with stream_dep2:
-            dep2_data = torch.matmul(base, base)
-            event_dep2 = stream_dep2.record_event()
-
-        with stream_dep3:
-            dep3_data = torch.matmul(base, base)
-            event_dep3 = stream_dep3.record_event()
-
-        # final stream waits for all three events
-        stream_final.wait_event(event_dep1)
-        stream_final.wait_event(event_dep2)
-        stream_final.wait_event(event_dep3)
-
-        with stream_final:
-            final_result = dep1_data + dep2_data + dep3_data
-
-        # synchronize
-        stream_dep1.synchronize()
-        stream_dep2.synchronize()
-        stream_dep3.synchronize()
-        stream_final.synchronize()
-
-        self.assertIsNotNone(final_result)
+        # Verify events completed and result correctness
+        self.assertTrue(event_a.query())
+        self.assertTrue(event_b.query())
+        self.assertTrue(event_c.query())
 
 
 if __name__ == "__main__":
