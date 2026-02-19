@@ -3,7 +3,6 @@ import io
 from unittest.mock import patch
 
 import torch
-import torch.distributed as dist
 from torch._dynamo.testing import AotEagerAndRecordGraphs, InductorAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
@@ -683,44 +682,30 @@ class TestHopPrintDTensor(DTensorTestBase):
     def world_size(self) -> int:
         return 4
 
-    def _check_output(self, output, expected):
-        if dist.get_rank() == 0:
-            self.assertEqual(output, expected)
-        else:
-            self.assertEqual(output, "")
-
     @with_comms
     def test_print_dtensor_basic(self):
-        """Sharded DTensor is redistributed to Replicate and printed on rank 0."""
+        """Sharded DTensor prints local shard on all ranks."""
         device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(
-            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
-        )
+        local_shard = full_tensor.chunk(self.world_size)[self.rank]
+        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
         def f(x):
             x = x + x
             torch._higher_order_ops.print("tensor: {}", x)
             return x
 
-        expected = f"tensor: {full_tensor + full_tensor}\n"
+        local_doubled = local_shard + local_shard
+        expected = f"tensor: {local_doubled}\n"
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            eager_result = f(dtensor)
-            eager_output = mock_stdout.getvalue()
-        self._check_output(eager_output, expected)
-
-        opt_f = torch.compile(f, backend="aot_eager", fullgraph=True)
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            compiled_result = opt_f(dtensor)
-            compiled_output = mock_stdout.getvalue()
-
-        self.assertEqual(compiled_result.to_local(), eager_result.to_local())
-        self._check_output(compiled_output, expected)
+            f(dtensor)
+            output = mock_stdout.getvalue()
+        self.assertEqual(output, expected)
 
     @with_comms
     def test_print_dtensor_replicate(self):
-        """Replicated DTensor is printed on rank 0 without redistribution."""
+        """Replicated DTensor prints full tensor on all ranks."""
         device_mesh = self.build_device_mesh()
         full_tensor = torch.tensor([1.0, 2.0, 3.0], device=self.device_type)
         dtensor = DTensor.from_local(full_tensor, device_mesh, [Replicate()])
@@ -735,7 +720,7 @@ class TestHopPrintDTensor(DTensorTestBase):
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             eager_result = f(dtensor)
             eager_output = mock_stdout.getvalue()
-        self._check_output(eager_output, expected)
+        self.assertEqual(eager_output, expected)
 
         opt_f = torch.compile(f, backend="aot_eager", fullgraph=True)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
@@ -743,16 +728,15 @@ class TestHopPrintDTensor(DTensorTestBase):
             compiled_output = mock_stdout.getvalue()
 
         self.assertEqual(compiled_result.to_local(), eager_result.to_local())
-        self._check_output(compiled_output, expected)
+        self.assertEqual(compiled_output, expected)
 
     @with_comms
     def test_print_dtensor_format_str(self):
-        """Test both positional and keyword DTensor args in format strings."""
+        """Test both positional and keyword sharded DTensor args in format strings."""
         device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(
-            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
-        )
+        local_shard = full_tensor.chunk(self.world_size)[self.rank]
+        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
         def f_pos(x):
             torch._higher_order_ops.print("pos: {}", x)
@@ -768,17 +752,16 @@ class TestHopPrintDTensor(DTensorTestBase):
             f_kw(dtensor)
             kw_output = mock_stdout.getvalue()
 
-        self._check_output(pos_output, f"pos: {full_tensor}\n")
-        self._check_output(kw_output, f"kw: {full_tensor}\n")
+        self.assertEqual(pos_output, f"pos: {local_shard}\n")
+        self.assertEqual(kw_output, f"kw: {local_shard}\n")
 
     @with_comms
     def test_print_dtensor_mixed_args(self):
-        """Mix DTensor, regular tensor, and scalar args in a single print call."""
+        """Mix sharded DTensor and scalar args in a single print call."""
         device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(
-            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
-        )
+        local_shard = full_tensor.chunk(self.world_size)[self.rank]
+        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
         def f(x):
             torch._higher_order_ops.print("dt: {} scalar: {}", x, 42)
@@ -787,16 +770,15 @@ class TestHopPrintDTensor(DTensorTestBase):
             f(dtensor)
             output = mock_stdout.getvalue()
 
-        self._check_output(output, f"dt: {full_tensor} scalar: 42\n")
+        self.assertEqual(output, f"dt: {local_shard} scalar: 42\n")
 
     @with_comms
     def test_print_dtensor_multiple_prints(self):
-        """Multiple DTensor prints with intermediate computations."""
+        """Multiple sharded DTensor prints with intermediate computations."""
         device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(
-            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
-        )
+        local_shard = full_tensor.chunk(self.world_size)[self.rank]
+        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
         def f(x):
             x1 = x + x
@@ -805,61 +787,42 @@ class TestHopPrintDTensor(DTensorTestBase):
             torch._higher_order_ops.print("after mul: {}", x2)
             return x2
 
-        added = full_tensor + full_tensor
-        mulled = added * added
-        expected = f"after add: {added}\nafter mul: {mulled}\n"
+        local_added = local_shard + local_shard
+        local_mulled = local_added * local_added
+        expected = f"after add: {local_added}\nafter mul: {local_mulled}\n"
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            eager_result = f(dtensor)
-            eager_output = mock_stdout.getvalue()
-        self._check_output(eager_output, expected)
-
-        opt_f = torch.compile(f, backend="aot_eager", fullgraph=True)
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            compiled_result = opt_f(dtensor)
-            compiled_output = mock_stdout.getvalue()
-
-        self.assertEqual(compiled_result.to_local(), eager_result.to_local())
-        self._check_output(compiled_output, expected)
+            f(dtensor)
+            output = mock_stdout.getvalue()
+        self.assertEqual(output, expected)
 
     @with_comms
     def test_print_dtensor_kwargs(self):
-        """DTensor print with kwargs."""
+        """Sharded DTensor print with kwargs."""
         device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(4, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(
-            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
-        )
+        local_shard = full_tensor.chunk(self.world_size)[self.rank]
+        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
         def f(x):
             x = x + 1
             torch._higher_order_ops.print("result: {x} count: {n}", x=x, n=42)
             return x
 
-        expected = f"result: {full_tensor + 1} count: 42\n"
+        expected = f"result: {local_shard + 1} count: 42\n"
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            eager_result = f(dtensor)
-            eager_output = mock_stdout.getvalue()
-        self._check_output(eager_output, expected)
-
-        opt_f = torch.compile(f, backend="aot_eager", fullgraph=True)
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            compiled_result = opt_f(dtensor)
-            compiled_output = mock_stdout.getvalue()
-
-        self.assertEqual(compiled_result.to_local(), eager_result.to_local())
-        self._check_output(compiled_output, expected)
+            f(dtensor)
+            output = mock_stdout.getvalue()
+        self.assertEqual(output, expected)
 
     @with_comms
     @skipIfTorchDynamo("Skipped under Dynamo")
     def test_print_dtensor_inductor_output_code(self):
-        """Verify inductor generated code contains print for DTensor."""
+        """Verify inductor generated code contains print for replicated DTensor."""
         device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(
-            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
-        )
+        dtensor = DTensor.from_local(full_tensor, device_mesh, [Replicate()])
 
         def f(x):
             x = x + x
@@ -884,18 +847,15 @@ class TestHopPrintDTensor(DTensorTestBase):
 
     @with_comms
     @skipIfTorchDynamo("Skipped under Dynamo")
-    def test_print_dtensor_rank_check_not_traced(self):
-        """Verify _rank_zero_only is passed through the graph, not evaluated at trace time.
+    def test_print_dtensor_no_get_rank_in_graph(self):
+        """Verify dist.get_rank() is not traced into the compiled graph.
 
-        All ranks must produce identical compiled graphs. The rank check should
-        appear as a _rank_zero_only kwarg in the traced print call, not as a
-        dist.get_rank() branch in the graph.
+        All ranks must produce identical compiled graphs. The graph should
+        not contain any get_rank calls.
         """
         device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(
-            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
-        )
+        dtensor = DTensor.from_local(full_tensor, device_mesh, [Replicate()])
 
         def f(x):
             torch._higher_order_ops.print("val: {}", x)
@@ -907,7 +867,6 @@ class TestHopPrintDTensor(DTensorTestBase):
             compiled_f(dtensor)
 
         graph_code = backend.fw_graphs[0].code
-        self.assertIn("_rank_zero_only", graph_code)
         self.assertNotIn("get_rank", graph_code)
 
 

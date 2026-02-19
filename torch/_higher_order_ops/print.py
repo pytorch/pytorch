@@ -41,13 +41,13 @@ class Print(HigherOrderOperator):
        Output: "moo 1 2"
 
     4. DTensor support:
-       When DTensor args are passed, the full (global) tensor is gathered
-       via all-gather and printed on rank 0 only.
+       DTensor args are unwrapped to local tensors via to_local() (no collective).
+       Each rank prints its own local view. For the global view of a sharded
+       tensor, call full_tensor() before passing to print.
 
-       dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
-       torch._higher_order_ops.print("activations: {}", dtensor)
-       # Rank 0 prints: "activations: tensor([0., 1., 2., ...])"
-       # Ranks 1-N: no output
+       dt = DTensor.from_local(local_shard, mesh, [Shard(0)])
+       torch._higher_order_ops.print("activations: {}", dt)
+       # Each rank prints its local shard
 
     5. Gradient printing during backward (print_backward=True):
        x = torch._higher_order_ops.print("x: {}", x, print_backward=True)
@@ -151,16 +151,6 @@ def print_fake_tensor_mode(mode, format_str: str, *args: object, **kwargs: objec
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore
 def print_impl(format_str: str, *args: object, **kwargs: object) -> None:
-    # _rank_zero_only is set by the DTensor py_impl to defer the rank check
-    # to runtime (here in CEA) instead of trace time, so all ranks produce
-    # identical compiled graphs.
-    rank_zero_only = kwargs.pop("_rank_zero_only", False)
-    if rank_zero_only:
-        import torch.distributed as dist
-
-        if dist.is_initialized() and dist.get_rank() != 0:
-            return
-
     # Ensure all immutable_dict/list in args and kwargs are converted to regular dict/list
     map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
@@ -186,15 +176,22 @@ def _register_dtensor_impl() -> None:
     @print.py_impl(DTensor)  # pyrefly: ignore [missing-attribute]
     # pyre-ignore
     def print_dtensor(format_str: str, *args: object, **kwargs: object) -> None:
-        # Gather the full (global) tensor from all ranks via all-gather collective.
-        # All ranks participate in full_tensor() (collective), then dispatch
-        # print with _rank_zero_only=True so the rank check happens at runtime
-        # in the CEA impl, not at trace time. This ensures all ranks produce
-        # identical compiled graphs.
-        local_args = pytree.tree_map_only(DTensor, DTensor.full_tensor, args)
-        local_kwargs = pytree.tree_map_only(DTensor, DTensor.full_tensor, kwargs)
+        # Unwrap DTensors to local tensors via to_local() — no collective is
+        # introduced so there is no OOM or performance risk.  Every rank prints
+        # its own local view (including Replicate, where to_local() already
+        # holds the full tensor).  Rank filtering is left to the user at the
+        # stdout/stderr level.
+        #
+        # After unwrapping, the call dispatches through the normal HOP path
+        # (ProxyTorchDispatchMode → FakeTensorMode → functionalization →
+        # inductor), so torch.compile sees the print in the graph.
+        #
+        # If the user needs the global view of a sharded tensor, they can call
+        # full_tensor() explicitly before passing it to print.
+        local_args = pytree.tree_map_only(DTensor, DTensor.to_local, args)
+        local_kwargs = pytree.tree_map_only(DTensor, DTensor.to_local, kwargs)
         print(  # pyrefly: ignore [no-matching-overload]
-            format_str, *local_args, _rank_zero_only=True, **local_kwargs
+            format_str, *local_args, **local_kwargs
         )
 
 
