@@ -141,7 +141,9 @@ def _resolve_inductor_callable(func) -> InductorCompiledCallable:
     """
     if isinstance(func, int):
         return inductor_code_side_table.get_callable(func)
-    assert isinstance(func, InductorCompiledCallable), f"Unexpected func type: {type(func)}"  # noqa: S101
+    assert isinstance(func, InductorCompiledCallable), (
+        f"Unexpected func type: {type(func)}"
+    )  # noqa: S101
     return func
 
 
@@ -208,9 +210,7 @@ def inductor_compiled_code_proxy(mode, func, inputs):
         {},
     )
 
-    return track_tensor_tree(
-        example_out, out_proxy, constant=None, tracer=mode.tracer
-    )
+    return track_tensor_tree(example_out, out_proxy, constant=None, tracer=mode.tracer)
 
 
 class WrapWithSetGradEnabled(HigherOrderOperator):
