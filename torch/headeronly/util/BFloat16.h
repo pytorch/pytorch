@@ -157,7 +157,7 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
 }
 
 #if defined(__HIPCC__)
-inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value) 
+inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value)
   : x__bf16(value) {}
 inline C10_HOST_DEVICE BFloat16::operator __hip_bfloat16() const {
   return x__bf16;
