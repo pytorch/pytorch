@@ -79,7 +79,6 @@ endmacro()
 # MODULE argument is added for clarity that CMake is searching
 # for FindHIP.cmake in Module mode
 find_package_and_print_version(HIP 1.0 MODULE)
-enable_language(HIP)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)

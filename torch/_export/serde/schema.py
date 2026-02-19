@@ -9,12 +9,17 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 16)
+SCHEMA_VERSION = (8, 17)
 TREESPEC_VERSION = 1
 
 
 # NOTE: If you updated the schema, please run `scripts/export/update_schema.py`
 # to update the auto generated files.
+#
+# There are also mappings from serialized enum values to c10 enum member names.
+# These are used by scripts/export/update_schema.py to generate C++ conversion
+# functions for oss_proxy_executor.cpp.
+# When adding new enum values, update both the enum AND the mapping.
 class ScalarType(IntEnum):
     UNKNOWN = 0
     BYTE = 1
@@ -54,6 +59,45 @@ class MemoryFormat(IntEnum):
     ChannelsLast = 2
     ChannelsLast3d = 3
     PreserveFormat = 4
+
+
+SCALAR_TYPE_TO_C10: dict[int, str] = {
+    ScalarType.BYTE: "Byte",
+    ScalarType.CHAR: "Char",
+    ScalarType.SHORT: "Short",
+    ScalarType.INT: "Int",
+    ScalarType.LONG: "Long",
+    ScalarType.HALF: "Half",
+    ScalarType.FLOAT: "Float",
+    ScalarType.DOUBLE: "Double",
+    ScalarType.COMPLEXHALF: "ComplexHalf",
+    ScalarType.COMPLEXFLOAT: "ComplexFloat",
+    ScalarType.COMPLEXDOUBLE: "ComplexDouble",
+    ScalarType.BOOL: "Bool",
+    ScalarType.BFLOAT16: "BFloat16",
+    ScalarType.UINT16: "UInt16",
+    ScalarType.FLOAT8E4M3FN: "Float8_e4m3fn",
+    ScalarType.FLOAT8E5M2: "Float8_e5m2",
+    ScalarType.FLOAT8E4M3FNUZ: "Float8_e4m3fnuz",
+    ScalarType.FLOAT8E5M2FNUZ: "Float8_e5m2fnuz",
+}
+
+LAYOUT_TO_C10: dict[int, str] = {
+    Layout.SparseCoo: "Sparse",
+    Layout.SparseCsr: "SparseCsr",
+    Layout.SparseCsc: "SparseCsc",
+    Layout.SparseBsr: "SparseBsr",
+    Layout.SparseBsc: "SparseBsc",
+    Layout._mkldnn: "Mkldnn",
+    Layout.Strided: "Strided",
+}
+
+MEMORY_FORMAT_TO_C10: dict[int, str] = {
+    MemoryFormat.ContiguousFormat: "Contiguous",
+    MemoryFormat.ChannelsLast: "ChannelsLast",
+    MemoryFormat.ChannelsLast3d: "ChannelsLast3d",
+    MemoryFormat.PreserveFormat: "Preserve",
+}
 
 
 @dataclass
@@ -212,6 +256,7 @@ class Argument(_Union):
     as_sym_floats: Annotated[list[SymFloatArgument], 240]
     as_optional_tensor: Annotated[OptionalTensorArgument, 250]
     as_complex: Annotated[ComplexValue, 260]
+    as_nested_tensors: Annotated[list[list[TensorArgument]], 270]
     as_int_lists: Annotated[list[list[int]], 280]
     as_string_to_argument: Annotated[dict[str, "Argument"], 290]
 

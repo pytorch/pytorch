@@ -1,0 +1,383 @@
+diff --git a/test/dynamo/cpython/3_13/test_enum.py b/test/dynamo/cpython/3_13/test_enum.py
+index c5ec56bf609..b99b508f043 100644
+--- a/test/dynamo/cpython/3_13/test_enum.py
++++ b/test/dynamo/cpython/3_13/test_enum.py
+@@ -1,3 +1,20 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.12/Lib/test/test_enum.py
++
++import torch
++import torch._dynamo.test_case
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++# ======= END DYNAMO PATCH =======
++
+ import copy
+ import enum
+ import doctest
+@@ -25,24 +42,6 @@ from datetime import timedelta
+ 
+ python_version = sys.version_info[:2]
+ 
+-def load_tests(loader, tests, ignore):
+-    tests.addTests(doctest.DocTestSuite(enum))
+-
+-    lib_tests = os.path.join(REPO_ROOT, 'Doc/library/enum.rst')
+-    if os.path.exists(lib_tests):
+-        tests.addTests(doctest.DocFileSuite(
+-                lib_tests,
+-                module_relative=False,
+-                optionflags=doctest.ELLIPSIS|doctest.NORMALIZE_WHITESPACE,
+-                ))
+-    howto_tests = os.path.join(REPO_ROOT, 'Doc/howto/enum.rst')
+-    if os.path.exists(howto_tests) and sys.float_repr_style == 'short':
+-        tests.addTests(doctest.DocFileSuite(
+-                howto_tests,
+-                module_relative=False,
+-                optionflags=doctest.ELLIPSIS|doctest.NORMALIZE_WHITESPACE,
+-                ))
+-    return tests
+ 
+ def reraise_if_not_enum(*enum_types_or_exceptions):
+     from functools import wraps
+@@ -166,13 +165,15 @@ def test_pickle_dump_load(assertion, source, target=None):
+         target = source
+     for protocol in range(HIGHEST_PROTOCOL + 1):
+         assertion(loads(dumps(source, protocol=protocol)), target)
++test_pickle_dump_load.__test__ = False
+ 
+ def test_pickle_exception(assertion, exception, obj):
+     for protocol in range(HIGHEST_PROTOCOL + 1):
+         with assertion(exception):
+             dumps(obj, protocol=protocol)
++test_pickle_exception.__test__ = False
+ 
+-class TestHelpers(unittest.TestCase):
++class TestHelpers(__TestCase):
+     # _is_descriptor, _is_sunder, _is_dunder
+ 
+     sunder_names = '_bad_', '_good_', '_what_ho_'
+@@ -282,6 +283,7 @@ class _EnumTests:
+     values = None
+ 
+     def setUp(self):
++        super().setUp()
+         if self.__class__.__name__[-5:] == 'Class':
+             class BaseEnum(self.enum_type):
+                 @enum.property
+@@ -1039,15 +1041,14 @@ class _FlagTests:
+             self.assertTrue(~OpenXYZ(0), (X|Y|Z))
+ 
+ 
+-class TestPlainEnumClass(_EnumTests, _PlainOutputTests, unittest.TestCase):
++class TestPlainEnumClass(_EnumTests, _PlainOutputTests, __TestCase):
+     enum_type = Enum
+ 
+-
+-class TestPlainEnumFunction(_EnumTests, _PlainOutputTests, unittest.TestCase):
++class TestPlainEnumFunction(_EnumTests, _PlainOutputTests, __TestCase):
+     enum_type = Enum
+ 
+ 
+-class TestPlainFlagClass(_EnumTests, _PlainOutputTests, _FlagTests, unittest.TestCase):
++class TestPlainFlagClass(_EnumTests, _PlainOutputTests, _FlagTests, __TestCase):
+     enum_type = Flag
+ 
+     def test_none_member(self):
+@@ -1067,11 +1068,11 @@ class TestPlainFlagClass(_EnumTests, _PlainOutputTests, _FlagTests, unittest.Tes
+             ~FlagWithNoneMember.E
+ 
+ 
+-class TestPlainFlagFunction(_EnumTests, _PlainOutputTests, _FlagTests, unittest.TestCase):
++class TestPlainFlagFunction(_EnumTests, _PlainOutputTests, _FlagTests, __TestCase):
+     enum_type = Flag
+ 
+ 
+-class TestIntEnumClass(_EnumTests, _MinimalOutputTests, unittest.TestCase):
++class TestIntEnumClass(_EnumTests, _MinimalOutputTests, __TestCase):
+     enum_type = IntEnum
+     #
+     def test_shadowed_attr(self):
+@@ -1083,7 +1084,7 @@ class TestIntEnumClass(_EnumTests, _MinimalOutputTests, unittest.TestCase):
+         self.assertIs(Number.numerator.divisor, Number.divisor)
+ 
+ 
+-class TestIntEnumFunction(_EnumTests, _MinimalOutputTests, unittest.TestCase):
++class TestIntEnumFunction(_EnumTests, _MinimalOutputTests, __TestCase):
+     enum_type = IntEnum
+     #
+     def test_shadowed_attr(self):
+@@ -1093,7 +1094,7 @@ class TestIntEnumFunction(_EnumTests, _MinimalOutputTests, unittest.TestCase):
+         self.assertIs(Number.numerator.divisor, Number.divisor)
+ 
+ 
+-class TestStrEnumClass(_EnumTests, _MinimalOutputTests, unittest.TestCase):
++class TestStrEnumClass(_EnumTests, _MinimalOutputTests, __TestCase):
+     enum_type = StrEnum
+     #
+     def test_shadowed_attr(self):
+@@ -1106,7 +1107,7 @@ class TestStrEnumClass(_EnumTests, _MinimalOutputTests, unittest.TestCase):
+         self.assertIs(Book.title.author, Book.author)
+ 
+ 
+-class TestStrEnumFunction(_EnumTests, _MinimalOutputTests, unittest.TestCase):
++class TestStrEnumFunction(_EnumTests, _MinimalOutputTests, __TestCase):
+     enum_type = StrEnum
+     #
+     def test_shadowed_attr(self):
+@@ -1117,39 +1118,39 @@ class TestStrEnumFunction(_EnumTests, _MinimalOutputTests, unittest.TestCase):
+         self.assertIs(Book.title.author, Book.author)
+ 
+ 
+-class TestIntFlagClass(_EnumTests, _MinimalOutputTests, _FlagTests, unittest.TestCase):
++class TestIntFlagClass(_EnumTests, _MinimalOutputTests, _FlagTests, __TestCase):
+     enum_type = IntFlag
+ 
+ 
+-class TestIntFlagFunction(_EnumTests, _MinimalOutputTests, _FlagTests, unittest.TestCase):
++class TestIntFlagFunction(_EnumTests, _MinimalOutputTests, _FlagTests, __TestCase):
+     enum_type = IntFlag
+ 
+ 
+-class TestMixedIntClass(_EnumTests, _MixedOutputTests, unittest.TestCase):
++class TestMixedIntClass(_EnumTests, _MixedOutputTests, __TestCase):
+     class enum_type(int, Enum): pass
+ 
+ 
+-class TestMixedIntFunction(_EnumTests, _MixedOutputTests, unittest.TestCase):
++class TestMixedIntFunction(_EnumTests, _MixedOutputTests, __TestCase):
+     enum_type = Enum('enum_type', type=int)
+ 
+ 
+-class TestMixedStrClass(_EnumTests, _MixedOutputTests, unittest.TestCase):
++class TestMixedStrClass(_EnumTests, _MixedOutputTests, __TestCase):
+     class enum_type(str, Enum): pass
+ 
+ 
+-class TestMixedStrFunction(_EnumTests, _MixedOutputTests, unittest.TestCase):
++class TestMixedStrFunction(_EnumTests, _MixedOutputTests, __TestCase):
+     enum_type = Enum('enum_type', type=str)
+ 
+ 
+-class TestMixedIntFlagClass(_EnumTests, _MixedOutputTests, _FlagTests, unittest.TestCase):
++class TestMixedIntFlagClass(_EnumTests, _MixedOutputTests, _FlagTests, __TestCase):
+     class enum_type(int, Flag): pass
+ 
+ 
+-class TestMixedIntFlagFunction(_EnumTests, _MixedOutputTests, _FlagTests, unittest.TestCase):
++class TestMixedIntFlagFunction(_EnumTests, _MixedOutputTests, _FlagTests, __TestCase):
+     enum_type = Flag('enum_type', type=int)
+ 
+ 
+-class TestMixedDateClass(_EnumTests, _MixedOutputTests, unittest.TestCase):
++class TestMixedDateClass(_EnumTests, _MixedOutputTests, __TestCase):
+     #
+     values = [date(2021, 12, 25), date(2020, 3, 15), date(2019, 11, 27)]
+     source_values = [(2021, 12, 25), (2020, 3, 15), (2019, 11, 27)]
+@@ -1161,7 +1162,7 @@ class TestMixedDateClass(_EnumTests, _MixedOutputTests, unittest.TestCase):
+             return values[count]
+ 
+ 
+-class TestMixedDateFunction(_EnumTests, _MixedOutputTests, unittest.TestCase):
++class TestMixedDateFunction(_EnumTests, _MixedOutputTests, __TestCase):
+     #
+     values = [date(2021, 12, 25), date(2020, 3, 15), date(2019, 11, 27)]
+     source_values = [(2021, 12, 25), (2020, 3, 15), (2019, 11, 27)]
+@@ -1174,7 +1175,7 @@ class TestMixedDateFunction(_EnumTests, _MixedOutputTests, unittest.TestCase):
+     enum_type = Enum('enum_type', {'_generate_next_value_':_generate_next_value_}, type=date)
+ 
+ 
+-class TestMinimalDateClass(_EnumTests, _MinimalOutputTests, unittest.TestCase):
++class TestMinimalDateClass(_EnumTests, _MinimalOutputTests, __TestCase):
+     #
+     values = [date(2023, 12, 1), date(2016, 2, 29), date(2009, 1, 1)]
+     source_values = [(2023, 12, 1), (2016, 2, 29), (2009, 1, 1)]
+@@ -1186,7 +1187,7 @@ class TestMinimalDateClass(_EnumTests, _MinimalOutputTests, unittest.TestCase):
+             return values[count]
+ 
+ 
+-class TestMinimalDateFunction(_EnumTests, _MinimalOutputTests, unittest.TestCase):
++class TestMinimalDateFunction(_EnumTests, _MinimalOutputTests, __TestCase):
+     #
+     values = [date(2023, 12, 1), date(2016, 2, 29), date(2009, 1, 1)]
+     source_values = [(2023, 12, 1), (2016, 2, 29), (2009, 1, 1)]
+@@ -1199,7 +1200,7 @@ class TestMinimalDateFunction(_EnumTests, _MinimalOutputTests, unittest.TestCase
+     enum_type = ReprEnum('enum_type', {'_generate_next_value_':_generate_next_value_}, type=date)
+ 
+ 
+-class TestMixedFloatClass(_EnumTests, _MixedOutputTests, unittest.TestCase):
++class TestMixedFloatClass(_EnumTests, _MixedOutputTests, __TestCase):
+     #
+     values = [1.1, 2.2, 3.3]
+     #
+@@ -1209,7 +1210,7 @@ class TestMixedFloatClass(_EnumTests, _MixedOutputTests, unittest.TestCase):
+             return values[count]
+ 
+ 
+-class TestMixedFloatFunction(_EnumTests, _MixedOutputTests, unittest.TestCase):
++class TestMixedFloatFunction(_EnumTests, _MixedOutputTests, __TestCase):
+     #
+     values = [1.1, 2.2, 3.3]
+     #
+@@ -1220,7 +1221,7 @@ class TestMixedFloatFunction(_EnumTests, _MixedOutputTests, unittest.TestCase):
+     enum_type = Enum('enum_type', {'_generate_next_value_':_generate_next_value_}, type=float)
+ 
+ 
+-class TestMinimalFloatClass(_EnumTests, _MinimalOutputTests, unittest.TestCase):
++class TestMinimalFloatClass(_EnumTests, _MinimalOutputTests, __TestCase):
+     #
+     values = [4.4, 5.5, 6.6]
+     #
+@@ -1230,7 +1231,7 @@ class TestMinimalFloatClass(_EnumTests, _MinimalOutputTests, unittest.TestCase):
+             return values[count]
+ 
+ 
+-class TestMinimalFloatFunction(_EnumTests, _MinimalOutputTests, unittest.TestCase):
++class TestMinimalFloatFunction(_EnumTests, _MinimalOutputTests, __TestCase):
+     #
+     values = [4.4, 5.5, 6.6]
+     #
+@@ -1241,12 +1242,13 @@ class TestMinimalFloatFunction(_EnumTests, _MinimalOutputTests, unittest.TestCas
+     enum_type = ReprEnum('enum_type', {'_generate_next_value_':_generate_next_value_}, type=float)
+ 
+ 
+-class TestSpecial(unittest.TestCase):
++class TestSpecial(__TestCase):
+     """
+     various operations that are not attributable to every possible enum
+     """
+ 
+     def setUp(self):
++        super().setUp()
+         class Season(Enum):
+             SPRING = 1
+             SUMMER = 2
+@@ -2762,6 +2764,7 @@ class TestSpecial(unittest.TestCase):
+         class TestEnum(enum.Enum):
+             VAL1 = 'val1'
+             VAL2 = 'val2'
++            __test__ = False
+         #
+         class Class1:
+             def __init__(self):
+@@ -3513,7 +3516,7 @@ class TestSpecial(unittest.TestCase):
+         self.assertIs(Directions({"sc"}), Directions.DOWN_ONLY)
+ 
+ 
+-class TestOrder(unittest.TestCase):
++class TestOrder(__TestCase):
+     "test usage of the `_order_` attribute"
+ 
+     def test_same_members(self):
+@@ -3576,7 +3579,7 @@ class TestOrder(unittest.TestCase):
+                 verde = green
+ 
+ 
+-class OldTestFlag(unittest.TestCase):
++class OldTestFlag(__TestCase):
+     """Tests of the Flags."""
+ 
+     class Perm(Flag):
+@@ -4059,7 +4062,7 @@ class OldTestFlag(unittest.TestCase):
+         self.assertFalse(NeverEnum.__dict__.get('_test2', False))
+ 
+ 
+-class OldTestIntFlag(unittest.TestCase):
++class OldTestIntFlag(__TestCase):
+     """Tests of the IntFlags."""
+ 
+     class Perm(IntFlag):
+@@ -4135,6 +4138,7 @@ class OldTestIntFlag(unittest.TestCase):
+                 )
+ 
+     @reraise_if_not_enum(NoName)
++    @unittest.skip('Fails because repr(NoName.ONE) == "__main__.ONE"')
+     def test_global_enum_str(self):
+         self.assertEqual(repr(NoName.ONE), 'test_enum.ONE')
+         self.assertEqual(repr(NoName(0)), 'test_enum.NoName(0)')
+@@ -4543,7 +4547,7 @@ class OldTestIntFlag(unittest.TestCase):
+         self.assertEqual(256, len(seen), 'too many composite members created')
+ 
+ 
+-class TestEmptyAndNonLatinStrings(unittest.TestCase):
++class TestEmptyAndNonLatinStrings(__TestCase):
+ 
+     def test_empty_string(self):
+         with self.assertRaises(ValueError):
+@@ -4560,7 +4564,7 @@ class TestEmptyAndNonLatinStrings(unittest.TestCase):
+         self.assertEqual(item.value, 1)
+ 
+ 
+-class TestUnique(unittest.TestCase):
++class TestUnique(__TestCase):
+ 
+     def test_unique_clean(self):
+         @unique
+@@ -4607,7 +4611,7 @@ class TestUnique(unittest.TestCase):
+             triple = 3
+             value = 4
+ 
+-class TestVerify(unittest.TestCase):
++class TestVerify(__TestCase):
+ 
+     def test_continuous(self):
+         @verify(CONTINUOUS)
+@@ -4742,7 +4746,7 @@ class TestVerify(unittest.TestCase):
+         # no error means success
+ 
+ 
+-class TestInternals(unittest.TestCase):
++class TestInternals(__TestCase):
+ 
+     sunder_names = '_bad_', '_good_', '_what_ho_'
+     dunder_names = '__mal__', '__bien__', '__que_que__'
+@@ -5042,7 +5046,7 @@ class Color(enum.Enum)
+  |
+  |  __members__"""
+ 
+-class TestStdLib(unittest.TestCase):
++class TestStdLib(__TestCase):
+ 
+     maxDiff = None
+ 
+@@ -5297,7 +5301,7 @@ class TestStdLib(unittest.TestCase):
+         _test_simple_enum(CheckedComplexFlag, ComplexFlag)
+ 
+ 
+-class MiscTestCase(unittest.TestCase):
++class MiscTestCase(__TestCase):
+ 
+     def test__all__(self):
+         support.check__all__(self, enum, not_exported={'bin', 'show_flag_values'})
+@@ -5358,7 +5362,7 @@ COMPLEX_C = 1j
+ COMPLEX_A = 2j
+ COMPLEX_B = 3j
+ 
+-class TestConvert(unittest.TestCase):
++class TestConvert(__TestCase):
+     def tearDown(self):
+         # Reset the module-level test variables to their original integer
+         # values, otherwise the already created enum values get converted
+@@ -5467,7 +5471,7 @@ class TestConvert(unittest.TestCase):
+         self.assertEqual(format(test_type.CONVERT_STRING_TEST_NAME_A), '5')
+ 
+ 
+-class TestEnumDict(unittest.TestCase):
++class TestEnumDict(__TestCase):
+     def test_enum_dict_in_metaclass(self):
+         """Test that EnumDict is usable as a class namespace"""
+         class Meta(type):
+@@ -5538,4 +5542,4 @@ def member_dir(member):
+ 
+ 
+ if __name__ == '__main__':
+-    unittest.main()
++    run_tests()
