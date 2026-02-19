@@ -152,6 +152,14 @@ if(NOT __AOTRITON_INCLUDED)
       -DAOTRITON_NO_PYTHON=ON
       -DAOTRITON_NOIMAGE_MODE=${noimage}
       -DHIP_PLATFORM=amd
+      # Disable sccache for aotriton sub-build to avoid sccache fatally
+      # erroring when compiling assembly (.s) files. sccache expects the
+      # dependency file (.d) specified by -MF to exist, but the assembler
+      # does not produce one for plain .s files (no #includes to track).
+      # See: https://github.com/mozilla/sccache/issues/1592
+      -DCMAKE_C_COMPILER_LAUNCHER=
+      -DCMAKE_CXX_COMPILER_LAUNCHER=
+      -DCMAKE_ASM_COMPILER_LAUNCHER=
       $<$<BOOL:${WIN32}>:-Ddlfcn-win32_DIR=${dlfcn-win32_DIR}>
       $<$<BOOL:${WIN32}>:-Dliblzma_DIR=${liblzma_DIR}>
       BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}"
