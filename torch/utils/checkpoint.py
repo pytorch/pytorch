@@ -1426,6 +1426,8 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         if cached is not None:
             out = tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), cached)
         elif policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
+            if func not in self.storage:
+                raise RuntimeError(f"{func} encountered during backward, but not found in storage")
             raise RuntimeError(
                 "Trying to backward an extra time. You are only allowed to backward once "
                 "on any region computed under selective activation checkpoint."
@@ -1547,24 +1549,19 @@ def save(tensor: torch.Tensor) -> None:
     if _current_caching_mode is None:
         return
 
-    # Under torch.compile, the tensor may be wrapped in FunctionalTensor.
-    # Unwrap to match the level at which __torch_dispatch__ tracked it.
-    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
-    unwrapped = mb_unwrap_functional_tensor(tensor)
-
-    info = _current_caching_mode.tensor_tracker.get(unwrapped)
+    info = _current_caching_mode.tensor_tracker.get(tensor)
     if info is None:
         return
 
     func, idx, any_ret_has_alias_info = info
     _current_caching_mode.storage[func][idx] = tree_map(
         lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)),
-        unwrapped,
+        tensor,
     )
 
     # Under torch.compile, annotate the FX node so the partitioner
     # knows this tensor should not be recomputed.
-    _set_save_policy_for_partitioner(unwrapped, CheckpointPolicy.MUST_SAVE)
+    _set_save_policy_for_partitioner(tensor, CheckpointPolicy.MUST_SAVE)
 
 
 def _set_save_policy_for_partitioner(tensor, policy):
