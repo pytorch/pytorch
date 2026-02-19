@@ -84,6 +84,12 @@ class _LazyStackTrace:
         self._resolved = result
         return result
 
+    def __contains__(self, item: str) -> bool:
+        resolved = self.resolve()
+        if resolved is None:
+            return False
+        return item in resolved
+
     def __bool__(self) -> bool:
         resolved = self.resolve()
         return resolved is not None and len(resolved) > 0
