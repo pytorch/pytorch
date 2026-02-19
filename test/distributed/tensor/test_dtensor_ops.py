@@ -287,7 +287,7 @@ dtensor_compiled_fails = {
     xfail("atleast_3d"),
     xfail("broadcast_tensors"),
     xfail("broadcast_to"),
-    # xfail("diagonal"),
+    xfail("diagonal"),
     xfail("dsplit"),
     xfail("expand"),
     xfail("expand_as"),
