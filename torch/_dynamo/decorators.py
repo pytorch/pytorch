@@ -104,7 +104,6 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
                 nonrecursive_disable_wrapper
             )
             nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
-            # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
 
         if fn is None:
@@ -631,7 +630,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             )
         # This wrapper call enables @leaf_function to work with make_fx tracing
 
-        # pyrefly: ignore [bad-argument-type]
         return _invoke_leaf_function_python(
             fn,
             # pyrefly: ignore [bad-argument-type]

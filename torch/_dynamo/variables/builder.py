@@ -678,7 +678,6 @@ class VariableBuilder:
         items = dict(build_key_value(k, v) for k, v in value.items())
 
         # Create a dict_vt to be used in the mapping proxy variable
-        # pyrefly: ignore[bad-argument-type]
         dict_vt = ConstDictVariable(items, source=None)
         result = MappingProxyVariable(dict_vt, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
@@ -1647,7 +1646,6 @@ class VariableBuilder:
             )
 
             dict_vt = ConstDictVariable(
-                # pyrefly: ignore[bad-argument-type]
                 result,
                 user_cls=(
                     collections.OrderedDict
@@ -3151,7 +3149,7 @@ def _wrap_fx_preexisting_tensor(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
-            # pyrefly: ignore[missing-argument, bad-argument-type]
+            # pyrefly: ignore [missing-argument]
             tensor = wrap_to_fake_tensor_and_record(tensor, tx=tx, **kwargs)
 
         if tensor.device.type != "meta" and (
