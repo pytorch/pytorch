@@ -55,6 +55,11 @@ struct alignas(2) BFloat16 {
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
 #endif
 
+#if defined(__HIPCC__)
+  inline C10_HOST_DEVICE BFloat16(const __bf16& value);
+  explicit inline C10_HOST_DEVICE operator __bf16() const;
+#endif
+
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
   inline C10_HOST_DEVICE BFloat16(const sycl::ext::oneapi::bfloat16& value);
   explicit inline C10_HOST_DEVICE operator sycl::ext::oneapi::bfloat16() const;
@@ -157,6 +162,10 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
 }
 
 #if defined(__HIPCC__)
+inline C10_HOST_DEVICE BFloat16(const __bf16& value) : x__bf16(value) {}
+explicit inline C10_HOST_DEVICE operator __bf16() const {
+  return x__bf16;
+}
 inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value)
   : x__bf16(value) {}
 inline C10_HOST_DEVICE BFloat16::operator __hip_bfloat16() const {
@@ -197,45 +206,81 @@ inline C10_DEVICE BFloat16 __ldg(const BFloat16* ptr) {
 
 inline C10_HOST_DEVICE BFloat16
 operator+(const BFloat16& a, const BFloat16& b) {
+#if defined(__HIPCC__)
+  return a.x__bf16 + b.x__bf16;
+#else
   return static_cast<float>(a) + static_cast<float>(b);
+#endif
 }
 
 inline C10_HOST_DEVICE BFloat16
 operator-(const BFloat16& a, const BFloat16& b) {
+#if defined(__HIPCC__)  
+  return a.x__bf16 - b.x__bf16;
+#else
   return static_cast<float>(a) - static_cast<float>(b);
+#endif
 }
 
 inline C10_HOST_DEVICE BFloat16
 operator*(const BFloat16& a, const BFloat16& b) {
+#if defined(__HIPCC__)
+  return a.x__bf16 * b.x__bf16;
+#else
   return static_cast<float>(a) * static_cast<float>(b);
+#endif
 }
 
 inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b)
     __ubsan_ignore_float_divide_by_zero__ {
+#if defined(__HIPCC__)
+  return a.x__bf16 / b.x__bf16;
+#else
   return static_cast<float>(a) / static_cast<float>(b);
+#endif
 }
 
 inline C10_HOST_DEVICE BFloat16 operator-(const BFloat16& a) {
+#if defined(__HIPCC__)
+  return -a.x__bf16;
+#else
   return -static_cast<float>(a);
+#endif
 }
 
 inline C10_HOST_DEVICE BFloat16& operator+=(BFloat16& a, const BFloat16& b) {
+#if defined(__HIPCC__)
+  a.x__bf16 += b.x__bf16;
+#else
   a = a + b;
+#endif
   return a;
 }
 
 inline C10_HOST_DEVICE BFloat16& operator-=(BFloat16& a, const BFloat16& b) {
+#if defined(__HIPCC__)
+  a.x__bf16 -= b.x__bf16;
+#else
   a = a - b;
+#endif
   return a;
 }
 
 inline C10_HOST_DEVICE BFloat16& operator*=(BFloat16& a, const BFloat16& b) {
+#if defined(__HIPCC__)
+  a.x__bf16 *= b.x__bf16;
+#else
   a = a * b;
+#endif
   return a;
 }
 
 inline C10_HOST_DEVICE BFloat16& operator/=(BFloat16& a, const BFloat16& b) {
+#if defined(__HIPCC__)
+  a.x__bf16 /= b.x__bf16;
+#else
   a = a / b;
+#endif
   return a;
 }
 
@@ -398,11 +443,19 @@ inline C10_HOST_DEVICE BFloat16 operator/(int64_t a, BFloat16 b) {
 // Overloading < and > operators, because std::max and std::min use them.
 
 inline C10_HOST_DEVICE bool operator>(BFloat16& lhs, BFloat16& rhs) {
+#if defined(__HIPCC__)
+  return lhs.x__bf16 > rhs.x__bf16;
+#else
   return float(lhs) > float(rhs);
+#endif
 }
 
 inline C10_HOST_DEVICE bool operator<(BFloat16& lhs, BFloat16& rhs) {
+#if defined(__HIPCC__)
+  return lhs.x__bf16 < rhs.x__bf16;
+#else
   return float(lhs) < float(rhs);
+#endif
 }
 
 C10_CLANG_DIAGNOSTIC_POP()
