@@ -788,7 +788,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 #if defined(USE_CUDA) && CUDA_VERSION < 13010
     if (dim_k == 1) {
       // indices_dim1 is aligned to 8(=1) or 16 bytes(=0).
-      const int64_t row_alignment_parity = (indices_dim1.data_ptr<uintptr_t>() % 16) / 8;
+      const int64_t row_alignment_parity = (reinterpret_cast<uintptr_t>(indices_dim1.data_ptr()) % 16) / 8;
       const auto* end_indices = mat_el_end_indices_host.data_ptr<int64_t>();
       auto max_nnz = row_alignment_parity * end_indices[0];
       for (const auto i : c10::irange(1, num_matrices)) {
@@ -803,11 +803,6 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 #endif
     return Tensor{};
   }();
-
-#if defined(USE_CUDA) && CUDA_VERSION < 13010
-  const auto max_nnz = mat_el_end_indices_host.max().item<int64_t>();
-  auto row_indices_buffer = at::empty({max_nnz}, indices.options());
-#endif
 
   Scalar beta = 0;
   Scalar alpha = 1;
@@ -828,11 +823,11 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
-      int64_t* row_indices_start_ptr = reinterpret_cast<int64_t*>(indices_dim1.data_ptr());
-      int64_t* col_indices_start_ptr = reinterpret_cast<int64_t*>(indices_dim2.data_ptr());
-      scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.data_ptr());
-      scalar_t* mat2_start_ptr = reinterpret_cast<scalar_t*>(mat2_contig.data_ptr());
-      scalar_t* result_start_ptr = reinterpret_cast<scalar_t*>(tmp_result.data_ptr());
+      int64_t* row_indices_start_ptr = static_cast<int64_t*>(indices_dim1.data_ptr());
+      int64_t* col_indices_start_ptr = static_cast<int64_t*>(indices_dim2.data_ptr());
+      scalar_t* values_start_ptr = static_cast<scalar_t*>(values.data_ptr());
+      scalar_t* mat2_start_ptr = static_cast<scalar_t*>(mat2_contig.data_ptr());
+      scalar_t* result_start_ptr = static_cast<scalar_t*>(tmp_result.data_ptr());
       for (
         int64_t cur_mat_num = 0;
         cur_mat_num < num_matrices;
@@ -854,9 +849,9 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
           dim_i,
           dim_j,
           sparse_nnz,
-          reinterpret_cast<void*>(row_indices_ptr),
-          reinterpret_cast<void*>(col_indices_ptr),
-          reinterpret_cast<void*>(values_ptr),
+          row_indices_ptr,
+          col_indices_ptr,
+          values_ptr,
           CUSPARSE_INDEX_64I,
           CUSPARSE_INDEX_BASE_ZERO,
           cuda_data_type
@@ -868,7 +863,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
           dim_j,
           dim_k,
           dim_k,
-          reinterpret_cast<void*>(mat2_ptr),
+          mat2_ptr,
           cuda_data_type,
           CUSPARSE_ORDER_ROW
         ));
@@ -879,7 +874,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
           dim_i,
           dim_k,
           dim_k,
-          reinterpret_cast<void*>(result_ptr),
+          result_ptr,
           cuda_data_type,
           CUSPARSE_ORDER_ROW
         ));
