@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import (
     Buffer,
@@ -656,7 +657,7 @@ def _prepare_configs_and_decompositions(
     op_overload: torch._ops.OpOverload,
     runtime_kwargs: dict[str, Any],
     name: str,
-) -> tuple[list[Callable], list[dict[str, Any]]]:
+) -> tuple[list[Callable], list[dict[str, Any]], list[dict[str, Any]]]:
     """Prepare decompositions and merged kwargs from configs.
 
     Handles both static configs and dynamic config generation.
@@ -815,6 +816,7 @@ def _lower_single_impl(
                     impl.__name__,
                     default_impl.__name__,
                 )
+                counters["inductor"]["custom_op_decomp_guard_skips"] += 1
                 impl_to_use = default_impl
                 impl_gm = make_fx(
                     make_impl_wrapper(default_impl),
@@ -1060,6 +1062,7 @@ def _range_based_lowering_fn(
             if not is_guard_error:
                 raise
             log.info("Dispatch function adds guards, falling back to default_impl")
+            counters["inductor"]["custom_op_decomp_guard_skips"] += 1
             return _lower_single_impl(
                 default_impl,
                 {},
