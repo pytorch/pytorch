@@ -69,6 +69,7 @@ class Benchmark(BenchmarkBase):
 
     def _prepare_once(self):
         torch._dynamo.config.capture_scalar_outputs = True
+        torch.fx.experimental._config.aggressive_guard_free_semantics = 2
         torch.manual_seed(0)
 
         self.model = UnbindSplitFlipCatModel(
