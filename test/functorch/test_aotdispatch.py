@@ -7628,10 +7628,10 @@ class TestAOTModuleSimplified(AOTTestCase):
         y2 = fn_comp(x2)
         with self.assertRaisesRegex(
             RuntimeError,
-            """
+            r"""
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
-""",  # noqa: F541
+Expected a .* tangent but got a plain Tensor.""",
         ):
             y2.backward(gradient=torch.randn(2, 3))
 
