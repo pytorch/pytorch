@@ -907,11 +907,6 @@ class TestHopPrintDTensor(DTensorTestBase):
             compiled_f(dtensor)
 
         graph_code = backend.fw_graphs[0].code
-        import builtins
-
-        builtins.print("=== FW GRAPH ===")
-        builtins.print(graph_code)
-        builtins.print("=== END FW GRAPH ===")
         self.assertIn("_rank_zero_only", graph_code)
         self.assertNotIn("get_rank", graph_code)
 
