@@ -430,9 +430,12 @@ def _disable_cudagraphs(fwd: bool = True, bwd: bool = True):
         with torch.compiler._disable_cudagraphs():
             y = x + 1
     """
-    from torch._dynamo import disable_cudagraphs
+    from torch._dynamo import override_cudagraphs
 
-    return disable_cudagraphs(fwd=fwd, bwd=bwd)
+    return override_cudagraphs(
+        fwd=False if fwd else None,
+        bwd=False if bwd else None,
+    )
 
 
 def _cudagraph_exclude_sym_shape(

@@ -451,6 +451,5 @@ import dataclasses
 
 @dataclasses.dataclass
 class _CudagraphAnnotation:
-    mode: str
-    fwd: bool
-    bwd: bool
+    fwd: Optional[bool]
+    bwd: Optional[bool]
