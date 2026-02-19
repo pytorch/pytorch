@@ -40,6 +40,7 @@ from .descriptors import (
     TangentAOTInput,
 )
 from .functional_utils import (
+    _maybe_get_inner_functional_tensor,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
@@ -689,6 +690,10 @@ from a multi-output view call"
             ):
                 if isinstance(o, FunctionalTensor):
                     view_meta_sequence = ViewMetaSequence(o)
+                elif is_traceable_wrapper_subclass(o):
+                    inner = _maybe_get_inner_functional_tensor(o)
+                    if inner is not None:
+                        view_meta_sequence = ViewMetaSequence(inner)
 
             out_info = OutputAliasInfo(
                 output_type=output_type,

@@ -278,32 +278,18 @@ dtensor_multi_threaded_fails = {
 # Ops that fail to compile with DTensor + torch.compile(fullgraph=True).
 # These are compile-time failures, NOT numeric correctness issues.
 dtensor_compiled_fails = {
-    # View-type ops that decompose into as_strided (at autograd level).
-    # DTensor doesn't have a sharding strategy for as_strided.
+    # Data-dependent outputs (unbacked shapes) from DTensor's argminmax_handler.
     xfail("argmax"),
     xfail("argmin"),
-    xfail("atleast_1d"),
-    xfail("atleast_2d"),
-    xfail("atleast_3d"),
-    xfail("broadcast_tensors"),
+    # Sharding propagation failures for expand-like ops with sharded inputs
+    # where the local tensor size doesn't match the expand target.
     xfail("broadcast_to"),
-    # xfail("diagonal"),
-    xfail("dsplit"),
     xfail("expand"),
     xfail("expand_as"),
-    xfail("hsplit"),
-    xfail("linalg.diagonal"),
+    # Data-dependent outputs (unbacked shapes) from DTensor's max/min
+    # reduction_with_dim handler.
     xfail("max", "reduction_with_dim"),
     xfail("min", "reduction_with_dim"),
-    xfail("movedim"),
-    xfail("narrow"),
-    xfail("permute"),
-    xfail("select"),
-    xfail("slice"),
-    xfail("t"),
-    xfail("transpose_copy"),
-    xfail("unsqueeze"),
-    xfail("vsplit"),
     # Decompositions that use plain tensor constructors (e.g. arange),
     # causing mixed tensor/DTensor errors during Dynamo's fake prop.
     xfail("corrcoef"),

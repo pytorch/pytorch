@@ -1476,6 +1476,43 @@ class outer_fn(torch.nn.Module):
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
 
+    def test_view_ops_aot_eager(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        view_fns = {
+            "diagonal": lambda x: torch.diagonal(x),
+            "select": lambda x: x.select(0, 1),
+            "t": lambda x: x.t(),
+            "permute": lambda x: x.permute(1, 0),
+            "unsqueeze": lambda x: x.unsqueeze(0),
+            "slice": lambda x: x[1:3],
+        }
+        for fn in view_fns.values():
+            torch._dynamo.reset()
+            compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            param = torch.randn(4, 4)
+            dt = DTensor.from_local(param, mesh, [Replicate()], run_check=False)
+            result = compiled_fn(dt)
+            self.assertIsInstance(result, DTensor)
+
+    def test_subclass_view_ops_aot_eager(self):
+        # TwoTensor is a subclass with two inner tensors; this verifies
+        # view replay works for non-DTensor subclasses too.
+        view_fns = {
+            "diagonal": lambda x: torch.diagonal(x),
+            "select": lambda x: x.select(0, 1),
+            "t": lambda x: x.t(),
+        }
+        for fn in view_fns.values():
+            torch._dynamo.reset()
+            compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            a, b = torch.randn(4, 4), torch.randn(4, 4)
+            x = TwoTensor(a, b)
+            result = compiled_fn(x)
+            self.assertIsInstance(result, TwoTensor)
+            self.assertEqual(result.a, fn(a))
+            self.assertEqual(result.b, fn(b))
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
