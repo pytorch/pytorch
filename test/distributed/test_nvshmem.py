@@ -388,7 +388,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         )
         torch.testing.assert_close(out[:out_numel], expected)
 
-    @skip_if_rocm_multiprocess
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_all_to_all_vdev_2d(self, align: int) -> None:
         torch.manual_seed(42 + self.rank)
@@ -497,7 +496,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             received_chunk = out[start : start + split]
             torch.testing.assert_close(received_chunk, chunk)
 
-    @skip_if_rocm_multiprocess
     def test_all_to_all_vdev_2d_offset(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
@@ -708,7 +706,6 @@ class DispatchCombineTest(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip_if_rocm_multiprocess
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_dispatch_combine(self, align: int) -> None:
         """
@@ -733,7 +730,6 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
     def device(self) -> torch.device:
         return torch.device(device_type, self.rank)
 
-    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(4)
     def test_dispatch_combine_subgroup(self) -> None:
         """
