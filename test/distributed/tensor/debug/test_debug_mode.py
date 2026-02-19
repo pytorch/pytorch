@@ -380,7 +380,10 @@ class TestDTensorDebugMode(TestCase):
     def test_debug_mode_einsum(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
-        # Create test tensors
+        # Create test tensors with mixed Partial placements: P(sum)R and RP(sum).
+        # Per-input linearity allows bmm to operate directly on Partial inputs
+        # without redistribution, producing P(sum)P(sum) output.
+        # Numerics are verified in test_matrix_ops.py::test_mm_partial_inputs.
         a = torch.randn(16, 6, 8)
         b = torch.randn(8, 4, 4)
 
@@ -416,25 +419,7 @@ class TestDTensorDebugMode(TestCase):
     aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
-      redistribute_input [implicit] (0, P(sum)R -> S(2)[0]S(2)[1])
-        redistribute_input(t: f32[1, 96, 8], trace: P(sum)R->S(2)R->S(2)[0]S(2)[1])
-          aten::chunk(t: f32[1, 96, 8], 4, 2)
-          aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
-          _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 1)
-          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 96, 2])
-          _c10d_functional::wait_tensor(t: f32[1, 96, 2])
-          aten::chunk(t: f32[1, 96, 2], 2, 2)
-          aten::clone(t: f32[1, 96, 1])
-      redistribute_input [implicit] (1, RP(sum) -> S(1)[0]S(1)[1])
-        redistribute_input(t: f32[1, 8, 16], trace: RP(sum)->S(1)P(sum)->S(1)[0]S(1)[1])
-          aten::chunk(t: f32[1, 8, 16], 4, 1)
-          aten::clone(t: f32[1, 2, 16])
-          aten::chunk(t: f32[1, 2, 16], 2, 1)
-          aten::cat(['t: f32[1, 1, 16]', 't: f32[1, 1, 16]'])
-          _c10d_functional::reduce_scatter_tensor(t: f32[2, 1, 16], sum, 2, 3)
-          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 1, 16])
-          _c10d_functional::wait_tensor(t: f32[1, 1, 16])
-      aten::bmm(t: f32[1, 96, 1], t: f32[1, 1, 16])
+      aten::bmm(t: f32[1, 96, 8], t: f32[1, 8, 16])
     aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
     aten::permute(dt: f32[16, 6, 1, 4, 4]| P(sum)P(sum), [0, 1, 3, 4, 2])
@@ -768,8 +753,7 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[4, 4])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
-    aten::empty_strided([4, 4], [4, 1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[4, 4]
-    aten::copy_(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::clone(t: f32[4, 4], memory_format=torch.contiguous_format)  ->  t: f32[4, 4]
   [aot_eager region (compile)] enter
     [nn.Mod (compile)] L['self'].bar
       [nn.Mod (compile)] L['self'].bar.l3
@@ -1070,8 +1054,7 @@ class TestDTensorDebugMode(TestCase):
     aten::sum(t: f32[8, 8])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [8, 8])  ->  t: f32[8, 8]
-    aten::empty_strided([8, 8], [8, 1], dtype=torch.float32, layout=torch.strided, device=cpu, pin_memory=False)  ->  t: f32[8, 8]
-    aten::copy_(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::clone(t: f32[8, 8], memory_format=torch.contiguous_format)  ->  t: f32[8, 8]
     torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, t: f32[8, 8], t: f32[8, 8])  ->  ('t: f32[8, 8]',)
     [annotate] [enter InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
       aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]

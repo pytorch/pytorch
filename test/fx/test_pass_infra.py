@@ -80,7 +80,10 @@ class TestPassManager(TestCase):
 
         res = pm(traced_m)
         modified_m = res.graph_module
-        assert isinstance(modified_m, fx.GraphModule)
+        if not isinstance(modified_m, fx.GraphModule):
+            raise AssertionError(
+                f"Expected modified_m to be fx.GraphModule, got {type(modified_m)}"
+            )
 
         # Check that all call_function nodes are divs
         for node in modified_m.graph.nodes:

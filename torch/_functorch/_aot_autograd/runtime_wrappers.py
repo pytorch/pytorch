@@ -398,8 +398,13 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
         )
 
         # Defer this to subclass torchdispatch modes (probably shouldn't have fake tensor here tho)
-        if not all(type(x) in HANDLED_TYPES for x in flat_tensor_args):
-            return NotImplemented
+        # For Parameters, we need to check the underlying tensor type, not the Parameter itself
+        for tensor in flat_tensor_args:
+            underlying_tensor = tensor
+            if isinstance(tensor, torch.nn.Parameter):
+                underlying_tensor = tensor.data
+            if type(underlying_tensor) not in HANDLED_TYPES:
+                return NotImplemented
 
         res = func(*args, **kwargs)
         # Only check aliasing for custom ops (non-aten/prim/prims/_c10d_functional/c10d)
@@ -1666,7 +1671,9 @@ def merge_view_inputs(
         return fwd_inputs, fwd_inputs_descs, None
 
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
+    # pyrefly: ignore [implicit-any]
     base_args = []
+    # pyrefly: ignore [implicit-any]
     other_args = []
     base_args_descs = []
     other_args_descs = []
@@ -1996,6 +2003,7 @@ def _backward_prologue_functional(
     # assert all(x is None for x in metadata_only_inps)
     # assert all(x is None for x in aliased_outputs)
     # TODO: replace this with FunctionalizedRngRuntimeWrapper
+    # pyrefly: ignore [implicit-any]
     rng_args = []
     if metadata.is_rng_op_functionalized:
         # Add the seed and offset to args
@@ -2842,6 +2850,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             )
                         ):
                             lazy_backward_info.saved_context.fw_metadata.bw_donated_idxs = (  # type: ignore[union-attr]
+                                # pyrefly: ignore [implicit-any]
                                 []
                             )
 

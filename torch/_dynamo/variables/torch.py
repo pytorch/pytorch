@@ -42,7 +42,7 @@ import torch.fx
 import torch.nn
 import torch.utils._pytree as _pytree
 from torch._C import DispatchKeySet
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
@@ -84,10 +84,10 @@ from .ctx_manager import (
     ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
-from .dicts import ConstDictVariable
-from .distributed import DistributedVariable, ProcessGroupVariable
+from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
+from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -344,15 +344,15 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
-    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
-    funcs.update(_device_constructors())
     more: set[Callable[..., Any]] = {
+        torch.ones,
         torch.ones_like,
+        torch.zeros,
         torch.zeros_like,
-        torch.empty_like,
-        torch.full_like,
+        torch.empty,
+        torch.full,
     }
     funcs.update(more)
     return funcs
@@ -933,7 +933,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 "call_function", torch._C._set_deterministic_algorithms, (value,), {}
             )
             torch._C._set_deterministic_algorithms(value)
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
@@ -1205,7 +1205,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 isinstance(condition, variables.SymNodeVariable)
                 and condition.evaluate_expr()
             ):
-                return ConstantVariable(None)
+                return CONSTANT_VARIABLE_NONE
             return None
 
         @register(SDPAParams)
@@ -1232,6 +1232,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
+                get_rank,
+                get_world_size,
             )
             from torch.distributed.tensor import DTensor
 
@@ -1241,34 +1243,54 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 get_process_group_ranks,
                 _resolve_group_name_by_ranks_and_tag,
+                get_rank,
+                get_world_size,
             )
             def handle_constant_processgroup_functions(
-                self, tx: "InstructionTranslator", *args: VariableTracker
+                self,
+                tx: "InstructionTranslator",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
             ) -> VariableTracker:
-                # because the input is a "ProcessGroupVariable", we'll be guarding on its
-                # ID_MATCH based on how it was constructed.
-
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
-                if len(args) == 1:
+                if len(args) == 0 and len(kwargs) == 0:
+                    # get_rank() or get_world_size() with no args (uses default group)
+                    pass
+                elif len(args) == 1 and len(kwargs) == 0:
                     # group or group name
-                    assert (
-                        isinstance(args[0], ProcessGroupVariable)
-                        or args[0].is_python_constant()
+                    assert args[0].is_python_constant() or (
+                        isinstance(args[0], TorchScriptObjectVariable)
+                        and args[  # pyrefly: ignore[missing-attribute]
+                            0
+                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
+                        == "torch.distributed.distributed_c10d.ProcessGroup"
                     )
-                elif len(args) == 2:
+                elif len(args) == 2 and len(kwargs) == 0:
                     # ranks + tag
                     assert (
                         isinstance(args[0], ListVariable)
                         and args[1].is_python_constant()
                     )
+                elif len(args) == 0 and len(kwargs) > 0:
+                    # All keyword arguments (e.g., get_world_size(group=...))
+                    pass
                 else:
                     raise AssertionError(
-                        f"Invalid group value ({args}) for constant pg "
+                        f"Invalid group value ({args}, {kwargs}) for constant pg "
                         f"function {self.value}"
                     )
-                args_as_value = [arg.as_python_constant() for arg in args]
-                invocation_result = self.value(*args_as_value)
+
+                def get_arg_value(arg: VariableTracker) -> Any:
+                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # as_python_constant(), so extract real_obj directly
+                    if isinstance(arg, TorchScriptObjectVariable):
+                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
+                    return arg.as_python_constant()
+
+                args_as_value = [get_arg_value(arg) for arg in args]
+                kwargs_as_value = {k: get_arg_value(v) for k, v in kwargs.items()}
+                invocation_result = self.value(*args_as_value, **kwargs_as_value)
 
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
@@ -1292,7 +1314,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     placements_vt = args[2]
 
                 if placements_vt is None:
-                    placements_vt = ConstantVariable.create(None)
+                    placements_vt = CONSTANT_VARIABLE_NONE
                 elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
                     placements_vt = SourcelessBuilder.create(tx, tuple).call_function(
                         tx, [placements_vt], {}
@@ -1663,7 +1685,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             TorchFunctionModeStackVariable.register_mutation(tx)
             # type: ignore[arg-type]
             tx.symbolic_torch_function_state.push_torch_function_mode(args[0])
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         @register(torch._C._len_torch_function_stack)
         def handle_len_torch_function(
@@ -1795,7 +1817,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         @register(torch._check)
         def handle_check(
@@ -1863,7 +1885,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             if predicate_vt.is_python_constant():
                 self.value(predicate_vt.as_python_constant(), message_eager)
-                return ConstantVariable.create(None)
+                return CONSTANT_VARIABLE_NONE
 
             predicate_proxy = predicate_vt.as_proxy()
 
@@ -2434,6 +2456,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
+        from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
             func_to_graphable,
@@ -2453,14 +2476,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # then tree_flatten them, we just let Dynamo symbolically interpret
         # `tree_flatten((args, kwargs))`. This saves us from having to
         # worry about the reconstruction logic, side effects, and guards.
-        packed_input_vt = TupleVariable.build(
-            tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
+        args_with_states, kwargs_with_states = self._extract_nn_module_states(
+            tx, args, kwargs
         )
-        out_vt = SourcelessBuilder.create(tx, tree_flatten).call_function(  # type: ignore[arg-type]
-            tx, [packed_input_vt], {}
-        )
-        assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
-        flat_args_vts, input_spec_vt = out_vt.items
+        flat_args_vts, input_spec_vt = _make_inlined(tx, tree_flatten)(
+            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+        ).unpack_var_sequence(tx)
         assert isinstance(flat_args_vts, ListVariable)
 
         # Handle the case when the input contains a non-graphable type.
@@ -2653,9 +2674,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         """
         import torch.utils._pytree as pytree
         from torch._dynamo.graph_bytecode_inputs import register_user_object
-        from torch._higher_order_ops.invoke_leaf_function import LeafModuleState
+        from torch._dynamo.utils import _make_inlined
+        from torch._higher_order_ops.invoke_leaf_function import (
+            convert_modules_to_states,
+        )
 
-        from .higher_order_ops import _make_inlined
         from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
         def is_module_variable(
@@ -2695,20 +2718,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             kwargs_var = VariableTracker.build(tx, kwargs)
             return args_var, kwargs_var
 
-        def convert_modules_to_states(
-            values: Any, module_to_index: dict[int, int]
-        ) -> Any:
-            def module_to_state(val: Any) -> Any:
-                if isinstance(val, torch.nn.Module):
-                    return LeafModuleState(
-                        nn_module_index=module_to_index[id(val)],
-                        named_parameters=dict(val.named_parameters()),
-                        named_buffers=dict(val.named_buffers()),
-                    )
-                return val
-
-            return pytree.tree_map(module_to_state, values)
-
         module_to_index_var = VariableTracker.build(tx, module_to_index)
 
         result_var = _make_inlined(tx, convert_modules_to_states)(
@@ -2723,14 +2732,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
+        from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import (
             invoke_leaf_function,
-            reconstruct_original_args,
+            make_leaf_function_wrappers,
         )
 
         from .builder import wrap_fx_proxy
-        from .higher_order_ops import _make_inlined
 
         decorated_fn = self.value
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
@@ -2752,29 +2761,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         flat_arg_proxies = [
             arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
         ]
-        input_spec = (
-            input_spec_var.as_python_constant()
-        )  # pyrefly: ignore [unbound-name]
+        input_spec = input_spec_var.as_python_constant()
 
-        def wrap_impl_for_leaf_module_state(
-            impl: Callable[..., Any],
-        ) -> Callable[..., Any]:
-            def wrapped_impl(*flat_args: Any) -> Any:
-                # NB: The flat_args contain flattened LeafModuleState objects.
-                # We need to unflatten them with input_spec then convert back to nn.Module
-                # before calling the original impl.
-                #
-                # input_spec is captured from the outer scope
-                with reconstruct_original_args(input_spec, flat_args) as (
-                    args_with_modules,
-                    kwargs_with_modules,
-                ):
-                    return impl(*args_with_modules, **kwargs_with_modules)
-
-            return wrapped_impl
-
-        wrapped_real_impl = wrap_impl_for_leaf_module_state(real_impl)
-        wrapped_fake_impl = wrap_impl_for_leaf_module_state(fake_impl)
+        # Single-element mutable list so the wrappers can write back the output
+        # TreeSpec. Read captured_out_spec[0] after the wrappers have been called.
+        captured_out_spec: list[pytree.TreeSpec | None] = [None]
+        wrapped_real_impl, wrapped_fake_impl = make_leaf_function_wrappers(
+            real_impl, fake_impl, captured_out_spec
+        )
 
         _, real_impl_spec = func_to_graphable(wrapped_real_impl)
         _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
@@ -2786,16 +2780,26 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
         fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
+            input_spec_proxy,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
             "call_function", invoke_leaf_function, invoke_args, {}
         )
-        return wrap_fx_proxy(tx, result_proxy)
+
+        flat_output_vt = wrap_fx_proxy(tx, result_proxy)
+
+        assert captured_out_spec[0] is not None, (
+            "Output spec was not captured during fake tensor propagation. "
+            "This should not happen - please report a bug."
+        )
+        out_spec_vt = VariableTracker.build(tx, captured_out_spec[0])
+        return _make_inlined(tx, _pytree.tree_unflatten)(flat_output_vt, out_spec_vt)
 
     def _call_ntuple(
         self,

@@ -37,7 +37,7 @@ void reset_deleter_call_count() {
   g_deleter_call_count = 0;
 }
 
-STABLE_TORCH_LIBRARY(libtorch_agn_2_11, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_from_blob_with_deleter(int data_ptr, int[] sizes, int[] strides, Device device, ScalarType dtype) -> Tensor");
   m.def("get_deleter_call_count() -> int");
@@ -45,7 +45,7 @@ STABLE_TORCH_LIBRARY(libtorch_agn_2_11, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    libtorch_agn_2_11,
+    STABLE_LIB_NAME,
     CompositeExplicitAutograd,
     m) {
   m.impl("my_from_blob_with_deleter", TORCH_BOX(&my_from_blob_with_deleter));
@@ -89,11 +89,11 @@ Tensor my_from_blob_with_cuda_deleter(
       cuda_deleter);
 }
 
-STABLE_TORCH_LIBRARY(libtorch_agn_2_11_cuda, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_from_blob_with_cuda_deleter(int numel, Device device) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_11_cuda, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_from_blob_with_cuda_deleter", TORCH_BOX(&my_from_blob_with_cuda_deleter));
 }
 

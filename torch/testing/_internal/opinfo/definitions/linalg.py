@@ -2831,13 +2831,6 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
-            # Exception: index ????? is out of bounds for dimension 0 with size 6
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
             # Exception: Tensor-likes are not close!
             DecorateInfo(
                 unittest.expectedFailure,
@@ -2847,11 +2840,6 @@ op_db: list[OpInfo] = [
             ),
         ],
         skips=(
-            DecorateInfo(
-                unittest.skip("Unsupported on MPS for now"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
             # Exception: linalg.lu_factor(): MPS only supports floats.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
