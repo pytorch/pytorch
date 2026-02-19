@@ -335,6 +335,30 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
+
+def _compose_context_fns(*context_fns):
+    """Compose multiple context_fns into one that stacks all their contexts."""
+    def composed():
+        fwd_and_recomp = [fn() for fn in context_fns]
+
+        @contextlib.contextmanager
+        def combined_fwd():
+            with contextlib.ExitStack() as stack:
+                for fwd, _ in fwd_and_recomp:
+                    stack.enter_context(fwd)
+                yield
+
+        @contextlib.contextmanager
+        def combined_recomp():
+            with contextlib.ExitStack() as stack:
+                for _, recomp in fwd_and_recomp:
+                    stack.enter_context(recomp)
+                yield
+
+        return combined_fwd(), combined_recomp()
+    return composed
+
+
 # Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow
 # looks likes this
@@ -1514,11 +1538,11 @@ def _checkpoint_without_reentrant_generator(
     unpack_error_cb = None
 
     if _checkpoint_debug_enabled if _checkpoint_debug_enabled is not None else debug:
+        debug_context_fn, unpack_error_cb = _get_debug_context_and_cb()
         if context_fn is not noop_context_fn:
-            raise ValueError(
-                "debug=True is incompatible with non-default context_fn"
-            )
-        context_fn, unpack_error_cb = _get_debug_context_and_cb()
+            context_fn = _compose_context_fns(context_fn, debug_context_fn)
+        else:
+            context_fn = debug_context_fn
 
     if determinism_check in _allowed_determinism_checks_to_fns:
         metadata_fn = _allowed_determinism_checks_to_fns[determinism_check]
