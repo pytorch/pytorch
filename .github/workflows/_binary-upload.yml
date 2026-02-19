@@ -59,6 +59,7 @@ on:
 jobs:
   upload:
     runs-on: ubuntu-22.04
+    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/nightly') && 'pytorchbot-env' || '' }}
     container:
       image: continuumio/miniconda3:4.12.0
     env:
@@ -133,3 +134,70 @@ jobs:
         run: |
             set -ex
             bash .circleci/scripts/binary_upload.sh
+
+      - name: Check if R2 upload is enabled
+        id: check-r2
+        if: steps.download-artifacts.outcome == 'success'
+        shell: bash
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          R2_UPLOAD="false"
+          if [[ -n "${R2_ACCOUNT_ID}" && -n "${R2_ACCESS_KEY_ID}" && -n "${R2_SECRET_ACCESS_KEY}" ]]; then
+            R2_UPLOAD="true"
+          fi
+          echo "r2_upload=${R2_UPLOAD}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure R2 credentials
+        if: ${{ steps.check-r2.outputs.r2_upload == 'true' && github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
+        shell: bash
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          {
+            echo "AWS_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}"
+            echo "AWS_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}"
+            echo "AWS_SESSION_TOKEN="
+            echo "AWS_DEFAULT_REGION=auto"
+            echo "R2_ACCOUNT_ID=${R2_ACCOUNT_ID}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Upload package to R2
+        if: ${{ steps.check-r2.outputs.r2_upload == 'true' && github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
+        shell: bash
+        env:
+          PKG_DIR: "${{ runner.temp }}/artifacts"
+          UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
+          BUILD_NAME: ${{ inputs.build_name }}
+        run: |
+          set -ex
+          pip install -q awscli
+          UPLOAD_BUCKET="s3://pytorch-downloads"
+          PACKAGE_TYPE="${PACKAGE_TYPE:-wheel}"
+          case "${PACKAGE_TYPE}" in
+            libtorch)
+              PKG_TYPE="libtorch"
+              EXTENSION="zip"
+              ;;
+            *wheel)
+              PKG_TYPE="whl"
+              EXTENSION="whl"
+              ;;
+          esac
+          UPLOAD_DIR="${UPLOAD_BUCKET}/${PKG_TYPE}/nightly"
+          if [[ -n "${UPLOAD_SUBFOLDER}" ]]; then
+            UPLOAD_DIR="${UPLOAD_DIR}/${UPLOAD_SUBFOLDER}"
+          fi
+          if [[ "${BUILD_NAME}" == *-full* ]]; then
+            UPLOAD_DIR="${UPLOAD_DIR}_full"
+          fi
+          for pkg in ${PKG_DIR}/*.${EXTENSION}; do
+            shm_id=$(sha256sum "${pkg}" | awk '{print $1}')
+            aws s3 cp "${pkg}" "${UPLOAD_DIR}/" \
+              --metadata "checksum-sha256=${shm_id}" \
+              --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          done
