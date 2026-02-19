@@ -92,7 +92,7 @@ r2_upload() {
         AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
         AWS_SESSION_TOKEN="" \
         AWS_DEFAULT_REGION="auto" \
-        aws s3 cp --no-progress "${pkg}" "${r2_upload_dir}" \
+        ${AWS_S3_CP} --no-progress "${pkg}" "${r2_upload_dir}" \
           --metadata "checksum-sha256=${shm_id}" \
           --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
       )
