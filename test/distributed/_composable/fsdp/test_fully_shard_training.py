@@ -85,7 +85,8 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         return 2
 
     def test_root_move_forward_input_to_device(self):
-        device = torch.device(device_type.type, 0)
+        device_id = self.rank if hasattr(self, 'rank') else 0
+        device = torch.device(device_type.type, device_id)
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: tuple[torch.Tensor, ...]):
@@ -121,7 +122,8 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
 
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
-        device = torch.device(device_type.type, 0)
+        device_id = self.rank if hasattr(self, 'rank') else 0
+        device = torch.device(device_type.type, device_id)
         # Single FSDP group
         for reshard_after_forward in (True, False, 2, None):
             torch.manual_seed(42)
@@ -181,7 +183,8 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
 
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
-        device = torch.device(device_type.type, 0)
+        device_id = self.rank if hasattr(self, 'rank') else 0
+        device = torch.device(device_type.type, device_id)
         # Single FSDP group
         for reshard_after_forward in (True, False, 2):
             model = MLP(8, device)
