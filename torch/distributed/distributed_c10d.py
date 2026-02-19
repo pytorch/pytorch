@@ -364,8 +364,12 @@ class Backend(str):  # noqa: SLOT000
 
         if devices is not None:
             for device in devices:
-                if device not in Backend.default_device_backend_map:
+                current = Backend.default_device_backend_map.get(device)
+                # Allow remapping from fake backend to actual backend (e.g., HPU from fake to HCCL)
+                # but prevent fake backend from claiming devices
+                if current is None or (current == "fake" and name.lower() != "fake"):
                     Backend.default_device_backend_map[device] = name.lower()
+
         Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
