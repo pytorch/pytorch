@@ -58,12 +58,7 @@ from torch.utils._sympy.functions import (
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import (
-    decompositions,
-    decomps_to_exclude,
-    emulate_precision_decomps_to_exclude,
-    get_decompositions,
-)
+from .decomposition import decompositions, decomps_to_exclude, get_decompositions
 from .ir import (
     BaseView,
     DtypeView,
@@ -2316,10 +2311,7 @@ def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
             return op.overloadpacket in exclude_set
         return False
 
-    skip_decomp = is_in_exclude_set(op, decomps_to_exclude) or (
-        config.emulate_precision_casts
-        and is_in_exclude_set(op, emulate_precision_decomps_to_exclude)
-    )
+    skip_decomp = is_in_exclude_set(op, decomps_to_exclude)
     assert op not in decompositions or override_decomp or skip_decomp, (
         f"both a fallback and a decomp for same op: {op}"
     )
@@ -7078,11 +7070,13 @@ _register_foreach_lowering(aten._foreach_addcmul.Scalar, _foreach_addcmul_scalar
 @register_lowering(aten.lerp.Scalar, broadcast=True)
 def lerp_scalar(start, end, weight):
     """
-    Computes start + weight * (end - start) using FMA for precision.
+    Computes linear interpolation using the same dual-formula approach as CUDA lerp.
 
-    CUDA's lerp uses FMA internally: fma(weight, end-start, start)
-    This computes weight*(end-start)+start with no intermediate rounding.
-    We match this behavior by using ops.fma.
+    For weight < 0.5: start + weight * (end - start)
+    For weight >= 0.5: end - (end - start) * (1 - weight)
+
+    This dual-formula approach ensures numerical stability and exact results
+    when weight equals 0 or 1.
     """
     dtype = get_promoted_dtype(
         start,
@@ -7094,6 +7088,11 @@ def lerp_scalar(start, end, weight):
     end_loader = end.make_loader()
 
     use_fma = dtype.is_floating_point and not torch.version.hip
+    # Determine which formula to use based on weight value
+    # Convert to float for comparison in case weight is a sympy expression
+    weight_float = float(weight)
+    # Use -weight_float if negative to get absolute value (avoid shadowed abs)
+    use_high_formula = (weight_float if weight_float >= 0 else -weight_float) >= 0.5
 
     def inner_fn(idx):
         start_val = start_loader(idx)
@@ -7102,13 +7101,23 @@ def lerp_scalar(start, end, weight):
         # Compute end - start
         diff = ops.sub(end_val, start_val)
 
-        weight_val = ops.constant(weight, dtype)
-        if use_fma:
-            # Use FMA to match CUDA lerp: fma(weight, diff, start) = weight*diff + start
-            return ops.fma(weight_val, diff, start_val)
+        if use_high_formula:
+            # For weight >= 0.5: end - (end - start) * (1 - weight)
+            one_minus_weight = ops.constant(1.0 - weight_float, dtype)
+            if use_fma:
+                # fma(-(1-weight), diff, end) = end - (1-weight)*diff
+                neg_one_minus_weight = ops.constant(-(1.0 - weight_float), dtype)
+                return ops.fma(neg_one_minus_weight, diff, end_val)
+            else:
+                return ops.sub(end_val, ops.mul(one_minus_weight, diff))
         else:
-            # Fallback for non-FMA targets
-            return ops.add(start_val, ops.mul(weight_val, diff))
+            # For weight < 0.5: start + weight * (end - start)
+            weight_val = ops.constant(weight_float, dtype)
+            if use_fma:
+                # fma(weight, diff, start) = weight*diff + start
+                return ops.fma(weight_val, diff, start_val)
+            else:
+                return ops.add(start_val, ops.mul(weight_val, diff))
 
     return Pointwise.create(
         device=start.get_device(),
@@ -7121,11 +7130,13 @@ def lerp_scalar(start, end, weight):
 @register_lowering(aten.lerp.Tensor, broadcast=True)
 def lerp_tensor(start, end, weight):
     """
-    Computes start + weight * (end - start) using FMA for precision.
+    Computes linear interpolation using the same dual-formula approach as CUDA lerp.
 
-    CUDA's lerp uses FMA internally: fma(weight, end-start, start)
-    This computes weight*(end-start)+start with no intermediate rounding.
-    We match this behavior by using ops.fma.
+    For weight < 0.5: start + weight * (end - start)
+    For weight >= 0.5: end - (end - start) * (1 - weight)
+
+    This dual-formula approach ensures numerical stability and exact results
+    when weight equals 0 or 1.
     """
     dtype = get_promoted_dtype(
         start,
@@ -7148,12 +7159,26 @@ def lerp_tensor(start, end, weight):
         # Compute end - start
         diff = ops.sub(end_val, start_val)
 
+        # Low formula: start + weight * (end - start)
         if use_fma:
-            # Use FMA to match CUDA lerp: fma(weight, diff, start) = weight*diff + start
-            return ops.fma(weight_val, diff, start_val)
+            low_result = ops.fma(weight_val, diff, start_val)
         else:
-            # Fallback for non-FMA targets
-            return ops.add(start_val, ops.mul(weight_val, diff))
+            low_result = ops.add(start_val, ops.mul(weight_val, diff))
+
+        # High formula: end - (end - start) * (1 - weight)
+        one_val = ops.constant(1.0, dtype)
+        one_minus_weight = ops.sub(one_val, weight_val)
+        if use_fma:
+            neg_one_minus_weight = ops.neg(one_minus_weight)
+            high_result = ops.fma(neg_one_minus_weight, diff, end_val)
+        else:
+            high_result = ops.sub(end_val, ops.mul(one_minus_weight, diff))
+
+        # Select formula based on |weight| >= 0.5
+        abs_weight = ops.abs(weight_val)
+        threshold = ops.constant(0.5, dtype)
+        use_high = ops.ge(abs_weight, threshold)
+        return ops.where(use_high, high_result, low_result)
 
     return Pointwise.create(
         device=start.get_device(),
