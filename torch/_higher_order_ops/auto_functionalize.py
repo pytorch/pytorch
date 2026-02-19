@@ -608,16 +608,20 @@ def do_auto_functionalize(
 class FunctionalCallableWithEpilogue:
     def __init__(self, orig_callable: Callable):
         self.orig_callable = orig_callable
+        # Propagate so callers pass inputs as a list, enabling input deallocation.
+        if getattr(orig_callable, "_boxed_call", False):
+            self._boxed_call = True
 
     def __call__(self, *args, **kwargs):
-        # We call torch.func.functionalize. This allows us to inline the epilogue graph.
-        # Inlining has the benefit of allowing easiser fusion inside subgraph.
-        # Though the epilogue graph contains copy_, it is OK because inductor can handle it
-        # and this is also how we have been supporting top-level graph input mutation.
-        # Handle boxed calling convention
+        # Functionalize to inline the epilogue graph (copy_ ops) for better fusion.
+        functionalized = torch.func.functionalize(self.orig_callable)
         if getattr(self.orig_callable, "_boxed_call", False):
-            return tuple(torch.func.functionalize(self.orig_callable)(list(args)))
-        return tuple(torch.func.functionalize(self.orig_callable)(*args, **kwargs))
+            # Not all callers respect _boxed_call (e.g. reenter_make_fx
+            # always calls f(*args)). Detect which convention was used.
+            if len(args) == 1 and isinstance(args[0], list):
+                return tuple(functionalized(args[0]))
+            return tuple(functionalized(list(args)))
+        return tuple(functionalized(*args, **kwargs))
 
     def __hash__(self):
         return id(self.orig_callable)
