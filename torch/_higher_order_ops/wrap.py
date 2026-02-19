@@ -141,9 +141,9 @@ def _resolve_inductor_callable(func) -> InductorCompiledCallable:
     """
     if isinstance(func, int):
         return inductor_code_side_table.get_callable(func)
-    assert isinstance(func, InductorCompiledCallable), (
+    assert isinstance(func, InductorCompiledCallable), (  # noqa: S101
         f"Unexpected func type: {type(func)}"
-    )  # noqa: S101
+    )
     return func
 
 
