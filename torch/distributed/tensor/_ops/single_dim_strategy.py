@@ -2,6 +2,7 @@
 import functools
 import heapq
 import logging
+import math
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -9,7 +10,10 @@ from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor._collective_utils import redistribute_cost
+from torch.distributed.tensor._collective_utils import (
+    _compute_placement_transition_cost,
+    MeshTopoInfo,
+)
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     ArgsType,
@@ -431,18 +435,77 @@ def register_single_dim_strategy(
     return wrapper
 
 
-def _cost_helper(src_placements, dst_placements, mesh, tensor_meta):
-    current_spec = DTensorSpec(
-        mesh,
-        src_placements,
-        tensor_meta=tensor_meta,
-    )
-    new_spec = DTensorSpec(
-        mesh,
-        dst_placements,
-        tensor_meta=tensor_meta,
-    )
-    return redistribute_cost(current_spec, new_spec)
+@dataclass(order=True)
+class _PQEntry:
+    """Priority queue entry for the Dijkstra search in _find_lowest_cost_sharding.
+
+    Ordered by (cost, counter) for heap comparison. The counter breaks ties
+    in FIFO order so that entries with equal cost are explored in insertion
+    order rather than by arbitrary tuple comparison on placements.
+    """
+
+    cost: float
+    counter: int
+    placements: tuple[tuple[Placement, ...], ...] = field(compare=False)
+    transitions: list[tuple[int, int, Placement, Placement]] = field(compare=False)
+    per_input_costs: tuple[float, ...] = field(compare=False)
+
+
+def _compute_redistribute_cost(
+    src_placements: tuple[Placement, ...],
+    dst_placements: tuple[Placement, ...],
+    mesh_topo: MeshTopoInfo,
+    initial_comm_bytes_gb: float,
+) -> float:
+    """Compute redistribute cost using per-dim placement transitions.
+
+    Avoids the overhead of DTensorSpec construction and _gen_transform_infos
+    planning used by redistribute_cost(). Uses the same greedy transform
+    ordering (reverse then forward pass) for correct nested shard handling.
+    """
+    if src_placements == dst_placements:
+        return 0.0
+
+    ndim = len(src_placements)
+    cost = 0.0
+    comm_bytes_gb = initial_comm_bytes_gb
+
+    # Replicate greedy transform ordering from generate_greedy_transform_infos:
+    # 1. Reverse pass: detect misaligned nested shardings and replicate first
+    # 2. Forward pass: handle remaining transitions
+    current = list(src_placements)
+    target = list(dst_placements)
+
+    src_has_shards = any(p.is_shard() for p in src_placements)
+    if src_has_shards:
+        for dim in reversed(range(ndim)):
+            cur = current[dim]
+            tgt = target[dim]
+            if tgt.is_shard():
+                shard_dim = cast(Shard, tgt).dim
+                cur_sharding = [i for i in range(dim) if current[i].is_shard(shard_dim)]
+                tgt_sharding = [i for i in range(dim) if target[i].is_shard(shard_dim)]
+                if cur_sharding != tgt_sharding:
+                    tgt = Replicate()
+            if cur != tgt:
+                step_cost, comm_bytes_gb = _compute_placement_transition_cost(
+                    cur, tgt, mesh_topo, dim, comm_bytes_gb
+                )
+                if step_cost == float("inf"):
+                    return float("inf")
+                cost += step_cost
+                current[dim] = tgt
+
+    for dim in range(ndim):
+        if current[dim] != target[dim]:
+            step_cost, comm_bytes_gb = _compute_placement_transition_cost(
+                current[dim], target[dim], mesh_topo, dim, comm_bytes_gb
+            )
+            if step_cost == float("inf"):
+                return float("inf")
+            cost += step_cost
+
+    return cost
 
 
 def _find_lowest_cost_sharding(
@@ -456,13 +519,27 @@ def _find_lowest_cost_sharding(
     """
     Find the lowest cost sharding for the given op_schema.
 
-    This solves the runtime complexity problem of using _expand_single_dim_strategy_to_mesh by avoiding enumerating
-    the product of the single dim strategy over all the mesh dims and then searching the enumerated list for the min
-    cost.  Instead, it starts from the input placements and expands a search from there, starting by checking if
-    the input placements already describe a legal placement on all mesh dims, and then if not, iterating by taking
-    the lowest-cost redistributions in priority-queue order.
+    Uses a Dijkstra-like priority-queue search over input placement states. Each
+    state is a tuple of per-input placement tuples, and neighbors are generated
+    by changing one placement on one mesh dim for one input. The search
+    terminates when a state matches a single-dim strategy on every mesh dim.
 
-    Returns None if any input has _StridedShard placement, signaling the caller to fall back to full expansion.
+    This avoids the O(S^N) exhaustive expansion of _expand_single_dim_strategy_to_mesh
+    (S = single-dim strategies, N = mesh dims).  Benchmarks with mm on fake
+    process groups show:
+
+        1D(4):     S^N=8,   avg 0.2ms
+        2D(2,2):   S^N=64,  avg 2.3ms
+        3D(2,2,2): S^N=512, avg 41ms, worst 392ms
+
+    The step count is small (avg 0.6-2.0 pops) but per-step cost is dominated
+    by cost computation.  To minimize overhead, we call
+    _compute_placement_transition_cost directly per mesh dim (via
+    _compute_redistribute_cost) instead of going through redistribute_cost
+    (which constructs DTensorSpecs and runs _gen_transform_infos planning).
+
+    Returns None if any input has _StridedShard placement, signaling the caller
+    to fall back to full expansion.
     """
     # Note: circular import
     from torch.distributed.tensor._ops.utils import (
@@ -550,59 +627,75 @@ def _find_lowest_cost_sharding(
     else:
         output_metas = tuple(output_tensor_meta)
 
-    # PQ entry: (cost, counter, input_placements_tuple, transitions)
-    # cost is the total redistribute cost from original placements to current state
-    # transitions: list of (input_idx, mesh_dim, src_placement, dst_placement)
-    _Transitions = list[tuple[int, int, Placement, Placement]]
+    # Pre-compute mesh topology and per-input comm_bytes_gb for direct cost computation
+    mesh_topo = MeshTopoInfo.build_from_mesh(mesh)
+    per_input_comm_bytes_gb: list[float] = []
+    for spec in input_specs:
+        assert spec.tensor_meta is not None
+        total_bytes = spec.tensor_meta.dtype.itemsize * math.prod(
+            spec.tensor_meta.shape
+        )
+        num_shards = 1
+        for i, p in enumerate(spec.placements):
+            if p.is_shard():
+                num_shards *= mesh_topo.mesh_dim_devices[i]
+        per_input_comm_bytes_gb.append(total_bytes / num_shards / (1024**3))
+
     counter: int = 0
-    pq: list[tuple[float, int, tuple[tuple[Placement, ...], ...], _Transitions]] = []
+    pq: list[_PQEntry] = []
     visited: set[tuple[tuple[Placement, ...], ...]] = set()
 
     initial_input_placements = tuple(spec.placements for spec in input_specs)
-    heapq.heappush(pq, (0.0, counter, initial_input_placements, []))
+    initial_per_input_costs = (0.0,) * num_inputs
+    heapq.heappush(
+        pq,
+        _PQEntry(0.0, counter, initial_input_placements, [], initial_per_input_costs),
+    )
     counter += 1
-
-    def _total_cost(
-        input_placements_tuple: tuple[tuple[Placement, ...], ...],
-    ) -> float:
-        """Compute total redistribute cost from original to candidate placements."""
-        total = 0.0
-        for input_idx in range(num_inputs):
-            total += _cost_helper(
-                initial_input_placements[input_idx],
-                input_placements_tuple[input_idx],
-                mesh,
-                input_specs[input_idx].tensor_meta,
-            )
-        return total
 
     def _push_neighbor(
         input_idx: int,
         mesh_dim: int,
         new_placement: Placement,
-        current_placements: tuple[tuple[Placement, ...], ...],
-        current_transitions: _Transitions,
+        entry: _PQEntry,
     ) -> None:
         nonlocal counter
-        new_input_placements = [list(ps) for ps in current_placements]
+        new_input_placements = [list(ps) for ps in entry.placements]
         old_placement = new_input_placements[input_idx][mesh_dim]
         new_input_placements[input_idx][mesh_dim] = new_placement
         new_tuple = tuple(tuple(ps) for ps in new_input_placements)
         if new_tuple in visited:
             return
-        new_cost = _total_cost(new_tuple)
-        new_transitions = current_transitions + [
+        # Only recompute cost for the changed input (from original to new)
+        changed_cost = _compute_redistribute_cost(
+            initial_input_placements[input_idx],
+            new_tuple[input_idx],
+            mesh_topo,
+            per_input_comm_bytes_gb[input_idx],
+        )
+        new_per_input_costs = (
+            entry.per_input_costs[:input_idx]
+            + (changed_cost,)
+            + entry.per_input_costs[input_idx + 1 :]
+        )
+        new_cost = sum(new_per_input_costs)
+        new_transitions = entry.transitions + [
             (input_idx, mesh_dim, old_placement, new_placement)
         ]
-        heapq.heappush(pq, (new_cost, counter, new_tuple, new_transitions))
+        heapq.heappush(
+            pq,
+            _PQEntry(
+                new_cost, counter, new_tuple, new_transitions, new_per_input_costs
+            ),
+        )
         counter += 1
 
     while pq:
-        cost, counter_, input_placements_tuple, transitions = heapq.heappop(pq)
+        entry = heapq.heappop(pq)
 
-        if input_placements_tuple in visited:
+        if entry.placements in visited:
             continue
-        visited.add(input_placements_tuple)
+        visited.add(entry.placements)
 
         # Check if current input placements match a single-dim strategy on every mesh dim
         selected_output_placements: list[tuple[Placement, ...]] = []
@@ -610,7 +703,7 @@ def _find_lowest_cost_sharding(
 
         for mesh_dim in range(mesh.ndim):
             input_placements_for_dim = tuple(
-                placements[mesh_dim] for placements in input_placements_tuple
+                placements[mesh_dim] for placements in entry.placements
             )
             output_for_dim = strategy_lookup.get(input_placements_for_dim)
             if output_for_dim is not None:
@@ -623,7 +716,7 @@ def _find_lowest_cost_sharding(
             # Build input specs for the candidate match
             arg_specs = [
                 DTensorSpec(mesh, placements, tensor_meta=input_spec.tensor_meta)
-                for placements, input_spec in zip(input_placements_tuple, input_specs)
+                for placements, input_spec in zip(entry.placements, input_specs)
             ]
 
             # Check all inputs are shardable with these placements
@@ -675,20 +768,20 @@ def _find_lowest_cost_sharding(
                 exhaustive = len(expanded_strategies_over_one_mesh_dim) ** mesh.ndim
                 logger.debug(
                     "returning cost=%f %s, counter=%d, exhaustive=%d, transitions=%s",
-                    cost,
+                    entry.cost,
                     op_spec,
                     counter,
                     exhaustive,
-                    transitions,
+                    entry.transitions,
                 )
                 result = OpStrategy([op_spec])
-                result._pq_transitions = transitions  # type: ignore[attr-defined]
+                result._pq_transitions = entry.transitions  # type: ignore[attr-defined]
                 return result
 
         # Generate all neighbor states (independent blocks, not if/elif)
-        for input_idx in range(len(input_placements_tuple)):
+        for input_idx in range(len(entry.placements)):
             for mesh_dim in range(mesh.ndim):
-                current_p = input_placements_tuple[input_idx][mesh_dim]
+                current_p = entry.placements[input_idx][mesh_dim]
 
                 # Replicate -> Shard (local chunk, free)
                 if isinstance(current_p, Replicate):
@@ -697,8 +790,7 @@ def _find_lowest_cost_sharding(
                             input_idx,
                             mesh_dim,
                             sharding,
-                            input_placements_tuple,
-                            transitions,
+                            entry,
                         )
                     # Replicate -> Partial (local, free)
                     for partial in allowed_partial_per_input[input_idx]:
@@ -706,8 +798,7 @@ def _find_lowest_cost_sharding(
                             input_idx,
                             mesh_dim,
                             partial,
-                            input_placements_tuple,
-                            transitions,
+                            entry,
                         )
 
                 # Shard -> Replicate (allgather)
@@ -716,8 +807,7 @@ def _find_lowest_cost_sharding(
                         input_idx,
                         mesh_dim,
                         Replicate(),
-                        input_placements_tuple,
-                        transitions,
+                        entry,
                     )
                     # Shard -> different Shard (all-to-all)
                     for sharding in allowed_sharding_per_input[input_idx]:
@@ -726,8 +816,7 @@ def _find_lowest_cost_sharding(
                                 input_idx,
                                 mesh_dim,
                                 sharding,
-                                input_placements_tuple,
-                                transitions,
+                                entry,
                             )
 
                 # Partial -> Replicate (allreduce)
@@ -736,8 +825,7 @@ def _find_lowest_cost_sharding(
                         input_idx,
                         mesh_dim,
                         Replicate(),
-                        input_placements_tuple,
-                        transitions,
+                        entry,
                     )
                     # Partial -> Shard (reduce-scatter)
                     for sharding in allowed_sharding_per_input[input_idx]:
@@ -745,8 +833,7 @@ def _find_lowest_cost_sharding(
                             input_idx,
                             mesh_dim,
                             sharding,
-                            input_placements_tuple,
-                            transitions,
+                            entry,
                         )
 
     raise AssertionError(
