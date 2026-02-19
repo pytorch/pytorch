@@ -1045,11 +1045,11 @@ torch.cuda.synchronize()
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
                     module(input)
 
-    @expectedFailureMPS  # TODO: fixme
     @onlyNativeDeviceTypes
     @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfMPS(torch.float)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(
             n,
