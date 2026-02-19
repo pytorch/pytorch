@@ -238,7 +238,7 @@ std::vector<int64_t> quantile_output_shape(
     out_shape = std::vector<int64_t>(self.dim(), 1);
   }
   if (q.dim() > 0) {
-    out_shape.insert(out_shape.begin(), q.sym_numel());
+    out_shape.insert(out_shape.begin(), q.size(0));
   }
 
   return out_shape;
