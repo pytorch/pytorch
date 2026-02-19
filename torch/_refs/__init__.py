@@ -1935,6 +1935,7 @@ def trunc_divide(
 #
 
 
+@register_decomposition(aten.addcdiv)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "tensor1", "tensor2"),
