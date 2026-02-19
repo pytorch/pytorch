@@ -1042,8 +1042,8 @@ class CommonTemplate:
                 "pad_outputs": True,
                 "padding_alignment_bytes": 32,
                 "padding_stride_threshold": 0,
-                "triton.prefer_nd_tiling": True,
                 "unroll_reductions_threshold": 1,
+                **tiled_reduction_config,
             },
         )
 
