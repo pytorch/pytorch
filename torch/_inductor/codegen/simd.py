@@ -1879,9 +1879,7 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
-    def _collect_config_patches(
-        self, node_schedule: list[Any]
-    ) -> dict[str, Any]:
+    def _collect_config_patches(self, node_schedule: list[Any]) -> dict[str, Any]:
         """Collect and merge config_patches from all operations in the node schedule.
 
         This enables scoped config (e.g., coordinate_descent_tuning) for kernels
