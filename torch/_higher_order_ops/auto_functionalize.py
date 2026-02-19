@@ -609,13 +609,12 @@ class FunctionalCallableWithEpilogue:
     def __init__(self, orig_callable: Callable):
         self.orig_callable = orig_callable
         # Propagate so callers pass inputs as a list, enabling input deallocation.
-        if getattr(orig_callable, "_boxed_call", False):
-            self._boxed_call = True
+        self._boxed_call = getattr(orig_callable, "_boxed_call", False)
 
     def __call__(self, *args, **kwargs):
         # Functionalize to inline the epilogue graph (copy_ ops) for better fusion.
         functionalized = torch.func.functionalize(self.orig_callable)
-        if getattr(self.orig_callable, "_boxed_call", False):
+        if self._boxed_call:
             # Not all callers respect _boxed_call (e.g. reenter_make_fx
             # always calls f(*args)). Detect which convention was used.
             if len(args) == 1 and isinstance(args[0], list):

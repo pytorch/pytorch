@@ -1138,8 +1138,7 @@ class FunctionalizeCtxWrapper:
         self.ctx = ctx
         self.subgraph = subgraph
         # Propagate so callers pass inputs as a list, enabling input deallocation.
-        if getattr(subgraph, "_boxed_call", False):
-            self._boxed_call = True
+        self._boxed_call = getattr(subgraph, "_boxed_call", False)
 
     def __hash__(self):
         return id(self.subgraph)
@@ -1149,7 +1148,7 @@ class FunctionalizeCtxWrapper:
 
     def __call__(self, *args, **kwargs):
         if isinstance(self.subgraph, torch.fx.GraphModule):
-            if getattr(self.subgraph, "_boxed_call", False):
+            if self._boxed_call:
                 # Not all callers respect _boxed_call (e.g. reenter_make_fx).
                 if len(args) == 1 and isinstance(args[0], list):
                     return self.ctx.functionalize(self.subgraph)(args[0])
@@ -1161,7 +1160,7 @@ class FunctionalizeCtxWrapper:
                         torch.fx.Interpreter(self.subgraph).run
                     )(*args, **kwargs)
         functionalized = self.ctx.functionalize(self.subgraph)
-        if getattr(self.subgraph, "_boxed_call", False):
+        if self._boxed_call:
             if len(args) == 1 and isinstance(args[0], list):
                 return functionalized(args[0])
             return functionalized(list(args))
