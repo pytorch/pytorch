@@ -1334,8 +1334,7 @@ static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tenso
   auto infos_data = infos.data_ptr<int>();
 
   // get the optimal work size and allocate workspace tensor
-  // hipsolverDnXsyevd is not yet supported on ROCm, use 32-bit syevd path instead
-#if defined(USE_CUSOLVER_64_BIT) && !defined(USE_ROCM)
+#ifdef USE_CUSOLVER_64_BIT
   size_t worksize_device; // workspaceInBytesOnDevice
   size_t worksize_host; // workspaceInBytesOnHost
   cusolverDnParams_t params = nullptr; // use default algorithm (currently it's the only option)
@@ -1356,7 +1355,7 @@ static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tenso
   int lda_32 = cuda_int_cast(lda, "lda");
   at::cuda::solver::syevd_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(), jobz, uplo, n_32, vectors_data, lda_32, values_data, &lwork);
-#endif // defined(USE_CUSOLVER_64_BIT) && !defined(USE_ROCM)
+#endif // USE_CUSOLVER_64_BIT
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
     scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
@@ -1364,7 +1363,7 @@ static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tenso
     int* info_working_ptr = &infos_data[i];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
-#if defined(USE_CUSOLVER_64_BIT) && !defined(USE_ROCM)
+#ifdef USE_CUSOLVER_64_BIT
     // allocate workspace storage on device and host
     auto& device_allocator = *at::cuda::getCUDADeviceAllocator();
     auto work_device_data = device_allocator.allocate(worksize_device);
@@ -1399,7 +1398,7 @@ static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tenso
         static_cast<scalar_t*>(work_data.get()),
         lwork,
         info_working_ptr);
-#endif // defined(USE_CUSOLVER_64_BIT) && !defined(USE_ROCM)
+#endif // USE_CUSOLVER_64_BIT
   }
 }
 
