@@ -304,6 +304,7 @@ dtensor_compiled_fails = {
     xfail("equal"),
     xfail("hash_tensor"),
     xfail("item"),
+    xfail("narrow"),
     xfail("nonzero_static"),
     # Decompositions with .is_cuda checks that fail during sharding
     # propagation for aten.is_cuda / prim::device.
