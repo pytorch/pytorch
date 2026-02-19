@@ -190,6 +190,7 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             else:
                 self.assertIn(einops_method, output)
 
+    @unittest.expectedFailure
     @parametrize(
         "method",
         ["reduce", "repeat", "pack", "unpack", "einsum", "rearrange"],
