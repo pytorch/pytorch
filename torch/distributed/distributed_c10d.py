@@ -3139,7 +3139,31 @@ def reduce(
 def _object_to_tensor(obj, device, group):
     with _WaitCounter("pytorch.wait_counter.c10d._object_to_tensor").guard():
         f = io.BytesIO()
-        _pickler(f).dump(obj)
+        try:
+            _pickler(f).dump(obj)
+        except TypeError as e:
+            if "cannot pickle code objects" in str(e):
+                # Python 3.13 compatibility
+                if hasattr(obj, "__iter__") and obj:
+                    try:
+                        if hasattr(obj[0], "filename"):
+                            safe_obj = []
+                            for item in obj:
+                                safe_obj.append({
+                                    "filename": item.filename,
+                                    "lineno": item.lineno,
+                                    "name": item.name,
+                                    "line": item.line
+                                })
+                            _pickler(f).dump(safe_obj)
+                        else:
+                            _pickler(f).dump([str(x) for x in obj])
+                    except (IndexError, AttributeError):
+                        _pickler(f).dump(str(obj))
+                else:
+                    _pickler(f).dump(str(obj))
+            else:
+                raise
         byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
         # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
         # Otherwise, it will cause 100X slowdown.
