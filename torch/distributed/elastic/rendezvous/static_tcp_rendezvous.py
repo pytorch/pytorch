@@ -9,6 +9,8 @@
 
 import datetime
 import logging
+import os
+import sys
 from typing import cast
 
 from torch.distributed import PrefixStore, Store, TCPStore
@@ -64,6 +66,7 @@ class StaticTCPRendezvous(RendezvousHandler):
         logger.info("Creating TCPStore as the c10d::Store implementation")
         is_master = self.rank == 0
         if not self._store:
+            use_libuv = os.environ.get("USE_LIBUV", "0" if sys.platform == "win32" else "1") == "1"
             self._store = TCPStore(  # type: ignore[call-arg]
                 self.master_addr,
                 self.master_port,
@@ -71,6 +74,7 @@ class StaticTCPRendezvous(RendezvousHandler):
                 is_master,
                 self.timeout,
                 multi_tenant=True,
+                use_libuv=use_libuv,
             )
         store = PrefixStore(self.run_id, self._store)
         # TCPStore server instance is used by trainer code

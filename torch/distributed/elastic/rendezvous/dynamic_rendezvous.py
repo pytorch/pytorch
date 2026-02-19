@@ -10,6 +10,7 @@ import logging
 import os
 import pickle
 import socket
+import sys
 import threading
 import time
 import weakref
@@ -1124,11 +1125,13 @@ class DynamicRendezvousHandler(RendezvousHandler):
         )
 
     def _create_tcp_store_server(self, master_addr, master_port) -> dist.TCPStore:
+        use_libuv = os.environ.get("USE_LIBUV", "0" if sys.platform == "win32" else "1") == "1"
         return dist.TCPStore(
             host_name=master_addr,
             port=master_port,
             is_master=True,
             multi_tenant=True,
+            use_libuv=use_libuv,
         )
 
     @property
