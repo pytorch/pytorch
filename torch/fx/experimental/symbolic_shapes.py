@@ -6605,9 +6605,7 @@ class ShapeEnv:
         Returns the resolved value if range analysis determines it, otherwise
         returns fallback.
         """
-        var_ranges = {
-            x: self.var_to_range.get(x) for x in expr.free_symbols
-        }
+        var_ranges = {x: self.var_to_range.get(x) for x in expr.free_symbols}
         out = bound_sympy(expr, var_ranges)  # type: ignore[arg-type]
         if out.is_singleton():
             return out.lower
@@ -7817,7 +7815,9 @@ class ShapeEnv:
             # Aggressive guard-free semantics:
             # Level 1: use value range analysis (bound_sympy) before returning fallback
             # Level 2: skip range analysis entirely, just return fallback_value
-            aggressive_level = torch.fx.experimental._config.aggressive_guard_free_semantics
+            aggressive_level = (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+            )
             if hint is None and aggressive_level and fallback_value is not None:
                 if aggressive_level >= 2:
                     # Skip range analysis entirely
@@ -7829,7 +7829,6 @@ class ShapeEnv:
                     if range_result is fallback_value:
                         self._log_suppressed_dde(orig_expr, fallback_value)
                     return range_result
-       
 
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
