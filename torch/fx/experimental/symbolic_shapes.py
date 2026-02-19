@@ -3980,6 +3980,10 @@ class ShapeEnv:
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
+        # Separate counter tracking only replacement/divisible changes,
+        # used by SymNode.expr cache to avoid spurious invalidation from
+        # deferred runtime asserts.
+        self._replacements_version_counter = 0
 
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
@@ -6706,6 +6710,12 @@ class ShapeEnv:
     def replace(self, expr: _SympyT) -> _SympyT:
         """
         Apply symbol replacements to any symbols in the given expression.
+
+        IMPORTANT: The output of this method MUST depend only on
+        self.replacements and the input expr. Do not add dependencies on other
+        mutable state. SymNode.expr uses _replacements_version_counter (which
+        tracks only replacement changes) to cache calls to this method, so
+        depending on other state would cause stale cache results.
         """
         replacements = {}
         # pyrefly: ignore [missing-attribute]
@@ -7146,6 +7156,7 @@ class ShapeEnv:
         # them)
         if a not in self.replacements_slocs:
             self.replacements_slocs[a] = self._get_sloc()
+        self._replacements_version_counter += 1
         self._update_version_counter()
 
         # When specializing 'a == tgt', the equality should be also conveyed to
@@ -7165,6 +7176,15 @@ class ShapeEnv:
 
         a: b + c
         c: d
+
+        IMPORTANT: The output of this method MUST depend only on
+        self.replacements and the input symbol. Do not add dependencies on other
+        mutable state. SymNode.expr uses _replacements_version_counter (which
+        tracks only replacement changes) to cache calls to replace() (and
+        transitively this method), so depending on other state would cause
+        stale cache results. (Note: _set_replacement, called for path
+        compression, may read other fields like var_to_range, but those are
+        side effects that do not affect the returned value.)
         """
         if a not in self.replacements:
             return a
