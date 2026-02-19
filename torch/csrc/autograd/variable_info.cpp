@@ -23,10 +23,21 @@ VariableInfo::VariableInfo(const Variable& var, bool use_zeros_like)
 
 VariableInfo::VariableInfo() : requires_grad(false), is_empty(true) {}
 
+void VariableInfo::save_template_for_zeros(const Variable& var) {
+  // Create a scalar (0-dim) tensor that preserves the tensor subclass type.
+  // For DTensor, this preserves the mesh and placements while using minimal
+  // memory (just a single element instead of the full tensor).
+  // We use new_zeros({}) to create a scalar with the same type/subclass.
+  template_var = var.new_zeros({}).detach();
+}
+
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   if (is_empty) {
-    // Return undefined tensor.
     return at::Tensor();
+  } else if (template_var.has_value()) {
+    // Use new_zeros_symint to create zeros with the original size but using
+    // the template's type (DTensor with its mesh/placements).
+    return template_var->new_zeros_symint(size);
   } else if (the_var.has_value()) {
     return at::zeros_like(*the_var);
   } else {

@@ -850,6 +850,203 @@ class DTensorTest(DTensorTestBase):
         loss = out1.sum()
         loss.backward()
 
+    @with_comms
+    def test_undefined_grad_preserves_dtensor_type(self):
+        """
+        Test that gradients for unused outputs preserve DTensor type.
+        When an operator has multiple outputs but only some are used downstream,
+        the gradients for unused outputs are materialized as zeros.
+        These zeros should be DTensors to avoid mixing DTensor and torch.Tensor.
+        """
+        device_mesh = self.build_device_mesh()
+
+        for use_compile in [True, False]:
+            with self.subTest(use_compile=use_compile):
+
+                class MultiOutputFunc(torch.autograd.Function):
+                    gout1 = None
+                    gout2 = None
+
+                    @staticmethod
+                    def forward(ctx, x, y):
+                        # Uncomment this line to make warning dispears for eager
+                        # ctx.set_materialize_grads(False)
+                        return (x * 2), (y * 3)
+
+                    @staticmethod
+                    def backward(ctx, grad_out1, grad_out2):
+                        assert isinstance(grad_out2, DTensor)
+                        if not use_compile:
+                            MultiOutputFunc.gout1 = grad_out1
+                            MultiOutputFunc.gout2 = grad_out2
+                        return grad_out1 * 2, grad_out2 * 3
+
+                x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+                y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+                x = DTensor.from_local(x_local, device_mesh, [Replicate()])
+                y = DTensor.from_local(y_local, device_mesh, [Replicate()])
+
+                def func(x, y):
+                    return MultiOutputFunc.apply(x, y)
+
+                if use_compile:
+                    out1, out2 = torch.compile(func, fullgraph=True)(x, y)
+                else:
+                    out1, out2 = func(x, y)
+
+                # Only use out1, so out2's gradient should be zeros.
+                loss = out1.sum()
+                loss.backward()
+
+                if not use_compile:
+                    gout1, gout2 = MultiOutputFunc.gout1, MultiOutputFunc.gout2
+                    self.assertIsInstance(out1, DTensor)
+                    self.assertIsInstance(out2, DTensor)
+                    self.assertIsInstance(
+                        gout1, DTensor, "grad_out1 should be a DTensor"
+                    )
+                    self.assertIsInstance(
+                        gout2, DTensor, "grad_out2 should be a DTensor"
+                    )
+                    self.assertTrue(
+                        torch.all(gout2.to_local() == 0),
+                        "grad_out2 should be all zeros since out2 was not used",
+                    )
+                    self.assertEqual(
+                        gout2.placements,
+                        out2.placements,
+                        "grad_out2 should have the same placements as out2",
+                    )
+
+    @with_comms
+    def test_multi_layer_memory_usage_with_zeros_like(self):
+        """
+        Test memory usage when multiple layers each use MultiOutputFunc with
+        an unused DTensor output. Selective activation checkpointing (SAC) is
+        applied to save memory by recomputing activations for cheap ops (mul)
+        while saving expensive ones. The zeros_like() materialization for
+        unused outputs during backward may cause unexpected memory growth.
+        """
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        device_mesh = self.build_device_mesh()
+
+        class MultiOutputFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return (x * 2), (y * 3)
+
+            @staticmethod
+            def backward(ctx, grad_out1, grad_out2):
+                return grad_out1 * 2, grad_out2
+
+        class MultiLayerModel(torch.nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.num_layers = num_layers
+
+            def forward(self, x, y):
+                current = x
+                for _ in range(self.num_layers):
+                    current, _unused = MultiOutputFunc.apply(current, y)
+                return current
+
+        def sac_policy(ctx, op, *args, **kwargs):
+            # Recompute cheap element-wise ops, save everything else
+            if op in (torch.ops.aten.mul.Tensor, torch.ops.aten.mul.Scalar):
+                return CheckpointPolicy.PREFER_RECOMPUTE
+            return CheckpointPolicy.MUST_SAVE
+
+        def sac_context_fn():
+            return create_selective_checkpoint_contexts(sac_policy)
+
+        num_layers = 30
+        # ~100 MB per tensor with float32
+        size = (5120, 5120)  # 5120*5120*4 bytes ≈ 100 MB
+
+        x_local = torch.randn(
+            *size, device=self.device_type, requires_grad=True
+        )
+        y_local = torch.randn(
+            *size, device=self.device_type, requires_grad=False
+        )
+        x = DTensor.from_local(x_local, device_mesh, [Replicate()])
+        y = DTensor.from_local(y_local, device_mesh, [Replicate()])
+        y.requires_grad = True
+
+        model = MultiLayerModel(num_layers)
+
+        if self.device_type == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+            mem_before_forward = torch.cuda.memory_allocated()
+
+        # Apply SAC once over the entire model forward.
+        output = checkpoint(
+            model,
+            x,
+            y,
+            use_reentrant=False,
+            context_fn=sac_context_fn,
+        )
+
+        if self.device_type == "cuda":
+            mem_after_forward = torch.cuda.memory_allocated()
+
+        loss = output.sum()
+
+        if self.device_type == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+            mem_before_backward = torch.cuda.memory_allocated()
+
+        loss.backward()
+
+        # Force garbage collection to free autograd nodes
+        import gc
+        del loss, output
+        gc.collect()
+        if self.device_type == "cuda":
+            torch.cuda.empty_cache()
+
+        if self.device_type == "cuda":
+            mem_after_backward = torch.cuda.memory_allocated()
+            peak_mem = torch.cuda.max_memory_allocated()
+            per_tensor_mb = x_local.nelement() * 4 / 1024 / 1024
+            per_tensor_bytes = x_local.nelement() * 4
+            forward_increase = mem_after_forward - mem_before_forward
+
+            print(
+                f"\n[Memory Report] num_layers={num_layers}, "
+                f"tensor_size={size}, dtype=float32\n"
+                f"  Per-tensor size: {per_tensor_mb:.1f} MB\n"
+                f"  Memory before forward: {mem_before_forward / 1024 / 1024:.1f} MB\n"
+                f"  Memory after forward:  {mem_after_forward / 1024 / 1024:.1f} MB\n"
+                f"  Forward memory increase: {forward_increase / 1024 / 1024:.1f} MB\n"
+                f"  Memory before backward: {mem_before_backward / 1024 / 1024:.1f} MB\n"
+                f"  Memory after backward:  {mem_after_backward / 1024 / 1024:.1f} MB\n"
+                f"  Peak memory during backward: {peak_mem / 1024 / 1024:.1f} MB\n"
+                f"  Without fix, forward increase would be: "
+                f"{num_layers * 2 * per_tensor_mb:.1f} MB "
+                f"({num_layers} layers x 2 outputs x {per_tensor_mb:.1f} MB)"
+            )
+
+            # The memory increase should be much less than storing all outputs.
+            # Without the fix, storing all DTensor outputs would use:
+            # num_layers * 2 outputs * per_tensor_bytes = 60 * 100 MB = 6000 MB
+            # With the fix, we only keep the final output (~100 MB).
+            max_allowed = 5 * per_tensor_bytes  # Allow up to 5 tensors overhead
+            self.assertLess(
+                forward_increase,
+                max_allowed,
+                f"Forward memory increase {forward_increase / 1024 / 1024:.1f} MB "
+                f"exceeds max allowed {max_allowed / 1024 / 1024:.1f} MB. "
+                f"This suggests DTensor outputs are not being properly managed "
+                f"by checkpoint hooks."
+            )
+
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
     skipped_tests=[
@@ -859,6 +1056,8 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
         # integration
         "test_dtensor_save_load",
         "test_dtensor_save_load_import",
+        "test_undefined_grad_preserves_dtensor_type",
+        "test_multi_layer_memory_usage_with_zeros_like",
     ],
 )
 
