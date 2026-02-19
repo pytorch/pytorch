@@ -95,6 +95,21 @@ def is_fun(t: object) -> TypeGuard[FunctionalTensor | Tensor]:
     return isinstance(t, FunctionalTensor)
 
 
+def _maybe_get_inner_functional_tensor(
+    t: object,
+) -> FunctionalTensor | None:
+    """Extract the first inner FunctionalTensor from a tensor subclass."""
+    if isinstance(t, FunctionalTensor):
+        return t
+    if is_traceable_wrapper_subclass(t):
+        attrs, _ = t.__tensor_flatten__()
+        for attr in attrs:
+            inner = _maybe_get_inner_functional_tensor(getattr(t, attr))
+            if inner is not None:
+                return inner
+    return None
+
+
 # t here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
