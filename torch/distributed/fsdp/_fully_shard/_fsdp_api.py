@@ -128,6 +128,33 @@ class ReduceScatter(Comm):
 
 
 @dataclass
+class DataParallelMeshDimNames:
+    """
+    Specifies which dimensions of a full SPMD mesh correspond to data
+    parallelism when using :func:`fully_shard` with a multi-dimensional
+    :class:`DeviceMesh` whose parameters are already DTensors on that mesh.
+
+    Attributes:
+        shard (Optional[Union[str, tuple[str, ...]]]): Mesh dimension name(s)
+            that FSDP shards parameters on. If a tuple of names, those dims
+            are flattened into a single shard dimension. At least one of
+            ``shard`` and ``replicate`` must be set.
+        replicate (Optional[str]): Mesh dimension name for HSDP replication.
+    """
+
+    shard: str | tuple[str, ...] | None = None
+    replicate: str | None = None
+
+    @property
+    def shard_names(self) -> tuple[str, ...]:
+        if self.shard is None:
+            return ()
+        if isinstance(self.shard, str):
+            return (self.shard,)
+        return tuple(self.shard)
+
+
+@dataclass
 class OffloadPolicy:
     """
     This base class represents the policy of no offloading and is only used as
