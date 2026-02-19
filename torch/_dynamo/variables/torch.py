@@ -84,9 +84,10 @@ from .ctx_manager import (
     ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
-from .distributed import DistributedVariable, ProcessGroupVariable
+from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
+from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -1231,6 +1232,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
+                get_rank,
+                get_world_size,
             )
             from torch.distributed.tensor import DTensor
 
@@ -1240,34 +1243,54 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 get_process_group_ranks,
                 _resolve_group_name_by_ranks_and_tag,
+                get_rank,
+                get_world_size,
             )
             def handle_constant_processgroup_functions(
-                self, tx: "InstructionTranslator", *args: VariableTracker
+                self,
+                tx: "InstructionTranslator",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
             ) -> VariableTracker:
-                # because the input is a "ProcessGroupVariable", we'll be guarding on its
-                # ID_MATCH based on how it was constructed.
-
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
-                if len(args) == 1:
+                if len(args) == 0 and len(kwargs) == 0:
+                    # get_rank() or get_world_size() with no args (uses default group)
+                    pass
+                elif len(args) == 1 and len(kwargs) == 0:
                     # group or group name
-                    assert (
-                        isinstance(args[0], ProcessGroupVariable)
-                        or args[0].is_python_constant()
+                    assert args[0].is_python_constant() or (
+                        isinstance(args[0], TorchScriptObjectVariable)
+                        and args[  # pyrefly: ignore[missing-attribute]
+                            0
+                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
+                        == "torch.distributed.distributed_c10d.ProcessGroup"
                     )
-                elif len(args) == 2:
+                elif len(args) == 2 and len(kwargs) == 0:
                     # ranks + tag
                     assert (
                         isinstance(args[0], ListVariable)
                         and args[1].is_python_constant()
                     )
+                elif len(args) == 0 and len(kwargs) > 0:
+                    # All keyword arguments (e.g., get_world_size(group=...))
+                    pass
                 else:
                     raise AssertionError(
-                        f"Invalid group value ({args}) for constant pg "
+                        f"Invalid group value ({args}, {kwargs}) for constant pg "
                         f"function {self.value}"
                     )
-                args_as_value = [arg.as_python_constant() for arg in args]
-                invocation_result = self.value(*args_as_value)
+
+                def get_arg_value(arg: VariableTracker) -> Any:
+                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # as_python_constant(), so extract real_obj directly
+                    if isinstance(arg, TorchScriptObjectVariable):
+                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
+                    return arg.as_python_constant()
+
+                args_as_value = [get_arg_value(arg) for arg in args]
+                kwargs_as_value = {k: get_arg_value(v) for k, v in kwargs.items()}
+                invocation_result = self.value(*args_as_value, **kwargs_as_value)
 
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
@@ -2652,7 +2675,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         import torch.utils._pytree as pytree
         from torch._dynamo.graph_bytecode_inputs import register_user_object
         from torch._dynamo.utils import _make_inlined
-        from torch._higher_order_ops.invoke_leaf_function import LeafModuleState
+        from torch._higher_order_ops.invoke_leaf_function import (
+            convert_modules_to_states,
+        )
 
         from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
@@ -2693,20 +2718,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             kwargs_var = VariableTracker.build(tx, kwargs)
             return args_var, kwargs_var
 
-        def convert_modules_to_states(
-            values: Any, module_to_index: dict[int, int]
-        ) -> Any:
-            def module_to_state(val: Any) -> Any:
-                if isinstance(val, torch.nn.Module):
-                    return LeafModuleState(
-                        nn_module_index=module_to_index[id(val)],
-                        named_parameters=dict(val.named_parameters()),
-                        named_buffers=dict(val.named_buffers()),
-                    )
-                return val
-
-            return pytree.tree_map(module_to_state, values)
-
         module_to_index_var = VariableTracker.build(tx, module_to_index)
 
         result_var = _make_inlined(tx, convert_modules_to_states)(
@@ -2723,7 +2734,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         import torch.utils._pytree as pytree
         from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import func_to_graphable
-        from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
+        from torch._higher_order_ops.invoke_leaf_function import (
+            invoke_leaf_function,
+            make_leaf_function_wrappers,
+        )
 
         from .builder import wrap_fx_proxy
 
@@ -2738,7 +2752,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 "decorator. See the leaf_function docstring for details."
             )
 
-        captured_out_spec: pytree.TreeSpec | None = None
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
@@ -2750,36 +2763,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ]
         input_spec = input_spec_var.as_python_constant()
 
-        # Wrap user fn to support nn.Module inputs and pytree inputs/outputs.
-        # The wrapped function:
-        # 1. Takes unflattened args/kwargs with nn.Module restored from LeafModuleState
-        # 2. Calls the original fn with args/kwargs
-        # 3. Flattens the output and captures/verifies the output spec
-        def make_leaf_function_wrapper(
-            fn: Callable[..., Any],
-        ) -> Callable[..., tuple[Any, ...]]:
-            def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
-                nonlocal captured_out_spec
-
-                out = fn(*args, **kwargs)
-
-                flat_out, out_spec = pytree.tree_flatten(out)
-                if captured_out_spec is None:
-                    captured_out_spec = out_spec
-                elif captured_out_spec != out_spec:
-                    raise AssertionError(
-                        f"leaf_function output structure mismatch: "
-                        f"expected {captured_out_spec}, got {out_spec}. "
-                        f"This can happen if the real function and fake function return "
-                        f"different pytree structures (e.g., dict vs tuple, different number "
-                        f"of elements). Ensure both functions return the same structure."
-                    )
-                return tuple(flat_out)
-
-            return wrapper
-
-        wrapped_real_impl = make_leaf_function_wrapper(real_impl)
-        wrapped_fake_impl = make_leaf_function_wrapper(fake_impl)
+        # Single-element mutable list so the wrappers can write back the output
+        # TreeSpec. Read captured_out_spec[0] after the wrappers have been called.
+        captured_out_spec: list[pytree.TreeSpec | None] = [None]
+        wrapped_real_impl, wrapped_fake_impl = make_leaf_function_wrappers(
+            real_impl, fake_impl, captured_out_spec
+        )
 
         _, real_impl_spec = func_to_graphable(wrapped_real_impl)
         _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
@@ -2805,11 +2794,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         flat_output_vt = wrap_fx_proxy(tx, result_proxy)
 
-        assert captured_out_spec is not None, (
+        assert captured_out_spec[0] is not None, (
             "Output spec was not captured during fake tensor propagation. "
             "This should not happen - please report a bug."
         )
-        out_spec_vt = VariableTracker.build(tx, captured_out_spec)
+        out_spec_vt = VariableTracker.build(tx, captured_out_spec[0])
         return _make_inlined(tx, _pytree.tree_unflatten)(flat_output_vt, out_spec_vt)
 
     def _call_ntuple(

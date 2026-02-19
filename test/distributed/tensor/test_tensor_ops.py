@@ -1129,9 +1129,29 @@ class DistArgMaxArgMinTest(DTensorTestBase):
                 local_result = op(local_tensor, dim=1)
                 self.assertEqual(full_dresult, local_result)
 
+    @with_comms
+    def test_argmax_argmin_sharded_reduction_dim(self):
+        """Unlike max/min which use reduction_linear=True and produce
+        Partial("max")/Partial("min") outputs, argmax/argmin return indices
+        that can't be combined across shards with an element-wise max/min.
+        The strategy sets reduction_linear=False, which forces the input to
+        be redistributed to Replicate on the sharded reduction dim before
+        the op runs. No Partial placement appears in the output."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        tensor = torch.tensor(self.sample, device=self.device_type, dtype=torch.float)
+        dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
+
+        for op in self._ops:
+            self.assertEqual(op(dtensor, dim=0).full_tensor(), op(tensor, dim=0))
+            self.assertEqual(op(dtensor).full_tensor(), op(tensor))
+
     def build_device_mesh(self):
         return init_device_mesh(self.device_type, (2, 2))
 
+
+DistArgMaxArgMinTestWithLocalTensor = create_local_tensor_test_class(
+    DistArgMaxArgMinTest,
+)
 
 DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorOpsTest,
