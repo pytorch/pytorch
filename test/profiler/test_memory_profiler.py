@@ -865,7 +865,8 @@ class TestMemoryProfilerE2E(TestCase):
             should_be_none: bool = False,
         ):
             if should_be_none:
-                assert t is None, "tensor should be None but is not."
+                if t is not None:
+                    raise AssertionError("tensor should be None but is not.")
                 return
             self.assertIsNotNone(t)
             categories = self._lookup_tensor_categories(t, memory_profile)
@@ -910,7 +911,8 @@ class TestMemoryProfilerE2E(TestCase):
                 for (key, version), category in snapshot.items()
                 if key == target_key
             )
-            assert matches, "Failed to lookup Tensor"
+            if not matches:
+                raise AssertionError("Failed to lookup Tensor")
 
             # Deduplicate version bumps which don't change the category.
             categories = [matches[0][1]]

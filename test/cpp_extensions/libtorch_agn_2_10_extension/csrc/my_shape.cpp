@@ -8,12 +8,12 @@ torch::headeronly::HeaderOnlyArrayRef<int64_t> my_shape(Tensor t) {
   return t.sizes();
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_shape(Tensor t) -> int[]");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    libtorch_agn_2_10,
+    STABLE_LIB_NAME,
     CompositeExplicitAutograd,
     m) {
   m.impl("my_shape", TORCH_BOX(&my_shape));
