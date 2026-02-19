@@ -40,10 +40,21 @@ def bench_cpu(m, k, n):
     a = torch.randn(m, k)
     b = torch.randn(k, n)
     for _ in range(WARMUP):
-        a @ b
+        torch.mm(a, b)
     t0 = time.perf_counter()
     for _ in range(ITERS):
-        a @ b
+        torch.mm(a, b)
+    return (time.perf_counter() - t0) / ITERS
+
+
+def bench_meta(m, k, n):
+    a = torch.randn(m, k, device="meta")
+    b = torch.randn(k, n, device="meta")
+    for _ in range(WARMUP):
+        torch.mm(a, b)
+    t0 = time.perf_counter()
+    for _ in range(ITERS):
+        torch.mm(a, b)
     return (time.perf_counter() - t0) / ITERS
 
 
@@ -52,10 +63,10 @@ def bench_cpp_fake(m, k, n):
     b = to_fake(torch.randn(k, n))
     with CppFakeTensorMode():
         for _ in range(WARMUP):
-            a @ b
+            torch.mm(a, b)
         t0 = time.perf_counter()
         for _ in range(ITERS):
-            a @ b
+            torch.mm(a, b)
         return (time.perf_counter() - t0) / ITERS
 
 
@@ -64,28 +75,20 @@ def bench_py_fake(m, k, n):
         a = mode.from_tensor(torch.randn(m, k))
         b = mode.from_tensor(torch.randn(k, n))
         for _ in range(WARMUP):
-            a @ b
+            torch.mm(a, b)
         t0 = time.perf_counter()
         for _ in range(ITERS):
-            a @ b
+            torch.mm(a, b)
         return (time.perf_counter() - t0) / ITERS
 
 
-def bench_meta(m, k, n):
-    a = torch.randn(m, k, device="meta")
-    b = torch.randn(k, n, device="meta")
-    for _ in range(WARMUP):
-        a @ b
-    t0 = time.perf_counter()
-    for _ in range(ITERS):
-        a @ b
-    return (time.perf_counter() - t0) / ITERS
-
-
 def main():
+    # C++ Fake goes through the boxed fallback -> our fast meta_mm kernel.
+    # Comparing Meta vs C++ Fake shows the boxed fallback overhead.
     header = (
-        f"{'Size':>20s}  {'CPU (us)':>10s}  {'Meta (us)':>10s}  "
-        f"{'C++ Fake (us)':>14s}  {'Py Fake (us)':>14s}  {'C++/Py':>8s}"
+        f"{'Size':>20s}  {'CPU':>10s}  {'Meta':>10s}  "
+        f"{'C++ Fake':>10s}  {'Py Fake':>10s}  "
+        f"(all times in us)"
     )
     print(header)
     print("-" * len(header))
@@ -96,10 +99,9 @@ def main():
         t_meta = bench_meta(m, k, n)
         t_cpp = bench_cpp_fake(m, k, n)
         t_py = bench_py_fake(m, k, n)
-        speedup = t_py / t_cpp if t_cpp > 0 else float("inf")
         print(
             f"{label:>20s}  {t_cpu*1e6:10.1f}  {t_meta*1e6:10.1f}  "
-            f"{t_cpp*1e6:14.1f}  {t_py*1e6:14.1f}  {speedup:8.2f}x"
+            f"{t_cpp*1e6:10.1f}  {t_py*1e6:10.1f}"
         )
 
 
