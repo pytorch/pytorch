@@ -183,7 +183,7 @@ from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
-    CudagraphDisableVariable,
+    CudagraphOverrideVariable,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
     NullContextVariable,
@@ -698,7 +698,7 @@ class VariableBuilder:
         )
 
         from ..decorators import (
-            CudagraphDisableContextManager,
+            CudagraphOverrideContextManager,
             DynamoConfigPatchProxy,
             ErrorOnGraphBreakDecoratorContextManager,
         )
@@ -1115,8 +1115,8 @@ class VariableBuilder:
             return DynamoConfigPatchVariable(value.changes)
         elif isinstance(value, ErrorOnGraphBreakDecoratorContextManager):
             return ErrorOnGraphBreakVariable(value.error_on_graph_break)
-        elif isinstance(value, CudagraphDisableContextManager):
-            return CudagraphDisableVariable(value.fwd, value.bwd)
+        elif isinstance(value, CudagraphOverrideContextManager):
+            return CudagraphOverrideVariable(value.fwd, value.bwd)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
