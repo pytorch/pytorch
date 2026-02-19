@@ -179,13 +179,13 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         with V.set_graph_handler(bm_graph_lowering):
             # Apply config_patches during benchmarking (e.g., coordinate_descent_tuning)
             # Also disable max_autotune to avoid nested autotuning
-            benchmark_config = {
+            benchmark_config: dict[str, Any] = {
                 "max_autotune": False,
                 "max_autotune_gemm": False,
                 "max_autotune_gemm_backends": "ATEN",
                 **self.config_patches,
             }
-            with config.patch(**benchmark_config):
+            with config.patch(benchmark_config):
                 bm_graph_lowering.run(*self.benchmark_inputs)
                 return bm_graph_lowering.compile_to_module()
 
@@ -196,7 +196,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
-        fn = lambda: bm_func([*sym_inputs, *args])
+
+        def fn() -> Any:
+            return bm_func([*sym_inputs, *args])
 
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(fn)

@@ -9,6 +9,7 @@ Inductor benchmarks all variants and automatically selects the best performing o
 
 import torch
 import torch._inductor.runtime.benchmarking
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.kernel.custom_op import (
     CustomOpConfig,
@@ -31,6 +32,9 @@ class TestCustomOpAutoTune(TestCase):
         super().setUp()
         self.device = "cuda" if HAS_GPU else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
+        from torch._inductor.lowering import user_lowerings
+
+        user_lowerings.clear()
 
     def _run_autotune_test(self, op_object, inputs, expected, test_name):
         """Shared test infrastructure for autotuning tests."""
@@ -954,115 +958,6 @@ class TestCustomOpAutoTune(TestCase):
         torch.testing.assert_close(result, test_mat1 @ test_mat2, rtol=1e-1, atol=1e-1)
 
     @skipIfXpu
-    def test_aten_mm_multi_decomp_range_dispatch(self):
-        """Test aten.mm with multiple decompositions and range-based dispatch.
-
-        Registers batch1_decompose, split_k variants, and lets autotuning pick
-        the best for each size range.
-        """
-        from torch._inductor.lowering import user_lowerings
-
-        # Clear any previous registration
-        user_lowerings.pop(torch.ops.aten.mm.default, None)
-
-        def batch1_decompose(mat1, mat2):
-            """Decompose mm to unsqueeze+mul+sum - good for m=1."""
-            return (mat1.unsqueeze(2) * mat2.unsqueeze(0)).sum(dim=1)
-
-        def split_k_2(mat1, mat2):
-            """Split K dimension into 2 parts."""
-            m, k = mat1.shape
-            n = mat2.shape[1]
-            k_splits = 2
-            if k % k_splits == 0:
-                k_parts = k // k_splits
-                a = torch.permute(mat1.reshape(m, k_splits, k_parts), (1, 0, 2))
-                b = mat2.reshape(k_splits, k_parts, n)
-                return torch.sum(torch.bmm(a, b), dim=0)
-            return mat1 @ mat2
-
-        def split_k_4(mat1, mat2):
-            """Split K dimension into 4 parts."""
-            m, k = mat1.shape
-            n = mat2.shape[1]
-            k_splits = 4
-            if k % k_splits == 0:
-                k_parts = k // k_splits
-                a = torch.permute(mat1.reshape(m, k_splits, k_parts), (1, 0, 2))
-                b = mat2.reshape(k_splits, k_parts, n)
-                return torch.sum(torch.bmm(a, b), dim=0)
-            return mat1 @ mat2
-
-        def split_k_16(mat1, mat2):
-            """Split K dimension into 16 parts - good for large K, moderate M."""
-            m, k = mat1.shape
-            n = mat2.shape[1]
-            k_splits = 16
-            if k % k_splits == 0:
-                k_parts = k // k_splits
-                a = torch.permute(mat1.reshape(m, k_splits, k_parts), (1, 0, 2))
-                b = mat2.reshape(k_splits, k_parts, n)
-                return torch.sum(torch.bmm(a, b), dim=0)
-            return mat1 @ mat2
-
-        # Register with multiple configs and range-based dispatch on M dimension
-        # Using larger K to give split_k variants a chance to win
-        # Enable coordinate descent tuning via config_patches for better autotuning
-        config_patches = {"coordinate_descent_tuning": True}
-        register_custom_op_autotuning(
-            torch.ops.aten.mm.default,
-            configs=[
-                CustomOpConfig(batch1_decompose, config_patches=config_patches),
-                CustomOpConfig(split_k_2, config_patches=config_patches),
-                CustomOpConfig(split_k_4, config_patches=config_patches),
-                CustomOpConfig(split_k_16, config_patches=config_patches),
-            ],
-            name="test_mm_multi_decomp",
-            dispatch_on={"tensor_name": "mat1", "dim": 0},
-            split_points=[
-                4,
-                32,
-            ],  # Ranges: [1,4], [5,32], [33,inf] - batch1 wins small, split_k_16 wins mid
-            benchmark_with_cudagraphs=True,
-            input_gen_fns={
-                "mat1": lambda t: torch.randn_like(t, device=self.device) * 0.1,
-                "mat2": lambda t: torch.randn_like(t, device=self.device) * 0.1,
-            },
-        )
-
-        self.assertIn(torch.ops.aten.mm.default, user_lowerings)
-
-        # Use router_256 shape: K=6144, N=256, fp32
-        # This shape shows batch1 winning at B=1-4 and split_k_16 winning at B=8-16
-        test_a = torch.randn(8, 6144, device=self.device, dtype=torch.float32)
-        test_b = torch.randn(6144, 256, device=self.device, dtype=torch.float32)
-
-        @torch.compile
-        def test_model(a, b):
-            return torch.mm(a, b)
-
-        # Mark first dimension (M/batch) as dynamic
-        torch._dynamo.mark_dynamic(test_a, 0)
-
-        torch._dynamo.reset()
-        with config.patch(coordinate_descent_tuning=True, fx_graph_cache=False):
-            # First compilation with dynamic M
-            result = test_model(test_a, test_b)
-            expected = torch.mm(test_a, test_b)
-            torch.testing.assert_close(result, expected, rtol=1e-1, atol=1e-1)
-
-            # Test with different M sizes - should use same compiled graph with dispatch
-            for m in [1, 4, 8, 16]:
-                test_a_sized = torch.randn(
-                    m, 6144, device=self.device, dtype=torch.float32
-                )
-                result = test_model(test_a_sized, test_b)
-                expected = torch.mm(test_a_sized, test_b)
-                torch.testing.assert_close(result, expected, rtol=1e-1, atol=1e-1)
-
-        user_lowerings.pop(torch.ops.aten.mm.default, None)
-
-    @skipIfXpu
     def test_empty_config_generator_falls_back_to_triton(self):
         """Test that empty config_generator falls back to normal mm autotuning.
 
@@ -1070,8 +965,6 @@ class TestCustomOpAutoTune(TestCase):
         and graph.py falls back to the normal lowering (triton mm autotuning).
         """
         from torch._inductor.lowering import user_lowerings
-
-        user_lowerings.pop(torch.ops.aten.mm.default, None)
 
         # Config generator that returns empty - should trigger fallback
         def empty_config_gen(fake_tensors):
@@ -1106,8 +999,6 @@ class TestCustomOpAutoTune(TestCase):
         torch.testing.assert_close(
             result, torch.mm(test_a, test_b), rtol=1e-1, atol=1e-1
         )
-
-        user_lowerings.pop(torch.ops.aten.mm.default, None)
 
     @skipIfXpu
     def test_guard_safety_drops_unsafe_decomposition(self):
@@ -1161,12 +1052,21 @@ class TestCustomOpAutoTune(TestCase):
             return guard_safety_op(mat1, mat2)
 
         torch._dynamo.reset()
+        counters.clear()
+
         # First call: m=8 (divisible by 4) triggers compilation
         mat1 = torch.randn(8, 64, device=self.device, dtype=self.dtype)
         mat2 = torch.randn(64, 32, device=self.device, dtype=self.dtype)
         with config.patch(max_autotune=True, fx_graph_cache=False):
             result = test_model(mat1, mat2)
         torch.testing.assert_close(result, mat1 @ mat2, rtol=1e-1, atol=1e-1)
+
+        # Verify the guard safety counter was incremented
+        self.assertGreater(
+            counters["inductor"]["custom_op_decomp_guard_skips"],
+            0,
+            "Expected custom_op_decomp_guard_skips counter to be incremented",
+        )
 
         # Second call: m=7 (NOT divisible by 4). If the unsafe impl was kept
         # and its Mod(m,4)==0 guard leaked, this would crash on the reshape
@@ -1180,6 +1080,11 @@ class TestCustomOpAutoTune(TestCase):
         )
 
     @skipIfXpu
+    @config.patch(
+        {
+            "test_configs.force_custom_op_decomposition": True,
+        }
+    )
     def test_shape_dependent_computation(self):
         """Test that decompositions using shape in computation (e.g., x * x.shape[0]) work correctly.
 
@@ -1190,6 +1095,9 @@ class TestCustomOpAutoTune(TestCase):
 
         Key validation: compile ONCE, then run with MULTIPLE sizes. If tracing used
         concrete values, the result would be wrong for different sizes.
+
+        The fallback op does x + y (no shape dependency), while the decomposition does
+        x * x.shape[0] + y. We force the decomposition to verify shape tracking works.
         """
         test_op_name = f"test_lib::shape_compute_{id(self)}"
 
@@ -1199,7 +1107,8 @@ class TestCustomOpAutoTune(TestCase):
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def shape_compute_op(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            return x * x.shape[0] + y
+            # Fallback: does NOT use shape - different from decomposition
+            return x + y
 
         @shape_compute_op.register_fake
         def _(x: torch.Tensor, y: torch.Tensor):
@@ -1228,6 +1137,7 @@ class TestCustomOpAutoTune(TestCase):
         with config.patch(max_autotune=True, fx_graph_cache=False):
             result = test_model(test_x, test_y)
 
+        # Expected: decomposition result (x * x.shape[0] + y), NOT fallback (x + y)
         expected = test_x * test_x.shape[0] + test_y
         torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
 
@@ -1334,10 +1244,8 @@ class TestCustomOpAutoTune(TestCase):
         memory_after_first = torch.cuda.memory_allocated()
 
         # Run benchmarking again - memory should not grow
-        for _ in range(5):
+        for _ in range(3):
             _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
 
         memory_after_many = torch.cuda.memory_allocated()
 

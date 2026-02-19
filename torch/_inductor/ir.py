@@ -7060,8 +7060,8 @@ class SubgraphBuffer(ExternKernel):
                 "max_autotune_gemm_backends": "ATEN",
             }
             # Merge with user config_patches (e.g., coordinate_descent_tuning)
-            merged_patches = {**base_patches, **(config_patches or {})}
-            with inductor_config.patch(**merged_patches):
+            merged_patches: dict[str, Any] = {**base_patches, **(config_patches or {})}
+            with inductor_config.patch(merged_patches):
                 self.subgraph.run(*self.example_inputs)
 
             # Tag all operations in subgraph with config_patches
@@ -8995,7 +8995,7 @@ class Conditional(ExternKernel):
         # Build fake_operands from FX nodes' metadata
         # For FX Nodes, get the fake tensor from meta["val"]
         # For non-Nodes (e.g., symbolic integers from sym_size lowering), pass directly
-        fake_operands = []
+        fake_operands: list[Any] = []
         for fx_op in fx_operands:
             if isinstance(fx_op, Node):
                 fake_operands.append(fx_op.meta["val"])

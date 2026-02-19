@@ -1392,13 +1392,11 @@ class GraphLowering(torch.fx.Interpreter):
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
-            elif (
-                target in user_lowerings
-                and target not in V.active_user_lowering_ops
-            ):
+            elif target in user_lowerings and target not in V.active_user_lowering_ops:
                 # User-registered lowering takes priority, with recursion guard
                 V.active_user_lowering_ops.add(target)
                 try:
+                    # pyrefly: ignore[bad-index]
                     out = user_lowerings[target](*args, **kwargs)
                 finally:
                     V.active_user_lowering_ops.discard(target)
