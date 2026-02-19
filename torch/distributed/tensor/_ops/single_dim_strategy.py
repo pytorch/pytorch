@@ -508,6 +508,30 @@ def _compute_redistribute_cost(
     return cost
 
 
+def _build_output_spec(
+    mesh: DeviceMesh,
+    selected_output_placements: list[tuple[Placement, ...]],
+    num_outputs: int,
+    output_metas: tuple[TensorMeta | None, ...],
+) -> DTensorSpec | tuple[DTensorSpec | None, ...]:
+    """Build multi-dim output spec from per-mesh-dim output placements."""
+    if num_outputs == 1:
+        output_placements_tuple = tuple(out[0] for out in selected_output_placements)
+        out_meta = output_metas[0] if output_metas else None
+        return DTensorSpec(mesh, output_placements_tuple, tensor_meta=out_meta)
+    elif num_outputs > 1:
+        multi_output_specs: list[DTensorSpec | None] = []
+        for out_idx in range(num_outputs):
+            out_placements = tuple(out[out_idx] for out in selected_output_placements)
+            meta = output_metas[out_idx] if out_idx < len(output_metas) else None
+            multi_output_specs.append(
+                DTensorSpec(mesh, out_placements, tensor_meta=meta)
+            )
+        return tuple(multi_output_specs)
+    else:
+        return DTensorSpec(mesh, (Replicate(),) * mesh.ndim)
+
+
 def _find_lowest_cost_sharding(
     mesh: DeviceMesh,
     op_schema: OpSchema,
@@ -515,6 +539,7 @@ def _find_lowest_cost_sharding(
         [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
     ],
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
+    _collect_all_matches: set[tuple[tuple[Placement, ...], ...]] | None = None,
 ) -> OpStrategy | None:
     """
     Find the lowest cost sharding for the given op_schema.
@@ -627,6 +652,54 @@ def _find_lowest_cost_sharding(
     else:
         output_metas = tuple(output_tensor_meta)
 
+    initial_input_placements = tuple(spec.placements for spec in input_specs)
+    first_result: OpStrategy | None = None
+
+    # Fast path: if initial placements already match on every mesh dim, skip PQ
+    selected_output_placements: list[tuple[Placement, ...]] = []
+    fast_match = True
+    for mesh_dim in range(mesh.ndim):
+        input_placements_for_dim = tuple(
+            placements[mesh_dim] for placements in initial_input_placements
+        )
+        output_for_dim = strategy_lookup.get(input_placements_for_dim)
+        if output_for_dim is not None:
+            selected_output_placements.append(output_for_dim)
+        else:
+            fast_match = False
+            break
+
+    if fast_match:
+        arg_specs = [
+            DTensorSpec(mesh, placements, tensor_meta=input_spec.tensor_meta)
+            for placements, input_spec in zip(initial_input_placements, input_specs)
+        ]
+        shardable = all(
+            is_tensor_shardable(spec.tensor_meta.shape, spec)
+            for spec in arg_specs
+            if spec.tensor_meta is not None
+        )
+        if shardable:
+            output_spec = _build_output_spec(
+                mesh, selected_output_placements, num_outputs, output_metas
+            )
+            redistribute_costs = [
+                generate_redistribute_costs(OpStrategy([OpSpec(input_spec)]), arg_spec)
+                for input_spec, arg_spec in zip(input_specs, arg_specs)
+            ]
+            op_spec = OpSpec(
+                output_specs=output_spec,
+                input_specs=arg_specs,
+                redistribute_cost=redistribute_costs,
+            )
+            result = OpStrategy([op_spec])
+            result._pq_transitions = []  # type: ignore[attr-defined]
+            if _collect_all_matches is not None:
+                _collect_all_matches.add(initial_input_placements)
+                first_result = result
+            else:
+                return result
+
     # Pre-compute mesh topology and per-input comm_bytes_gb for direct cost computation
     mesh_topo = MeshTopoInfo.build_from_mesh(mesh)
     per_input_comm_bytes_gb: list[float] = []
@@ -644,8 +717,10 @@ def _find_lowest_cost_sharding(
     counter: int = 0
     pq: list[_PQEntry] = []
     visited: set[tuple[tuple[Placement, ...], ...]] = set()
+    cost_caches: list[dict[tuple[Placement, ...], float]] = [
+        {} for _ in range(num_inputs)
+    ]
 
-    initial_input_placements = tuple(spec.placements for spec in input_specs)
     initial_per_input_costs = (0.0,) * num_inputs
     heapq.heappush(
         pq,
@@ -666,13 +741,18 @@ def _find_lowest_cost_sharding(
         new_tuple = tuple(tuple(ps) for ps in new_input_placements)
         if new_tuple in visited:
             return
-        # Only recompute cost for the changed input (from original to new)
-        changed_cost = _compute_redistribute_cost(
-            initial_input_placements[input_idx],
-            new_tuple[input_idx],
-            mesh_topo,
-            per_input_comm_bytes_gb[input_idx],
-        )
+        candidate_key = new_tuple[input_idx]
+        cached = cost_caches[input_idx].get(candidate_key)
+        if cached is not None:
+            changed_cost = cached
+        else:
+            changed_cost = _compute_redistribute_cost(
+                initial_input_placements[input_idx],
+                candidate_key,
+                mesh_topo,
+                per_input_comm_bytes_gb[input_idx],
+            )
+            cost_caches[input_idx][candidate_key] = changed_cost
         new_per_input_costs = (
             entry.per_input_costs[:input_idx]
             + (changed_cost,)
@@ -727,32 +807,9 @@ def _find_lowest_cost_sharding(
             )
 
             if shardable:
-                # Build multi-dim output placements: transpose from per-mesh-dim to per-output
-                if num_outputs == 1:
-                    output_placements_tuple = tuple(
-                        out[0] for out in selected_output_placements
-                    )
-                    out_meta = output_metas[0] if output_metas else None
-                    output_spec: DTensorSpec | tuple[DTensorSpec | None, ...] = (
-                        DTensorSpec(mesh, output_placements_tuple, tensor_meta=out_meta)
-                    )
-                elif num_outputs > 1:
-                    multi_output_specs: list[DTensorSpec | None] = []
-                    for out_idx in range(num_outputs):
-                        out_placements = tuple(
-                            out[out_idx] for out in selected_output_placements
-                        )
-                        meta = (
-                            output_metas[out_idx]
-                            if out_idx < len(output_metas)
-                            else None
-                        )
-                        multi_output_specs.append(
-                            DTensorSpec(mesh, out_placements, tensor_meta=meta)
-                        )
-                    output_spec = tuple(multi_output_specs)
-                else:
-                    output_spec = DTensorSpec(mesh, (Replicate(),) * mesh.ndim)
+                output_spec = _build_output_spec(
+                    mesh, selected_output_placements, num_outputs, output_metas
+                )
 
                 redistribute_costs = [
                     generate_redistribute_costs(src_strategy, arg_spec)
@@ -776,11 +833,16 @@ def _find_lowest_cost_sharding(
                 )
                 result = OpStrategy([op_spec])
                 result._pq_transitions = entry.transitions  # type: ignore[attr-defined]
-                return result
+                if _collect_all_matches is not None:
+                    _collect_all_matches.add(entry.placements)
+                    if first_result is None:
+                        first_result = result
+                else:
+                    return result
 
-        # Generate all neighbor states (independent blocks, not if/elif)
-        for input_idx in range(len(entry.placements)):
-            for mesh_dim in range(mesh.ndim):
+        # Generate neighbor states
+        for mesh_dim in range(mesh.ndim):
+            for input_idx in range(len(entry.placements)):
                 current_p = entry.placements[input_idx][mesh_dim]
 
                 # Replicate -> Shard (local chunk, free)
@@ -835,6 +897,9 @@ def _find_lowest_cost_sharding(
                             sharding,
                             entry,
                         )
+
+    if _collect_all_matches is not None and first_result is not None:
+        return first_result
 
     raise AssertionError(
         f"No valid strategy found for op_schema {op_schema}. "
