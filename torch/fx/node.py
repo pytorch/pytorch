@@ -90,6 +90,13 @@ class _LazyStackTrace:
             return False
         return item in resolved
 
+    def __str__(self) -> str:
+        resolved = self.resolve()
+        return resolved if resolved is not None else ""
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
     def __bool__(self) -> bool:
         resolved = self.resolve()
         return resolved is not None and len(resolved) > 0
