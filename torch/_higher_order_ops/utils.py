@@ -1256,9 +1256,7 @@ def materialize_as_graph(
                     unfunc_t = [_from_fun(arg) for arg in args]
 
                 stack.enter_context(
-                    torch._C._ForceDispatchKeyGuard(
-                        include_key_set, exclude_key_set
-                    ),
+                    torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
                 )
                 if force_enable_grad:
                     stack.enter_context(torch.enable_grad())
