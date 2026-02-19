@@ -1277,7 +1277,6 @@ def _allow_in_graph_einops() -> None:
     #         # trigger backend registration up front to avoid a later guard failure
     #         # that would otherwise cause a recompilation
     #         einops.rearrange(torch.randn(1), "i -> i")
-
     #     # einops 0.8.2+ don't need explicit allow_in_graph calls
     #     return
 
