@@ -24,7 +24,6 @@ from ..codegen.cutlass.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemm
 from ..codegen.rocm.ck_tile_universal_gemm_template import CKTileGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
-from .custom_op import get_registered_aten_autotuning
 from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import (
@@ -302,30 +301,11 @@ addmm_contiguous_subgraph_template = ContiguousTemplate(
 )
 
 
-import threading
-
-# Thread-local storage to prevent recursion when autotuning
-_mm_autotuning_in_progress = threading.local()
-
-
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    # Check if user has registered custom autotuning for aten.mm
-    # Use recursion guard to prevent infinite loop when autotuning calls mm
-    if not getattr(_mm_autotuning_in_progress, "active", False):
-        registered_autotuning = get_registered_aten_autotuning(aten.mm.default)
-        if registered_autotuning is not None:
-            _mm_autotuning_in_progress.active = True
-            try:
-                # Realize inputs to ensure they have proper strides for autotuning
-                mat1_realized, mat2_realized = realize_inputs(mat1, mat2)
-                return registered_autotuning(mat1_realized, mat2_realized)
-            finally:
-                _mm_autotuning_in_progress.active = False
-
     if out_dtype is not None:
         input_dtype = mat1.get_dtype()
         torch._check(

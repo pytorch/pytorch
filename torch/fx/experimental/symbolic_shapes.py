@@ -134,8 +134,6 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 class ShapeEnvGuardError(RuntimeError):
     """Raised when a guard is attempted while the ShapeEnv is in error-on-guard mode."""
 
-    pass
-
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
