@@ -462,11 +462,13 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> ConstantVariable:
         result = False
 
-        try:
-            result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
-        except NotImplementedError:
-            if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
-                result = True
+        if name in fn_known_dunder_attrs or name == "__dict__":
+            result = True
+        else:
+            try:
+                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
+            except NotImplementedError:
+                result = False
         return variables.ConstantVariable.create(result)
 
     def closure_vars(self, tx: "InstructionTranslator") -> dict[str, VariableTracker]:
