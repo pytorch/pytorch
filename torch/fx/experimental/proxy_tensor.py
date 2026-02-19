@@ -2570,11 +2570,7 @@ class _MakefxTracer:
         # For example, fake_tensor_mode, we want the example value's fake_mode of parent graph and subgraphs to be the same.
         prev_modes = self._checkpoint_modes()
         try:
-            # If an active fake tensor mode exists on the dispatch stack (for example,
-            # during tracing of functionalized higher-order ops via make_fx),
-            # prefer to use it; otherwise, fall back to the parent tracer's fake mode.
-            active_mode = torch._guards.active_fake_mode()
-            self.fake_tensor_mode = active_mode or parent_tracer.fake_tensor_mode
+            self.fake_tensor_mode = parent_tracer.fake_tensor_mode
 
             def _create_sub_fx_tracer(parent_tracer: _ProxyTracer) -> PythonKeyTracer:
                 if type(parent_tracer) is PythonKeyTracer:
