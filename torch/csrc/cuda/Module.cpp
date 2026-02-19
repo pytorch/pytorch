@@ -1599,8 +1599,10 @@ static PyObject* THCPModule_clearBlasWorkspacesForStream_wrap(
     PyObject* self,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(THPUtils_checkLong(arg), "argument must be a CUDA stream pointer");
-  cudaStream_t stream = reinterpret_cast<cudaStream_t>(THPUtils_unpackLong(arg));
+  TORCH_CHECK(
+      THPUtils_checkLong(arg), "argument must be a CUDA stream pointer");
+  cudaStream_t stream =
+      reinterpret_cast<cudaStream_t>(THPUtils_unpackLong(arg));
   at::cuda::clearCublasWorkspacesForStream(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
