@@ -775,9 +775,10 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
                 DeviceType.HPU,
+                DeviceType.XPU,
             ]:
                 raise AssertionError(
-                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, or HPU, but got {self.device_type}"
+                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, HPU or XPU, but got {self.device_type}"
                 )
             return self.time_range.elapsed_us()
 
@@ -803,9 +804,10 @@ class FunctionEvent(FormattedTimesMixin):
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
                 DeviceType.HPU,
+                DeviceType.XPU,
             ]:
                 raise AssertionError(
-                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, or HPU, but got {self.device_type}"
+                    f"Expected device_type to be CUDA, PrivateUse1, MTIA, HPU or XPU, but got {self.device_type}"
                 )
             return self.device_time_total
 
@@ -1239,6 +1241,7 @@ def _build_table(
                 DeviceType.CUDA,
                 DeviceType.PrivateUse1,
                 DeviceType.MTIA,
+                DeviceType.XPU,
             ]
             and not evt.is_user_annotation
         ):
@@ -1424,7 +1427,7 @@ def _canonicalize_profiler_events(events):
 
         events_with_traces.append(
             {
-                "event_name": event_name[:20],
+                "event_name": event_name[:30],
                 "node_name": node_name,
                 "stack_trace": stack_trace,
                 "start_time": event.get("ts", 0),

@@ -97,6 +97,7 @@ def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
         #   having multiple output observers.
         for cls in (ObserverBase, FakeQuantizeBase):
             if isinstance(quant_pattern, tuple):
+                # pyrefly: ignore [not-iterable]
                 new_pattern = (cls, *quant_pattern)
             else:
                 new_pattern = (cls, quant_pattern)

@@ -155,6 +155,10 @@ static StableIValue from_ivalue(
       return torch::stable::detail::_from(
           ivalue.toStringRef(), extension_build_version);
     }
+    case c10::TypeKind::SymIntType: {
+      // Treat SymInt as Int for StableIValue <-> IValue conversion
+      return from_ivalue(c10::IntType::get(), ivalue, extension_build_version);
+    }
     default: {
       TORCH_CHECK(
           false,
@@ -265,6 +269,11 @@ static c10::IValue to_ivalue(
       return c10::IValue(torch::stable::detail::_to<std::string>(
           stable_ivalue, extension_build_version));
     }
+    case c10::TypeKind::SymIntType: {
+      // Treat SymInt as Int for StableIValue <-> IValue conversion
+      return to_ivalue(
+          c10::IntType::get(), stable_ivalue, extension_build_version);
+    }
     default: {
       TORCH_CHECK(
           false,
@@ -294,7 +303,8 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
 
     for (const auto idx : c10::irange(num_arguments)) {
       const auto ministack_idx = num_arguments - idx - 1;
-      const c10::TypePtr& arg_type = schema.arguments()[ministack_idx].type();
+      const c10::TypePtr& arg_type =
+          schema.arguments()[ministack_idx].real_type();
       ministack[ministack_idx] = from_ivalue(
           arg_type, torch::jit::pop(stack), extension_build_version_);
     }
@@ -306,7 +316,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
     for (size_t idx = 0; idx < num_returns; idx++) {
-      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       torch::jit::push(
           stack, to_ivalue(ret_type, ministack[idx], extension_build_version_));
     }
@@ -376,7 +386,7 @@ AOTITorchError aoti_torch_call_dispatcher(
     // convert StableIValue stack to c10::IValue stack
     for (const auto idx : c10::irange(num_arguments)) {
       auto stable_ivalue = stack[idx];
-      auto arg_type = schema.arguments()[idx].type();
+      auto arg_type = schema.arguments()[idx].real_type();
       torch::jit::push(
           ivalue_stack, to_ivalue(arg_type, stable_ivalue, TORCH_ABI_VERSION));
     }
@@ -387,7 +397,7 @@ AOTITorchError aoti_torch_call_dispatcher(
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
-      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), TORCH_ABI_VERSION);
     }
@@ -529,7 +539,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
       ivalue_stack.reserve(std::max(num_arguments, num_returns));
       for (const auto idx : c10::irange(num_arguments)) {
         auto stable_ivalue = stack[idx];
-        auto arg_type = schema.arguments()[idx].type();
+        auto arg_type = schema.arguments()[idx].real_type();
         torch::jit::push(
             ivalue_stack,
             to_ivalue(arg_type, stable_ivalue, extension_build_version));
@@ -542,7 +552,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_call_dispatcher(
     // we will convert to StableIValue and repopulate user input stack
     for (const auto idx : c10::irange(num_returns)) {
       const auto stack_idx = num_returns - idx - 1;
-      const c10::TypePtr& ret_type = schema.returns()[idx].type();
+      const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       stack[stack_idx] = from_ivalue(
           ret_type, torch::jit::pop(ivalue_stack), extension_build_version);
     }
@@ -632,6 +642,17 @@ torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad) {
     t->set_requires_grad(requires_grad);
   });
 }
+
+// Most other dtypes defined in torch/csrc/inductor/aoti_torch/shim_common.cpp
+#define TORCH_DTYPE_IMPL(dtype, stype)                    \
+  AOTI_TORCH_EXPORT int32_t torch_dtype_##dtype() {       \
+    return (int32_t)torch::headeronly::ScalarType::stype; \
+  }
+
+TORCH_DTYPE_IMPL(float8_e8m0fnu, Float8_e8m0fnu)
+TORCH_DTYPE_IMPL(float4_e2m1fn_x2, Float4_e2m1fn_x2)
+
+#undef TORCH_DTYPE_IMPL
 
 AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     void* data,

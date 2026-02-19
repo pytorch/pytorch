@@ -1035,12 +1035,11 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
 
             with CommDebugMode() as comm_mode:
                 # `A @ B2` will trigger redistribution on both inputs as below:
-                # A: S(1)[0]S(1)[1]
-                # B2: _S(0, 4)S(0)[0]->RS(0)->RR->S(0)R->S(0)[0]S(0)[1]
-                # The final output res2's placements will be PP.
+                # A: S(1)[0]S(1)[1]->S(1)R->RR
+                # B2: S(0)[1]S(0)[0]->RS(0)->RR
                 res2 = A @ B2
             self.assertEqual(
-                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 4
             )
             assert isinstance(res1, DTensor)
             assert isinstance(res2, DTensor)
