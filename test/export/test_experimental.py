@@ -440,80 +440,74 @@ def forward(self, args_0):
             _dynamo_graph_capture_for_export(module)(x)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_callable_object_with_eq(self):
-        """Test that callable objects with custom __eq__ work with BlockMask pytree.
+    def test_aot_export_flex_attention_callable_mask_mod(self):
+        """Test flex_attention AOT export with callable class as mask_mod.
 
-        When mask_mod is a callable class instance (not a plain function), the
-        _MaskModWrapper should delegate to the callable's __eq__ method for
-        comparison. This is needed for cases like sixlib's _AndMasksMod which
-        composes multiple mask functions.
+        _MaskModWrapper must delegate __eq__ to callable objects for TreeSpec
+        comparison in AOTAutograd's PytreeThunk.set() (utils.py:162).
         """
+        from torch._functorch.aot_autograd import aot_export_module
         from torch.nn.attention.flex_attention import (
-            _MaskModWrapper,
             create_block_mask,
+            flex_attention,
         )
 
         _register_blockmask_pytree()
 
-        # A callable class that implements __eq__ based on its state
         class ComposedMaskMod:
-            def __init__(self, offset: int):
-                self.offset = offset
+            def __init__(self, *mask_fns):
+                self.mask_fns = mask_fns
 
             def __call__(self, b, h, q, k):
-                return q >= k + self.offset
+                result = True
+                for fn in self.mask_fns:
+                    result = result & fn(b, h, q, k)
+                return result
 
             def __eq__(self, other):
                 if not isinstance(other, ComposedMaskMod):
                     return NotImplemented
-                return self.offset == other.offset
+                return self.mask_fns == other.mask_fns
 
             def __hash__(self):
-                return hash(self.offset)
+                return hash(self.mask_fns)
 
-        # Test _MaskModWrapper equality with callable objects
-        fn1 = ComposedMaskMod(offset=5)
-        fn2 = ComposedMaskMod(offset=5)  # Same offset, different instance
-        fn3 = ComposedMaskMod(offset=10)  # Different offset
+        def causal_mask(b, h, q, k):
+            return q >= k
 
-        wrapper1 = _MaskModWrapper(fn1)
-        wrapper2 = _MaskModWrapper(fn2)
-        wrapper3 = _MaskModWrapper(fn3)
-
-        # Same offset should be equal (delegates to ComposedMaskMod.__eq__)
-        self.assertEqual(wrapper1, wrapper2)
-        # Different offset should not be equal
-        self.assertNotEqual(wrapper1, wrapper3)
-
-        # Test that BlockMask works with callable objects in export
-        def make_mask_fn():
-            return ComposedMaskMod(offset=4)
-
-        class Model(torch.nn.Module):
-            def __init__(self, mask_fn_factory):
+        class FlexAttentionModel(torch.nn.Module):
+            def __init__(self, embed_dim: int, num_heads: int):
                 super().__init__()
-                self.mask_fn_factory = mask_fn_factory
+                self.num_heads = num_heads
+                self.head_dim = embed_dim // num_heads
+                self.q_proj = torch.nn.Linear(embed_dim, embed_dim)
+                self.k_proj = torch.nn.Linear(embed_dim, embed_dim)
+                self.v_proj = torch.nn.Linear(embed_dim, embed_dim)
 
             def forward(self, x):
-                mask_fn = self.mask_fn_factory()
+                B, L, D = x.shape
+                q = self.q_proj(x).view(B, L, self.num_heads, self.head_dim)
+                k = self.k_proj(x).view(B, L, self.num_heads, self.head_dim)
+                v = self.v_proj(x).view(B, L, self.num_heads, self.head_dim)
+                q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+
+                mask_mod = ComposedMaskMod(causal_mask)
                 block_mask = create_block_mask(
-                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                    mask_mod, B=B, H=self.num_heads, Q_LEN=L, KV_LEN=L, device=x.device
                 )
-                return x, block_mask
+                out = flex_attention(q, k, v, block_mask=block_mask)
+                return out.transpose(1, 2).contiguous().view(B, L, D)
 
-        x = torch.randn(2, 128, device="cuda")
-        module = Model(make_mask_fn)
+        embed_dim, num_heads, seq_len = 64, 2, 128
+        model = FlexAttentionModel(embed_dim, num_heads).cuda()
+        x = torch.randn(1, seq_len, embed_dim, device="cuda")
 
-        out_eager, mask_eager = module(x)
+        gm, signature = aot_export_module(model, [x], trace_joint=False)
 
-        compiled = _dynamo_graph_capture_for_export(module)(x)
-        out_compiled, mask_compiled = compiled(x)
-
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(
-            mask_eager.mask_mod(1, 1, 64, 64),
-            mask_compiled.mask_mod(1, 1, 64, 64),
-        )
+        out_eager = model(x)
+        out_export = gm(x)
+        self.assertEqual(out_eager.shape, out_export[0].shape)
+        self.assertTrue(torch.allclose(out_eager, out_export[0], atol=1e-5))
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
