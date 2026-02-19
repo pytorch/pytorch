@@ -1511,10 +1511,10 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
         return "error_on_graph_break"
 
 
-class CudagraphDisableVariable(ContextWrappingVariable):
-    """represents torch._dynamo.disable_cudagraphs"""
+class CudagraphOverrideVariable(ContextWrappingVariable):
+    """represents torch._dynamo.override_cudagraphs"""
 
-    def __init__(self, fwd: bool, bwd: bool, **kwargs: Any) -> None:
+    def __init__(self, fwd: Optional[bool], bwd: Optional[bool], **kwargs: Any) -> None:
         super().__init__(
             target_values=(fwd, bwd),
             initial_values=None,  # Captured in enter()
@@ -1540,7 +1540,7 @@ class CudagraphDisableVariable(ContextWrappingVariable):
         else:
             assert len(values) == 2
             fwd, bwd = values
-            annotation = _CudagraphAnnotation(mode="disable", fwd=fwd, bwd=bwd)
+            annotation = _CudagraphAnnotation(fwd=fwd, bwd=bwd)
             tx.output.cudagraph_annotation = annotation
             tx.output.tracing_context.cudagraph_annotation = annotation
 
@@ -1548,7 +1548,7 @@ class CudagraphDisableVariable(ContextWrappingVariable):
         return "torch._dynamo"
 
     def fn_name(self) -> str:
-        return "disable_cudagraphs"
+        return "override_cudagraphs"
 
     def exit_on_graph_break(self) -> bool:
         # Annotation persists until graph is compiled; each resume function
