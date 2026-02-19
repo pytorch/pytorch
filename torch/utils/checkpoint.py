@@ -1543,26 +1543,42 @@ def save(tensor: torch.Tensor) -> None:
 
     Args:
         tensor: The tensor to save.
-
-    .. note::
-        Under ``torch.compile``, ``save()`` is currently a no-op. Use a
-        policy function to control save/recompute decisions during compilation.
     """
     if _current_caching_mode is None:
         return
 
-    # Under torch.compile, _CachingTorchDispatchMode already caches all ops.
-    # The tensor_tracker won't have entries from the traced execution, so this
-    # is effectively a no-op. Use a policy_fn for compile-time control.
-    info = _current_caching_mode.tensor_tracker.get(tensor)
+    # Under torch.compile, the tensor may be wrapped in FunctionalTensor.
+    # Unwrap to match the level at which __torch_dispatch__ tracked it.
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+    unwrapped = mb_unwrap_functional_tensor(tensor)
+
+    info = _current_caching_mode.tensor_tracker.get(unwrapped)
     if info is None:
         return
 
     func, idx, any_ret_has_alias_info = info
     _current_caching_mode.storage[func][idx] = tree_map(
         lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)),
-        tensor,
+        unwrapped,
     )
+
+    # Under torch.compile, annotate the FX node so the partitioner
+    # knows this tensor should not be recomputed.
+    _set_save_policy_for_partitioner(unwrapped, CheckpointPolicy.MUST_SAVE)
+
+
+def _set_save_policy_for_partitioner(tensor, policy):
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    mode = get_proxy_mode()
+    if mode is None:
+        return
+    proxy_tensor = mode.tracer.tensor_tracker.get(tensor)
+    if proxy_tensor is None:
+        return
+    node = proxy_tensor.proxy.node
+    node.meta["recompute"] = policy
+    node.meta["ac_graph_id"] = node.meta.get("ac_graph_id", 0)
 
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
