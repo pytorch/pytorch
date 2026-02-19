@@ -2,7 +2,7 @@
 import inspect
 import itertools
 import logging
-import threading
+import weakref
 from typing import Any, Optional
 
 import torch
@@ -69,12 +69,17 @@ inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
 
 
+_inductor_compiled_callable_id = itertools.count()
+
+
 class InductorCompiledCallable:
     """
     A wrapper class that holds both the Inductor-compiled callable and fake outputs.
+    Each instance gets a globally unique idx at creation (via atomic itertools.count).
     """
 
     def __init__(self, compiled_callable, fake_outputs):
+        self.idx = next(_inductor_compiled_callable_id)
         self.compiled_callable = compiled_callable
         self.fake_outputs = fake_outputs
         # AOT autograd needs this to know inputs are passed as a list
@@ -88,68 +93,62 @@ class InductorCodeSideTable:
     """
     Side table for storing InductorCompiledCallable objects.
 
-    Similar to KernelSideTable for Triton kernels, we cannot put
-    InductorCompiledCallable objects directly into the FX graph as the
-    graph nodes do not support arbitrary objects. We use a side table
-    and pass an index instead.
+    We cannot put InductorCompiledCallable objects directly into the FX graph
+    as graph nodes do not support arbitrary objects. We use this side table
+    and pass callable.idx instead.
 
-    We use two dicts so that fetching both the callable and id are O(1).
+    Uses WeakValueDictionary so entries are automatically removed when
+    the InductorCompiledCallable is no longer referenced elsewhere
+    (e.g. after dynamo.reset() drops the compiled code cache).
     """
 
     def __init__(self):
-        self.id_to_callable: dict[int, InductorCompiledCallable] = {}
-        self.callable_to_id: dict[int, int] = {}  # id(callable) -> idx
-        self.lock = threading.Lock()
+        self.id_to_callable: weakref.WeakValueDictionary[
+            int, InductorCompiledCallable
+        ] = weakref.WeakValueDictionary()
 
     def add_callable(self, callable_obj: InductorCompiledCallable) -> int:
-        """Add a callable to the table and return its index."""
-        with self.lock:
-            obj_id = id(callable_obj)
-            if obj_id in self.callable_to_id:
-                return self.callable_to_id[obj_id]
-
-            idx = len(self.id_to_callable)
-            self.id_to_callable[idx] = callable_obj
-            self.callable_to_id[obj_id] = idx
-            return idx
+        """Register a callable and return its idx."""
+        self.id_to_callable[callable_obj.idx] = callable_obj
+        return callable_obj.idx
 
     def get_callable(self, idx: int) -> InductorCompiledCallable:
         """Get the callable at the given index."""
-        # No need to lock here as fetching from dict is atomic in CPython
         assert idx in self.id_to_callable, f"Invalid inductor code index: {idx}"  # noqa: S101
         return self.id_to_callable[idx]
 
+    def __getstate__(self):
+        # Convert WeakValueDictionary to regular dict for pickling
+        return {"id_to_callable": dict(self.id_to_callable)}
+
+    def __setstate__(self, state):
+        self.id_to_callable = weakref.WeakValueDictionary(state["id_to_callable"])
+
     def reset_table(self) -> None:
-        """Reset the table (only meant to be used in unit tests)."""
-        self.id_to_callable = {}
-        self.callable_to_id = {}
+        """Reset the table."""
+        self.id_to_callable = weakref.WeakValueDictionary()
 
 
 inductor_code_side_table = InductorCodeSideTable()
 
 
-def _resolve_inductor_callable(func):
+def _resolve_inductor_callable(func) -> InductorCompiledCallable:
     """
     Resolve func to an InductorCompiledCallable.
 
-    func can be:
-    - An int index into the side table
-    - An InductorCompiledCallable directly
-    - A raw callable (legacy case)
+    func is either an InductorCompiledCallable directly (from post_compile)
+    or an int index into the side table (from a traced FX graph node).
     """
     if isinstance(func, int):
         return inductor_code_side_table.get_callable(func)
+    assert isinstance(func, InductorCompiledCallable), f"Unexpected func type: {type(func)}"  # noqa: S101
     return func
 
 
 @inductor_compiled_code.py_impl(DispatchKey.CompositeExplicitAutograd)
 def inductor_compiled_code_impl(func, inputs):
-    # Resolve func from side table if it's an index
     resolved = _resolve_inductor_callable(func)
-    # resolved can be either a raw callable or an InductorCompiledCallable
-    if isinstance(resolved, InductorCompiledCallable):
-        return resolved.compiled_callable(inputs)
-    return resolved(inputs)
+    return resolved.compiled_callable(inputs)
 
 
 redirect_to_mode(inductor_compiled_code, DebugMode)
@@ -159,22 +158,23 @@ redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
 
 @register_fake(inductor_compiled_code)
 def inductor_compiled_code_fake(func, inputs):
-    # Resolve func from side table if it's an index
     resolved = _resolve_inductor_callable(func)
-
-    # If resolved is an InductorCompiledCallable, use the fake outputs
-    if isinstance(resolved, InductorCompiledCallable):
-        for x in pytree.tree_leaves(resolved.fake_outputs):
-            if any(isinstance(s, torch.SymInt) for s in x.shape):
-                raise RuntimeError(
-                    "fake prop on inductor compiled code doesn't work with SymInt outputs yet"
-                )
-        fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-        return tuple([fake_mode.from_tensor(t) for t in resolved.fake_outputs])
-    raise RuntimeError(
-        "Inductor compiled code cannot be run with FakeTensor inputs. "
-        "This can happen when torch.compile is called inside a FakeTensorMode. "
-        "Consider using backend='eager' or backend='aot_eager' instead."
+    if resolved.fake_outputs is None:
+        raise RuntimeError(
+            "inductor_compiled_code fake_outputs is None — the compiled graph may "
+            "have been serialized. Recompile to restore fake_outputs."
+        )
+    for x in pytree.tree_leaves(resolved.fake_outputs):
+        if isinstance(x, torch.Tensor) and any(
+            isinstance(s, torch.SymInt) for s in x.shape
+        ):
+            raise RuntimeError(
+                "fake prop on inductor compiled code doesn't work with SymInt outputs yet"
+            )
+    fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+    return tuple(
+        fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t
+        for t in resolved.fake_outputs
     )
 
 
@@ -191,38 +191,25 @@ def inductor_compiled_code_functionalize(ctx, func, inputs):
 
 @inductor_compiled_code.py_impl(ProxyTorchDispatchMode)
 def inductor_compiled_code_proxy(mode, func, inputs):
-    # Resolve func from side table if it's an index
     resolved = _resolve_inductor_callable(func)
 
-    # If resolved is an InductorCompiledCallable with an FX graph, run the graph
-    # to get example outputs for tracing
-    if isinstance(resolved, InductorCompiledCallable):
-        # This should run the fake impl
-        example_out = inductor_compiled_code(func, inputs)
+    # Run the fake impl to get example outputs for tracing
+    example_out = inductor_compiled_code(func, inputs)
 
-        # Add the callable to the side table and get its index
-        # This ensures the same callable gets the same index
-        callable_idx = inductor_code_side_table.add_callable(resolved)
+    # Register in side table so the FX node stores a serializable int
+    callable_idx = inductor_code_side_table.add_callable(resolved)
 
-        # Unwrap proxies from inputs
-        proxy_inputs = pytree.tree_map(mode.tracer.unwrap_proxy, inputs)
+    proxy_inputs = pytree.tree_map(mode.tracer.unwrap_proxy, inputs)
 
-        # Create a proxy for the HOP call with the index (an int, which is serializable)
-        out_proxy = mode.tracer.create_proxy(
-            "call_function",
-            inductor_compiled_code,
-            (callable_idx, proxy_inputs),
-            {},
-        )
+    out_proxy = mode.tracer.create_proxy(
+        "call_function",
+        inductor_compiled_code,
+        (callable_idx, proxy_inputs),
+        {},
+    )
 
-        return track_tensor_tree(
-            example_out, out_proxy, constant=None, tracer=mode.tracer
-        )
-
-    raise RuntimeError(
-        "Inductor compiled code cannot be traced with ProxyTorchDispatchMode. "
-        "This can happen when make_fx is called on code with inductor_compiled_code HOPs. "
-        "Ensure that InductorCompiledCallable has an fx_graph attached."
+    return track_tensor_tree(
+        example_out, out_proxy, constant=None, tracer=mode.tracer
     )
 
 
