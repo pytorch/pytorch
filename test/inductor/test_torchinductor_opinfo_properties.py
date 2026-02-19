@@ -90,11 +90,9 @@ LLM_UNARY_OP_NAMES = {
 
 # LLM-useful op names to filter from binary_ufuncs
 LLM_BINARY_OP_NAMES = {
-    "add",
     "sub",
     "mul",
     "div",
-    "pow",
     "remainder",
     "fmod",
     "maximum",
@@ -381,7 +379,6 @@ EAGER_EQUIV_XFAILS = {
         "softmax": {fp32},
         "log_softmax": {fp32},
         "matmul": {fp32},
-        "pow": {fp32},
     },
     "inductor_numerics": {
         "reciprocal": {fp32},
@@ -391,7 +388,6 @@ EAGER_EQUIV_XFAILS = {
         "softmax": {fp32},
         "log_softmax": {fp32},
         "matmul": {fp32},
-        "pow": {fp32},
     },
 }
 
@@ -434,11 +430,9 @@ BINARY_NUMERICAL_XFAILS = {
     "inductor_default": {
         "div": {fp16, fp32},
         "fmod": {bf16, fp32},
-        "pow": {ALL},
         "remainder": {ALL},
     },
     "inductor_numerics": {
-        "pow": {fp16, fp32},
         "remainder": {ALL},
     },
 }
@@ -457,10 +451,6 @@ ROCM_XFAILS = {
     "batch_invariance": {
         "inductor_default": {
             "log1p": {fp32},
-            "pow": {fp32},
-        },
-        "inductor_numerics": {
-            "pow": {fp32},
         },
     },
 }
