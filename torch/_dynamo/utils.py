@@ -2973,7 +2973,7 @@ def iter_contains(
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
-    from .variables.constant import CONSTANT_VARIABLE_TRUE
+    from .variables.constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
 
     if search.is_python_constant():
         found_const = any(
@@ -3008,7 +3008,7 @@ def iter_contains(
                     tx, [check, found], {}
                 )
     if found is None:
-        found = ConstantVariable.create(False)
+        found = CONSTANT_VARIABLE_FALSE
     return found
 
 

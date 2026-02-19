@@ -86,7 +86,12 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import CONSTANT_VARIABLE_NONE, CONSTANT_VARIABLE_TRUE, ConstantVariable
+from .constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    CONSTANT_VARIABLE_TRUE,
+    ConstantVariable,
+)
 
 
 try:
@@ -1072,7 +1077,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     ) -> ConstantVariable:
         if name in self.python_type().__dict__:
             return CONSTANT_VARIABLE_TRUE
-        return ConstantVariable.create(False)
+        return CONSTANT_VARIABLE_FALSE
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return False
