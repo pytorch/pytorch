@@ -517,7 +517,7 @@ class FSDPParamGroup:
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
-            fsdp_params_with_grad: list[FSDPParam] = []
+            fsdp_params_with_grad: list[FSDPParam | None] = []
             unsharded_grads: list[torch.Tensor] = []
 
             for fsdp_param in self.fsdp_params:

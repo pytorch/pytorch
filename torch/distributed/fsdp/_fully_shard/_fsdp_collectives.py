@@ -446,7 +446,7 @@ def foreach_all_gather_copy_out(
 
 @torch.no_grad()
 def foreach_reduce(
-    fsdp_params: list[FSDPParam],
+    fsdp_params: list[FSDPParam | None],
     unsharded_grads: list[torch.Tensor],
     reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
