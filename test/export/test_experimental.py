@@ -439,6 +439,82 @@ def forward(self, args_0):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_callable_object_with_eq(self):
+        """Test that callable objects with custom __eq__ work with BlockMask pytree.
+
+        When mask_mod is a callable class instance (not a plain function), the
+        _MaskModWrapper should delegate to the callable's __eq__ method for
+        comparison. This is needed for cases like sixlib's _AndMasksMod which
+        composes multiple mask functions.
+        """
+        from torch.nn.attention.flex_attention import (
+            _MaskModWrapper,
+            create_block_mask,
+        )
+
+        _register_blockmask_pytree()
+
+        # A callable class that implements __eq__ based on its state
+        class ComposedMaskMod:
+            def __init__(self, offset: int):
+                self.offset = offset
+
+            def __call__(self, b, h, q, k):
+                return q >= k + self.offset
+
+            def __eq__(self, other):
+                if not isinstance(other, ComposedMaskMod):
+                    return NotImplemented
+                return self.offset == other.offset
+
+            def __hash__(self):
+                return hash(self.offset)
+
+        # Test _MaskModWrapper equality with callable objects
+        fn1 = ComposedMaskMod(offset=5)
+        fn2 = ComposedMaskMod(offset=5)  # Same offset, different instance
+        fn3 = ComposedMaskMod(offset=10)  # Different offset
+
+        wrapper1 = _MaskModWrapper(fn1)
+        wrapper2 = _MaskModWrapper(fn2)
+        wrapper3 = _MaskModWrapper(fn3)
+
+        # Same offset should be equal (delegates to ComposedMaskMod.__eq__)
+        self.assertEqual(wrapper1, wrapper2)
+        # Different offset should not be equal
+        self.assertNotEqual(wrapper1, wrapper3)
+
+        # Test that BlockMask works with callable objects in export
+        def make_mask_fn():
+            return ComposedMaskMod(offset=4)
+
+        class Model(torch.nn.Module):
+            def __init__(self, mask_fn_factory):
+                super().__init__()
+                self.mask_fn_factory = mask_fn_factory
+
+            def forward(self, x):
+                mask_fn = self.mask_fn_factory()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model(make_mask_fn)
+
+        out_eager, mask_eager = module(x)
+
+        compiled = _dynamo_graph_capture_for_export(module)(x)
+        out_compiled, mask_compiled = compiled(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(
+            mask_eager.mask_mod(1, 1, 64, 64),
+            mask_compiled.mask_mod(1, 1, 64, 64),
+        )
+
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
 
