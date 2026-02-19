@@ -16,7 +16,8 @@ from torch.testing._internal.common_dtype import \
 from torch.testing._internal.common_cuda import CDNA3OrLater
 
 # Protects against includes accidentally setting the default dtype
-assert torch.get_default_dtype() is torch.float32
+if torch.get_default_dtype() is not torch.float32:
+    raise AssertionError("default dtype should be float32")
 
 
 # Note: test_scatter_gather_ops.py

@@ -27,14 +27,14 @@ Tensor my_new_zeros(
   return torch::stable::new_zeros(self, size, dtype, layout, device, pin_memory);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_new_empty(Tensor self, int[] size, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory) -> Tensor");
   m.def(
       "my_new_zeros(Tensor self, int[] size, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_new_empty", TORCH_BOX(&my_new_empty));
   m.impl("my_new_zeros", TORCH_BOX(&my_new_zeros));
 }
