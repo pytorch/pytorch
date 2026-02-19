@@ -892,6 +892,13 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
+        if self.device == "cpu" and (
+            config.triton.cooperative_reductions
+            or config.triton.force_cooperative_reductions
+        ):
+            expected_num_triton_kernels = 1
+            expected_num_block_pointers = 1
+
         if torch.version.hip is not None and expected_num_triton_kernels == 2:
             size = (256, 256)
         view = self._discontiguous_tensor(size, self.device)
