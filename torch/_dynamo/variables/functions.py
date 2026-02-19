@@ -602,7 +602,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Improper error_on_graph_break() call. Please fix your call to error_on_graph_break(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
-        elif self.fn is torch._dynamo.disable_cudagraphs:
+        elif self.fn is torch._dynamo.override_cudagraphs:
             try:
                 bound = inspect.signature(self.fn).bind(*args, **kwargs)
                 bound.apply_defaults()
@@ -612,10 +612,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     fwd = fwd.as_python_constant()
                 if isinstance(bwd, VariableTracker):
                     bwd = bwd.as_python_constant()
-                return variables.CudagraphDisableVariable(fwd, bwd)
+                return variables.CudagraphOverrideVariable(fwd, bwd)
             except Exception as e:
                 raise RuntimeError(
-                    "Improper disable_cudagraphs() call. Please fix your call to disable_cudagraphs(). "
+                    "Improper override_cudagraphs() call. Please fix your call to override_cudagraphs(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
         # Handle a `nonstrict_trace(fn)` call

@@ -3058,7 +3058,7 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         def test_cudagraph_annotation_disable(self):
-            @torch._dynamo.disable_cudagraphs()
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
             def helper(x):
                 return x + 1
 
@@ -3073,7 +3073,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertIsNone(self.get_manager())
 
         def test_cudagraph_annotation_disable_fwd_bwd(self):
-            @torch._dynamo.disable_cudagraphs()
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
             def helper(x):
                 return (x * x).sin()
 
@@ -3089,7 +3089,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertIsNone(self.get_manager())
 
         def test_cudagraph_annotation_disable_bwd_only(self):
-            @torch._dynamo.disable_cudagraphs(fwd=False, bwd=True)
+            @torch._dynamo.override_cudagraphs(bwd=False)
             def helper(x):
                 return (x * x).sin()
 
@@ -3112,7 +3112,7 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         def test_cudagraph_annotation_disable_fwd_only(self):
-            @torch._dynamo.disable_cudagraphs(fwd=True, bwd=False)
+            @torch._dynamo.override_cudagraphs(fwd=False)
             def helper(x):
                 return (x * x).sin()
 
@@ -3125,16 +3125,14 @@ if HAS_CUDA_AND_TRITON:
             out.sum().backward()
 
             self.assertEqual(out, inp.detach().pow(2).sin())
-            # Forward disabled cudagraphs; disabling fwd also effectively
-            # prevents bwd from recording since cudagraph trees require the
-            # forward to be recorded first.
+            # fwd override also disables bwd since the BoxedBool is shared
             self.assertIsNone(self.get_manager())
 
         def test_cudagraph_annotation_graph_break_selective(self):
             """Annotated function only disables cudagraphs for graph segments
             that inline it. Other segments after a graph break are unaffected."""
 
-            @torch._dynamo.disable_cudagraphs()
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
             def disabled_fn(x):
                 return x + 1
 
@@ -3163,11 +3161,11 @@ if HAS_CUDA_AND_TRITON:
         def test_cudagraph_annotation_multiple_functions(self):
             """Multiple annotated functions each disable their containing graph."""
 
-            @torch._dynamo.disable_cudagraphs()
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
             def no_cg_add(x):
                 return x + 1
 
-            @torch._dynamo.disable_cudagraphs()
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
             def no_cg_mul(x):
                 return x * 3
 
@@ -3191,7 +3189,7 @@ if HAS_CUDA_AND_TRITON:
             """Annotation on an innermost function propagates through
             nested inlining to disable cudagraphs for the whole graph."""
 
-            @torch._dynamo.disable_cudagraphs()
+            @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
             def inner(x):
                 return x + 1
 
@@ -3218,7 +3216,7 @@ if HAS_CUDA_AND_TRITON:
             def model(x):
                 y = x + 1  # g1: outside context, cudagraphs ON
                 torch._dynamo.graph_break()
-                with torch._dynamo.disable_cudagraphs():
+                with torch._dynamo.override_cudagraphs(fwd=False, bwd=False):
                     z = y * 2  # g2: inside context, cudagraphs OFF
                     torch._dynamo.graph_break()
                     w = z - 1  # g3: still inside context, cudagraphs OFF
@@ -3240,7 +3238,7 @@ if HAS_CUDA_AND_TRITON:
             when that module is called inside a compiled function."""
 
             class MyModule(torch.nn.Module):
-                @torch._dynamo.disable_cudagraphs()
+                @torch._dynamo.override_cudagraphs(fwd=False, bwd=False)
                 def forward(self, x):
                     return x + 1
 
@@ -3258,6 +3256,105 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(out, (inp + 1) * 2)
             self.assertIsNone(self.get_manager())
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable(self):
+            """override_cudagraphs(fwd=True, bwd=True) force-enables cudagraphs
+            even when config.triton.cudagraphs is False."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=True)
+            def helper(x):
+                return x + 1
+
+            def fn(x):
+                return helper(x)
+
+            fn_compiled = torch.compile(fn)
+
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(inp)
+
+            self.assertEqual(out, inp + 1)
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_fwd_bwd(self):
+            """override_cudagraphs(fwd=True, bwd=True) force-enables cudagraphs
+            for both forward and backward when config disables them."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True, bwd=True)
+            def helper(x):
+                return (x * x).sin()
+
+            def fn(x):
+                return helper(x)
+
+            fn_compiled = torch.compile(fn)
+
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(inp)
+                out.sum().backward()
+
+            self.assertEqual(out, inp.detach().pow(2).sin())
+            self.assertIsNotNone(self.get_manager())
+            # One forward and one backward
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_fwd_only(self):
+            """override_cudagraphs(fwd=True) force-enables cudagraphs for
+            forward. Backward is also enabled since the BoxedBool is shared."""
+
+            @torch._dynamo.override_cudagraphs(fwd=True)
+            def helper(x):
+                return (x * x).sin()
+
+            def fn(x):
+                return helper(x)
+
+            fn_compiled = torch.compile(fn)
+
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                torch.compiler.cudagraph_mark_step_begin()
+                out = fn_compiled(inp)
+                out.sum().backward()
+
+            self.assertEqual(out, inp.detach().pow(2).sin())
+            self.assertIsNotNone(self.get_manager())
+            # fwd override also enables bwd since the BoxedBool is shared
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        @torch._inductor.config.patch("triton.cudagraphs", False)
+        def test_cudagraph_annotation_enable_context_manager(self):
+            """Context manager force-enables cudagraphs for segments within
+            the block when config disables them."""
+
+            def model(x):
+                y = x + 1  # g1: no annotation, config off -> no cudagraphs
+                torch._dynamo.graph_break()
+                with torch._dynamo.override_cudagraphs(fwd=True, bwd=True):
+                    z = y * 2  # g2: annotation on -> cudagraphs
+                    torch._dynamo.graph_break()
+                    w = z - 1  # g3: annotation on -> cudagraphs
+                torch._dynamo.graph_break()
+                return w + 3  # g4: no annotation, config off -> no cudagraphs
+
+            compiled = torch.compile(model)
+            for _ in range(3):
+                inp = torch.randn(4, 4, device="cuda")
+                torch.compiler.cudagraph_mark_step_begin()
+                out = compiled(inp)
+
+            expected = ((inp + 1) * 2 - 1) + 3
+            self.assertEqual(out, expected)
+            # g2 and g3 use cudagraphs (2 graphs recorded)
+            self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         def test_tensor_constant_mutation(self):
             class Foo(torch.nn.Module):
