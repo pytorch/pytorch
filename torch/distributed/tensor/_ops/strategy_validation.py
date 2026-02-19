@@ -1240,9 +1240,7 @@ def _print_discrepancy_section(
 
     for op_str in sorted(by_op.keys()):
         print(f"\n  [{op_str}]")
-        for (inp, out), discs in sorted(  # pyrefly: ignore[not-iterable]
-            by_op[op_str].items(), key=str
-        ):
+        for (inp, out), discs in sorted(by_op[op_str].items(), key=str):
             inp_str = ", ".join(inp)
             print(f"    {inp_str} -> {out}")
             if show_repro:
