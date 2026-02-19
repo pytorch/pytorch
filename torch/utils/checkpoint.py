@@ -1312,6 +1312,15 @@ def _policy_from_bool(b):
     return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
 
 
+def _sac_storage_key(func, args):
+    # For HOPs, different instances share the same func object (e.g., all
+    # inductor_compiled_code calls use the same singleton). Include the id of
+    # the callable (args[0]) so we can distinguish different HOP regions.
+    if isinstance(func, torch._ops.HigherOrderOperator) and args:
+        return (func, id(args[0]))
+    return func
+
+
 SAC_IGNORED_OPS = {
     # AC inserts different number of detach during forward and recompute.
     torch.ops.aten.detach.default,
@@ -1359,7 +1368,8 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
+            key = _sac_storage_key(func, args)
+            self.storage[key].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
         return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
@@ -1386,7 +1396,8 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         is_compiling = _is_compiling(func, args, kwargs)
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            storage = self.storage.get(func)
+            key = _sac_storage_key(func, args)
+            storage = self.storage.get(key)
             if storage is None:
                 raise RuntimeError(f"{func} encountered during backward, but not found in storage")
             if len(storage) == 0:
