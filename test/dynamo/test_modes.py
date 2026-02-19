@@ -855,7 +855,7 @@ class outer_fn(torch.nn.Module):
         """Test that calling the same compiled function twice uses the same subgraph.
 
         When the same compiled function is called multiple times with inputs that
-        dont cause guard failures, both calls should reference the same subgraph.
+        don't cause guard failures, both calls should reference the same subgraph.
         """
         from torch._guards import tracing, TracingContext
         from torch.fx.experimental.proxy_tensor import make_fx
@@ -1262,7 +1262,7 @@ class outer_fn(torch.nn.Module):
 
     @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_aot_autograd_over_dynamo_with_requires_grad(self):
-        """Test AOTAutograd tracing over a torch.compiled function with requires_grad inputs.
+        """Test AOTAutograd tracing over a torch.compile'd function with requires_grad inputs.
 
         This tests the scenario where:
         1. An outer aot_function traces a function with requires_grad inputs
@@ -1417,6 +1417,36 @@ class outer_fn(torch.nn.Module):
             1,
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
+
+    @requires_gpu
+    def test_nested_compile_dynamic(self):
+        """Test that wrap_compiled_regions raises on dynamic shapes."""
+
+        d_model = 64
+
+        class MMLayer(torch.nn.Module):
+            def __init__(self, d_model: int):
+                super().__init__()
+                self.linear = torch.nn.Linear(d_model, d_model)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "wrap_compiled_regions does not support dynamic shapes yet",
+        ):
+            torch._dynamo.reset()
+
+            compiled_mm = torch.compile(
+                MMLayer(d_model).to(GPU_TYPE),
+                backend="inductor",
+                options={"wrap_inductor_compiled_regions": True},
+                dynamic=True,
+            )
+
+            x = torch.randn(2, d_model, device=GPU_TYPE)
+            compiled_mm(x)
 
     @requires_gpu
     def test_nested_compile_transformer_with_flex_attention_compiled_layers(

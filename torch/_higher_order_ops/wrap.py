@@ -2,6 +2,7 @@
 import inspect
 import itertools
 import logging
+import threading
 from typing import Any, Optional
 
 import torch
@@ -70,10 +71,7 @@ inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
 
 class InductorCompiledCallable:
     """
-    A wrapper class that holds both the Inductor-compiled callable and
-    the pre-compilation FX graph. This allows the inductor_compiled_code
-    HOP to properly handle FakeTensor and FunctionalTensor inputs by
-    running the FX graph instead of the compiled callable.
+    A wrapper class that holds both the Inductor-compiled callable and fake outputs.
     """
 
     def __init__(self, compiled_callable, fake_outputs):
@@ -101,20 +99,23 @@ class InductorCodeSideTable:
     def __init__(self):
         self.id_to_callable: dict[int, InductorCompiledCallable] = {}
         self.callable_to_id: dict[int, int] = {}  # id(callable) -> idx
+        self.lock = threading.Lock()
 
     def add_callable(self, callable_obj: InductorCompiledCallable) -> int:
         """Add a callable to the table and return its index."""
-        obj_id = id(callable_obj)
-        if obj_id in self.callable_to_id:
-            return self.callable_to_id[obj_id]
+        with self.lock:
+            obj_id = id(callable_obj)
+            if obj_id in self.callable_to_id:
+                return self.callable_to_id[obj_id]
 
-        idx = len(self.id_to_callable)
-        self.id_to_callable[idx] = callable_obj
-        self.callable_to_id[obj_id] = idx
-        return idx
+            idx = len(self.id_to_callable)
+            self.id_to_callable[idx] = callable_obj
+            self.callable_to_id[obj_id] = idx
+            return idx
 
     def get_callable(self, idx: int) -> InductorCompiledCallable:
         """Get the callable at the given index."""
+        # No need to lock here as fetching from dict is atomic in CPython
         assert idx in self.id_to_callable, f"Invalid inductor code index: {idx}"  # noqa: S101
         return self.id_to_callable[idx]
 

@@ -29,6 +29,7 @@ from functools import partial
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
@@ -467,7 +468,6 @@ class CompiledFxGraph(OutputCode):
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
     _wrap_compiled_regions: bool = False
-    fx_g: Optional[torch.fx.GraphModule] = None
 
     def __init__(
         self,
@@ -621,6 +621,13 @@ class CompiledFxGraph(OutputCode):
             self.fake_outputs = tuple(
                 [x.meta["val"] for x in gm.graph.find_nodes(op="output")[0].args[0]]
             )
+            for fake_out in pytree.tree_leaves(self.fake_outputs):
+                if isinstance(fake_out, torch.Tensor) and any(
+                    isinstance(s, torch.SymInt) for s in fake_out.shape
+                ):
+                    raise RuntimeError(
+                        "wrap_compiled_regions does not support dynamic shapes yet"
+                    )
 
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
