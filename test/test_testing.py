@@ -2404,7 +2404,7 @@ class TestImports(TestCase):
 
         if sys.version_info < (3, 12):
             # depends on Python 3.12+ syntax
-            ignored_modules.append("torch.testing._internal.py32_intrinsics")
+            ignored_modules.append("torch.testing._internal.py312_intrinsics")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, _, files in os.walk(torch_dir):
