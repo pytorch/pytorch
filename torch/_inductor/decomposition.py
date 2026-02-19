@@ -134,6 +134,8 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.lerp,
     aten._foreach_lerp.Scalar,
     aten._foreach_lerp.ScalarList,
+    aten.addcmul,
+    aten._foreach_addcmul.Scalar,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
