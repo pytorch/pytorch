@@ -1,7 +1,9 @@
 import argparse
 import json
+import operator
 import os
 import platform
+import random
 import sys
 import time
 from collections.abc import Iterable
@@ -17,36 +19,38 @@ from torch.fx.passes.operator_support import OperatorSupportBase
 # Simple, deterministic operator support: only `operator.add` is supported.
 class _AddOnlySupport(OperatorSupportBase):
     def is_node_supported(self, submodules, node: Node) -> bool:  # type: ignore[override]
-        return node.op == "call_function" and node.target is torch.ops.aten.add.Tensor
+        return node.op == "call_function" and node.target is operator.add
 
 
-def _make_large_partition_fn(num_nodes: int, num_unsupported: int):
+def _make_large_partition_fn(num_nodes: int, num_unsupported: int, seed: int = 0):
     if num_nodes < 1:
         raise ValueError("num_nodes must be >= 1")
     if num_unsupported < 0 or num_unsupported > num_nodes:
         raise ValueError("num_unsupported must be in [0, num_nodes]")
 
-    unsupported_start = (num_nodes - num_unsupported) // 2
-    unsupported_end = unsupported_start + num_unsupported
+    rng = random.Random(seed)
+    if num_unsupported:
+        unsupported_indices = set(rng.sample(range(num_nodes), num_unsupported))
+    else:
+        unsupported_indices = set()
 
     def fn(a, b):
         # Two streams with frequent merges to avoid a straight-line graph and
         # to exercise partition-cycle detection across unsupported ops.
-        left = a + b
-        right = a + b + b
+        # Each loop iteration emits exactly one op so total ops == num_nodes.
+        left = a
+        right = b
         for i in range(num_nodes):
-            if unsupported_start <= i < unsupported_end:
-                left = left.relu()
+            if i in unsupported_indices:
+                if rng.random() < 0.5:
+                    left = left.relu()
+                else:
+                    right = right.relu()
             else:
-                if i % 2 == 0:
+                if rng.random() < 0.5:
                     left = left + right
                 else:
                     right = right + left
-
-            if i % 3 == 0:
-                left = left + right
-            else:
-                right = right + left
         return left, right
 
     return fn
@@ -136,12 +140,6 @@ def main(argv: Iterable[str] | None = None) -> int:
         "--iters", type=int, default=1, help="Timed iterations per case."
     )
     parser.add_argument(
-        "--threads",
-        type=int,
-        default=1,
-        help="Sets OMP_NUM_THREADS for repeatability (default: 1).",
-    )
-    parser.add_argument(
         "--json",
         type=str,
         default=None,
@@ -149,8 +147,6 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
-
-    os.environ.setdefault("OMP_NUM_THREADS", str(args.threads))
 
     env = _collect_env()
     print("Environment:", json.dumps(env, indent=2))

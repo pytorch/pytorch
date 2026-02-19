@@ -4,6 +4,7 @@
 from dataclasses import dataclass
 import operator
 import logging
+import random
 import sys
 
 import torch
@@ -117,6 +118,28 @@ class TestPartitionFunctions:
         # right branch
         relu_1 = add.relu()
         return relu, relu_1
+
+    @staticmethod
+    def forward_depth_window_regression(a, b):
+        rng = random.Random(0)
+        num_nodes = 8
+        num_unsupported = 5
+        unsupported_indices = set(rng.sample(range(num_nodes), num_unsupported))
+
+        left = a
+        right = b
+        for i in range(num_nodes):
+            if i in unsupported_indices:
+                if rng.random() < 0.5:
+                    left = left.relu()
+                else:
+                    right = right.relu()
+            else:
+                if rng.random() < 0.5:
+                    left = left + right
+                else:
+                    right = right + left
+        return left, right
 
     @staticmethod
     def forward7(a, b, c):
@@ -422,6 +445,19 @@ class TestFXGraphPasses(JitTestCase):
             ["add", "add_1"],
             f"Unexpected partition nodes: {nodes_names}",
         )
+
+    def test_partitioner_depth_window_uses_input_and_output(self):
+        traced = symbolic_trace(TestPartitionFunctions.forward_depth_window_regression)
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            supported_ops,
+            allows_single_node_partition=True,
+        )
+        partitions = partitioner.propose_partitions()
+        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
+        self.assertEqual(len(partitions_name), 1)
+        self.assertEqual(set(partitions_name[0]), {"add", "add_1", "add_2"})
 
     @parametrize("fn, expected_partition", [
         (TestPartitionFunctions.forward17, [['add', 'add_1', 'add_2']]),

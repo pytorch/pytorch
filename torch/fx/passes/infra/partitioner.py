@@ -161,20 +161,33 @@ class CapabilityBasedPartitioner:
 
         else:
 
-            def compute_depths(nodes: list[Node]) -> dict[Node, int]:
-                """Return a depth map measured from graph outputs toward inputs.
+            def compute_depths(
+                nodes: list[Node],
+            ) -> tuple[dict[Node, int], dict[Node, int]]:
+                """Return depth maps from outputs (bottom-up) and inputs (top-down).
 
-                Depth grows as we walk upstream; this matches the traversal logic used
-                in the greedy partitioner to bound how far back we scan while building
-                a partition.
+                - Output depth grows as we walk upstream from graph outputs.
+                - Input depth grows as we walk downstream from graph inputs.
                 """
-                depth: dict[Node, int] = {}
+                output_depth: dict[Node, int] = {}
                 for node in reversed(nodes):
                     if not node.users:
-                        depth[node] = 0
+                        output_depth[node] = 0
                     else:
-                        depth[node] = 1 + min(depth[user] for user in node.users)
-                return depth
+                        output_depth[node] = 1 + min(
+                            output_depth[user] for user in node.users
+                        )
+
+                input_depth: dict[Node, int] = {}
+                for node in nodes:
+                    if not node.all_input_nodes:
+                        input_depth[node] = 0
+                    else:
+                        input_depth[node] = 1 + min(
+                            input_depth[input_n] for input_n in node.all_input_nodes
+                        )
+
+                return output_depth, input_depth
 
             def greedy_partition(partition_id: int, start_index: int):
                 """Greedily pull supported upstream nodes while steering around
@@ -186,16 +199,24 @@ class CapabilityBasedPartitioner:
                 to the last node already placed in the partition.
                 """
                 blocklist: set[Node] = set()
-                last_added_depth = -1
+                last_added_output_depth = -1
+                last_added_input_depth = -1
                 current_partition = Partition(id=partition_id)
                 partitions_by_id[partition_id] = current_partition
 
                 def depth_window_exceeded() -> bool:
-                    """Return True once scanning has moved more than one depth
-                    step upstream relative to the shallowest node already placed
-                    in this partition (depth grows as we walk upstream).
+                    """Return True only if both depth windows are exceeded.
+
+                    - Output depth increases as we walk upstream.
+                    - Input depth decreases as we walk upstream.
                     """
-                    return depth_map[candidate_node] > last_added_depth + 1
+                    output_exceeded = (
+                        output_depth[candidate_node] > last_added_output_depth + 1
+                    )
+                    input_exceeded = (
+                        input_depth[candidate_node] < last_added_input_depth - 1
+                    )
+                    return output_exceeded and input_exceeded
 
                 for idx in range(start_index, len(nodes)):
                     node_idx = len(nodes) - 1 - idx
@@ -219,7 +240,8 @@ class CapabilityBasedPartitioner:
                         continue
                     assignment[candidate_node] = partition_id
                     current_partition.add_node(candidate_node, idx)
-                    last_added_depth = depth_map[candidate_node]
+                    last_added_output_depth = output_depth[candidate_node]
+                    last_added_input_depth = input_depth[candidate_node]
 
             def reassign_node_to_partition(node: Node, target_id: Optional[int]):
                 """Reassign `node` to `target_id`, preserving stored order.
@@ -255,7 +277,7 @@ class CapabilityBasedPartitioner:
                 "Proposing partitions with general path (cycle detection enabled)..."
             )
 
-            depth_map = compute_depths(nodes)
+            output_depth, input_depth = compute_depths(nodes)
 
             partition_id = 0
             for i, node in enumerate(reversed(nodes)):
