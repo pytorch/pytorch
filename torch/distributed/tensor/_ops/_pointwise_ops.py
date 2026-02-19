@@ -37,6 +37,7 @@ from torch.utils._typing_utils import not_none
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 # leave the remaining pointwise_ops list here for convenience,
 # Below ops are some pointwise ops that are yet to be supported,
 # they might not be a complete list.
@@ -224,6 +225,8 @@ pointwise_ops = [
     aten.frac.default,
     aten.frac.out,
     aten.frac_.default,
+    aten.gcd.default,
+    aten.gcd.out,
     aten.ge.Scalar,
     aten.ge.Tensor,
     aten.gelu.default,
@@ -377,6 +380,8 @@ pointwise_ops = [
     aten.sinh.default,
     aten.sinh.out,
     aten.sinh_.default,
+    aten.special_erfcx.default,
+    aten.special_erfcx.out,
     aten.sqrt.default,
     aten.sqrt.out,
     aten.sqrt_.default,
@@ -413,6 +418,21 @@ pointwise_ops = [
     aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
+    # prims ops
+    # please keep the entries below alphabetically sorted
+    prims.bessel_i0e.default,
+    prims.bessel_i1.default,
+    prims.bessel_i1e.default,
+    prims.bessel_j0.default,
+    prims.bessel_j1.default,
+    prims.div.default,
+    prims.erfcx.default,
+    prims.gcd.default,
+    prims.frexp.default,
+    prims.ndtri.default,
+    prims.ne.default,
+    prims.spherical_bessel_j0.default,
+    prims.zeta.default,
 ]
 
 # the linear pointwise ops map, key is op, value is the type of linearity
@@ -441,8 +461,10 @@ linear_pointwise_ops = {
 partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.maximum.default: "max",
     aten.maximum.out: "max",
+    prims.fmax.default: "max",
     aten.minimum.default: "min",
     aten.minimum.out: "min",
+    prims.fmin.default: "min",
 }
 
 
@@ -828,6 +850,9 @@ for op in partial_preserving_ops:
 # Register copy_ with its custom strategy that preserves all Partial types
 register_op_strategy(
     aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(copy_strategy)
+register_op_strategy(
+    prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
 )(copy_strategy)
 
 for op in pointwise_ops:

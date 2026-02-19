@@ -57,6 +57,25 @@ def cpp_string_literal(s: str) -> str:
     return f'"{escaped}"'
 
 
+TRITON_SIGNATURE_TO_CPP = {
+    "i32": "int32_t",
+    "i64": "int64_t",
+    "fp32": "float",
+    "fp64": "double",
+}
+
+
+def signature_is_tma_desc(sig: Optional[str]) -> bool:
+    """Check if a Triton signature represents a TMA descriptor."""
+    if not sig:
+        return False
+    if sig == "nvTmaDesc":
+        return True
+    if sig.startswith("tensordesc<"):
+        return True
+    return False
+
+
 @dataclasses.dataclass
 class DeferredTritonCallWrapper:
     """
@@ -289,22 +308,6 @@ class DeferredTritonCallWrapper:
                     )
 
                 # Add input info (This copies the logic from args_decl)
-                signature2dtype = {
-                    "i32": "int32_t",
-                    "i64": "int64_t",
-                    "fp32": "float",
-                    "fp64": "double",
-                }
-
-                def signature_is_tma_desc(sig):
-                    if not sig:
-                        return False
-                    if sig == "nvTmaDesc":
-                        return True
-                    if sig.startswith("tensordesc<"):
-                        return True
-                    return False
-
                 curr_arg_id = -1
                 total_args = []
                 ordered_argsname = []
@@ -349,7 +352,7 @@ class DeferredTritonCallWrapper:
                     elif (
                         isinstance(arg_type, type(SymbolicCallArg))
                         and arg_signature is not None
-                        and arg_signature in signature2dtype
+                        and arg_signature in TRITON_SIGNATURE_TO_CPP
                     ) or arg_type in (sympy.Integer, int, sympy.Float, float):
                         write_dummy_scalar_ivalue(arg_name)
                     elif arg_signature and arg_signature.startswith("tensordesc<"):
@@ -650,23 +653,6 @@ class CppWrapperGpu(CppWrapperCpu):
         """
         new_args: list[str] = []
 
-        # Add more cases for other types as needed
-        signature2dtype = {
-            "i32": "int32_t",
-            "i64": "int64_t",
-            "fp32": "float",
-            "fp64": "double",
-        }
-
-        def signature_is_tma_desc(sig):
-            if not sig:
-                return False
-            if sig == "nvTmaDesc":
-                return True
-            if sig.startswith("tensordesc<"):
-                return True
-            return False
-
         def process_tma_stable_arg(arg, arg_type, arg_signature, var_name):
             # [Note: AOTI TMA Stable handling]
             # For most args, a single arg passed to the python triton interface
@@ -726,10 +712,10 @@ class CppWrapperGpu(CppWrapperCpu):
             elif (
                 isinstance(arg_type, type(SymbolicCallArg))
                 and arg_signature is not None
-                and arg_signature in signature2dtype
+                and arg_signature in TRITON_SIGNATURE_TO_CPP
             ):
                 code.writeline(
-                    f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"
+                    f"{TRITON_SIGNATURE_TO_CPP[arg_signature]} {var_name} = {cexpr(arg)};"
                 )
                 new_args.append(f"&{var_name}")
             elif arg_type in (sympy.Integer, int):
@@ -737,7 +723,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 new_args.append(f"&{var_name}")
             elif arg_type in (sympy.Float, float):
                 # Use signature type if available, otherwise default to float
-                cpp_type = signature2dtype.get(  # pyrefly: ignore[no-matching-overload]
+                cpp_type = TRITON_SIGNATURE_TO_CPP.get(  # pyrefly: ignore[no-matching-overload]
                     arg_signature, "float"
                 )
                 code.writeline(f"{cpp_type} {var_name} = {cexpr(arg)};")
@@ -789,6 +775,7 @@ class CppWrapperGpu(CppWrapperCpu):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
     ):
@@ -810,6 +797,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
             )
 
         if (
@@ -828,6 +816,7 @@ class CppWrapperGpu(CppWrapperCpu):
                 raw_keys=raw_keys,
                 raw_args=raw_args,
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 original_fxnode_name=original_fxnode_name,
             )
 
