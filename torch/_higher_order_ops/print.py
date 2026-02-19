@@ -151,6 +151,16 @@ def print_fake_tensor_mode(mode, format_str: str, *args: object, **kwargs: objec
 @print.py_impl(torch._C.DispatchKey.CompositeExplicitAutograd)
 # pyre-ignore
 def print_impl(format_str: str, *args: object, **kwargs: object) -> None:
+    # _rank_zero_only is set by the DTensor py_impl to defer the rank check
+    # to runtime (here in CEA) instead of trace time, so all ranks produce
+    # identical compiled graphs.
+    rank_zero_only = kwargs.pop("_rank_zero_only", False)
+    if rank_zero_only:
+        import torch.distributed as dist
+
+        if dist.is_initialized() and dist.get_rank() != 0:
+            return
+
     # Ensure all immutable_dict/list in args and kwargs are converted to regular dict/list
     map_types: dict[type, type] = {
         torch.fx.immutable_collections.immutable_dict: dict,
@@ -176,13 +186,16 @@ def _register_dtensor_impl() -> None:
     @print.py_impl(DTensor)  # pyrefly: ignore [missing-attribute]
     # pyre-ignore
     def print_dtensor(format_str: str, *args: object, **kwargs: object) -> None:
-        import torch.distributed as dist
-
-        # Gather the full (global) tensor from all ranks via all-gather collective
+        # Gather the full (global) tensor from all ranks via all-gather collective.
+        # All ranks participate in full_tensor() (collective), then dispatch
+        # print with _rank_zero_only=True so the rank check happens at runtime
+        # in the CEA impl, not at trace time. This ensures all ranks produce
+        # identical compiled graphs.
         local_args = pytree.tree_map_only(DTensor, DTensor.full_tensor, args)
         local_kwargs = pytree.tree_map_only(DTensor, DTensor.full_tensor, kwargs)
-        if dist.get_rank() == 0:
-            print(format_str, *local_args, **local_kwargs)
+        print(  # pyrefly: ignore [no-matching-overload]
+            format_str, *local_args, _rank_zero_only=True, **local_kwargs
+        )
 
 
 @print.py_functionalize_impl

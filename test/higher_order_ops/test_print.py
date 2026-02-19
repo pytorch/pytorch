@@ -851,6 +851,70 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(compiled_result.to_local(), eager_result.to_local())
         self._check_output(compiled_output, expected)
 
+    @with_comms
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_print_dtensor_inductor_output_code(self):
+        """Verify inductor generated code contains print for DTensor."""
+        device_mesh = self.build_device_mesh()
+        full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
+        dtensor = DTensor.from_local(
+            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
+        )
+
+        def f(x):
+            x = x + x
+            torch._higher_order_ops.print("val: {}", x)
+            return x
+
+        compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            _, codes = run_and_get_code(compiled_f, dtensor)
+
+        merged_code = "\n".join(codes)
+        self.assertIn(
+            "print",
+            merged_code,
+            "Inductor output code should contain print call",
+        )
+        self.assertNotIn(
+            "torch.ops.higher_order.print",
+            merged_code,
+            "Inductor should use python print, not the HOP directly",
+        )
+
+    @with_comms
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_print_dtensor_rank_check_not_traced(self):
+        """Verify _rank_zero_only is passed through the graph, not evaluated at trace time.
+
+        All ranks must produce identical compiled graphs. The rank check should
+        appear as a _rank_zero_only kwarg in the traced print call, not as a
+        dist.get_rank() branch in the graph.
+        """
+        device_mesh = self.build_device_mesh()
+        full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
+        dtensor = DTensor.from_local(
+            full_tensor.chunk(self.world_size)[self.rank], device_mesh, [Shard(0)]
+        )
+
+        def f(x):
+            torch._higher_order_ops.print("val: {}", x)
+            return x + x
+
+        backend = AotEagerAndRecordGraphs()
+        compiled_f = torch.compile(f, backend=backend, fullgraph=True)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            compiled_f(dtensor)
+
+        graph_code = backend.fw_graphs[0].code
+        import builtins
+
+        builtins.print("=== FW GRAPH ===")
+        builtins.print(graph_code)
+        builtins.print("=== END FW GRAPH ===")
+        self.assertIn("_rank_zero_only", graph_code)
+        self.assertNotIn("get_rank", graph_code)
+
 
 @instantiate_parametrized_tests
 class TestHopPrintBackward(TestCase):
