@@ -355,6 +355,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.dont_skip_tracing": UserFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
+    "torch._dynamo.bytecode_debugger.breakpoint": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
@@ -3806,7 +3807,7 @@ def _force_inline() -> Iterator[None]:
     When active, check_verbose() will skip all inline/skip decision logic and
     always return SkipResult(False, ...), meaning functions will be inlined.
 
-    See _make_inlined() in higher_order_ops.py which uses this to ensure that
+    See _make_inlined() in utils.py which uses this to ensure that
     a python function is fully traced to produce the needed variable trackers.
     """
     global _force_inline_flag
