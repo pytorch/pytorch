@@ -50,6 +50,9 @@ base_types = typing.get_args(BaseArgumentTypes)
 Target: TypeAlias = Union[Callable[..., Any], str]
 
 
+_UNRESOLVED = object()
+
+
 class _LazyStackTrace:
     """Deferred stack trace that avoids expensive symbolization until accessed.
 
@@ -64,14 +67,12 @@ class _LazyStackTrace:
         instance = super().__new__(cls)
         instance._captured_tb = captured_tb
         instance._filter_fn = filter_fn
-        instance._resolved = None
+        instance._resolved = _UNRESOLVED
         return instance
 
     def resolve(self) -> Optional[str]:
-        if self._resolved is not None:
+        if self._resolved is not _UNRESOLVED:
             return self._resolved
-        if self._captured_tb is None:
-            return None
         user_stack_summary = self._captured_tb.summary()
         result = None
         if user_stack_summary:
