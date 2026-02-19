@@ -7,17 +7,17 @@ tracing through its decomposition. The decomposed ops (which do have strategies)
 determine how placements propagate through the original op.
 """
 
+from __future__ import annotations
+
 import itertools
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._decomp import decomposition_table
-from torch._ops import OpOverload
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, RuntimeSchemaInfo
-from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -60,6 +60,11 @@ def _infer_schema_info_from_op(op: OpOverload) -> RuntimeSchemaInfo:
 
 
 from torch.utils._pytree import tree_any, tree_flatten, tree_map, tree_map_only
+
+
+if TYPE_CHECKING:
+    from torch._ops import OpOverload
+    from torch.distributed.tensor._sharding_prop import ShardingPropagator
 
 
 def _extract_input_specs(op_schema: OpSchema) -> tuple[DTensorSpec | object, ...]:

@@ -12,6 +12,7 @@ from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._decompositions import DecompShardingStrategy
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -222,8 +223,6 @@ class ShardingPropagator:
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
-        from torch.distributed.tensor._decompositions import DecompShardingStrategy
-
         self.decomp_strategy = DecompShardingStrategy(self)
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
@@ -580,7 +579,6 @@ class ShardingPropagator:
 
         else:
             # try operator decomposition path
-            from torch.distributed.tensor._decompositions import DecompShardingStrategy
 
             # If the op has a CIA decomposition, we prioritize it over the decomposition flow,
             # allowing decomposed ops to individually enter DTensor dispatch.
