@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import unittest
-import warnings
 
 import torch
 from torch import nn
@@ -228,7 +227,7 @@ print(normalize_gm(graph.print_readable(print_output=False)))
         # checks that this doesn't produce any warnings
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            return einops.rearrange(x, '... -> (...)')
+            return einops.rearrange(x, "... -> (...)")
 
         x = torch.randn(5)
         self.assertNotWarn(lambda: fn(x))
