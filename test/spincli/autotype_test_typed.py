@@ -8,7 +8,7 @@ BOOLEAN_CONSTANT = True
 NONE_CONSTANT = None
 
 
-def greeter(name: int | str | None=None) -> str:
+def greeter(name: int | str | None = None) -> str:
     return f"Hello, {name}!"
 
 
