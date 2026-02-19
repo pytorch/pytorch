@@ -18,6 +18,10 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_new.h>
 
+namespace at::impl {
+TORCH_API at::Tensor to_fake(const at::Tensor& tensor);
+} // namespace at::impl
+
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 #include <torch/csrc/utils/python_raii.h>
@@ -764,6 +768,7 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(ADInplaceOrView)
       DEF_ONE(PythonTLSSnapshot)
       DEF_ONE(Python)
+      DEF_ONE(Fake)
       DEF_ONE(FuncTorchDynamicLayerFrontMode)
       DEF_ONE(FuncTorchDynamicLayerBackMode)
       DEF_ONE(FuncTorchBatchedDecomposition)
@@ -902,6 +907,10 @@ void initDispatchBindings(PyObject* module) {
       m, "_ExcludeDispatchKeyGuard");
   py_context_manager<SetExcludeDispatchKeyGuard, c10::DispatchKey, bool>(
       m, "_SetExcludeDispatchKeyGuard");
+
+  m.def("_to_fake", [](const at::Tensor& t) {
+    return at::impl::to_fake(t);
+  });
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");

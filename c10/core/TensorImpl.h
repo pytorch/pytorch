@@ -1490,6 +1490,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
+  void _set_fake(bool value, std::optional<c10::Device> device = std::nullopt) {
+    if (value) {
+      key_set_ = key_set_.add(DispatchKey::Fake);
+      if (device.has_value()) {
+        device_opt_ = *device;
+      }
+    } else {
+      key_set_ = key_set_.remove(DispatchKey::Fake);
+    }
+  }
+
   /**
    * Return the accumulated gradient of a tensor. This gradient is computed
    * using forward mode AD.
