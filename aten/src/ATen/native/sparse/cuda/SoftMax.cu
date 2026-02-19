@@ -320,7 +320,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   auto new_sz = ::cuda::std::distance(
       thrust_ptr(pool_sizes.template data_ptr<int64_t>()), new_end.second);
 #else
-  auto new_sz = thrust::distance
+  auto new_sz = thrust::distance(
       thrust_ptr(pool_sizes.template data_ptr<int64_t>()), new_end.second);
 #endif
   pool_sizes.resize_({new_sz});
