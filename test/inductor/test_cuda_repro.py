@@ -2758,6 +2758,17 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         compiled_result = torch.compile(fn)(base, exp)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
+    @config.patch("eager_numerics.division_rounding", True)
+    def test_reciprocal_precision_rounding(self):
+        # Test that reciprocal matches eager when division_rounding is enabled.
+        # This requires OpDecompositions.reciprocal to use float32 constant so
+        # that div_rn can be applied (the dtype check requires both operands float32).
+        def fn(x):
+            return torch.reciprocal(x)
+
+        x = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
+        self.common(fn, [x])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
