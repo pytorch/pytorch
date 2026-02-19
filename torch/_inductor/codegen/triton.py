@@ -1748,13 +1748,40 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.fmod({a}, {b})"
 
     @staticmethod
-    @maybe_upcast_float32()
     def pow(a, b):
+        # Check dtype before potential upcast - powf_cuda only supports fp32
+        a_dtype = getattr(a, "dtype", None)
+        if a_dtype == torch.float64:
+            # fp64: libdevice.pow matches eager exactly
+            return f"libdevice.pow({a}, {b})"
+
+        # Handle fp16/bf16 upcast to fp32
+        needs_upcast = (
+            not config.triton.codegen_upcast_to_fp32
+            and isinstance(a, CSEVariable)
+            and a.dtype in (torch.float16, torch.bfloat16)
+        )
+        if needs_upcast:
+            a_str = f"{a}.to(tl.float32)"
+            b_str = f"{b}.to(tl.float32)" if isinstance(b, CSEVariable) else str(b)
+        else:
+            a_str = str(a)
+            b_str = str(b)
+
         if config.eager_numerics.pow_precision:
             # Use inline PTX pow that matches CUDA's powf exactly.
             # libdevice.pow uses FTZ (flush-to-zero) which causes 1-3 ULP differences.
-            return f"triton_helpers.powf_cuda({a}, {b})"
-        return f"libdevice.pow({a}, {b})"
+            result = f"triton_helpers.powf_cuda({a_str}, {b_str})"
+        else:
+            result = f"libdevice.pow({a_str}, {b_str})"
+
+        # Downcast back if needed
+        if needs_upcast:
+            out_dtype = get_dtype_handler().pow(a, b)
+            if out_dtype not in (torch.float32, None):
+                result = f"{result}.to({triton_type(out_dtype)})"
+
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
