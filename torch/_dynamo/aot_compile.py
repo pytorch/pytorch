@@ -86,6 +86,7 @@ class AOTCompilePickler(pickle.Pickler):
         return _.__closure__[0]
 
     @classmethod
+    # pyrefly: ignore [implicit-any]
     def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
         return types.MethodType(func, base)
 
@@ -492,6 +493,7 @@ def aot_compile_module(
                 backend=backend,
             )
 
+    # pyrefly: ignore [implicit-any]
     compiled_results = []
     for model_input in inputs:
         log.info("Compiling input %s..", model_input)

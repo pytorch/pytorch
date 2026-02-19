@@ -820,3 +820,28 @@ def fn_wrappers(fn: Callable[..., Any]) -> list[Callable[..., Any]]:
         f = f.__wrapped__
         fns.append(f)
     return fns
+
+
+def _is_primal(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "placeholder"
+        and "tangents" not in str(node.target)
+        and not _is_bwd_seed_offset(node)
+        and not _is_fwd_seed_offset(node)
+    )
+
+
+def _is_tangent(node: torch.fx.Node) -> bool:
+    return node.op == "placeholder" and "tangents" in str(node.target)
+
+
+def _is_bwd_seed_offset(node: torch.fx.Node) -> bool:
+    return node.op == "placeholder" and (
+        "bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target)
+    )
+
+
+def _is_fwd_seed_offset(node: torch.fx.Node) -> bool:
+    return node.op == "placeholder" and (
+        "fwd_seed" in str(node.target) or "fwd_base_offset" in str(node.target)
+    )
