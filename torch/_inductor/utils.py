@@ -2965,8 +2965,9 @@ def is_multi_outputs_template(input_buf: Optional[Union[Buffer, Operation]]) -> 
     """
     from . import ir
 
-    return isinstance(input_buf, ir.CppTemplateBuffer) and isinstance(
-        input_buf.layout, ir.MultiOutputLayout
+    return (
+        isinstance(input_buf, ir.TemplateBuffer)
+        and input_buf.is_multi_outputs_template()
     )
 
 

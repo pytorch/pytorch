@@ -5,7 +5,8 @@ This module provides a pdb-like debugger for stepping through Python bytecode
 one instruction at a time, with the ability to inspect the value stack,
 locals, and globals.
 
-Usage:  # doctest: +SKIP
+Usage:
+    >>> # xdoctest: +SKIP
     >>> import torch
     >>>
     >>> @torch.compile
@@ -828,7 +829,8 @@ def debug() -> Generator[_DebugContext, None, None]:
     Any Dynamo-generated code executed within this context will trigger
     the interactive bytecode debugger.
 
-    Example:  # doctest: +SKIP
+    Example:
+        >>> # xdoctest: +SKIP
         >>> import torch
         >>>
         >>> @torch.compile
