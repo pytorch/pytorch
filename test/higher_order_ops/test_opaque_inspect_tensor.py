@@ -18,12 +18,7 @@ from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 from torch._higher_order_ops.opaque_inspect_tensor import make_opaque_inspect_tensor_fn
 from torch.autograd import Function
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfCrossRef,
-    skipIfTorchDynamo,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 if torch.distributed.is_available():
@@ -387,7 +382,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @skipIfCrossRef  # crossref changes graph whitespace
     def test_compile_graph_has_opaque_node_in_bw(self):
         cp = make_opaque_inspect_tensor_fn(
             fwd_f=lambda t: None,

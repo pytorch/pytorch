@@ -313,6 +313,7 @@ def uninteresting_files() -> set[str]:
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
     import torch.export._trace
+    import torch.testing._internal.common_utils
 
     mods = [
         sys.modules[__name__],
@@ -331,6 +332,7 @@ def uninteresting_files() -> set[str]:
         torch._subclasses.fake_tensor,
         torch._logging._internal,
         torch._logging.structured,
+        torch.testing._internal.common_utils,
     ]
     import torch._dynamo.guards
 
