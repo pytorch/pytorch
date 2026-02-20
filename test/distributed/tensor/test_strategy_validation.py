@@ -1118,6 +1118,76 @@ class TestCompareOperatorEndToEnd(TestCase):
 
         self._with_even_sizes(run)
 
+    def test_compare_operator_index_no_incorrect(self):
+        """
+        End-to-end test: compare_operator on index (aten.index.Tensor) should
+        find valid rules with no incorrect ones. This exercises the full flow:
+        custom OpInfo, pytree args preservation, and strategy querying.
+        """
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+
+        def run():
+            stats = compare_operator(
+                "index",
+                device="cpu",
+                dtype=torch.float32,
+                world_size=self.world_size,
+                incorrect_only=True,
+            )
+            self.assertGreater(stats.true_positives, 0)
+            self.assertEqual(len(stats.false_positives), 0)
+
+        self._with_even_sizes(run)
+
+
+class TestQuerySingleDimStrategyPytree(TestCase):
+    """Test that query_single_dim_strategy handles pytree args correctly."""
+
+    def test_index_with_captured_aten_args(self):
+        """
+        aten.index.Tensor has signature (Tensor, Tensor?[]) where the indices
+        list can contain None. query_single_dim_strategy must use the captured
+        aten args tree to preserve this structure.
+        """
+        values = torch.randn(8, 4, 6)
+        idx0 = torch.randint(0, 8, (2,))
+        idx2 = torch.randint(0, 6, (2,))
+        aten_index = torch.ops.aten.index.Tensor
+
+        captured_aten_args = (values, [idx0, None, idx2])
+        tensors = [("values", values), ("idx0", idx0), ("idx2", idx2)]
+
+        result = query_single_dim_strategy(
+            aten_index,
+            tensors,
+            None,
+            captured_aten_args=captured_aten_args,
+        )
+        self.assertIsNotNone(result)
+        self.assertGreater(len(result), 0)
+
+        # Each rule should have 4 entries: [output, values, idx0, idx2]
+        for rule in result:
+            self.assertEqual(
+                len(rule),
+                4,
+                f"Expected 4 placements per rule, got {len(rule)}: {rule}",
+            )
+
+    def test_index_without_captured_aten_args_returns_none(self):
+        """
+        Without captured_aten_args, the flat tensor list doesn't match the
+        pytree structure expected by index_single_dim_strategy, so the call
+        fails gracefully and returns None.
+        """
+        values = torch.randn(8, 4, 6)
+        idx0 = torch.randint(0, 8, (2,))
+        idx2 = torch.randint(0, 6, (2,))
+
+        tensors = [("values", values), ("idx0", idx0), ("idx2", idx2)]
+        result = query_single_dim_strategy(torch.ops.aten.index.Tensor, tensors, None)
+        self.assertIsNone(result)
+
 
 class TestOpInfoLookup(TestCase):
     """Tests for get_opinfo_by_name, _find_opinfo_candidates, and resolve_op_names."""
@@ -1144,6 +1214,12 @@ class TestOpInfoLookup(TestCase):
         with self.assertRaises(ValueError) as ctx:
             get_opinfo_by_name("this_op_does_not_exist_xyz")
         self.assertNotIn("did you mean", str(ctx.exception))
+
+    def test_get_opinfo_by_name_custom(self):
+        """Custom OpInfos (e.g., index) should be found when not in op_db."""
+        results = get_opinfo_by_name("index")
+        self.assertGreater(len(results), 0)
+        self.assertEqual(results[0].name, "index")
 
     def test_find_opinfo_candidates_aten_name(self):
         # relu OpInfo has aten_name="relu" explicitly set
