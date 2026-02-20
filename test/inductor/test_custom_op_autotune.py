@@ -7,8 +7,6 @@ config specifies an optional decomposition function and its associated parameter
 Inductor benchmarks all variants and automatically selects the best performing one.
 """
 
-import unittest
-
 import torch
 import torch._inductor.runtime.benchmarking
 from torch._dynamo.utils import counters
@@ -1088,7 +1086,7 @@ class TestCustomOpAutoTune(TestCase):
         This validates that multiple compilations using the same fallback name
         don't cause assertion errors. The first registered kernel is reused.
         """
-        from torch._inductor.select_algorithm import ExternKernelChoice, extern_kernels
+        from torch._inductor.select_algorithm import extern_kernels, ExternKernelChoice
 
         test_name = f"test_reregister_{id(self)}"
 

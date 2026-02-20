@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import functools
 import logging
 from collections.abc import Callable
@@ -786,7 +787,7 @@ def _lower_single_impl(
     """
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
     from torch.fx.experimental.proxy_tensor import make_fx
-    from torch.fx.experimental.symbolic_shapes import ShapeEnvGuardError
+    from torch.fx.experimental.symbolic_shapes import _ShapeEnvGuardError
 
     from ..decomposition import select_decomp_table
 
@@ -814,9 +815,9 @@ def _lower_single_impl(
                         decomposition_table=decomposition_table,
                         tracing_mode="symbolic",
                     )(*fake_inputs)
-            except (ShapeEnvGuardError, AssertionError) as e:
-                # ShapeEnvGuardError may be wrapped in AssertionError by dynamo
-                is_guard_error = isinstance(e, ShapeEnvGuardError) or (
+            except (_ShapeEnvGuardError, AssertionError) as e:
+                # _ShapeEnvGuardError may be wrapped in AssertionError by dynamo
+                is_guard_error = isinstance(e, _ShapeEnvGuardError) or (
                     isinstance(e, AssertionError)
                     and "Guard attempted while ShapeEnv guards are frozen" in str(e)
                 )
@@ -955,67 +956,8 @@ def _range_based_lowering_fn(
             impl_config.impl_name,
         )
 
-    # Group ranges by implementation and trace dispatch function
-    from torch.fx.experimental.symbolic_shapes import ShapeEnvGuardError
-
-    def build_dispatch_fn(groups):
-        """Build dispatch function for the given impl groups."""
-
-        def dispatch_fn(*fake_tensors):
-            num_impl_groups = len(groups)
-            if num_impl_groups < 2:
-                raise RuntimeError(
-                    f"dispatch_fn requires at least 2 impl groups, got {num_impl_groups}"
-                )
-
-            dim_value = fake_tensors[0].size(dim_index)
-
-            def build_range_predicate(ranges_list: list[RangeBounds]) -> torch.Tensor:
-                predicates = []
-                for rb in ranges_list:
-                    end = int(rb.end) if rb.end != float("inf") else None
-                    if end is None:
-                        predicates.append(dim_value >= rb.start)
-                    else:
-                        predicates.append((dim_value >= rb.start) & (dim_value <= end))
-
-                result = predicates[0]
-                for pred in predicates[1:]:
-                    result = result | pred
-                return result  # pyrefly: ignore [bad-return]
-
-            def build_nested_cond(idx: int):
-                if idx >= num_impl_groups:
-                    raise RuntimeError(f"Invalid impl group index: {idx}")
-
-                group = groups[idx]
-                merged_kwargs = _merge_config_and_runtime_kwargs(
-                    group.impl_kwargs, runtime_kwargs
-                )
-
-                @torch._dynamo.dont_skip_tracing
-                def group_fn(*ops):
-                    return group.impl_func(*ops, **merged_kwargs)
-
-                if idx == num_impl_groups - 1:
-                    return group_fn
-
-                next_fn = build_nested_cond(idx + 1)
-
-                @torch._dynamo.dont_skip_tracing
-                def cond_wrapper(*ops, _ranges=group.ranges):
-                    return torch.cond(
-                        pred=build_range_predicate(_ranges),
-                        true_fn=group_fn,
-                        false_fn=next_fn,
-                        operands=ops,
-                    )
-
-                return cond_wrapper
-
-            return build_nested_cond(0)(*fake_tensors)
-
-        return dispatch_fn
+    # Group ranges by implementation
+    from torch.fx.experimental.symbolic_shapes import _ShapeEnvGuardError
 
     impl_groups = _group_ranges_by_impl(range_to_best_impl_map)
 
@@ -1037,7 +979,60 @@ def _range_based_lowering_fn(
             default_impl=default_impl,
         )
 
-    dispatch_fn = build_dispatch_fn(impl_groups)
+    def dispatch_fn(*fake_tensors):
+        """Build nested torch.cond dispatch: cond(pred1, impl1, cond(pred2, impl2, ...))."""
+        num_impl_groups = len(impl_groups)
+        if num_impl_groups < 2:
+            raise RuntimeError(
+                f"dispatch_fn requires at least 2 impl groups, got {num_impl_groups}"
+            )
+
+        dim_value = fake_tensors[0].size(dim_index)
+
+        def build_range_predicate(ranges_list: list[RangeBounds]) -> torch.Tensor:
+            predicates = []
+            for rb in ranges_list:
+                end = int(rb.end) if rb.end != float("inf") else None
+                if end is None:
+                    predicates.append(dim_value >= rb.start)
+                else:
+                    predicates.append((dim_value >= rb.start) & (dim_value <= end))
+
+            result = predicates[0]
+            for pred in predicates[1:]:
+                result = result | pred
+            return result  # pyrefly: ignore [bad-return]
+
+        def build_nested_cond(idx: int):
+            if idx >= num_impl_groups:
+                raise RuntimeError(f"Invalid impl group index: {idx}")
+
+            group = impl_groups[idx]
+            merged_kwargs = _merge_config_and_runtime_kwargs(
+                group.impl_kwargs, runtime_kwargs
+            )
+
+            @torch._dynamo.dont_skip_tracing
+            def group_fn(*ops):
+                return group.impl_func(*ops, **merged_kwargs)
+
+            if idx == num_impl_groups - 1:
+                return group_fn
+
+            next_fn = build_nested_cond(idx + 1)
+
+            @torch._dynamo.dont_skip_tracing
+            def cond_wrapper(*ops, _ranges=group.ranges):
+                return torch.cond(
+                    pred=build_range_predicate(_ranges),
+                    true_fn=group_fn,
+                    false_fn=next_fn,
+                    operands=ops,
+                )
+
+            return cond_wrapper
+
+        return build_nested_cond(0)(*fake_tensors)
 
     with V.fake_mode:
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
@@ -1047,14 +1042,12 @@ def _range_based_lowering_fn(
         log.info("Tracing torch.cond dispatch with symbolic shapes...")
 
         try:
-            if shape_env is not None:
-                with shape_env.error_on_new_guards():
-                    dispatch_gm = make_fx(
-                        dispatch_fn,
-                        decomposition_table=decomposition_table,
-                        tracing_mode="symbolic",
-                    )(*fake_inputs)
-            else:
+            context = (
+                shape_env.error_on_new_guards
+                if shape_env is not None
+                else contextlib.nullcontext
+            )
+            with context():
                 dispatch_gm = make_fx(
                     dispatch_fn,
                     decomposition_table=decomposition_table,
@@ -1064,24 +1057,16 @@ def _range_based_lowering_fn(
             log.info("Successfully traced torch.cond dispatch")
             log.info("Traced graph:\n%s", dispatch_gm.graph)
 
-        except (ShapeEnvGuardError, AssertionError) as e:
-            # ShapeEnvGuardError may be wrapped in AssertionError by dynamo
-            is_guard_error = isinstance(e, ShapeEnvGuardError) or (
+        except (_ShapeEnvGuardError, AssertionError) as e:
+            is_guard_error = isinstance(e, _ShapeEnvGuardError) or (
                 isinstance(e, AssertionError)
                 and "Guard attempted while ShapeEnv guards are frozen" in str(e)
             )
             if not is_guard_error:
                 raise
-            log.info("Dispatch function adds guards, falling back to default_impl")
+            log.info("Dispatch function adds guards, skipping custom op lowering")
             counters["inductor"]["custom_op_decomp_guard_skips"] += 1
-            return _lower_single_impl(
-                default_impl,
-                {},
-                runtime_kwargs,
-                tensor_inputs,
-                name,
-                default_impl=default_impl,
-            )
+            return None
 
         except Exception:
             log.exception("make_fx tracing FAILED")
@@ -1091,6 +1076,7 @@ def _range_based_lowering_fn(
     result = inline_subgraph_to_ir_nodes(dispatch_gm, tensor_inputs, f"{name}_dispatch")
 
     # Apply config_patches from all impl groups to inlined operations
+    # TODO - consider conflicting patches
     merged_patches: dict[str, Any] = {}
     for group in impl_groups:
         merged_patches.update(group.config_patches)
