@@ -319,7 +319,6 @@ else:
                             target_registry[name] = pg
 
                 if is_initialized() and get_backend() == "threaded":
-                    # pyrefly: ignore [bad-assignment]
                     self._thread_id = threading.get_ident()
 
                 # Now that the process group is initialized, we can get the rank

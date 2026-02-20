@@ -119,6 +119,7 @@ from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
+    DictGetItemSource,
     GetItemSource,
     GlobalStateSource,
     is_constant_source,
@@ -709,6 +710,21 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
+        # Cache for sources resolved via MRO walk, keyed by id(obj).
+        # When the same descriptor (e.g. property) is reached from multiple
+        # subclasses, we reuse the first source to avoid redundant guards.
+        # We thought of rolling this in variable_tracker_cache but here
+        # different sources point to the same object, we also don't want it to
+        # go through the side effects cache because even though these objects
+        # are same, we dont want OBJECT_ALIASING guards on them. For these
+        # objects, we have DICT_CONTAINS absent guards on the mro walk, so there
+        # is no need of the OBJECT_ALIASING guards.
+        self.mro_source_cache: dict[tuple[int, str], DictGetItemSource] = {}
+        # Tracks (id(klass), attr_name) pairs that already have a
+        # DICT_CONTAINS absent guard installed during MRO walks.  When
+        # multiple subclasses share the same intermediate MRO class, we
+        # only need to guard the absence once per (class, attr) pair.
+        self.guarded_mro_absent_keys: set[tuple[int, str]] = set()
         # Cache for inspect.signature results: function -> VariableTracker
         self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
@@ -2978,6 +2994,8 @@ class OutputGraph(OutputGraphCommon):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
+        self.mro_source_cache.clear()
+        self.guarded_mro_absent_keys.clear()
         self.signature_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()

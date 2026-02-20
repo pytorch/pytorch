@@ -851,9 +851,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
             return_getters_groups.append(return_getters)
 
-        assert all(
-            V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining
-        ), f"failed to set ranges {remaining} {lengths}"
+        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
+            f"failed to set ranges {remaining} {lengths}"
+        )
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -1655,10 +1655,8 @@ class SIMDScheduling(BaseScheduling):
             num_sm = device_prop.multi_processor_count
             estimated_num_splits = num_sm * 8
 
-            # split_size is decided based on hint.
-            # optimization_hint is fine here: the result is clamped to [16, 128],
-            # so any fallback value still produces a valid split size.
-            numel_hint = V.graph.sizevars.optimization_hint(numel)
+            # split_size is decided based on hint
+            numel_hint = V.graph.sizevars.size_hint(numel)
             split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
             split_size = min(split_size, 128)
             return split_size
@@ -2523,7 +2521,7 @@ class SIMDScheduling(BaseScheduling):
                 )
 
                 # score by number of elements
-                score = V.graph.sizevars.optimization_hint(
+                score = V.graph.sizevars.size_hint(
                     sympy_product(
                         size for size, stride in zip(ranges, strides) if stride != 0
                     )
@@ -2537,7 +2535,7 @@ class SIMDScheduling(BaseScheduling):
                     score *= 2
 
                 if (
-                    V.graph.sizevars.optimization_hint(
+                    V.graph.sizevars.size_hint(
                         score - sympy_product(itertools.chain(ranges, reduction_ranges))
                     )
                     >= 0
@@ -3118,20 +3116,16 @@ class SIMDScheduling(BaseScheduling):
                 a0, a1 = tiling0["x"], tiling0.get("y", 1)
                 b0, b1 = tiling1["x"], tiling1.get("y", 1)
 
-                # TODO: These tiling decisions (equality, ordering, divisibility)
-                # are structural — they determine the kernel's iteration space
-                # decomposition — but are NOT guarded here. If the relationship
-                # between a1 and b1 changes across dynamic shape inputs, the
-                # compiled kernel could be wrong. Seems scary, unless there is a reason
-                # this is safe in that case probably we need better comment here !
-                hint = V.graph.sizevars.guarding_hint_or_throw
-                if hint(a1 - b1) == 0:
+                if (
+                    free_unbacked_symbols([a1, b1])
+                    or V.graph.sizevars.size_hint(a1 - b1) == 0
+                ):
                     return None
-                if hint(a1 - b1) < 0:
+                if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger
                     (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
 
-                assert hint(a1 - b1) > 0
+                assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     return None
 
