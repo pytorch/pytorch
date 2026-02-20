@@ -1084,44 +1084,13 @@ class TestCustomOpAutoTune(TestCase):
             result_odd, mat1_odd @ mat2_odd, rtol=1e-1, atol=1e-1
         )
 
-    def test_extern_kernel_reregistration(self):
-        """Test that re-registering an ExternKernelChoice with the same name reuses existing.
-
-        This validates that multiple compilations using the same fallback name
-        don't cause assertion errors. The first registered kernel is reused.
-        """
-        from torch._inductor.select_algorithm import extern_kernels, ExternKernelChoice
-
-        test_name = f"test_reregister_{id(self)}"
-
-        # First registration
-        def kernel_v1(*args):
-            return args[0] + 1
-
-        choice1 = ExternKernelChoice(kernel=kernel_v1, name=test_name)
-        self.assertEqual(choice1.name, test_name)
-        self.assertTrue(hasattr(extern_kernels, test_name))
-
-        # Second registration with same name - should not raise, reuses existing
-        def kernel_v2(*args):
-            return args[0] + 2
-
-        choice2 = ExternKernelChoice(kernel=kernel_v2, name=test_name)
-        self.assertEqual(choice2.name, test_name)
-
-        # The FIRST kernel should still be registered (not overwritten)
-        registered_kernel = getattr(extern_kernels, test_name)
-        self.assertIs(registered_kernel, kernel_v1)
-
     def test_fallback_choice_reuse(self):
-        """Test that _create_fallback_choice reuses the same kernel for the same op_overload.
+        """Test that _create_fallback_choice reuses the same choice for the same op.
 
-        Since fallback now uses op_overload directly with a name derived from the op,
-        multiple calls to _create_fallback_choice for the same op should reuse
-        the same registered kernel in extern_kernels.
+        Since kwargs are passed at bind time rather than baked into the kernel,
+        the same ExternKernelChoice is reused across compilations.
         """
         from torch._inductor.kernel.custom_op import _create_fallback_choice
-        from torch._inductor.select_algorithm import extern_kernels
 
         test_op_name = f"test_lib::fallback_reuse_{id(self)}"
 
@@ -1133,19 +1102,12 @@ class TestCustomOpAutoTune(TestCase):
         def _(x: torch.Tensor):
             return torch.empty_like(x)
 
-        # Get the op_overload from the custom op
         op_overload = reuse_test_op._opoverload
 
-        # Create fallback choice twice for the same op_overload
         choice1 = _create_fallback_choice(op_overload)
         choice2 = _create_fallback_choice(op_overload)
 
-        # Both should have the same name
-        self.assertEqual(choice1.name, choice2.name)
-
-        # The registered kernel should be the same object (op_overload)
-        registered_kernel = getattr(extern_kernels, choice1.name)
-        self.assertIs(registered_kernel, op_overload)
+        self.assertIs(choice1, choice2)
 
     @skipIfXpu
     @parametrize("force_choice", [None, True, False])

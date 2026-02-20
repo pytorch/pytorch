@@ -9,11 +9,10 @@ import os
 import re
 import sys
 import time
+import typing_extensions
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
-
-import typing_extensions
 
 import sympy
 from sympy import Expr
@@ -1399,29 +1398,30 @@ class GraphLowering(torch.fx.Interpreter):
                 out = fallback_handler(target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
-            elif target in user_lowerings and target not in V.active_user_lowering_ops:
-                # User-registered lowering takes priority, with recursion guard
-                V.active_user_lowering_ops.add(target)
-                try:
-                    # pyrefly: ignore[bad-index]
-                    out = user_lowerings[target](*args, **kwargs)
-                finally:
-                    V.active_user_lowering_ops.discard(target)
-                # If user_lowering returns None, fall back to normal lowering
+            else:
+                out = None
+
+                if (
+                    target in user_lowerings
+                    and target not in V.active_user_lowering_ops
+                ):
+                    # User-registered lowering takes priority, with recursion guard
+                    V.active_user_lowering_ops.add(target)
+                    try:
+                        # pyrefly: ignore[bad-index]
+                        out = user_lowerings[target](*args, **kwargs)
+                    finally:
+                        V.active_user_lowering_ops.discard(target)
+
+                # If no user_lowering, or it returned None fall back to normal lowering
                 if out is None:
                     if target in lowerings:
                         out = lowerings[target](*args, **kwargs)
                     else:
+                        # Fallback for ops not in lowerings (e.g., custom ops during recursion)
                         out = fallback_handler(target, add_to_fallback_set=False)(
                             *args, **kwargs
                         )
-            elif target in lowerings:
-                out = lowerings[target](*args, **kwargs)
-            else:
-                # Fallback for ops not in lowerings (e.g., custom ops during recursion)
-                out = fallback_handler(target, add_to_fallback_set=False)(
-                    *args, **kwargs
-                )
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
