@@ -85,7 +85,8 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
-  // Different float64 handling.
+  // Bypass OneDNN optimization path for float64 due to lack of full double
+  // precision support.
   if (mat1.scalar_type() == at::kDouble) {
     bool is_inplace = self.is_same(result);
     bool is_beta_ne_zero = beta.to<double>() != 0.0;
@@ -246,7 +247,8 @@ Tensor& baddbmm_out(
     return result;
   }
 
-  // Different float64 handling.
+  // Bypass OneDNN optimization path for float64 due to lack of full double
+  // precision support.
   if (batch1.scalar_type() == at::kDouble ||
       batch2.scalar_type() == at::kDouble) {
     bool is_inplace = input.is_same(result);
