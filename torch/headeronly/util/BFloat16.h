@@ -58,7 +58,6 @@ struct alignas(2) BFloat16 {
       unsigned short bits,
       from_bits_t /*unused*/)
       : x(bits) {}
-
   /* implicit */ inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 
@@ -66,7 +65,6 @@ struct alignas(2) BFloat16 {
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
   explicit inline C10_HOST_DEVICE operator __nv_bfloat16() const;
 #endif
-
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
   inline C10_HOST_DEVICE BFloat16(const sycl::ext::oneapi::bfloat16& value);
@@ -152,7 +150,7 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
       // RNE by default
       x(detail::round_to_nearest_even(value))
 #endif
-{  
+{
 }
 
 #if defined(__HIPCC__)
