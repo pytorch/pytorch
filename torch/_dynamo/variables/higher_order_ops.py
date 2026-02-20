@@ -2409,6 +2409,290 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    _HOP_NAME = "torch.switch"
+    _ALLOW_FALLBACK_TO_EAGER = False
+    supports_input_mutation = False
+    supports_aliasing = False
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from . import ListVariable
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        for i, k in enumerate(["index", "branches", "operands"]):
+            if v := kwargs.pop(k, None):
+                assert i == len(args), (
+                    "did not provide the right number of non-keyword args"
+                )
+                args.append(v)
+
+        # TODO(voz): Support fake tensor dispatch for recursive
+        # ops - see torch/dispatch/_dispatcher.py
+        if len(args) != 3 or kwargs:
+            unimplemented(
+                gb_type="torch.switch: improper args/kwargs",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation=f"torch.switch expects 3 positional arguments (got {len(args)}) "
+                f"and no keyword arguments (got {len(kwargs)}) "
+                "Usage: switch(index, branches, operands)",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        # Specialize into one of the branches since index is constant
+        index, branches, operands = args
+        if type(index) is ConstantVariable:
+            warnings.warn(
+                "Index is a Python constant. When used with torch.switch, it specializes on one of the branches."
+                " If you want torch.switch to preserve the branches, please make the index a tensor or SymInt.",
+                UserWarning,
+            )
+            idx = index.as_python_constant()
+            branch_fns = branches.unpack_var_sequence(tx)
+            clamped = min(max(0, idx), len(branch_fns) - 1)
+            return branch_fns[clamped].call_function(tx, operands.unpack_var_sequence(tx), {})
+
+        # index
+        if type(index.realize()) not in (
+            ConstantVariable,
+            TensorVariable,
+            SymNodeVariable
+        ):
+            unimplemented(
+                gb_type="torch.switch: improper index",
+                context=str(index),
+                explanation="Expected index to be an int or a tensor with a single item "
+                f"but got {str(type(index))} with original python type {str(index.python_type())}.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        # operands
+        if not isinstance(operands, (ListVariable, TupleVariable)):
+            unimplemented(
+                gb_type="torch.switch: improper operands",
+                context=str(operands),
+                explanation=f"Expected operands to be a list/tuple "
+                f"but got {operands.python_type()}.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        operands_seq = operands.unpack_var_sequence(tx)
+        if not only_consist_of(
+            operands, (TensorVariable, ConstantVariable, SymNodeVariable)
+        ):
+            unimplemented(
+                gb_type="torch.switch: improper operands contents",
+                context=str(operands),
+                explanation="Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        if not isinstance(branches, (ListVariable, TupleVariable)):
+            unimplemented(
+                gb_type="torch.switch: improper branches",
+                context=str(branches),
+                explanation="Expected branches to be a list/tuple of callables.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        branch_fns = branches.unpack_var_sequence(tx)
+        if len(branch_fns) == 0:
+            unimplemented(
+                gb_type="torch.switch: empty branches",
+                context=str(branches),
+                explanation="Expected at least one branch.",
+                hints=[*graph_break_hints.USER_ERROR],
+            )
+
+        # branches
+        for i, branch_fn in enumerate(branch_fns):
+            _check_supported_callable_arg(tx, branch_fn, f"branch{i}")
+
+        # Our strategy for tracing the branches of switch are to checkpoint
+        # our graphstate, run the branch0 roll it back to the checkpoint,
+        # repeat with the remaining branches and then merge the graphstates.
+        # Well, perhaps "merge" is too strong a word: we mostly assert that
+        # the resulting graphstates have to be the same.
+        #
+        # We only permit guards to diverge (we union the guards from
+        # both branches). In particular, this means that side effects
+        # are NOT permitted inside branches; this would be difficult
+        # to implement, because of the path explosion problem.
+
+        def speculate_branch(
+            func,
+        ) -> tuple[VariableTracker, OutputSpec, torch.fx.Graph, dict[Proxy, Proxy]]:
+            assert self._HOP_NAME is not None
+            # TODO: Support kwargs
+            (
+                (ret_val, ret_spec),
+                ret_graph,
+                ret_lifted_freevars,
+            ) = speculate_subgraph(
+                tx,
+                func,
+                operands_seq,
+                {},
+                self._HOP_NAME,
+                source_target=self.value,
+                should_flatten_outputs=True,
+                # TODO - removing consts from control flow ops need more work
+                remove_consts_from_outputs=False,
+                supports_input_mutation=self.supports_input_mutation,
+                supports_aliasing=self.supports_aliasing,
+            )
+
+            # need to ensure we increase epoch so we don't memoize unbacked bindings
+            # across different subgraphs which can interfere with runtime assertion
+            # generation.
+            assert tx.fake_mode is not None
+            tx.fake_mode.epoch += 1
+
+            if not only_consist_of(ret_val, (TensorVariable, ConstantVariable)):
+                unimplemented(
+                    gb_type="torch.switch: unsupported branch return type",
+                    context=str(ret_val),
+                    explanation="Expected branches to return a possibly nested pytree of tensors or constant ints.",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            for ret in ret_val.unpack_var_sequence(tx):
+                if ret.is_python_constant() and not isinstance(
+                    ret.as_python_constant(), int
+                ):
+                    unimplemented(
+                        gb_type="torch.switch: unsupported branch return type (constant non-int)",
+                        context=str(ret_val),
+                        explanation="Constants returned from branches must be ints.",
+                        hints=[*graph_break_hints.USER_ERROR],
+                    )
+            return ret_val, ret_spec, ret_graph, ret_lifted_freevars
+
+        branch_states, branch_nn_modules = [], []
+        for f in branch_fns:
+            branch_states.append(speculate_branch(f))
+            branch_nn_modules.append(dict(tx.output.nn_modules))
+        branch_rets, branch_specs, branch_graphs, branch_lifted_freevars = zip(*branch_states)
+
+        for i, (spec_a, spec_b) in enumerate(itertools.pairwise(branch_specs)):
+            same_spec = _make_inlined(tx, pytree.TreeSpec.__eq__)(
+                spec_a.treespec, spec_b.treespec
+            ).as_python_constant()
+            # 3.14: NotImplemented cannot be converted to bool
+            if same_spec is not NotImplemented and not same_spec:
+                unimplemented(
+                    gb_type="torch.cond: differing branch outputs",
+                    context=f"branch{i}: {spec_a.treespec}, branch{i+1}: {spec_b.treespec}, same_spec: {same_spec}",
+                    explanation="Expected branches to return the same pytree structure.",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+
+        # Merge lifted freevars across all branches so they share the same
+        # input signature. Pairwise merge: fold each branch into the running
+        # accumulator of (shared, unique_per_branch) proxies.
+        # TODO: review
+        all_lifted = _merge_switch_graph_inputs(
+            branch_graphs, branch_lifted_freevars
+        )
+
+        branch_names = [
+            tx.output.install_subgraph(
+                f"switch_branch{i}",
+                GraphModule(branch_nn_modules[i], graph),
+            ) for i, graph in enumerate(branch_graphs)
+        ]
+
+        branch_nodes = [make_attr(tx, name) for name in branch_names]
+
+        p_args = (
+            index.as_proxy(),
+            branch_nodes,
+            tuple(all_lifted), # TODO: review
+        )
+
+        return _call_function_and_unflatten_output(
+            tx,
+            torch.ops.higher_order.switch,
+            p_args,
+            {},
+            None,
+            branch_specs[0],
+            branch_rets[0],
+        )
+
+
+# TODO: review
+def _merge_switch_graph_inputs(
+    graphs: list[torch.fx.Graph],
+    lifted_freevars_list: list[dict[Proxy, Proxy]],
+) -> list[Proxy]:
+    """Merge lifted freevars across N branch graphs so they all share the same
+    input placeholder signature. Returns the canonical outer proxies in order.
+
+    Each lifted_freevars dict maps outer_proxy -> inner_proxy, where
+    inner_proxy.node is a placeholder in the corresponding graph. We
+    deduplicate get_attr proxies that share the same target across branches,
+    then ensure every branch graph has placeholders for the full set."""
+    if len(graphs) == 0:
+        return []
+
+    # Collect all unique outer proxies, deduplicating get_attrs with the
+    # same target (they refer to the same nn module attribute).
+    get_attr_canonical: dict[str, Proxy] = {}
+    outer_to_canonical: dict[int, Proxy] = {}  # keyed by id(outer)
+    canonical_order: list[Proxy] = []
+    canonical_seen: set[int] = set()
+
+    for lifted_freevars in lifted_freevars_list:
+        for outer in lifted_freevars:
+            if id(outer) in outer_to_canonical:
+                continue
+            if outer.node.op == "get_attr":
+                target = outer.node.target
+                if target not in get_attr_canonical:
+                    get_attr_canonical[target] = outer
+                outer_to_canonical[id(outer)] = get_attr_canonical[target]
+            else:
+                outer_to_canonical[id(outer)] = outer
+
+            canonical = outer_to_canonical[id(outer)]
+            if id(canonical) not in canonical_seen:
+                canonical_seen.add(id(canonical))
+                canonical_order.append(canonical)
+
+    canonical_order.sort(key=lambda p: p.node.name)
+
+    # Fix up each branch graph: create new placeholders for the full
+    # canonical set, replacing existing ones where present.
+    for graph, lifted_freevars in zip(graphs, lifted_freevars_list):
+        canonical_to_inner: dict[int, Proxy] = {}
+        for outer, inner in lifted_freevars.items():
+            canonical = outer_to_canonical[id(outer)]
+            canonical_to_inner[id(canonical)] = inner
+
+        first_not_ph = next(
+            (n for n in graph.nodes if n.op != "placeholder"), None
+        )
+        if first_not_ph is None:
+            continue
+
+        with graph.inserting_before(first_not_ph):
+            for canonical in canonical_order:
+                new_ph = graph.placeholder(canonical.node.name)
+                new_ph.meta = dict(canonical.node.meta)
+                if id(canonical) in canonical_to_inner:
+                    old_ph = canonical_to_inner[id(canonical)].node
+                    old_ph.replace_all_uses_with(new_ph)
+                    old_ph.users = {}
+                    graph.erase_node(old_ph)
+
+    return canonical_order
+
+
 class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.call_torchbind"
 
@@ -5516,6 +5800,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
+    "switch": SwitchHigherOrderVariable,
     "while_loop": WhileLoopHigherOrderVariable,
     "while_loop_stack_output": WhileLoopStackOutputHigherOrderVariable,
     "map_impl": MapHigherOrderVariable,
