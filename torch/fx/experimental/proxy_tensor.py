@@ -488,8 +488,8 @@ def _get_proxies(t: torch.Tensor) -> list[Proxy]:
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
-    Returns a dict converting sympy functions to python operators
-    (i.e. `sympy.Mul` -> `operator.mul`)
+    Returns a dict mapping sympy types to Python callables
+    (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
     """
     import sympy
 
@@ -502,8 +502,8 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
             handlers[k] = op
 
     # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
-    # Use torch.sym_sum which natively handles n-ary integer addition and
-    # already has proper FX tracing support (see _compute_proxy).
+    # torch.sym_sum handles n-ary integer addition and accepts both
+    # sym_sum([a, b, c]) and sym_sum(a, b, c).
     handlers[sympy.Add] = torch.sym_sum
     return handlers
 
@@ -602,19 +602,12 @@ def _build_proxy_for_sym_expr(
 
     func: OpOverload | None = _sympy_handlers().get(expr.func)  # type: ignore[assignment]
     if not func:
-        # Handler not found
         return None
 
-    # torch.sym_sum takes a single sequence arg, not splatted args
-    if func is torch.sym_sum:
-        call_args = (tuple(args),)
-    else:
-        call_args = tuple(args)
-
     if out is None:
-        out = func(*call_args)
+        out = func(*args)
     else:
-        _sym_register(tracer, func, call_args, out)
+        _sym_register(tracer, func, tuple(args), out)
     return out
 
 
