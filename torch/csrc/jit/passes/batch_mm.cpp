@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/passes/batch_mm.h>
 
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
@@ -11,7 +13,14 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
+#else
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/chunk.h>
+#include <ATen/ops/mm.h>
+#endif
 #include <algorithm>
 #include <unordered_map>
 #include <utility>

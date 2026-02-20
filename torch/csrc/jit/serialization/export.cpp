@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/serialization/export.h>
 
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/Utils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/functional.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
