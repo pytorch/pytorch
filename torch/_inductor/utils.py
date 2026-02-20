@@ -3478,16 +3478,10 @@ def remove_unaligned_input_idxs(
 
 
 def expr_fits_within_32bit(e: sympy.Expr) -> bool:
-    """Check if an expression fits within 32-bit integer range.
-
-    NOTE: This function intentionally does not install guards. Callers are
-    responsible for guarding (e.g. via check_leq) when they decide to use
-    32-bit indexing based on this result.
-    """
     from .virtualized import V
 
     int_max = torch.iinfo(torch.int32).max
-    guarding_hint_or_throw = V.graph.sizevars.guarding_hint_or_throw
+    size_hint = V.graph.sizevars.size_hint
     has_hint = V.graph.sizevars.shape_env.has_hint
 
     if config.assume_32bit_indexing:
@@ -3519,7 +3513,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
             return False
 
     # Otherwise, the hint MUST exist and be in range
-    return has_hint(e) and guarding_hint_or_throw(e) <= int_max
+    return has_hint(e) and size_hint(e) <= int_max
 
 
 def set_tracing_context_output_strides(

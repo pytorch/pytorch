@@ -535,7 +535,7 @@ def gen_2d_view_of_epilogue_buf(
             #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
             stride_order = list(
                 ir.get_stride_order(
-                    V.graph.sizevars.guarding_hints_or_throw(epilogue_node.get_stride())
+                    V.graph.sizevars.size_hints(epilogue_node.get_stride())
                 )
             )
             fill_order = ir.stride_order2fill_order(stride_order)
@@ -994,10 +994,8 @@ class CppGemmTemplate(CppTemplate):
                 if has_free_symbols(view_size):
                     # If batch size B is dynamic, we need to set the batch size and possibly stride
                     assert not has_free_symbols(view_size[1:])
-                    view_size[:] = V.graph.sizevars.guarding_hints_or_throw(view_size)
-                    view_stride[:] = V.graph.sizevars.guarding_hints_or_throw(
-                        view_stride
-                    )
+                    view_size[:] = V.graph.sizevars.size_hints(view_size)
+                    view_stride[:] = V.graph.sizevars.size_hints(view_stride)
                 # With the assumptation that W is the storage of unwrap view
                 # thus view it back here
                 new_inputs[1] = new_inputs[1].as_strided(
