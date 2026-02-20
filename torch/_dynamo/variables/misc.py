@@ -73,7 +73,7 @@ from .base import (
     raise_type_error_exc,
     VariableTracker,
 )
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_NONE, ConstantVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
@@ -252,7 +252,7 @@ class SuperVariable(VariableTracker):
         ):
             user_cls = inner_fn.__self__
             if hasattr(user_cls, "__module__") and user_cls.__module__ == "builtins":
-                user_cls_vt: VariableTracker = variables.BuiltinVariable(user_cls)
+                user_cls_vt: VariableTracker = VariableTracker.build(tx, user_cls)
             else:
                 assert source is not None
                 user_cls_source = source.member
@@ -444,13 +444,13 @@ class FrameSummaryVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "lineno":
-            return variables.ConstantVariable.create(self.frame_summary.lineno)
+            return VariableTracker.build(tx, self.frame_summary.lineno)
         elif name == "filename":
-            return variables.ConstantVariable.create(self.frame_summary.filename)
+            return VariableTracker.build(tx, self.frame_summary.filename)
         elif name == "name":
-            return variables.ConstantVariable.create(self.frame_summary.name)
+            return VariableTracker.build(tx, self.frame_summary.name)
         elif name == "line":
-            return variables.ConstantVariable.create(self.frame_summary.line)
+            return VariableTracker.build(tx, self.frame_summary.line)
         return super().var_getattr(tx, name)
 
 
@@ -547,7 +547,7 @@ class TracebackVariable(VariableTracker):
     ) -> VariableTracker:
         if name == "__eq__":
             # Two traceback variables are only equal if they are the same object
-            return variables.ConstantVariable.create(self is args[0])
+            return VariableTracker.build(tx, self is args[0])
         elif name == "__setattr__":
             return self.call_setattr(tx, *args)
         return super().call_method(tx, name, args, kwargs)
@@ -581,7 +581,7 @@ class ExceptionVariable(VariableTracker):
         # raise ... from ...
         self.__cause__: VariableTracker = CONSTANT_VARIABLE_NONE
         # Boolean flag that controls whether the __context__ attribute is set
-        self.__suppress_context__: VariableTracker = ConstantVariable(False)
+        self.__suppress_context__: VariableTracker = CONSTANT_VARIABLE_FALSE
         # Contains the call stack where the exception was raised.
         self.__traceback__: VariableTracker = CONSTANT_VARIABLE_NONE
         # The user stack at the time this exception was first raised.
@@ -622,7 +622,9 @@ class ExceptionVariable(VariableTracker):
         val: VariableTracker,
     ) -> VariableTracker:
         def raise_error(msg: str) -> NoReturn:
-            raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+            raise_observed_exception(
+                TypeError, tx, args=[VariableTracker.build(tx, msg)]
+            )
 
         name = name_var.as_python_constant()
         if name == "__context__":
@@ -640,7 +642,7 @@ class ExceptionVariable(VariableTracker):
                 ),
             ):
                 self.__cause__ = val
-                self.__suppress_context__ = variables.ConstantVariable(True)
+                self.__suppress_context__ = variables.CONSTANT_VARIABLE_TRUE
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
@@ -654,8 +656,8 @@ class ExceptionVariable(VariableTracker):
                     TypeError,
                     tx,
                     args=[
-                        ConstantVariable.create(
-                            "__traceback__ must be a traceback object or None"
+                        VariableTracker.build(
+                            tx, "__traceback__ must be a traceback object or None"
                         )
                     ],
                 )
@@ -682,7 +684,7 @@ class ExceptionVariable(VariableTracker):
             return self.call_setattr(tx, *args)
         elif name == "with_traceback":
             [tb] = args
-            self.call_setattr(tx, ConstantVariable("__traceback__"), tb)
+            self.call_setattr(tx, VariableTracker.build(tx, "__traceback__"), tb)
             return self
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -1391,9 +1393,9 @@ class GetAttrVariable(VariableTracker):
             obj = self.obj
             key = args[0].as_python_constant()
             if obj.has_key_in_generic_dict(tx, key):
-                return variables.ConstantVariable(True)
+                return variables.CONSTANT_VARIABLE_TRUE
             else:
-                return variables.ConstantVariable(False)
+                return variables.CONSTANT_VARIABLE_FALSE
 
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
             if isinstance(self.obj, variables.UserDefinedObjectVariable):
@@ -1450,7 +1452,7 @@ class MethodWrapperVariable(VariableTracker):
         if wrapper_name == "__init__":
             fn_obj = type(self_obj).__init__
             if fn_obj is object.__init__:
-                return variables.BuiltinVariable(object).call_method(
+                return VariableTracker.build(tx, object).call_method(
                     tx,
                     wrapper_name,
                     # type: ignore[arg-type, list-item]
@@ -1599,9 +1601,9 @@ class PythonModuleVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> ConstantVariable:
+    ) -> "ConstantVariable":
         result = hasattr(self.value, name)
-        return variables.ConstantVariable.create(result)
+        return VariableTracker.build(tx, result)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
@@ -1840,7 +1842,8 @@ class NumpyVariable(VariableTracker):
                 check_unspec_or_constant_args(args, kwargs)
             ):
                 # constant fold
-                return variables.ConstantVariable.create(
+                return VariableTracker.build(
+                    tx,
                     self.as_python_constant()(
                         *[x.as_python_constant() for x in args],
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -2182,7 +2185,7 @@ class ConstantLikeVariable(VariableTracker):
         result = getattr(self.value, name)(*cargs, **ckwargs)
 
         if variables.ConstantVariable.is_literal(result):
-            return variables.ConstantVariable.create(result)
+            return VariableTracker.build(tx, result)
         if isinstance(result, re.Match):
             return ConstantLikeVariable(result)
 
@@ -2205,7 +2208,7 @@ class ConstantLikeVariable(VariableTracker):
             # things like x.dtype.type
             return NumpyVariable(result)
         if variables.ConstantVariable.is_literal(result):
-            return variables.ConstantVariable.create(result)
+            return VariableTracker.build(tx, result)
         return GetAttrVariable(self, name)
 
 
