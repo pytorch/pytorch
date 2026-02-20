@@ -19,7 +19,9 @@ from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import flex_attention_supported_platform
+from torch.testing._internal.common_device_type import (
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+)
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.utils import _pytree as pytree
 
@@ -440,8 +442,10 @@ def forward(self, args_0):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @flex_attention_supported_platform
-    @unittest.skipIf(torch.version.hip, "flex_attention not fully supported on ROCm")
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
     def test_aot_export_flex_attention_callable_mask_mod(self):
         """Test flex_attention AOT export with callable class as mask_mod.
 
