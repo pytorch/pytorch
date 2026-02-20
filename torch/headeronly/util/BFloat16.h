@@ -34,9 +34,12 @@ struct alignas(2) BFloat16 {
   // HIP wants __host__ __device__ tag, CUDA does not
   C10_HOST_DEVICE BFloat16() = default;
   // Fast conversion constructors 
-  explicit inline C10_HOST_DEVICE BFloat16(double value);
-  explicit inline C10_HOST_DEVICE BFloat16(int value);
-  explicit inline C10_HOST_DEVICE BFloat16(int64_t value);
+  inline C10_HOST_DEVICE BFloat16(double value);
+  explicit inline C10_HOST_DEVICE operator double() const;
+  inline C10_HOST_DEVICE BFloat16(int value);
+  explicit inline C10_HOST_DEVICE operator int() const;
+  inline C10_HOST_DEVICE BFloat16(int64_t value);
+  explicit inline C10_HOST_DEVICE operator int64_t() const;
 #else
   uint16_t x;
   BFloat16() = default;
@@ -151,10 +154,19 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 #if defined(__HIPCC__)
 inline C10_HOST_DEVICE BFloat16::BFloat16(int value)
   : x__bf16(static_cast<__bf16>(value)) {}
+inline C10_HOST_DEVICE BFloat16::operator int() const {
+    return static_cast<int>(x__bf16);
+}
 inline C10_HOST_DEVICE BFloat16::BFloat16(int64_t value)
   : x__bf16(static_cast<__bf16>(value)) {}  
+inline C10_HOST_DEVICE BFloat16::operator int64_t() const {
+    return static_cast<int64_t>(x__bf16);
+}
 inline C10_HOST_DEVICE BFloat16::BFloat16(double value)
   : x__bf16(static_cast<__bf16>(value)) {}
+inline C10_HOST_DEVICE BFloat16::operator double() const {
+    return static_cast<double>(x__bf16);
+}
 #endif
 
 /// Implicit conversions
