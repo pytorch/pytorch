@@ -155,7 +155,6 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
   return detail::f32_from_bits(x);
 #endif
 }
-#endif
 
 #if defined(__HIPCC__)
 inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value)
@@ -170,6 +169,7 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
 inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
   return *reinterpret_cast<const __nv_bfloat16*>(&x);
 }
+#endif
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 inline C10_HOST_DEVICE BFloat16::BFloat16(
