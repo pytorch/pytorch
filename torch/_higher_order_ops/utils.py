@@ -514,6 +514,7 @@ def _from_fun(t):
                 # which could be either FunctionalTensorWrapper or FunctionalTensor
                 torch._sync(t)
                 maybe_unfunc_t = torch._from_functional_tensor(t)
+            # pyrefly: ignore[missing-attribute]
             return maybe_unfunc_t.clone()
     return t
 
@@ -598,14 +599,20 @@ def unmask_none_gradients(grads, operands):
 
 
 def _maybe_fake_prop_ignore_unbacked(fn, args):
-    with ExitStack() as ctx_stack:
-        if (fake_mode := detect_fake_mode(args)) is not None:
-            ctx_stack.enter_context(fake_mode)
-            if fake_mode.shape_env is not None:
-                ctx_stack.enter_context(
-                    fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                )
-        return fn(*args)
+    with suspend_functionalization(), disable_functional_mode():
+        with disable_proxy_modes_tracing():
+            unfunc_args = [_from_fun(arg) for arg in args]
+        with ExitStack() as ctx_stack:
+            ctx_stack.enter_context(
+                torch.utils._python_dispatch._disable_current_modes()
+            )
+            if (fake_mode := detect_fake_mode(unfunc_args)) is not None:
+                ctx_stack.enter_context(fake_mode)
+                if fake_mode.shape_env is not None:
+                    ctx_stack.enter_context(
+                        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                    )
+            return fn(*unfunc_args)
 
 
 def redirect_to_mode(hop: OperatorBase, mode):

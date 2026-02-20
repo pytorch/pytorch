@@ -1002,8 +1002,10 @@ class TestFromiter(TestCase):
                 return iter([])  # actual iterator is empty.
 
         res = np.fromiter(MyIter(), dtype="d")
-        assert res.shape == (0,)
-        assert res.dtype == "d"
+        if res.shape != (0,):
+            raise AssertionError(f"Expected res.shape == (0,), got {res.shape}")
+        if res.dtype != "d":
+            raise AssertionError(f"Expected res.dtype == 'd', got {res.dtype}")
 
     def test_too_few_items(self):
         msg = "iterator too short: Expected 10 but iterator had only 3 items."
@@ -1024,7 +1026,10 @@ class TestFromiter(TestCase):
 class TestNonzeroAndCountNonzero(TestCase):
     def test_count_nonzero_list(self):
         lst = [[0, 1, 2, 3], [1, 0, 0, 6]]
-        assert np.count_nonzero(lst) == 5
+        if np.count_nonzero(lst) != 5:
+            raise AssertionError(
+                f"Expected count_nonzero == 5, got {np.count_nonzero(lst)}"
+            )
         assert_array_equal(np.count_nonzero(lst, axis=0), np.array([1, 1, 1, 2]))
         assert_array_equal(np.count_nonzero(lst, axis=1), np.array([3, 2]))
 
@@ -1043,7 +1048,8 @@ class TestNonzeroAndCountNonzero(TestCase):
 
     def test_nonzero_trivial_differs(self):
         # numpy returns a python int, we return a 0D array
-        assert isinstance(np.count_nonzero([]), np.ndarray)
+        if not isinstance(np.count_nonzero([]), np.ndarray):
+            raise AssertionError("Expected count_nonzero([]) to return np.ndarray")
 
     def test_nonzero_zerod(self):
         assert_equal(np.count_nonzero(np.array(0)), 0)
@@ -1054,7 +1060,10 @@ class TestNonzeroAndCountNonzero(TestCase):
 
     def test_nonzero_zerod_differs(self):
         # numpy returns a python int, we return a 0D array
-        assert isinstance(np.count_nonzero(np.array(1)), np.ndarray)
+        if not isinstance(np.count_nonzero(np.array(1)), np.ndarray):
+            raise AssertionError(
+                "Expected count_nonzero(np.array(1)) to return np.ndarray"
+            )
 
     def test_nonzero_onedim(self):
         x = np.array([1, 0, 2, -1, 0, 0, 8])
@@ -1065,7 +1074,8 @@ class TestNonzeroAndCountNonzero(TestCase):
     def test_nonzero_onedim_differs(self):
         # numpy returns a python int, we return a 0D array
         x = np.array([1, 0, 2, -1, 0, 0, 8])
-        assert isinstance(np.count_nonzero(x), np.ndarray)
+        if not isinstance(np.count_nonzero(x), np.ndarray):
+            raise AssertionError("Expected count_nonzero(x) to return np.ndarray")
 
     def test_nonzero_twodim(self):
         x = np.array([[0, 1, 0], [2, 0, 3]])
@@ -1107,7 +1117,10 @@ class TestNonzeroAndCountNonzero(TestCase):
         expected = np.array([2, 3])
         assert_array_equal(np.count_nonzero(m, axis=1), expected)
 
-        assert isinstance(np.count_nonzero(m, axis=1), np.ndarray)
+        if not isinstance(np.count_nonzero(m, axis=1), np.ndarray):
+            raise AssertionError(
+                "Expected count_nonzero(m, axis=1) to return np.ndarray"
+            )
 
         assert_raises(ValueError, np.count_nonzero, m, axis=(1, 1))
         assert_raises(TypeError, np.count_nonzero, m, axis="foo")
@@ -1129,12 +1142,14 @@ class TestNonzeroAndCountNonzero(TestCase):
         expected = np.array([2, 0, 0], dtype=np.intp)
         result = np.count_nonzero(m, axis=0)
         assert_array_equal(result, expected)
-        assert expected.dtype == result.dtype
+        if expected.dtype != result.dtype:
+            raise AssertionError(f"Expected dtype {expected.dtype}, got {result.dtype}")
 
         expected = np.array([1, 1, 0], dtype=np.intp)
         result = np.count_nonzero(m, axis=1)
         assert_array_equal(result, expected)
-        assert expected.dtype == result.dtype
+        if expected.dtype != result.dtype:
+            raise AssertionError(f"Expected dtype {expected.dtype}, got {result.dtype}")
 
         expected = np.array(2)
         assert_array_equal(np.count_nonzero(m, axis=(0, 1)), expected)
@@ -1150,7 +1165,10 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert_array_equal(np.count_nonzero(a, axis=0, keepdims=True), [[1, 2, 3, 0]])
         assert_array_equal(np.count_nonzero(a, axis=1, keepdims=True), [[1], [2], [3]])
         assert_array_equal(np.count_nonzero(a, keepdims=True), [[6]])
-        assert isinstance(np.count_nonzero(a, axis=1, keepdims=True), np.ndarray)
+        if not isinstance(np.count_nonzero(a, axis=1, keepdims=True), np.ndarray):
+            raise AssertionError(
+                "Expected count_nonzero(a, axis=1, keepdims=True) to return np.ndarray"
+            )
 
 
 class TestIndex(TestCase):
@@ -1913,7 +1931,8 @@ class TestClip(TestCase):
         result = np.clip(arr, amin, amax)
         t = np.result_type(arr, amin, amax)
         expected = np.minimum(amax, np.maximum(arr, amin, dtype=t), dtype=t)
-        assert result.dtype == t
+        if result.dtype != t:
+            raise AssertionError(f"Expected result.dtype == {t}, got {result.dtype}")
         assert_array_equal(result, expected)
 
 
@@ -2385,10 +2404,12 @@ class TestLikeFuncs(TestCase):
         kwargs = {"fill_value": ""} if likefunc is np.full_like else {}
         result = likefunc(b, dtype=dtype, **kwargs)
         if dtype is str:
-            assert result.strides == (16, 4)
+            if result.strides != (16, 4):
+                raise AssertionError(f"Expected strides (16, 4), got {result.strides}")
         else:
             # dtype is bytes
-            assert result.strides == (4, 1)
+            if result.strides != (4, 1):
+                raise AssertionError(f"Expected strides (4, 1), got {result.strides}")
 
 
 class TestCorrelate(TestCase):

@@ -2,6 +2,7 @@
 import logging
 import threading
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from functools import lru_cache
 from itertools import chain
 from typing import cast, Optional
@@ -26,7 +27,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
-    _SingleDimStrategyFunc,
+    _SingleDimStrategyInfo,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
@@ -110,6 +111,22 @@ class LocalLRUCache(threading.local):
         self.cache = lru_cache(None)(user_function)
 
     def __call__(self, *args, **kwargs) -> object:
+        # Fast path: log.handlers check is very cheap (just checking if list is non-empty)
+        # Only do the more expensive isEnabledFor check if handlers exist
+        if log.handlers and log.isEnabledFor(logging.DEBUG):
+            info_before = self.cache.cache_info()
+            result = self.cache(*args, **kwargs)
+            info_after = self.cache.cache_info()
+            cache_hit = info_after.hits > info_before.hits
+            op_schema = args[0] if args else None
+            output_spec = getattr(result, "output_spec", None)
+            log.debug(
+                "sharding_prop python cache %s: %s -> %s",
+                "HIT" if cache_hit else "MISS",
+                op_schema,
+                output_spec,
+            )
+            return result
         return self.cache(*args, **kwargs)
 
     def cache_info(self):
@@ -187,6 +204,12 @@ def _select_min_cost_strategy(
 
 
 class ShardingPropagator:
+    # Lock to protect FakeTensorMode context during tensor meta propagation.
+    # By default this is a no-op (nullcontext) for performance. Multi-threaded
+    # tests should set this to threading.Lock() to prevent race conditions
+    # when multiple threads enter different FakeTensorMode contexts.
+    _fake_mode_lock = nullcontext()
+
     def __init__(self) -> None:
         self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
         self.op_strategy_funcs: dict[
@@ -195,7 +218,7 @@ class ShardingPropagator:
         ] = {}
         self.op_single_dim_strategy_funcs: dict[
             OpOverload,
-            _SingleDimStrategyFunc,
+            _SingleDimStrategyInfo,
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
@@ -240,13 +263,13 @@ class ShardingPropagator:
     def register_single_dim_op_strategy(
         self,
         op_overload: OpOverload,
-        strategy_func: _SingleDimStrategyFunc,
+        strategy_info: _SingleDimStrategyInfo,
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
         Register a strategy over a single mesh-dim, relying on infra to automatically expand to the full mesh.
         """
-        self.op_single_dim_strategy_funcs[op_overload] = strategy_func
+        self.op_single_dim_strategy_funcs[op_overload] = strategy_info
         if schema_info is not None:
             self.op_to_schema_info_for_single_dim_strategy[op_overload] = schema_info
 
@@ -318,11 +341,15 @@ class ShardingPropagator:
 
         # NOTE: We must call the tracing in fake tensor mode so that it avoids
         # materializing memory.
-        fake_mode = detect_fake_mode() or FakeTensorMode()
-        with fake_mode:
-            fake_args = op_schema.gen_fake_args()
-            fake_kwargs = op_schema.gen_fake_kwargs()
-            fake_out = op_schema.op(*fake_args, **fake_kwargs)
+        # NOTE: Use _fake_mode_lock to serialize access when running in
+        # multi-threaded tests (lock must be set to threading.Lock()).
+        # This is a nullcontext by default.
+        with ShardingPropagator._fake_mode_lock:
+            fake_mode = detect_fake_mode() or FakeTensorMode()
+            with fake_mode:
+                fake_args = op_schema.gen_fake_args()
+                fake_kwargs = op_schema.gen_fake_kwargs()
+                fake_out = op_schema.op(*fake_args, **fake_kwargs)
 
         if isinstance(fake_out, torch.Tensor):
             return TensorMeta(
@@ -523,12 +550,13 @@ class ShardingPropagator:
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
-        single_dim_strategy = self.op_single_dim_strategy_funcs.get(op_schema.op)
+        single_dim_strategy_info = self.op_single_dim_strategy_funcs.get(op_schema.op)
         op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
-        if single_dim_strategy is not None or op_strategy_func is not None:
+        decomp_exception = None
+        if single_dim_strategy_info is not None or op_strategy_func is not None:
             # Validate that tensor_meta count matches expected outputs from op schema.
             # This catches bugs in fake tensor propagation early.
-            if single_dim_strategy is not None:
+            if single_dim_strategy_info is not None:
                 _validate_tensor_meta_count(op_schema, out_tensor_meta)
             """
             Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
@@ -543,13 +571,13 @@ class ShardingPropagator:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
-            if single_dim_strategy is not None:
+            if single_dim_strategy_info is not None:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
                 assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                    mesh, strategy_schema, single_dim_strategy, out_tensor_meta
+                    mesh, strategy_schema, single_dim_strategy_info, out_tensor_meta
                 )
                 op_strategy = _expanded_strategy_fn(
                     op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
@@ -558,6 +586,29 @@ class ShardingPropagator:
                 assert op_strategy_func is not None
                 op_strategy = op_strategy_func(strategy_schema)
 
+        else:
+            # try operator decomposition path
+            from torch.distributed.tensor._decompositions import DecompShardingStrategy
+
+            # If the op has a CIA decomposition, we prioritize it over the decomposition flow,
+            # allowing decomposed ops to individually enter DTensor dispatch.
+            # TODO(pianpwk): maybe switch this back; the decomp flow could incur fewer comms.
+            op_strategy = None
+            has_cia = torch._C._dispatch_has_kernel_for_dispatch_key(
+                op_schema.op.name(),
+                torch._C.DispatchKey.CompositeImplicitAutograd,
+            )
+            if not has_cia and DecompShardingStrategy.has_decomp(op_schema.op):
+                # Ensure schema_info is registered for proper cache key computation
+                DecompShardingStrategy.ensure_schema_info(op_schema.op, self)
+                try:
+                    op_strategy = DecompShardingStrategy.propagate_strategy(
+                        op_schema, self
+                    )
+                except Exception as e:
+                    decomp_exception = e
+
+        if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
                 output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
@@ -769,7 +820,7 @@ class ShardingPropagator:
         else:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
-            )
+            ) from decomp_exception
 
     def _adjust_shape_and_stride_args(
         self,

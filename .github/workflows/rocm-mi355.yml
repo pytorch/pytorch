@@ -2,9 +2,6 @@ name: rocm-mi355
 
 on:
   push:
-    branches:
-      - main
-      - release/*
     tags:
       - ciflow/rocm-mi355/*
   workflow_dispatch:

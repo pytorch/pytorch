@@ -1273,11 +1273,12 @@ def tensordot(  # noqa: F811
 
     When called with a non-negative integer argument :attr:`dims` = :math:`d`, and
     the number of dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`,
-    respectively, :func:`~torch.tensordot` computes
+    respectively, :func:`~torch.tensordot` computes the tensor :math:`r` of shape
+    ``a.shape[:-dims] + b.shape[dims:]`` given by:
 
     .. math::
-        r_{i_0,...,i_{m-d}, i_d,...,i_n}
-          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} \times b_{k_0,...,k_{d-1}, i_d,...,i_n}.
+        r_{i_1,...,i_{m-d}, j_1,...,j_{n-d}}
+          = \sum_{k_1,...,k_d} a_{i_1,...,i_{m-d},k_1,...,k_d} \times b_{k_1,...,k_d, j_1,...,j_{n-d}}.
 
     When called with :attr:`dims` of the list form, the given dimensions will be contracted
     in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
