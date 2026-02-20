@@ -806,6 +806,22 @@ def forward(self, pred_1, x_1):
         result = torch.switch(index, (branch0, branch1), (x,))
         self.assertEqual(result, torch.cos(x))
 
+    def test_switch_compile(self):
+        @torch.compile
+        def func(idx, x):
+            branches = (
+                lambda x: x + 1.0,
+                lambda x: x * 2.0,
+                lambda x: x * x,
+            )
+            return torch.switch(idx, branches, (x,))
+
+        x = torch.ones(4)
+        for i in range(3):
+            itensor = torch.tensor([i])
+            func(i, x)
+
+
     def test_cond_autograd_complex(self):
         def true_fn(x):
             return torch.abs((x**2).sin())
