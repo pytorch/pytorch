@@ -68,4 +68,5 @@ jobs:
       build-environment: ${{ needs.linux-noble-rocm-py3_12-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
+      tests-to-include: "inductor/test_torchinductor_dynamic_shapes dynamo/test_misc test_autograd inductor/test_torchinductor_opinfo"
     secrets: inherit
