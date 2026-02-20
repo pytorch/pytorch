@@ -3309,8 +3309,8 @@ class GraphModule(torch.nn.Module):
         mod = SimpleModule()
         x = torch.randn(3, 3)
 
-        result = mod(x)
-        self.assertEqual(result[0].shape, (3, 3))
+        with self.assertRaisesRegex(Exception, "requires a fake implementation"):
+            mod(x)
 
         compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Exception, "requires a fake implementation"):
@@ -3363,10 +3363,16 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return mutate_input(x)
 
+        x = torch.randn(3, 3)
+
+        x_eager = x.clone()
+        with self.assertRaisesRegex(RuntimeError, "Undeclared in-place mutation"):
+            fn(x_eager)
+
         x = torch.randn(3, 3, requires_grad=True)
 
         compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "leaf Variable that requires grad"):
             compiled_fn(x.clone().requires_grad_(True))
 
     @parametrize("backend", ["eager", "aot_eager"])
@@ -4024,13 +4030,39 @@ class GraphModule(torch.nn.Module):
                 buffers.add_(1)
                 return (x + buffers,)
 
-    def test_leaf_function_mutates_args_invalid_nested_parameter(self):
         with self.assertRaisesRegex(ValueError, "refers to parameter 'mdl'"):
 
             @leaf_function(mutates_args={"mdl.running_mean"})
-            def bad_fn(x, model):
+            def bad_fn2(x, model):
                 model.running_mean.add_(1)
                 return (x,)
+
+    def test_leaf_function_mutates_args_non_leaf_expression(self):
+        @leaf_function(mutates_args={"model"})
+        def bad_fn(x, model):
+            model.running_mean.add_(1)
+            return (x,)
+
+        @bad_fn.register_fake
+        def bad_fn_fake(x, model):
+            model.running_mean.add_(1)
+            return (x,)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("running_mean", torch.zeros(3))
+
+            def forward(self, x):
+                return bad_fn(x, self)
+
+        mod = MyModule()
+        x = torch.randn(3)
+        compiled_fn = torch.compile(mod, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, "resolved to a non-leaf value"
+        ):
+            compiled_fn(x)
 
 
 instantiate_parametrized_tests(DecoratorTests)
