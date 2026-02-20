@@ -338,8 +338,10 @@ class ShardingPropagator:
             aten.new_empty_strided.default: (1, 2),
             # view ops
             aten.expand.default: 1,
+            aten.expand_copy.default: 1,
             aten.reshape.default: 1,
             aten.view.default: 1,
+            aten.view_copy.default: 1,
             aten._unsafe_view.default: 1,
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
@@ -687,15 +689,8 @@ class ShardingPropagator:
         else:
             # try operator decomposition path
 
-            # If the op has a CIA decomposition, we prioritize it over the decomposition flow,
-            # allowing decomposed ops to individually enter DTensor dispatch.
-            # TODO(pianpwk): maybe switch this back; the decomp flow could incur fewer comms.
             op_strategy = None
-            has_cia = torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_schema.op.name(),
-                torch._C.DispatchKey.CompositeImplicitAutograd,
-            )
-            if not has_cia and DecompShardingStrategy.has_decomp(op_schema.op):
+            if DecompShardingStrategy.has_decomp(op_schema.op):
                 # Ensure schema_info is registered for proper cache key computation
                 self.decomp_strategy.ensure_schema_info(op_schema.op)
                 try:

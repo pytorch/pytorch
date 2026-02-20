@@ -127,9 +127,6 @@ standard_library = ["typing_extensions"]
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
-[tool.ruff.per-file-target-version]
-"**/py312_intrinsics.py" = "py312"
-
 [tool.ruff.format]
 docstring-code-format = true
 quote-style = "double"
