@@ -1769,6 +1769,39 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if subobj is torch.nn.Module.__init__:
             subobj = unpatched_nn_module_init
 
+        # Instance dict values bypass descriptor resolution — Python only
+        # applies the descriptor protocol to class-level attributes.
+        # Skip the isinstance chain (property/staticmethod/classmethod/
+        # descriptor __get__/FunctionType) and the uncached
+        # inspect.getattr_static on type(subobj) for these.
+        if (
+            subobj is not NO_SUCH_SUBOBJ
+            and not isinstance(subobj, (types.FunctionType, types.MethodType))
+            and name in getattr(self.value, "__dict__", ())
+            and self.value.__dict__[name] is subobj
+        ):
+            if (
+                (
+                    torch._dynamo.config.inline_inbuilt_nn_modules
+                    or isinstance(self, variables.FSDPManagedNNModuleVariable)
+                )
+                and source
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and (
+                    not tx.output.export
+                    or torch._dynamo.config.install_free_tensors
+                )
+            ):
+                if name in ("_buffers", "_parameters"):
+                    assert self.source is not None
+                    source = UnspecializedParamBufferSource(self.source, name)
+                source = self._wrap_source(source)
+
+            if source:
+                return variables.LazyVariableTracker.create(subobj, source)
+            else:
+                return VariableTracker.build(tx, subobj)
+
         # Check if its already saved, avoids inspect getattr_static call
         if name in self._subobj_from_class:
             subobj_from_class = self._subobj_from_class[name]
