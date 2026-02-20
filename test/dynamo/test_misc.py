@@ -9920,6 +9920,29 @@ def ___make_guard_fn():
         self.assertEqual(fn_out, compiled_out)
         self.assertEqual(fn_out, (True, False, True, False, True, False))
 
+    def test_class_hasattr_sourceless_descriptor(self):
+        """Test that hasattr on sourceless UserDefinedClassVariable does not graph break."""
+        class FlagDescriptor:
+            def __get__(self, instance, owner):
+                if hasattr(owner, "flag"):
+                    return 1
+                return 0
+
+        class WithFlag:
+            flag = True
+            prop = FlagDescriptor()
+
+        class WithoutFlag:
+            prop = FlagDescriptor()
+
+        def fn(x, obj):
+            return x + obj.prop
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        x = torch.randn(3)
+        self.assertEqual(fn(x, WithFlag()), compiled_fn(x, WithFlag()))
+        self.assertEqual(fn(x, WithoutFlag()), compiled_fn(x, WithoutFlag()))
+
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 

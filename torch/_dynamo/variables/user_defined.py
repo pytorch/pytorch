@@ -981,8 +981,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.source:
             source = AttrSource(self.source, name)
             install_guard(source.make_guard(GuardBuilder.HASATTR))
-            return variables.ConstantVariable(hasattr(self.value, name))
-        return super().call_obj_hasattr(tx, name)
+        return variables.ConstantVariable(hasattr(self.value, name))
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
         if name == "__name__":
