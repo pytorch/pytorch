@@ -31,10 +31,12 @@ class TestCustomOpAutoTune(TestCase):
         super().setUp()
         self.device = "cuda" if HAS_GPU else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
-        # Clear any previous aten.mm registration to ensure test isolation
+        # Clear any previous registrations to ensure test isolation
         from torch._inductor.lowering import user_lowerings
+        from torch._inductor.select_algorithm import ExternKernelChoice
 
         user_lowerings.clear()
+        ExternKernelChoice._registry.clear()
 
     def _run_autotune_test(self, op_object, inputs, expected, test_name):
         """Shared test infrastructure for autotuning tests."""
@@ -861,7 +863,6 @@ class TestCustomOpAutoTune(TestCase):
         def test_model(a, b):
             return torch.mm(a, b)
 
-        torch._dynamo.reset()
         # Enable max_autotune with TRITON backend
         with config.patch(
             max_autotune=True,
