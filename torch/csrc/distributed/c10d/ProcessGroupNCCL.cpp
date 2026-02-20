@@ -221,6 +221,23 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
+bool safeEventQuery(const std::shared_ptr<at::cuda::CUDAEvent>& event) {
+#ifdef USE_ROCM
+  try {
+    return event->query();
+  } catch (const c10::Error& e) {
+    const std::string msg = e.what_without_backtrace();
+    if (msg.find("hipErrorCapturedEvent") != std::string::npos ||
+        msg.find("hipErrorStreamCaptureUnsupported") != std::string::npos) {
+      return false;
+    }
+    throw;
+  }
+#else
+  return event->query();
+#endif
+}
+
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
   // parentheses avoid some compiler warnings
   static const uint64_t min_version =
@@ -644,7 +661,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
     return false;
   }
   // Checking the work's corresponding CUDA event's status
-  if (!ncclStartEvent_->query()) {
+  if (!safeEventQuery(ncclStartEvent_)) {
     return false;
   }
   return true;
@@ -657,7 +674,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // hang if another thread is holding the CUDA global context lock. For
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
-  if (!ncclEndEvent_->query()) {
+  if (!safeEventQuery(ncclEndEvent_)) {
     return false;
   }
   return true;
