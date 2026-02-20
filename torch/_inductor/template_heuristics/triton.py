@@ -2008,6 +2008,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # Extract dtype and device_type from kernel_inputs
         dtype = kernel_inputs.dtype()
         device = kernel_inputs.device()
+        c_stride, a_stride, b_stride = kernel_inputs.strides_symbolic()
 
         # Get the appropriate config generator
         configs = self._get_config_generator()
@@ -2023,8 +2024,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             allcfgs = origami_cfg_gen(
                 m, n, k, dtype_size=dtype.itemsize, op_name=op_name
             )
-            selector = origami.TorchMatmulHeuristic(
-                allcfgs, m, n, k, dtype, dtype, dtype, device
+            selector = origami.OrigamiMatmulSelector(
+                allcfgs, m, n, k, dtype, dtype, dtype, device. a_stride, b_stride, c_stride
             )
             origami_config_kwargs = {
                 "EVEN_K": selector.even_k,
@@ -2037,9 +2038,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 "BLOCK_K": selector.block_k,
                 "GROUP_M": selector.group_m,
                 "matrix_instr_nonkdim": 16,
-                "waves_per_eu": selector.waves_per_eu,
+                "waves_per_eu": selector.occupancy,
                 "kpack": 2,
-                "_origami_config": True,
             }
             yield origami_config_kwargs
         else:
