@@ -2777,14 +2777,24 @@ def _max_pool_nd_with_indices(
         for d in range(n_dim)
     ]
 
-    # Pad with -inf (or dtype min) so out-of-bounds positions never win the max
+    # Pad with -inf (or dtype min) so out-of-bounds positions never win the max.
+    # For unsigned integers (min == 0), promote to signed so we can use a
+    # negative sentinel — otherwise padding ties with real 0-valued data and
+    # the argmax can select a padding position, producing wrong indices.
     dtype = self.dtype
+    promoted = False
     if dtype is torch.bool:
         fill_value = 0.0
     elif dtype.is_floating_point:
         fill_value = float("-inf")
     else:
-        fill_value = float(torch.iinfo(dtype).min)
+        info = torch.iinfo(dtype)
+        if info.min == 0:
+            self = self.to(torch.int32)
+            fill_value = -1.0
+            promoted = True
+        else:
+            fill_value = float(info.min)
 
     # Compute asymmetric padding: left = pa[d], right may be larger for ceil_mode
     pad_args: list[int] = []
@@ -2849,6 +2859,9 @@ def _max_pool_nd_with_indices(
     flat_indices = orig_coords[0]
     for d in range(1, n_dim):
         flat_indices = flat_indices * input_sizes[d] + orig_coords[d]
+
+    if promoted:
+        values = values.to(dtype)
 
     if not is_batched:
         values = values.squeeze(0)
