@@ -441,6 +441,7 @@ def forward(self, args_0):
             _dynamo_graph_capture_for_export(module)(x)
 
     @flex_attention_supported_platform
+    @unittest.skipIf(torch.version.hip, "flex_attention not fully supported on ROCm")
     def test_aot_export_flex_attention_callable_mask_mod(self):
         """Test flex_attention AOT export with callable class as mask_mod.
 
