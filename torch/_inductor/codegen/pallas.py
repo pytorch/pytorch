@@ -1471,6 +1471,11 @@ class PallasKernel(SIMDKernel):
             is_known_non_contiguous and not is_tpu and buf_numel == output_numel
         )
 
+        if name.startswith("in_ptr"):
+             print(f"DEBUG: _needs_strided_indexing name={name} output_numel={output_numel} buf_numel={buf_numel} "
+                   f"not_all_vars_used={not_all_vars_used} has_non_unit_strides={has_non_unit_strides} "
+                   f"is_contiguous={is_contiguous} is_tpu={is_tpu}")
+
         # Determine if strided indexing is needed
         if (
             output_numel > 0
@@ -1612,6 +1617,48 @@ class PallasKernel(SIMDKernel):
             # Flatten then index for non-contiguous access (gather operation)
             has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
             idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
+            
+            # Optimization: Avoid flatten() and int indexing for full-buffer access
+            # This avoids "RecursionError" (from flatten) and "ValueError: Cannot do int indexing on TPU"
+            buffer_obj = V.graph.get_buffer(name)
+            if buffer_obj:
+                # Check if index is a simple iteration variable covering the whole buffer
+                is_full_slice = False
+                if isinstance(index, sympy.Symbol):
+                    # Fix: keys in range_tree_nodes are Symbols
+                    if index in self.range_tree_nodes:
+                        entry = self.range_tree_nodes[index]
+                    elif str(index) in self.range_tree_nodes:
+                        entry = self.range_tree_nodes[str(index)]
+                    else:
+                        entry = None
+
+                    if entry:
+                        range_len = entry.length
+                        
+                        # Calculate buffer total numel
+                        buf_size = buffer_obj.get_size()
+                        buf_numel = 1
+                        for s in buf_size:
+                            buf_numel *= s
+                            
+                        # Check equality of symbolic sizes
+                        diff = V.graph.sizevars.simplify(range_len - buf_numel)
+                        if diff == 0:
+                            is_full_slice = True
+                
+                if is_full_slice:
+                    # Mosaic doesn't support 1d memref reshape inside kernel for N-D buffers.
+                    # Use [...] to load the entire buffer, which preserves shape (N-D) but works for elementwise.
+                    return f"{buf}[...]"
+
+                # Optimization: Avoid flatten() for 1D buffers even if partial
+                if len(buffer_obj.get_size()) == 1:
+                    return f"{buf}[{idx}]"
+                else:
+                    return f"{buf}.reshape(-1)[{idx}]"
+            
+            # Fallback (should be unreachable given checks above, but kept for safety)
             return f"{buf}[...].flatten()[{idx}]"
         else:
             # Direct indexing for contiguous access
@@ -3020,6 +3067,7 @@ class PallasKernel(SIMDKernel):
                 )
 
         self._codegen_main_entry(ctx, jit_wrapper_name)
+        print(code.getvalue())
         return code.getvalue()
 
     def _codegen_imports(self, ctx: _CodegenContext) -> None:
@@ -3700,6 +3748,13 @@ class PallasScheduling(SIMDScheduling):
         node_schedule: Sequence[BaseSchedulerNode],
         kernel: PallasKernel,
     ) -> str:  # type: ignore[override]
+        print("*" * 12, "In define_kernel: src_code = [", src_code, "]")
+        print("=" * 40 + " INDUCTOR IR NODES " + "=" * 40)
+        for node in node_schedule:
+            print(f"Node: {node}")
+            if hasattr(node, 'node'): # Access the underlying IRNode if available
+                print(f"  IRNode: {node.node}")
+        print("=" * 105)
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]
