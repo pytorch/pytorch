@@ -34,7 +34,7 @@ BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 IS_ROCM = os.path.exists("/opt/rocm")
 NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if not TEST_CUDA or SM80OrLater else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
-THRESHOLD = 60 * 20  # 20 minutes
+THRESHOLD = 60 * 10  # 10 minutes
 
 # See Note [ROCm parallel CI testing]
 # Special logic for ROCm GHA runners to query number of GPUs available.
