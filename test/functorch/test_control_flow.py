@@ -821,6 +821,26 @@ def forward(self, pred_1, x_1):
             itensor = torch.tensor([i])
             func(i, x)
 
+    def test_switch_aoti(self):
+        class SwitchModel(torch.nn.Module):
+            def forward(self, idx, x):
+                branches = (
+                    lambda x: x + 1.0,
+                    lambda x: x * 2.0,
+                    lambda x: x * x,
+                )
+                return torch.switch(idx, branches, (x,))
+
+        model = SwitchModel()
+        example_inputs = (torch.tensor([1]), torch.ones(4))
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._inductor.aoti_compile_and_package(ep)
+        optimized = torch._inductor.aoti_load_package(package_path)
+
+        for i in range(3):
+            idx = torch.tensor([i])
+            x = torch.randn(4)
+            self.assertEqual(optimized(idx, x), model(idx, x))
 
     def test_cond_autograd_complex(self):
         def true_fn(x):
