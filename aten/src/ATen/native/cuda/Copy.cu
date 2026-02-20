@@ -445,8 +445,10 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     TORCH_CHECK(
         host_tensor->is_pinned(),
         "Cannot copy between CPU and CUDA tensors during CUDA graph capture ",
-        "unless the CPU tensor is pinned. Please use tensor.pin_memory() or ",
-        "allocate the tensor with pin_memory=True.");
+        "unless the CPU tensor is pinned and the graph uses ",
+        "capture_error_mode=\"thread_local\". Please use tensor.pin_memory() ",
+        "or allocate the tensor with pin_memory=True, and pass ",
+        "capture_error_mode=\"thread_local\" to torch.cuda.graph().");
   }
 
   void* dst = iter.data_ptr(0);
