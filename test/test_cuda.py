@@ -7600,9 +7600,6 @@ class TestCudaAutocast(TestAutocast):
                 _ = torch.ones(10)
 
 
-@unittest.skipIf(
-    os.environ.get("USE_LEGACY_DRIVER", None) == "1", "Doesn't work with older driver"
-)
 class TestCompileKernel(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel(self):
