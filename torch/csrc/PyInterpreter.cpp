@@ -376,8 +376,41 @@ void ConcretePyInterpreterVTable::python_dispatcher(
     return;
   }
 
+  // Handler is a py_impl callable (e.g. a decomposition registered via
+  // py_impl(Autograd)). If any tensor arg is a subclass with
+  // __torch_dispatch__ (DispatchKey::Python), defer to the Python dispatch
+  // key so that subclass dispatch (e.g. DTensor) runs before the py_impl
+  // decomposition. Without this, the decomposition fires first and may
+  // create plain tensors that mix with the subclass tensors.
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
+  if (ks.has(c10::DispatchKey::Python)) {
+    for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
+      if (ivalue.isTensor()) {
+        const auto& t = ivalue.toTensor();
+        if (t.defined() && isPythonTensor(t)) {
+          op.callBoxedForDispatchKey(c10::DispatchKey::Python, *stack);
+          return;
+        }
+      } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
+        bool found = false;
+        for (const auto& elem : ivalue.toListRef()) {
+          if (elem.isTensor()) {
+            const auto& t = elem.toTensor();
+            if (t.defined() && isPythonTensor(t)) {
+              found = true;
+              break;
+            }
+          }
+        }
+        if (found) {
+          op.callBoxedForDispatchKey(c10::DispatchKey::Python, *stack);
+          return;
+        }
+      }
+    }
+  }
+
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
