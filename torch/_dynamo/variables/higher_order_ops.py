@@ -4513,7 +4513,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         """
         Traces the backward method of the autograd.Function object.
         """
-        from . import UserDefinedClassVariable, UserMethodVariable
+        from . import UserMethodVariable
 
         # Note that for the forward, we do not restore side effects, because we
         # want the later tracing to see the side-effects. But for backward, we
@@ -4595,7 +4595,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
                         autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        UserDefinedClassVariable(self.bwd_fn.__class__),
+                        VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
                     unimplemented(
@@ -4985,7 +4985,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         method_name: str,
         args: Sequence[VariableTracker],
     ) -> tuple[VariableTracker, Sequence[VariableTracker]]:
-        from . import UserDefinedClassVariable, UserMethodVariable
+        from . import UserMethodVariable
 
         source = None
         if self.parent_source:
@@ -5001,7 +5001,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fn_vt = VariableTracker.build(tx, fn, source=source)
             fn_args = [ctx, *args]
         elif isinstance(fn, types.MethodType):
-            cls_vt = UserDefinedClassVariable(fn.__class__)
+            cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
                 fn.__func__,
                 cls_vt,
@@ -5314,6 +5314,8 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             in_grad_placements,
             device_mesh,
             redistribute_inputs,
+            allow_uneven_sharding,
+            out_shapes,
             *user_args,
         ) = args
 
@@ -5341,6 +5343,8 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "redistribute_inputs": redistribute_inputs.value,  # type: ignore[attr-defined]
             "in_grad_placements": in_grad_placements.value,  # type: ignore[attr-defined]
             "device_mesh": device_mesh.value,  # type: ignore[attr-defined]
+            "allow_uneven_sharding": allow_uneven_sharding.value,  # type: ignore[attr-defined]
+            "out_shapes": out_shapes.value,  # type: ignore[attr-defined]
         }
         assert local_map_kwargs["device_mesh"] is not None, (
             "Not yet implemented, please manually provide a device_mesh to local_map."
