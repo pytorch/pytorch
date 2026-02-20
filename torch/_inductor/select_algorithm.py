@@ -1581,7 +1581,10 @@ class TritonTemplateKernel(TritonKernel):
         node_name = node.get_name()
 
         if isinstance(layout, ir.FlexibleLayout):
-            if not use_aten_gemm_kernels():
+            if (
+                not use_aten_gemm_kernels()
+                or not config.max_autotune_defer_layout_freezing
+            ):
                 # No ExternKernel fallback available, freeze immediately
                 node.data.freeze_layout()
             else:
@@ -3055,9 +3058,6 @@ class AlgorithmSelectorCache(PersistentCache):
             if use_pipelined_autotuning():
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
-                )
-                assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
-                    "Pipelined autotuning not compatible yet with subgraph choices"
                 )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)

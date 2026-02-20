@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import operator
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -17,6 +18,9 @@ from torch.overrides import (
     _get_current_function_mode_stack,
     BaseTorchFunctionMode,
     TorchFunctionMode,
+)
+from torch.testing._internal.common_device_type import (
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE
@@ -1672,7 +1676,10 @@ class outer_fn(torch.nn.Module):
             out = wrapped_fn(x)
             out.sum().backward()
 
-    @requires_gpu
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
     def test_nested_compile_transformer_with_flex_attention_compiled_layers(
         self,
     ):
@@ -1829,7 +1836,7 @@ class outer_fn(torch.nn.Module):
 
         fake_store = FakeStore()
         dist.init_process_group("fake", store=fake_store, rank=0, world_size=2)
-        device_mesh = init_device_mesh("cuda", (2,))
+        device_mesh = init_device_mesh(GPU_TYPE, (2,))
 
         with (
             # Needed when wrapping a compiled region with FX tracing
@@ -1920,6 +1927,8 @@ class outer_fn(torch.nn.Module):
 
             out = wrapped_fn(x)
             out.sum().backward()
+
+        dist.destroy_process_group()
 
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
