@@ -155,11 +155,9 @@ def _get_pattern_to_quantize_handlers(
         num_tensor_args_to_observation_type = (
             config._num_tensor_args_to_observation_type
         )
-        # pyrefly: ignore [unsupported-operation]
         pattern_to_quantize_handlers[pattern] = _get_quantize_handler_cls(
             observation_type, dtype_configs, num_tensor_args_to_observation_type
         )
-    # pyrefly: ignore [bad-return]
     return pattern_to_quantize_handlers
 
 
