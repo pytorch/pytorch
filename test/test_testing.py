@@ -2402,10 +2402,6 @@ class TestImports(TestCase):
             ignored_modules.append("torch.testing._internal.common_fsdp")
             ignored_modules.append("torch.testing._internal.common_distributed")
 
-        if sys.version_info < (3, 12):
-            # depends on Python 3.12+ syntax
-            ignored_modules.append("torch.testing._internal.py312_intrinsics")
-
         torch_dir = os.path.dirname(torch.__file__)
         for base, _, files in os.walk(torch_dir):
             prefix = os.path.relpath(base, os.path.dirname(torch_dir)).replace(os.path.sep, ".")
