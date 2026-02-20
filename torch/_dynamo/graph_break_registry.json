@@ -3327,16 +3327,6 @@
       ]
     }
   ],
-  "GB6604": [
-    {
-      "Gb_type": "Missing CALL_INTRINSIC_2 handler",
-      "Context": "CALL_INTRINSIC_2 operand: {inst.argval}",
-      "Explanation": "No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0276": [
     {
       "Gb_type": "Failed to make weakref to User Object",

@@ -62,6 +62,7 @@ from torch._functorch.aot_autograd import (
 from torch._inductor.codecache import code_hash, FxGraphCache, output_code_log
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
+    cudagraphs_log,
     format_default_skip_message,
     log_cudagraph_skip_and_bump_counter,
     PlaceholderInfo,
@@ -2262,14 +2263,63 @@ class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
     forward_device: BoxedDeviceIndex
+    cudagraphs_bwd_override: Optional[bool] = None
 
 
-def create_compiler_config_extra(config: types.ModuleType) -> CompilerConfigExtra:
+def create_compiler_config_extra(
+    config: types.ModuleType, gm_meta: Optional[dict[str, Any]] = None
+) -> CompilerConfigExtra:
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
     # force cudagraphs to be disabled.  This mutable box lets us retrieve
     # the final determination if cudagraphs actually can be used or not.
     cudagraphs = BoxedBool(config.triton.cudagraphs)
+
+    cudagraphs_bwd_override: Optional[bool] = None
+
+    # Normalize the cudagraphs BoxedBool with annotations to maximize cache hits.
+    # Because disabling fwd disables bwd today within torch.compile (due to
+    # assumptions/profitability of copying activations), the only case that
+    # needs an annotation is fwd enabled / bwd disabled.
+    if gm_meta is not None:
+        annotation = gm_meta.get("cudagraph_annotation")
+        if annotation is not None:
+            if (
+                annotation.fwd == annotation.bwd
+                and annotation.fwd is not None
+                and annotation.fwd != config.triton.cudagraphs
+            ):
+                cudagraphs = BoxedBool(annotation.fwd)
+                if annotation.fwd:
+                    cudagraphs_log.info(
+                        "enabling cudagraphs due to override_cudagraphs annotation"
+                    )
+                else:
+                    log_cudagraph_skip_and_bump_counter(
+                        "disabling cudagraphs due to override_cudagraphs annotation"
+                    )
+            elif (
+                annotation.fwd is not None
+                and not annotation.fwd
+                and config.triton.cudagraphs
+            ):
+                cudagraphs = BoxedBool(False)
+                log_cudagraph_skip_and_bump_counter(
+                    "disabling cudagraphs due to override_cudagraphs annotation "
+                    "(disabling fwd also disables bwd)"
+                )
+            else:
+                if annotation.fwd and annotation.fwd != config.triton.cudagraphs:
+                    cudagraphs = BoxedBool(annotation.fwd)
+                    perf_hint_log.info(
+                        "enabling cudagraphs for forward due to override_cudagraphs annotation"
+                    )
+
+                if annotation.bwd is not None and not annotation.bwd:
+                    cudagraphs_bwd_override = annotation.bwd
+                    log_cudagraph_skip_and_bump_counter(
+                        "disabling cudagraphs for backward due to override_cudagraphs annotation"
+                    )
 
     # TODO: The modern style is to use CompileId from TracingContext to
     # identify Inductor compilation.  However, this CompileId cannot
@@ -2284,6 +2334,7 @@ def create_compiler_config_extra(config: types.ModuleType) -> CompilerConfigExtr
         cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device=forward_device,
+        cudagraphs_bwd_override=cudagraphs_bwd_override,
     )
 
 
@@ -2428,6 +2479,12 @@ def compile_fx_backward(
             model_outputs_node.meta["user_visible_output_idxs"] = []
 
         fixed = count_tangents(gm)
+
+        # Check if cudagraphs should be overridden for backward via annotation
+        cudagraphs = compiler_config_extra.cudagraphs
+        if compiler_config_extra.cudagraphs_bwd_override is not None:
+            cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
+
         with (
             config.patch(get_cpp_wrapper_config())
             if config.cpp_wrapper
@@ -2437,7 +2494,7 @@ def compile_fx_backward(
                 gm,
                 example_inputs,
                 static_input_idxs=list(range(fixed)),
-                cudagraphs=compiler_config_extra.cudagraphs,
+                cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
                 boxed_forward_device_index=compiler_config_extra.forward_device,
@@ -2700,7 +2757,8 @@ def _compile_fx_main(
 
         num_example_inputs = len(example_inputs_)
 
-        compiler_config_extra = create_compiler_config_extra(config)
+        gm_meta = model_.meta if isinstance(model_, GraphModule) else None
+        compiler_config_extra = create_compiler_config_extra(config, gm_meta)
 
         decompositions = (
             decompositions if decompositions is not None else select_decomp_table()
