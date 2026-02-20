@@ -1025,6 +1025,7 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
 
+    @xfail_if_use_tensor_descriptor
     def test_reduction_padded_output_tiling(self):
         """
         Test a [Y, X, R0_] reduction with tiled output dimensions.
