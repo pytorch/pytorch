@@ -2,6 +2,7 @@
 import logging
 import threading
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from functools import lru_cache
 from itertools import chain
 from typing import cast, Optional
@@ -13,6 +14,7 @@ from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._decompositions import DecompShardingStrategy
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -299,6 +301,12 @@ def _select_min_cost_strategy(
 
 
 class ShardingPropagator:
+    # Lock to protect FakeTensorMode context during tensor meta propagation.
+    # By default this is a no-op (nullcontext) for performance. Multi-threaded
+    # tests should set this to threading.Lock() to prevent race conditions
+    # when multiple threads enter different FakeTensorMode contexts.
+    _fake_mode_lock = nullcontext()
+
     def __init__(self) -> None:
         self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
         self.op_strategy_funcs: dict[
@@ -318,6 +326,7 @@ class ShardingPropagator:
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
+        self.decomp_strategy = DecompShardingStrategy(self)
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
         self.op_to_shape_and_stride_idx: dict[OpOverload, int | tuple[int, int]] = {
@@ -430,11 +439,15 @@ class ShardingPropagator:
 
         # NOTE: We must call the tracing in fake tensor mode so that it avoids
         # materializing memory.
-        fake_mode = detect_fake_mode() or FakeTensorMode()
-        with fake_mode:
-            fake_args = op_schema.gen_fake_args()
-            fake_kwargs = op_schema.gen_fake_kwargs()
-            fake_out = op_schema.op(*fake_args, **fake_kwargs)
+        # NOTE: Use _fake_mode_lock to serialize access when running in
+        # multi-threaded tests (lock must be set to threading.Lock()).
+        # This is a nullcontext by default.
+        with ShardingPropagator._fake_mode_lock:
+            fake_mode = detect_fake_mode() or FakeTensorMode()
+            with fake_mode:
+                fake_args = op_schema.gen_fake_args()
+                fake_kwargs = op_schema.gen_fake_kwargs()
+                fake_out = op_schema.op(*fake_args, **fake_kwargs)
 
         if isinstance(fake_out, torch.Tensor):
             return TensorMeta(
@@ -673,7 +686,6 @@ class ShardingPropagator:
 
         else:
             # try operator decomposition path
-            from torch.distributed.tensor._decompositions import DecompShardingStrategy
 
             # If the op has a CIA decomposition, we prioritize it over the decomposition flow,
             # allowing decomposed ops to individually enter DTensor dispatch.
@@ -685,10 +697,10 @@ class ShardingPropagator:
             )
             if not has_cia and DecompShardingStrategy.has_decomp(op_schema.op):
                 # Ensure schema_info is registered for proper cache key computation
-                DecompShardingStrategy.ensure_schema_info(op_schema.op, self)
+                self.decomp_strategy.ensure_schema_info(op_schema.op)
                 try:
-                    op_strategy = DecompShardingStrategy.propagate_strategy(
-                        op_schema, self
+                    op_strategy = self.decomp_strategy.propagate_strategy(
+                        op_schema,
                     )
                 except Exception as e:
                     decomp_exception = e
