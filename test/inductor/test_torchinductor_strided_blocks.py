@@ -1056,6 +1056,46 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
 
+    def test_2d_reduction_with_broadcast(self):
+        """
+        Tests 2D tiled reduction with a broadcasted 1D tensor.
+
+        This is a regression test for a bug where block pointers that only
+        advance in one reduction dimension (not both) would cause a KeyError
+        during codegen. The bug occurred because:
+        1. The broadcasted tensor only varies along the first reduction dimension (R0)
+        2. When building pointer_advancements, the block_ptr is only
+           added to R0_INDEX (non-zero advancement) but skipped for R1_INDEX
+           (zero/identity advancement)
+        3. During loop suffix generation, the code assumed if a block_ptr exists
+           in the outer loop's advancements, it must exist in the inner loop's too
+
+        The pattern: (x * y[:, None]).sum() where x is 2D and y is 1D.
+        """
+        # Use sizes that require looped (non-persistent) reductions
+        # to trigger 2D tiled reduction with R0 and R1 loops
+        M, N = 64, 128
+
+        def fn(x, y):
+            # y is 1D (M,), x is 2D (M, N)
+            # y[:, None] broadcasts to (M, N)
+            # The y block_ptr only advances with R0, not R1
+            return (x * y[:, None]).sum()
+
+        x = torch.randn(M, N, device=self.device)
+        y = torch.randn(M, device=self.device)
+
+        # This should compile without KeyError and produce correct results
+        result, (code,) = self._run_and_compare(
+            fn,
+            x,
+            y,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Verify 2D reduction is used (R0_BLOCK and R1_BLOCK present)
+        self._assert_reduction_ndims(code, 2)
+
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
             add_ = x + y

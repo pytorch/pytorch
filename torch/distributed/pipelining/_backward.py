@@ -231,7 +231,6 @@ def stage_backward_weight(
     weight_grads: list[torch.Tensor | None] = []
     for index, weight in enumerate(weights):
         grad_acc = _get_grad_fn_or_grad_acc(weight)
-        # pyrefly: ignore [unsupported-operation]
         grad_acc_to_weight[grad_acc] = weight, index
         weight_grads.append(weight.grad)
 
