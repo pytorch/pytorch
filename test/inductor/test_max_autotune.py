@@ -2485,6 +2485,7 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "max_autotune_gemm_backends": "ATEN,TRITON",
             "force_pointwise_cat": True,
+            "max_autotune_defer_layout_freezing": True,
         }
     )
     @parametrize("epilogue", (True, False))

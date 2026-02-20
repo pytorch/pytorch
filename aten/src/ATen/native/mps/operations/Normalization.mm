@@ -70,6 +70,18 @@ static void get_shapes(MPSShape* input_shape_readonly,
       axes[i] = [NSNumber numberWithInt:i];
   }
 }
+
+static std::string get_mem_string(c10::MemoryFormat memory_format) {
+  switch (memory_format) {
+    case at::MemoryFormat::Contiguous:
+      return "Contiguous";
+    case at::MemoryFormat::ChannelsLast:
+      return "ChannelsLast";
+    default:
+      break;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unexpected memory format", memory_format);
+}
 } // namespace mps
 
 // Inverse standard deviation now becomes variance (without epsilon)
@@ -120,18 +132,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
   }
 
   @autoreleasepool {
-    std::string mem_format_key;
-    switch (memory_format) {
-      case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
-        break;
-      case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
-        break;
-      default:
-        assert(0 && "Check should have been done earlier\n");
-    }
-
     // Number of elements in one channel, needed for bessel correction term
     const int64_t N = self.numel() / save_mean.numel();
     MPSShape* input_shape_readonly = mps::getMPSShape(self);
@@ -147,14 +147,20 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    std::string key = "batch_norm_mps_out:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
-        std::to_string(momentum) + ":" + std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" +
-        std::to_string(has_weight) + ":" + std::to_string(has_bias) + ":" + [ns_shape_key UTF8String] + ":" +
-        getTensorsStringKey({self,
-                             weight_opt.value_or(Tensor()),
-                             bias_opt.value_or(Tensor()),
-                             running_mean_opt.value_or(Tensor()),
-                             running_var_opt.value_or(Tensor())});
+    std::string key = fmt::format("batch_norm_mps_out:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                                  get_mem_string(memory_format),
+                                  epsilon,
+                                  momentum,
+                                  train,
+                                  has_running_mean,
+                                  has_weight,
+                                  has_bias,
+                                  [ns_shape_key UTF8String],
+                                  getTensorsStringKey({self,
+                                                       weight_opt.value_or(Tensor()),
+                                                       bias_opt.value_or(Tensor()),
+                                                       running_mean_opt.value_or(Tensor()),
+                                                       running_var_opt.value_or(Tensor())}));
     auto input_mps_dtype = getMPSDataType(self);
 
     // Dim where channels are located
@@ -493,22 +499,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_mps_out(const T
       self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, epsilon, output, save_mean, save_var);
 }
 
-static std::string get_mem_string(c10::MemoryFormat memory_format) {
-  std::string mem_format_key;
-  switch (memory_format) {
-    case at::MemoryFormat::Contiguous:
-      mem_format_key = "Contiguous";
-      break;
-    case at::MemoryFormat::ChannelsLast:
-      mem_format_key = "ChannelsLast";
-      break;
-    default:
-      assert(0 && "Invalid memory format\n");
-  }
-
-  return mem_format_key;
-}
-
 // Batch norm backward
 std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mps(const Tensor& grad_output,
                                                                 const Tensor& input,
@@ -608,18 +598,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   }
 
   @autoreleasepool {
-    std::string mem_format_key;
-    switch (memory_format) {
-      case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
-        break;
-      case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
-        break;
-      default:
-        assert(0 && "Check should have been done earlier\n");
-    }
-
     MPSShape* input_shape_readonly = mps::getMPSShape(input);
     int num_input_dims = [input_shape_readonly count];
     NSMutableArray<NSNumber*>* input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
@@ -632,9 +610,15 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    std::string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
-        std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" + std::to_string(has_weight) + ":" +
-        [ns_shape_key UTF8String] + ":" + c10::Join(",", grad_input_mask) + ":" + getMPSTypeString(input);
+    std::string key = fmt::format("batch_norm_backward_mps:{}:{}:{}:{}:{}:{}:{}:{}",
+                                  get_mem_string(memory_format),
+                                  epsilon,
+                                  train,
+                                  has_running_mean,
+                                  has_weight,
+                                  [ns_shape_key UTF8String],
+                                  c10::Join(",", grad_input_mask),
+                                  getMPSTypeString(input));
     auto input_mps_dtype = getMPSDataType(input);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       // NCHW - Channels dim is 1
@@ -1092,9 +1076,12 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
       for (const auto i : c10::irange(num_normalized_dims))
         bn_gamma_shape[i + 2] = input_shape[i + num_channel_dims];
 
-      std::string key = "layer_norm_backward_mps:" + std::to_string(has_weight) + ":" +
-          getArrayRefString(normalized_shape) + ":" + getArrayRefString((*X).sizes()) + ":" +
-          c10::Join(",", grad_input_mask) + ":" + getMPSTypeString(*X);
+      std::string key = fmt::format("layer_norm_backward_mps:{}:{}:{}:{}:{}",
+                                    has_weight,
+                                    getArrayRefString(normalized_shape),
+                                    getArrayRefString((*X).sizes()),
+                                    c10::Join(",", grad_input_mask),
+                                    getMPSTypeString(*X));
       auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
         MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *X);
         MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, *dOut);
