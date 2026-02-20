@@ -1322,7 +1322,7 @@
 - func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: logical_xor_out
+    CPU, CUDA, MTIA: logical_xor_out
     MPS: logical_xor_out_mps
   tags: pointwise
 

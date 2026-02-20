@@ -91,6 +91,16 @@ def draw_buffers(
                 group = (group[1],)
             else:
                 group = group[1]
+        elif isinstance(group, str):
+            # extern / template / nop nodes store a string like "extern"
+            # as the group instead of a shape tuple.  Extract the real
+            # output shape from the scheduler node's first output buffer.
+            try:
+                snode = node.meta["fusion_meta"].snode
+                size = snode.get_outputs()[0].node.maybe_get_size()
+                group = tuple(size) if size else ()
+            except Exception:
+                group = ()
 
         # gather meta data
         dtype = None
