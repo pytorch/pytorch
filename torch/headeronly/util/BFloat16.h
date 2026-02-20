@@ -33,11 +33,13 @@ struct alignas(2) BFloat16 {
   };
   // HIP wants __host__ __device__ tag, CUDA does not
   C10_HOST_DEVICE BFloat16() = default;
-  // Fast conversion constructors 
-  inline C10_HOST_DEVICE BFloat16(__bf16 value) : x__bf16(value) {}
-  inline C10_HOST_DEVICE BFloat16(unsigned long value) : x__bf16(static_cast<__bf16>(value)) {}
-  inline C10_HOST_DEVICE BFloat16(unsigned int value) : x__bf16(static_cast<__bf16>(value)) {}
-  
+  // Fast conversion constructors
+  inline C10_HOST_DEVICE BFloat16(__bf16 value): x__bf16(value) {}
+  inline C10_HOST_DEVICE BFloat16(unsigned long value)
+  : x__bf16(static_cast<__bf16>(value)) {}
+  inline C10_HOST_DEVICE BFloat16(unsigned int value)
+  : x__bf16(static_cast<__bf16>(value)) {}
+
   inline C10_HOST_DEVICE BFloat16(double value);
   explicit inline C10_HOST_DEVICE operator double() const;
   inline C10_HOST_DEVICE BFloat16(int value);
@@ -155,17 +157,17 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 
 #if defined(__HIPCC__)
 inline C10_HOST_DEVICE BFloat16::BFloat16(int value)
-  : x__bf16(static_cast<__bf16>(value)) {}
+: x__bf16(static_cast<__bf16>(value)) {}
 inline C10_HOST_DEVICE BFloat16::operator int() const {
     return static_cast<int>(x__bf16);
 }
 inline C10_HOST_DEVICE BFloat16::BFloat16(int64_t value)
-  : x__bf16(static_cast<__bf16>(value)) {}  
+: x__bf16(static_cast<__bf16>(value)) {}
 inline C10_HOST_DEVICE BFloat16::operator int64_t() const {
     return static_cast<int64_t>(x__bf16);
 }
 inline C10_HOST_DEVICE BFloat16::BFloat16(double value)
-  : x__bf16(static_cast<__bf16>(value)) {}
+: x__bf16(static_cast<__bf16>(value)) {}
 inline C10_HOST_DEVICE BFloat16::operator double() const {
     return static_cast<double>(x__bf16);
 }
@@ -187,7 +189,7 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
 
 #if defined(__HIPCC__)
 inline C10_HOST_DEVICE BFloat16::BFloat16(const __hip_bfloat16& value)
-  : x__bf16(value) {}
+: x__bf16(value) {}
 inline C10_HOST_DEVICE BFloat16::operator __hip_bfloat16() const {
   return x__bf16;
 }
@@ -235,7 +237,7 @@ operator+(const BFloat16& a, const BFloat16& b) {
 
 inline C10_HOST_DEVICE BFloat16
 operator-(const BFloat16& a, const BFloat16& b) {
-#if defined(__HIPCC__)  
+#if defined(__HIPCC__)
   return a.x__bf16 - b.x__bf16;
 #else
   return static_cast<float>(a) - static_cast<float>(b);
