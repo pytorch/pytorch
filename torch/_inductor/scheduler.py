@@ -4186,6 +4186,13 @@ class Scheduler:
                     choice_timings = multi_node.choice_timings()
                     min_choice, ms1 = multi_node.get_min_choice()
 
+                    # Some choices can fail to benchmark, inf timing
+                    future_choices = [
+                        fut_choice
+                        for fut_choice in future_choices
+                        if fut_choice[0] in choice_timings
+                    ]
+
                     future_choices = sorted(
                         future_choices,
                         key=lambda x: choice_timings[x[0]],

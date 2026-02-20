@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 
-from itertools import chain, permutations
+from itertools import chain, permutations, product
 from unittest.mock import patch
 
 import torch
@@ -30,7 +30,7 @@ from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _fill_single_dim_strategy_placeholders,
-    _find_lowest_cost_sharding,
+    _dijkstra_expand_single_dim_strategy_to_mesh,
     _get_num_tensor_inputs,
     _get_unique_placements,
     _insert_single_dim_replication_strategy,
@@ -1042,7 +1042,7 @@ class TestFindLowestCostSharding(TestCase):
         )
 
         # PQ search
-        pq_strategy = _find_lowest_cost_sharding(
+        pq_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
             mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
         )
         self.assertIsNotNone(pq_strategy)
@@ -1086,7 +1086,7 @@ class TestFindLowestCostSharding(TestCase):
             ),
         )
 
-    def test_find_lowest_cost_sharding_basic(self):
+    def test_dijkstra_expand_single_dim_strategy_to_mesh_basic(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
         left_meta, right_meta = _get_mm_metas()
         output_meta = self._get_mm_output_meta()
@@ -1104,7 +1104,7 @@ class TestFindLowestCostSharding(TestCase):
             kwargs_schema={},
         )
 
-        strategy = _find_lowest_cost_sharding(
+        strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
             mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
         )
 
@@ -1127,7 +1127,7 @@ class TestFindLowestCostSharding(TestCase):
         self.assertIsNotNone(output_spec.tensor_meta)
         self.assertEqual(output_spec.tensor_meta.shape, torch.Size([64, 64]))
 
-    def test_find_lowest_cost_sharding_hard(self):
+    def test_dijkstra_expand_single_dim_strategy_to_mesh_hard(self):
         """Verify PQ search matches full expansion min cost on 3D mesh."""
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
         self._compare_pq_vs_full_expansion(
@@ -1136,7 +1136,7 @@ class TestFindLowestCostSharding(TestCase):
             right_placements=(Shard(1), Shard(0), Replicate()),
         )
 
-    def test_find_lowest_cost_sharding_hard_4d(self):
+    def test_dijkstra_expand_single_dim_strategy_to_mesh_hard_4d(self):
         """Verify PQ search matches full expansion min cost on 4D mesh."""
         mesh = DeviceMesh("cpu", mesh=torch.arange(16).reshape(2, 2, 2, 2))
         self._compare_pq_vs_full_expansion(
@@ -1146,8 +1146,12 @@ class TestFindLowestCostSharding(TestCase):
         )
 
     def test_pq_vs_full_expansion_data_driven(self):
-        """Data-driven comparison across mesh shapes, placements for mm."""
-        placement_options = [Shard(0), Shard(1), Replicate()]
+        """Data-driven comparison across mesh shapes, all placement types for mm.
+
+        Enumerates all combos of R, S(0), S(1), P(sum) for each mesh dim on
+        both inputs, across 1D/2D/3D meshes.
+        """
+        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
         mesh_configs = [
             ("1d", torch.arange(4)),
             ("2d", torch.arange(4).reshape(2, 2)),
@@ -1158,29 +1162,12 @@ class TestFindLowestCostSharding(TestCase):
             mesh = DeviceMesh("cpu", mesh=mesh_tensor)
             ndim = mesh.ndim
 
-            # Generate placement combos for this mesh dimensionality
-            from itertools import product
-
             all_placements = list(product(placement_options, repeat=ndim))
 
             for left_pl in all_placements:
                 for right_pl in all_placements:
                     with self.subTest(mesh=mesh_name, left=left_pl, right=right_pl):
                         self._compare_pq_vs_full_expansion(mesh, left_pl, right_pl)
-
-    def test_pq_vs_full_expansion_with_partial_inputs(self):
-        """Verify PQ search handles Partial inputs correctly."""
-        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
-
-        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
-        from itertools import product
-
-        all_placements = list(product(placement_options, repeat=mesh.ndim))
-
-        for left_pl in all_placements:
-            for right_pl in all_placements:
-                with self.subTest(left=left_pl, right=right_pl):
-                    self._compare_pq_vs_full_expansion(mesh, left_pl, right_pl)
 
     def test_strided_shard_fallback(self):
         """Verify PQ search returns None for StridedShard inputs."""
@@ -1204,7 +1191,7 @@ class TestFindLowestCostSharding(TestCase):
             kwargs_schema={},
         )
 
-        result = _find_lowest_cost_sharding(
+        result = _dijkstra_expand_single_dim_strategy_to_mesh(
             mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
         )
         self.assertIsNone(result)
@@ -1242,7 +1229,7 @@ class TestFindLowestCostSharding(TestCase):
             kwargs_schema={},
         )
 
-        strategy = _find_lowest_cost_sharding(
+        strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
             mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
         )
         self.assertIsNotNone(strategy)
@@ -1303,7 +1290,7 @@ class TestFindLowestCostSharding(TestCase):
             kwargs_schema={},
         )
 
-        strategy = _find_lowest_cost_sharding(
+        strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
             mesh, op_schema, mm_single_dim_strategy, output_tensor_meta=output_meta
         )
         self.assertIsNotNone(strategy)
@@ -1315,6 +1302,180 @@ class TestFindLowestCostSharding(TestCase):
         # Each transition should be (input_idx, mesh_dim, src, dst)
         for t in transitions:
             self.assertEqual(len(t), 4)
+
+    def test_pq_reachability_collect_all_2d(self):
+        """On a 2D mesh, verify PQ search can reach all valid strategies.
+
+        For every starting placement combo, run _dijkstra_expand_single_dim_strategy_to_mesh with
+        _collect_all_matches and union all collected sets. Assert the full
+        expansion reference set is a subset of the collected union.
+        """
+        from itertools import product
+
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        M, K, N = 64, 32, 64
+        left_meta, right_meta = _get_mm_metas(M, K, N)
+        output_meta = self._get_mm_output_meta(M, K, N)
+
+        placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
+        all_placements = list(product(placement_options, repeat=mesh.ndim))
+
+        # Get full expansion reference set
+        ref_left_spec, ref_right_spec = _get_mm_specs(
+            mesh,
+            left_meta,
+            right_meta,
+            left_placements=(Replicate(), Replicate()),
+            right_placements=(Replicate(), Replicate()),
+        )
+        wrapped_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(ref_left_spec)]),
+                OpStrategy([OpSpec(ref_right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+        expanded_fn = _expand_single_dim_strategy_to_mesh(
+            mesh,
+            wrapped_schema,
+            _SingleDimStrategyInfo(mm_single_dim_strategy),
+            output_meta,
+        )
+        ref_strategy = expanded_fn(
+            torch.ops.aten.mm.default,
+            wrapped_schema.args_meta,
+            wrapped_schema.kwargs_meta,
+        )
+        full_expansion_set = {
+            tuple(spec.placements for spec in s.input_specs)
+            for s in ref_strategy.strategies
+        }
+
+        # Collect all reachable matches from every starting placement
+        collected_union: set[tuple[tuple[Placement, ...], ...]] = set()
+        for left_pl in all_placements:
+            for right_pl in all_placements:
+                left_spec, right_spec = _get_mm_specs(
+                    mesh,
+                    left_meta,
+                    right_meta,
+                    left_pl,
+                    right_pl,
+                )
+                op_schema = OpSchema(
+                    op=torch.ops.aten.mm.default,
+                    args_schema=(left_spec, right_spec),
+                    kwargs_schema={},
+                )
+                matches: set[tuple[tuple[Placement, ...], ...]] = set()
+                _dijkstra_expand_single_dim_strategy_to_mesh(
+                    mesh,
+                    op_schema,
+                    mm_single_dim_strategy,
+                    output_tensor_meta=output_meta,
+                    _collect_all_matches=matches,
+                )
+                collected_union.update(matches)
+
+        missing = full_expansion_set - collected_union
+        self.assertEqual(
+            missing,
+            set(),
+            f"PQ search missed {len(missing)} strategies reachable by full expansion",
+        )
+
+    def test_single_dim_transition_reachability(self):
+        """Verify single-dim transition rules form a connected graph.
+
+        For mm on a 2D mesh, collect all placements that appear per input
+        position, build a directed graph from transition rules, and BFS from
+        each placement to assert all others are reachable.
+        """
+        from collections import deque
+
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        M, K, N = 64, 32, 64
+        left_meta, right_meta = _get_mm_metas(M, K, N)
+        output_meta = self._get_mm_output_meta(M, K, N)
+
+        ref_left_spec, ref_right_spec = _get_mm_specs(
+            mesh,
+            left_meta,
+            right_meta,
+            left_placements=(Replicate(), Replicate()),
+            right_placements=(Replicate(), Replicate()),
+        )
+        wrapped_schema = OpSchema(
+            op=torch.ops.aten.mm.default,
+            args_schema=(
+                OpStrategy([OpSpec(ref_left_spec)]),
+                OpStrategy([OpSpec(ref_right_spec)]),
+            ),
+            kwargs_schema={},
+        )
+        expanded_fn = _expand_single_dim_strategy_to_mesh(
+            mesh,
+            wrapped_schema,
+            _SingleDimStrategyInfo(mm_single_dim_strategy),
+            output_meta,
+        )
+        ref_strategy = expanded_fn(
+            torch.ops.aten.mm.default,
+            wrapped_schema.args_meta,
+            wrapped_schema.kwargs_meta,
+        )
+
+        # Collect all placements per input position per mesh dim
+        for input_idx in range(2):
+            for mesh_dim in range(mesh.ndim):
+                all_placements: set[Placement] = set()
+                for s in ref_strategy.strategies:
+                    all_placements.add(s.input_specs[input_idx].placements[mesh_dim])
+
+                # Build directed graph from transition rules
+                def is_sharding(p: Placement) -> bool:
+                    return isinstance(p, Shard)
+
+                edges: dict[Placement, set[Placement]] = {
+                    p: set() for p in all_placements
+                }
+                for src in all_placements:
+                    for dst in all_placements:
+                        if src == dst:
+                            continue
+                        # R -> S, R -> P (free)
+                        if isinstance(src, Replicate) and (
+                            is_sharding(dst) or isinstance(dst, Partial)
+                        ):
+                            edges[src].add(dst)
+                        # S -> R (allgather), S -> S' (all-to-all)
+                        if is_sharding(src) and (
+                            isinstance(dst, Replicate) or is_sharding(dst)
+                        ):
+                            edges[src].add(dst)
+                        # P -> R (allreduce), P -> S (reduce-scatter)
+                        if isinstance(src, Partial) and (
+                            isinstance(dst, Replicate) or is_sharding(dst)
+                        ):
+                            edges[src].add(dst)
+
+                # BFS from each placement, assert all others reachable
+                for start in all_placements:
+                    visited: set[Placement] = set()
+                    q = deque([start])
+                    while q:
+                        node = q.popleft()
+                        if node in visited:
+                            continue
+                        visited.add(node)
+                        q.extend(edges.get(node, set()))
+                    self.assertEqual(
+                        visited,
+                        all_placements,
+                        f"input_idx={input_idx}, mesh_dim={mesh_dim}: "
+                        f"from {start}, unreachable: {all_placements - visited}",
+                    )
 
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())

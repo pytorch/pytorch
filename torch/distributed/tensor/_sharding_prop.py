@@ -26,7 +26,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
-    _find_lowest_cost_sharding,
+    _dijkstra_expand_single_dim_strategy_to_mesh,
     _SingleDimStrategyInfo,
 )
 from torch.distributed.tensor._utils import (
@@ -570,7 +570,7 @@ class ShardingPropagator:
                 op_strategy = None
                 if _USE_MIN_COST_SEARCH:
                     # Try PQ search first; returns None on StridedShard fallback
-                    op_strategy = _find_lowest_cost_sharding(
+                    op_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
                         mesh,
                         strategy_schema,
                         single_dim_strategy_info,

@@ -2,6 +2,7 @@
 import functools
 import heapq
 import logging
+import math
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -9,7 +10,10 @@ from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor._collective_utils import redistribute_cost
+from torch.distributed.tensor._collective_utils import (
+    _compute_placement_transition_cost,
+    MeshTopoInfo,
+)
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     ArgsType,
@@ -431,38 +435,159 @@ def register_single_dim_strategy(
     return wrapper
 
 
-def _cost_helper(src_placements, dst_placements, mesh, tensor_meta):
-    current_spec = DTensorSpec(
-        mesh,
-        src_placements,
-        tensor_meta=tensor_meta,
-    )
-    new_spec = DTensorSpec(
-        mesh,
-        dst_placements,
-        tensor_meta=tensor_meta,
-    )
-    return redistribute_cost(current_spec, new_spec)
+_pq_counter: int = 0
 
 
-def _find_lowest_cost_sharding(
+@dataclass(order=True)
+class _PQEntry:
+    """Priority queue entry for the Dijkstra search in _dijkstra_expand_single_dim_strategy_to_mesh.
+
+    Ordered by (cost, counter) for heap comparison. The counter breaks ties
+    in FIFO order so that entries with equal cost are explored in insertion
+    order rather than by arbitrary tuple comparison on placements.
+    """
+
+    cost: float
+    counter: int = field(init=False)
+    # Per-input placement tuples representing the current search state.
+    placements: tuple[tuple[Placement, ...], ...] = field(compare=False)
+    # History of (input_idx, mesh_dim, old_placement, new_placement) transitions
+    # from the initial state to this state, used for debugging.
+    transitions: list[tuple[int, int, Placement, Placement]] = field(compare=False)
+    # Redistribute cost from initial placements to current placements, per input.
+    per_input_costs: tuple[float, ...] = field(compare=False)
+
+    def __post_init__(self) -> None:
+        global _pq_counter
+        self.counter = _pq_counter
+        _pq_counter += 1
+
+
+def _compute_redistribute_cost(
+    src_placements: tuple[Placement, ...],
+    dst_placements: tuple[Placement, ...],
+    mesh_topo: MeshTopoInfo,
+    initial_comm_bytes_gb: float,
+) -> float:
+    """Compute redistribute cost using per-dim placement transitions.
+
+    Avoids the overhead of DTensorSpec construction and _gen_transform_infos
+    planning used by redistribute_cost(). Uses the same greedy transform
+    ordering (reverse then forward pass) for correct nested shard handling.
+    """
+    if src_placements == dst_placements:
+        return 0.0
+
+    ndim = len(src_placements)
+    cost = 0.0
+    comm_bytes_gb = initial_comm_bytes_gb
+
+    # Replicate greedy transform ordering from generate_greedy_transform_infos:
+    # 1. Reverse pass: detect misaligned nested shardings and replicate first
+    # 2. Forward pass: handle remaining transitions
+    current = list(src_placements)
+    target = list(dst_placements)
+
+    src_has_shards = any(p.is_shard() for p in src_placements)
+    if src_has_shards:
+        for dim in reversed(range(ndim)):
+            cur = current[dim]
+            tgt = target[dim]
+            if tgt.is_shard():
+                shard_dim = cast(Shard, tgt).dim
+                cur_sharding = [i for i in range(dim) if current[i].is_shard(shard_dim)]
+                tgt_sharding = [i for i in range(dim) if target[i].is_shard(shard_dim)]
+                if cur_sharding != tgt_sharding:
+                    tgt = Replicate()
+            if cur != tgt:
+                step_cost, comm_bytes_gb = _compute_placement_transition_cost(
+                    cur, tgt, mesh_topo, dim, comm_bytes_gb
+                )
+                if step_cost == float("inf"):
+                    return float("inf")
+                cost += step_cost
+                current[dim] = tgt
+
+    for dim in range(ndim):
+        if current[dim] != target[dim]:
+            step_cost, comm_bytes_gb = _compute_placement_transition_cost(
+                current[dim], target[dim], mesh_topo, dim, comm_bytes_gb
+            )
+            if step_cost == float("inf"):
+                return float("inf")
+            cost += step_cost
+
+    return cost
+
+
+def _build_output_spec(
+    mesh: DeviceMesh,
+    selected_output_placements: list[tuple[Placement, ...]],
+    num_outputs: int,
+    output_metas: tuple[TensorMeta | None, ...],
+) -> DTensorSpec | tuple[DTensorSpec | None, ...]:
+    """Build multi-dim output spec from per-mesh-dim output placements.
+
+    selected_output_placements is indexed [mesh_dim][output_idx], so we transpose
+    to get per-output placements across mesh dims. For num_outputs==0 (ops with
+    no tensor output, e.g. assertion ops), returns an all-Replicate spec as a
+    placeholder.
+    """
+    if num_outputs == 1:
+        output_placements_tuple = tuple(out[0] for out in selected_output_placements)
+        out_meta = output_metas[0] if output_metas else None
+        return DTensorSpec(mesh, output_placements_tuple, tensor_meta=out_meta)
+    elif num_outputs > 1:
+        multi_output_specs: list[DTensorSpec | None] = []
+        for out_idx in range(num_outputs):
+            out_placements = tuple(out[out_idx] for out in selected_output_placements)
+            meta = output_metas[out_idx] if out_idx < len(output_metas) else None
+            multi_output_specs.append(
+                DTensorSpec(mesh, out_placements, tensor_meta=meta)
+            )
+        return tuple(multi_output_specs)
+    else:
+        return DTensorSpec(mesh, (Replicate(),) * mesh.ndim)
+
+
+def _dijkstra_expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: Callable[
         [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
     ],
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
+    _collect_all_matches: set[tuple[tuple[Placement, ...], ...]] | None = None,
 ) -> OpStrategy | None:
     """
     Find the lowest cost sharding for the given op_schema.
 
-    This solves the runtime complexity problem of using _expand_single_dim_strategy_to_mesh by avoiding enumerating
-    the product of the single dim strategy over all the mesh dims and then searching the enumerated list for the min
-    cost.  Instead, it starts from the input placements and expands a search from there, starting by checking if
-    the input placements already describe a legal placement on all mesh dims, and then if not, iterating by taking
-    the lowest-cost redistributions in priority-queue order.
+    Uses a Dijkstra-like priority-queue search over input placement states. Each
+    state is a tuple of per-input placement tuples, and neighbors are generated
+    by changing one placement on one mesh dim for one input. The search
+    terminates when a state matches a single-dim strategy on every mesh dim.
 
-    Returns None if any input has _StridedShard placement, signaling the caller to fall back to full expansion.
+    This avoids the O(S^N) exhaustive expansion of _expand_single_dim_strategy_to_mesh
+    (S = single-dim strategies, N = mesh dims).  Benchmarks with mm on fake
+    process groups show:
+
+        1D(4):     S^N=8,   avg 0.2ms
+        2D(2,2):   S^N=64,  avg 2.3ms
+        3D(2,2,2): S^N=512, avg 41ms, worst 392ms
+
+    The step count is small (avg 0.6-2.0 pops) but per-step cost is dominated
+    by cost computation.  To minimize overhead, we call
+    _compute_placement_transition_cost directly per mesh dim (via
+    _compute_redistribute_cost) instead of going through redistribute_cost
+    (which constructs DTensorSpecs and runs _gen_transform_infos planning).
+
+    Returns None if any input has _StridedShard placement, signaling the caller
+    to fall back to full expansion.
+
+    Args:
+        _collect_all_matches: Testing-only. When non-None, exhaustively explores the
+            full transition graph, adding every shardable match to the set. Still
+            returns the optimal (first) match.
     """
     # Note: circular import
     from torch.distributed.tensor._ops.utils import (
@@ -550,145 +675,169 @@ def _find_lowest_cost_sharding(
     else:
         output_metas = tuple(output_tensor_meta)
 
-    # PQ entry: (cost, counter, input_placements_tuple, transitions)
-    # cost is the total redistribute cost from original placements to current state
-    # transitions: list of (input_idx, mesh_dim, src_placement, dst_placement)
-    _Transitions = list[tuple[int, int, Placement, Placement]]
-    counter: int = 0
-    pq: list[tuple[float, int, tuple[tuple[Placement, ...], ...], _Transitions]] = []
-    visited: set[tuple[tuple[Placement, ...], ...]] = set()
-
     initial_input_placements = tuple(spec.placements for spec in input_specs)
-    heapq.heappush(pq, (0.0, counter, initial_input_placements, []))
-    counter += 1
+    first_result: OpStrategy | None = None
 
-    def _total_cost(
-        input_placements_tuple: tuple[tuple[Placement, ...], ...],
-    ) -> float:
-        """Compute total redistribute cost from original to candidate placements."""
-        total = 0.0
-        for input_idx in range(num_inputs):
-            total += _cost_helper(
-                initial_input_placements[input_idx],
-                input_placements_tuple[input_idx],
-                mesh,
-                input_specs[input_idx].tensor_meta,
-            )
-        return total
-
-    def _push_neighbor(
-        input_idx: int,
-        mesh_dim: int,
-        new_placement: Placement,
-        current_placements: tuple[tuple[Placement, ...], ...],
-        current_transitions: _Transitions,
-    ) -> None:
-        nonlocal counter
-        new_input_placements = [list(ps) for ps in current_placements]
-        old_placement = new_input_placements[input_idx][mesh_dim]
-        new_input_placements[input_idx][mesh_dim] = new_placement
-        new_tuple = tuple(tuple(ps) for ps in new_input_placements)
-        if new_tuple in visited:
-            return
-        new_cost = _total_cost(new_tuple)
-        new_transitions = current_transitions + [
-            (input_idx, mesh_dim, old_placement, new_placement)
-        ]
-        heapq.heappush(pq, (new_cost, counter, new_tuple, new_transitions))
-        counter += 1
-
-    while pq:
-        cost, counter_, input_placements_tuple, transitions = heapq.heappop(pq)
-
-        if input_placements_tuple in visited:
-            continue
-        visited.add(input_placements_tuple)
-
-        # Check if current input placements match a single-dim strategy on every mesh dim
+    def _try_match(
+        input_placements: tuple[tuple[Placement, ...], ...],
+    ) -> OpStrategy | None:
+        """If input_placements match a strategy rule on every mesh dim and are
+        shardable, return an OpStrategy with zero redistribute costs."""
         selected_output_placements: list[tuple[Placement, ...]] = []
-        is_match = True
-
         for mesh_dim in range(mesh.ndim):
             input_placements_for_dim = tuple(
-                placements[mesh_dim] for placements in input_placements_tuple
+                placements[mesh_dim] for placements in input_placements
             )
             output_for_dim = strategy_lookup.get(input_placements_for_dim)
             if output_for_dim is not None:
                 selected_output_placements.append(output_for_dim)
             else:
-                is_match = False
-                break
+                return None
 
-        if is_match:
-            # Build input specs for the candidate match
-            arg_specs = [
-                DTensorSpec(mesh, placements, tensor_meta=input_spec.tensor_meta)
-                for placements, input_spec in zip(input_placements_tuple, input_specs)
-            ]
+        arg_specs = [
+            DTensorSpec(mesh, placements, tensor_meta=input_spec.tensor_meta)
+            for placements, input_spec in zip(input_placements, input_specs)
+        ]
+        if not all(
+            is_tensor_shardable(spec.tensor_meta.shape, spec)
+            for spec in arg_specs
+            if spec.tensor_meta is not None
+        ):
+            return None
 
-            # Check all inputs are shardable with these placements
-            shardable = all(
-                is_tensor_shardable(spec.tensor_meta.shape, spec)
-                for spec in arg_specs
-                if spec.tensor_meta is not None
-            )
-
-            if shardable:
-                # Build multi-dim output placements: transpose from per-mesh-dim to per-output
-                if num_outputs == 1:
-                    output_placements_tuple = tuple(
-                        out[0] for out in selected_output_placements
-                    )
-                    out_meta = output_metas[0] if output_metas else None
-                    output_spec: DTensorSpec | tuple[DTensorSpec | None, ...] = (
-                        DTensorSpec(mesh, output_placements_tuple, tensor_meta=out_meta)
-                    )
-                elif num_outputs > 1:
-                    multi_output_specs: list[DTensorSpec | None] = []
-                    for out_idx in range(num_outputs):
-                        out_placements = tuple(
-                            out[out_idx] for out in selected_output_placements
-                        )
-                        meta = (
-                            output_metas[out_idx]
-                            if out_idx < len(output_metas)
-                            else None
-                        )
-                        multi_output_specs.append(
-                            DTensorSpec(mesh, out_placements, tensor_meta=meta)
-                        )
-                    output_spec = tuple(multi_output_specs)
-                else:
-                    output_spec = DTensorSpec(mesh, (Replicate(),) * mesh.ndim)
-
-                redistribute_costs = [
-                    generate_redistribute_costs(src_strategy, arg_spec)
-                    for src_strategy, arg_spec in zip(src_strategies, arg_specs)
-                ]
-
-                op_spec = OpSpec(
+        output_spec = _build_output_spec(
+            mesh, selected_output_placements, num_outputs, output_metas
+        )
+        return OpStrategy(
+            [
+                OpSpec(
                     output_specs=output_spec,
                     input_specs=arg_specs,
-                    redistribute_cost=redistribute_costs,
+                    redistribute_cost=[[0.0] for _ in input_specs],
                 )
+            ]
+        )
 
-                exhaustive = len(expanded_strategies_over_one_mesh_dim) ** mesh.ndim
-                logger.debug(
-                    "returning cost=%f %s, counter=%d, exhaustive=%d, transitions=%s",
-                    cost,
-                    op_spec,
-                    counter,
-                    exhaustive,
-                    transitions,
+    # Fast path: if initial placements already match, skip PQ entirely
+    fast_result = _try_match(initial_input_placements)
+    if fast_result is not None:
+        fast_result._pq_transitions = []  # type: ignore[attr-defined]
+        if _collect_all_matches is not None:
+            _collect_all_matches.add(initial_input_placements)
+            first_result = fast_result
+        else:
+            return fast_result
+
+    # Pre-compute mesh topology and per-input comm_bytes_gb for direct cost computation
+    mesh_topo = MeshTopoInfo.build_from_mesh(mesh)
+    per_input_comm_bytes_gb: list[float] = []
+    for spec in input_specs:
+        assert spec.tensor_meta is not None
+        total_bytes = spec.tensor_meta.dtype.itemsize * math.prod(
+            spec.tensor_meta.shape
+        )
+        num_shards = 1
+        for i, p in enumerate(spec.placements):
+            if p.is_shard():
+                num_shards *= mesh_topo.mesh_dim_devices[i]
+        per_input_comm_bytes_gb.append(total_bytes / num_shards / (1024**3))
+
+    pq: list[_PQEntry] = []
+    visited: set[tuple[tuple[Placement, ...], ...]] = set()
+    cost_caches: list[dict[tuple[Placement, ...], float]] = [
+        {} for _ in range(num_inputs)
+    ]
+
+    initial_per_input_costs = (0.0,) * num_inputs
+    heapq.heappush(
+        pq,
+        _PQEntry(0.0, initial_input_placements, [], initial_per_input_costs),
+    )
+
+    def _push_neighbor(
+        input_idx: int,
+        mesh_dim: int,
+        new_placement: Placement,
+        entry: _PQEntry,
+    ) -> None:
+        new_input_placements = [list(ps) for ps in entry.placements]
+        old_placement = new_input_placements[input_idx][mesh_dim]
+        new_input_placements[input_idx][mesh_dim] = new_placement
+        candidate_placements = tuple(tuple(ps) for ps in new_input_placements)
+        if candidate_placements in visited:
+            return
+        candidate_key = candidate_placements[input_idx]
+        cached = cost_caches[input_idx].get(candidate_key)
+        if cached is not None:
+            changed_cost = cached
+        else:
+            changed_cost = _compute_redistribute_cost(
+                initial_input_placements[input_idx],
+                candidate_key,
+                mesh_topo,
+                per_input_comm_bytes_gb[input_idx],
+            )
+            cost_caches[input_idx][candidate_key] = changed_cost
+        new_per_input_costs = (
+            entry.per_input_costs[:input_idx]
+            + (changed_cost,)
+            + entry.per_input_costs[input_idx + 1 :]
+        )
+        new_cost = sum(new_per_input_costs)
+        new_transitions = entry.transitions + [
+            (input_idx, mesh_dim, old_placement, new_placement)
+        ]
+        heapq.heappush(
+            pq,
+            _PQEntry(new_cost, candidate_placements, new_transitions, new_per_input_costs),
+        )
+
+    while pq:
+        entry = heapq.heappop(pq)
+
+        if entry.placements in visited:
+            continue
+        visited.add(entry.placements)
+
+        match_result = _try_match(entry.placements)
+        if match_result is not None:
+            # Replace zero redistribute costs with actual costs from src
+            match_spec = match_result.strategies[0]
+            assert match_spec.input_specs is not None
+            redistribute_costs = [
+                generate_redistribute_costs(src_strategy, arg_spec)
+                for src_strategy, arg_spec in zip(
+                    src_strategies, match_spec.input_specs
                 )
-                result = OpStrategy([op_spec])
-                result._pq_transitions = transitions  # type: ignore[attr-defined]
+            ]
+            op_spec = OpSpec(
+                output_specs=match_spec.output_specs,
+                input_specs=list(match_spec.input_specs),
+                redistribute_cost=redistribute_costs,
+            )
+
+            exhaustive = len(expanded_strategies_over_one_mesh_dim) ** mesh.ndim
+            logger.debug(
+                "returning cost=%f %s, visited=%d, exhaustive=%d, transitions=%s",
+                entry.cost,
+                op_spec,
+                len(visited),
+                exhaustive,
+                entry.transitions,
+            )
+            result = OpStrategy([op_spec])
+            result._pq_transitions = entry.transitions  # type: ignore[attr-defined]
+            if _collect_all_matches is not None:
+                _collect_all_matches.add(entry.placements)
+                if first_result is None:
+                    first_result = result
+            else:
                 return result
 
-        # Generate all neighbor states (independent blocks, not if/elif)
-        for input_idx in range(len(input_placements_tuple)):
-            for mesh_dim in range(mesh.ndim):
-                current_p = input_placements_tuple[input_idx][mesh_dim]
+        # Generate neighbor states
+        for mesh_dim in range(mesh.ndim):
+            for input_idx in range(len(entry.placements)):
+                current_p = entry.placements[input_idx][mesh_dim]
 
                 # Replicate -> Shard (local chunk, free)
                 if isinstance(current_p, Replicate):
@@ -697,8 +846,7 @@ def _find_lowest_cost_sharding(
                             input_idx,
                             mesh_dim,
                             sharding,
-                            input_placements_tuple,
-                            transitions,
+                            entry,
                         )
                     # Replicate -> Partial (local, free)
                     for partial in allowed_partial_per_input[input_idx]:
@@ -706,8 +854,7 @@ def _find_lowest_cost_sharding(
                             input_idx,
                             mesh_dim,
                             partial,
-                            input_placements_tuple,
-                            transitions,
+                            entry,
                         )
 
                 # Shard -> Replicate (allgather)
@@ -716,8 +863,7 @@ def _find_lowest_cost_sharding(
                         input_idx,
                         mesh_dim,
                         Replicate(),
-                        input_placements_tuple,
-                        transitions,
+                        entry,
                     )
                     # Shard -> different Shard (all-to-all)
                     for sharding in allowed_sharding_per_input[input_idx]:
@@ -726,8 +872,7 @@ def _find_lowest_cost_sharding(
                                 input_idx,
                                 mesh_dim,
                                 sharding,
-                                input_placements_tuple,
-                                transitions,
+                                entry,
                             )
 
                 # Partial -> Replicate (allreduce)
@@ -736,8 +881,7 @@ def _find_lowest_cost_sharding(
                         input_idx,
                         mesh_dim,
                         Replicate(),
-                        input_placements_tuple,
-                        transitions,
+                        entry,
                     )
                     # Partial -> Shard (reduce-scatter)
                     for sharding in allowed_sharding_per_input[input_idx]:
@@ -745,9 +889,11 @@ def _find_lowest_cost_sharding(
                             input_idx,
                             mesh_dim,
                             sharding,
-                            input_placements_tuple,
-                            transitions,
+                            entry,
                         )
+
+    if _collect_all_matches is not None and first_result is not None:
+        return first_result
 
     raise AssertionError(
         f"No valid strategy found for op_schema {op_schema}. "
