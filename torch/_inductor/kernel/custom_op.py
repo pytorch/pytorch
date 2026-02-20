@@ -985,6 +985,7 @@ def _range_based_lowering_fn(
     result = inline_subgraph_to_ir_nodes(dispatch_gm, tensor_inputs, f"{name}_dispatch")
 
     # Apply config_patches from all impl groups to inlined operations
+    # TODO - consider conflicting patches
     merged_patches: dict[str, Any] = {}
     for group in impl_groups:
         merged_patches.update(group.config_patches)
