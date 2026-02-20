@@ -169,6 +169,31 @@ class TestDecomp(NNTestCase):
         run_comp_nocomp(torch_bmm, t1, t2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    def test_mm_k1(self, device, dtype):
+        fudge = 10
+        rtol = default_rtol[dtype] * fudge
+        atol = default_atol[dtype] * fudge
+
+        t1 = rand_math_tensor((64, 1), dtype=dtype, device=device)
+        t2 = rand_math_tensor((1, 64), dtype=dtype, device=device)
+
+        run_comp_nocomp(torch_mm, t1, t2, rtol=rtol, atol=atol)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    def test_addmm_k1(self, device, dtype):
+        fudge = 10
+        rtol = default_rtol[dtype] * fudge
+        atol = default_atol[dtype] * fudge
+
+        t1 = rand_math_tensor((64, 1), dtype=dtype, device=device)
+        t2 = rand_math_tensor((1, 64), dtype=dtype, device=device)
+        tadd = rand_math_tensor((64,), dtype=dtype, device=device)
+
+        run_comp_nocomp(torch_addmm, tadd, t1, t2, rtol=rtol, atol=atol)
+
+    @unittest.skipIf(not HAS_GPU, "GPU tests require triton")
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
     def test_some(self, device, dtype):
         # this Pytorch data type is not fully supported on cuda today
