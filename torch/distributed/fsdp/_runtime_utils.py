@@ -469,7 +469,7 @@ def _post_forward(
         # recomputed forward
         if handle and handle._training_state == HandleTrainingState.BACKWARD_PRE:
             return output
-        # Only execute for native forward (non-recomputed)   
+        # Only execute for native forward (non-recomputed)
         if torch._C._current_graph_task_id() == -1:
             state._exec_order_data.record_post_forward(handle)
             if reshard_fn is not None:
