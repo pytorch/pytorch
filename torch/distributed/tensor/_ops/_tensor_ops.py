@@ -1334,3 +1334,56 @@ def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
             for strategy in out_spec.strategies
         ]
     )
+
+
+def _unshard_active_dims(
+    ndim: int, active_dims: set[int]
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Single-dim strategies for ops that unshard on active dims, keep sharding on others."""
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d not in active_dims:
+            strategies.append([_ShardingPlaceholder(d), _ShardingPlaceholder(d)])
+    return strategies
+
+
+@register_single_dim_strategy(aten.roll.default, schema_info=RuntimeSchemaInfo(1))
+def roll_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    assert isinstance(input_meta, TensorMeta)
+    ndim = len(input_meta.shape)
+    raw_dims = cast(list[int], args_schema[2]) if len(args_schema) > 2 else []
+    # When dims is empty, roll flattens the tensor — all dims are active
+    if not raw_dims:
+        raw_dims = list(range(ndim))
+    active_dims = {normalize_dim(d, ndim) for d in raw_dims}
+    return _unshard_active_dims(ndim, active_dims)
+
+
+@register_single_dim_strategy(aten.flip.default, schema_info=RuntimeSchemaInfo(1))
+def flip_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    assert isinstance(input_meta, TensorMeta)
+    ndim = len(input_meta.shape)
+    raw_dims = cast(list[int], args_schema[1])
+    active_dims = {normalize_dim(d, ndim) for d in raw_dims}
+    return _unshard_active_dims(ndim, active_dims)
+
+
+@register_single_dim_strategy(
+    [aten._fft_c2c.default, aten._fft_r2c.default, aten._fft_c2r.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def fft_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    assert isinstance(input_meta, TensorMeta)
+    ndim = len(input_meta.shape)
+    raw_dims = cast(list[int], args_schema[1])
+    active_dims = {normalize_dim(d, ndim) for d in raw_dims}
+    return _unshard_active_dims(ndim, active_dims)
