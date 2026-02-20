@@ -2,7 +2,7 @@
 
 ``debug_log`` and ``debug_log_rank`` log tensor norms during forward and
 gradients during backward. Both are leaf functions, so they are opaque to
-the compiler and work with eager, torch.compile, and aot_function.
+the compiler and work with eager, torch.compile with aot_eager backend, and make_fx.
 
 Backward logging is implemented via ``register_hook`` on the leaf function,
 which registers autograd hooks on the input tensors so the hook fires when
@@ -45,7 +45,7 @@ Example::
         print(f"[{label}][bwd] mean={t_grad.mean().item():.4f}")
 
 
-    # Usage (works in eager, torch.compile, and aot_function):
+    # Usage (works in eager, torch.compile with aot_eager backend, and make_fx):
     y = x * 2
     my_log(y, "after_linear")  # logs fwd on call, bwd when y's grad is computed
 
