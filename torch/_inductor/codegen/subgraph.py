@@ -8,8 +8,8 @@ from typing import Any
 import sympy
 
 import torch
-from torch._dynamo.utils import counters
 import torch._inductor.config as config
+from torch._dynamo.utils import counters
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
@@ -368,7 +368,7 @@ class SubgraphTemplate(KernelTemplate):
         ):
             # Create make_fx_graph function for this decomposition
             # Uses error_on_new_guards to detect impls that add guards
-            from torch.fx.experimental.symbolic_shapes import ShapeEnvGuardError
+            from torch.fx.experimental.symbolic_shapes import _ShapeEnvGuardError
 
             def make_fx_graph(
                 *args: Any,
@@ -410,7 +410,7 @@ class SubgraphTemplate(KernelTemplate):
                     description=f"CustomOp {decomp.__name__}",
                     input_gen_fns=input_gen_fns,
                 )
-            except ShapeEnvGuardError:
+            except _ShapeEnvGuardError:
                 log.info(
                     "Skipping decomposition %s: adds guards during tracing",
                     decomp.__name__,

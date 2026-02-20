@@ -1607,19 +1607,6 @@ static PyObject* THCPModule_clearBlasWorkspaces_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPModule_clearBlasWorkspacesForStream_wrap(
-    PyObject* self,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      THPUtils_checkLong(arg), "argument must be a CUDA stream pointer");
-  cudaStream_t stream =
-      reinterpret_cast<cudaStream_t>(THPUtils_unpackLong(arg));
-  at::cuda::clearCublasWorkspacesForStream(stream);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THCPModule_rocm_is_backward_pass(
     PyObject* _unused,
     PyObject* noargs) {
@@ -2062,10 +2049,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_clearCublasWorkspaces",
      THCPModule_clearBlasWorkspaces_wrap,
      METH_NOARGS,
-     nullptr},
-    {"_cuda_clearCublasWorkspacesForStream",
-     THCPModule_clearBlasWorkspacesForStream_wrap,
-     METH_O,
      nullptr},
     {"_cuda_isCurrentStreamCapturing",
      THCPModule_isCurrentStreamCapturing_wrap,
