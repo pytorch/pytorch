@@ -13,7 +13,7 @@ enum class TransposeType {
 };
 
 // Transforms TransposeType into the BLAS / LAPACK format
-static inline char to_blas(TransposeType trans) {
+[[maybe_unused]] static inline char to_blas(TransposeType trans) {
   switch (trans) {
     case TransposeType::Transpose: return 'T';
     case TransposeType::NoTranspose: return 'N';

@@ -82,18 +82,20 @@ class TestConfigModule(TestCase):
             self.check_deterministic(key, value)
 
     def test_inductor_config_hash_portable_without_ignore(self):
-        idx = inductor_config._cache_config_ignore_prefix.index("cuda.cutlass_dir")
-        inductor_config._cache_config_ignore_prefix.remove("cuda.cutlass_dir")
-        try:
-            changed_torch_config = inductor_config.save_config_portable()
-            with self.assertRaisesRegex(
-                AssertionError,
-                "Detected path in config value '.*', key='cuda.cutlass_dir'",
-            ):
-                for key, value in changed_torch_config.items():
-                    self.check_deterministic(key, value)
-        finally:
-            inductor_config._cache_config_ignore_prefix.insert(idx, "cuda.cutlass_dir")
+        for cutlass_key in ("cuda", "xpu", "cutlass"):
+            cutlass_dir_key = f"{cutlass_key}.cutlass_dir"
+            idx = inductor_config._cache_config_ignore_prefix.index(cutlass_dir_key)
+            inductor_config._cache_config_ignore_prefix.remove(cutlass_dir_key)
+            try:
+                changed_torch_config = inductor_config.save_config_portable()
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    f"Detected path in config value '.*', key='{cutlass_dir_key}'",
+                ):
+                    for key, value in changed_torch_config.items():
+                        self.check_deterministic(key, value)
+            finally:
+                inductor_config._cache_config_ignore_prefix.insert(idx, cutlass_dir_key)
 
 
 if __name__ == "__main__":

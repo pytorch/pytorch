@@ -1,5 +1,5 @@
 import copy
-from queue import SimpleQueue
+import heapq
 from typing import Optional as _Optional
 
 import torch.fx
@@ -13,31 +13,35 @@ from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-d
 
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
-    # sort nodes according to the topological order
+    # Stable topological sort: among nodes with no dependency between them,
+    # preserve their relative order in the input list. This uses a min-heap
+    # keyed by original position instead of a FIFO queue.
     indegree_map = dict.fromkeys(nodes, 0)
-    candidates: SimpleQueue[Node] = SimpleQueue()
+    position = {node: i for i, node in enumerate(nodes)}
+    candidates: list[tuple[int, Node]] = []
 
     for node in nodes:
         for n in node.all_input_nodes:
             if n in indegree_map:
                 indegree_map[node] += 1
         if indegree_map[node] == 0:
-            candidates.put(node)
+            heapq.heappush(candidates, (position[node], node))
 
     sorted_nodes: NodeList = []
-    while not candidates.empty():
-        node = candidates.get()
+    while candidates:
+        _, node = heapq.heappop(candidates)
         sorted_nodes.append(node)
 
         for n in node.users:
             if n in indegree_map:
                 indegree_map[n] -= 1
                 if indegree_map[n] == 0:
-                    candidates.put(n)
+                    heapq.heappush(candidates, (position[n], n))
 
-    assert len(nodes) == len(sorted_nodes), (
-        "topological sorted nodes doesn't have same length as input nodes"
-    )
+    if len(nodes) != len(sorted_nodes):
+        raise AssertionError(
+            "topological sorted nodes doesn't have same length as input nodes"
+        )
 
     return sorted_nodes
 
@@ -126,16 +130,20 @@ def fuse_as_graphmodule(
     # assumption: nodes are already sorted in topo order
 
     for node in nodes:
-        assert node.graph.owning_module is gm, (
-            f"{node} doesn't belong to passed in graph module {gm._get_name()}"
-        )
-        assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph._find_nodes_lookup_table, (
-            f"{node} is not found in graph module {gm._get_name()}"
-        )
+        if node.graph.owning_module is not gm:
+            raise AssertionError(
+                f"{node} doesn't belong to passed in graph module {gm._get_name()}"
+            )
+        if node._erased:
+            raise AssertionError(f"{node} has been removed from owning graph")
+        if node not in gm.graph._find_nodes_lookup_table:
+            raise AssertionError(
+                f"{node} is not found in graph module {gm._get_name()}"
+            )
 
     # validates partition doesn't introduce dependency circles in the graph
-    assert validate_partition(nodes), "Invalid partition, found dependency cycles"
+    if not validate_partition(nodes):
+        raise AssertionError("Invalid partition, found dependency cycles")
 
     # if no dict of partition nodes is provided, reconstruct it by nodes list to reduce lookup time
     if partition_lookup_table is None:
@@ -227,7 +235,8 @@ def insert_subgm(
         return None
 
     last_output_node: Node | None = last_node(orig_outputs)
-    assert last_output_node is not None
+    if last_output_node is None:
+        raise AssertionError("last_output_node is None")
 
     # Create a call_module node in main graph.
     with gm.graph.inserting_after(last_output_node):

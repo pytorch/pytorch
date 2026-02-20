@@ -29,6 +29,7 @@ from functools import partial
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
@@ -50,7 +51,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
-from torch.fx._graph_pickler import _ops_filter_safe
+from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -616,6 +617,18 @@ class CompiledFxGraph(OutputCode):
         # This is set at compile time to avoid runtime overhead
         self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
 
+        if self._wrap_compiled_regions:
+            self.fake_outputs = tuple(
+                [x.meta["val"] for x in gm.graph.find_nodes(op="output")[0].args[0]]
+            )
+            for fake_out in pytree.tree_leaves(self.fake_outputs):
+                if isinstance(fake_out, torch.Tensor) and any(
+                    isinstance(s, torch.SymInt) for s in fake_out.shape
+                ):
+                    raise RuntimeError(
+                        "wrap_compiled_regions does not support dynamic shapes yet"
+                    )
+
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
             # For torch._inductor.config.graph_partition = True,
@@ -751,11 +764,18 @@ class CompiledFxGraph(OutputCode):
         # Apply inductor_compiled_code HOP wrapper if configured
         # This is done in post_compile to ensure it works with cached artifacts
         if self._wrap_compiled_regions and self.current_callable is not None:
+            from torch._higher_order_ops.wrap import InductorCompiledCallable
+
             original_callable = self.current_callable
+
+            # Create a wrapper that holds both the compiled callable and FX graph
+            inductor_callable = InductorCompiledCallable(
+                original_callable, self.fake_outputs
+            )
 
             def wrapped_callable(inputs):
                 if is_in_torch_dispatch_mode():
-                    return inductor_compiled_code(original_callable, inputs)
+                    return inductor_compiled_code(inductor_callable, inputs)
                 else:
                     return original_callable(inputs)
 
@@ -772,6 +792,8 @@ class CompiledFxGraph(OutputCode):
         self.current_callable = None
         self.recursively_apply_fns = None
         self.compiled_fn_runner = None
+        # Note: _serialized_fx_graph is already in serializable form (SerializedGraphModule)
+        # so it doesn't need to be cleared
 
     def write_to_disk(self) -> str:
         from torch._dynamo.utils import counters
@@ -966,6 +988,9 @@ class RegionalOutputCode(OutputCode):
         self,
         graph_module: torch.fx.GraphModule,
         ops_filter: Callable[[str], bool] = _ops_filter_safe,
+        node_metadata_key_filter: Optional[Callable[[str], bool]] = (
+            _node_metadata_key_filter_safe
+        ),
     ):
         """
         Args:
@@ -983,6 +1008,7 @@ class RegionalOutputCode(OutputCode):
             module.graph._codegen, torch.fx.graph._BoxedCodeGen
         )
         self._ops_filter = ops_filter
+        self._node_metadata_key_filter = node_metadata_key_filter
 
     def __call__(self, inputs: list[Any]) -> Any:
         """
@@ -1083,6 +1109,7 @@ class RegionalOutputCode(OutputCode):
                 graph_module,
                 options=Options(
                     ops_filter=self._ops_filter,
+                    node_metadata_key_filter=self._node_metadata_key_filter,
                 ),
             )
             # Clear the graph module to avoid pickling it with standard pickle

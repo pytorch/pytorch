@@ -260,9 +260,7 @@ def _adapt_user_input_gen_fns(
     user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]],
 ) -> dict[int, Callable[[Any], torch.Tensor]]:
     """Convert user input generators from name-based to index-based format.
-       Inductor autotune's input_gen_fns expects index of arg_names as key.
-
-    Uses V.graph.sizevars.size_hints() to guess best for dynamic shapes.
+    Inductor autotune's input_gen_fns expects index of arg_names as key.
     """
 
     name_to_index = {name: i for i, name in enumerate(arg_names)}
@@ -285,7 +283,7 @@ def _adapt_user_input_gen_fns(
         """Create internal input generator that converts IR buffer to user's fake tensor."""
 
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-            fake_tensor = ir_node_to_tensor(ir_buffer, guard_shape=False)
+            fake_tensor = ir_node_to_tensor(ir_buffer, replace_symbols_with_hints=True)
             assert fake_tensor is not None, "ir_node_to_tensor returned None"
             return user_function(fake_tensor)
 

@@ -363,9 +363,9 @@ def conv_layout(
     """Determine output layout for a convolution"""
     with V.graph.fake_mode:
         output = torch.ops.aten.convolution(
-            ir.ir_node_to_tensor(x, guard_shape=True),
-            ir.ir_node_to_tensor(weight, guard_shape=True),
-            ir.ir_node_to_tensor(bias, guard_shape=True),
+            ir.ir_node_to_tensor(x),
+            ir.ir_node_to_tensor(weight),
+            ir.ir_node_to_tensor(bias),
             V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
@@ -613,7 +613,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
@@ -636,7 +636,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,

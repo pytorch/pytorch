@@ -343,7 +343,7 @@ class InductorChoices:
         ):
             return False
 
-        xhint = V.graph.sizevars.size_hint(features.numel, fallback=2)
+        xhint = V.graph.sizevars.optimization_hint(features.numel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
         elif xhint <= 16:
@@ -351,6 +351,8 @@ class InductorChoices:
         else:
             return False
         # TODO(jansel): should this default on for dynamic shapes?
+        # TODO(laith) What if hint(features.reduction_numel) >= threshold ?
+        # shall we compare hints instead
         return V.graph.sizevars.statically_known_geq(
             features.reduction_numel, threshold
         )
@@ -379,7 +381,7 @@ class InductorChoices:
             if not all(
                 (
                     (isinstance(bound, int) or bound.is_constant())
-                    and bound != torch.utils._sympy.numbers.IntInfinity()
+                    and not torch.utils._sympy.numbers.is_infinite(bound)
                 )
                 for bound in (lower, upper)
             ):
@@ -398,12 +400,11 @@ class InductorChoices:
 
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
-            try:
-                threshold *= 32 // min(
-                    V.graph.sizevars.size_hint_or_throw(features.numel), 32
-                )
-            except ValueError:
-                pass  # unbacked symint
+            # The default fallback will be used if optimizations hint is not provided. The default fallback
+            # is >> 32.
+            threshold *= 32 // min(
+                V.graph.sizevars.optimization_hint(features.numel), 32
+            )
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
         # This may result in some persistent reductions slower than the
