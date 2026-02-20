@@ -499,7 +499,7 @@ def forward(self, args_0):
                     mask_mod, B=B, H=self.num_heads, Q_LEN=L, KV_LEN=L, device=x.device
                 )
                 out = flex_attention(q, k, v, block_mask=block_mask)
-                return out.transpose(1, 2).contiguous().view(B, L, D)
+                return (out.transpose(1, 2).contiguous().view(B, L, D),)
 
         embed_dim, num_heads, seq_len = 64, 2, 128
         model = FlexAttentionModel(embed_dim, num_heads).cuda()
@@ -507,10 +507,12 @@ def forward(self, args_0):
 
         gm, signature = aot_export_module(model, [x], trace_joint=False)
 
-        out_eager = model(x)
-        out_export = gm(x)
-        self.assertEqual(out_eager.shape, out_export[0].shape)
-        self.assertTrue(torch.allclose(out_eager, out_export[0], atol=1e-5))
+        # aot_export_module flattens params/buffers into the graph signature
+        params = [p for p in model.parameters()]
+        out_eager = model(x)[0]
+        out_export = gm(*params, x)[0]
+        self.assertEqual(out_eager.shape, out_export.shape)
+        self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
