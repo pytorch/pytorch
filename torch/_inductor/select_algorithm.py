@@ -2283,14 +2283,6 @@ class ExternKernelChoice:
     specific inputs/layouts for benchmarking and code generation.
     """
 
-    # Registry of existing choices by name for reuse
-    _registry: dict[str, "ExternKernelChoice"] = {}
-
-    @classmethod
-    def get_existing(cls, name: str) -> Optional["ExternKernelChoice"]:
-        """Get an existing ExternKernelChoice by name if it exists."""
-        return cls._registry.get(name)
-
     def __init__(
         self,
         kernel,
@@ -2305,16 +2297,17 @@ class ExternKernelChoice:
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
-        setattr(extern_kernels, name, kernel)
+        # Only register if not already present - reuse existing registration
+        if hasattr(extern_kernels, name):
+            log.debug("Reusing existing extern kernel: %s", name)
+        else:
+            setattr(extern_kernels, name, kernel)
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
-        # Register this choice for reuse
-        ExternKernelChoice._registry[name] = self
         # match the API for KernelTemplate as they can be treated the same
         # There is no src hash for ExternKernelChoice in the traditional sense
         # so we indicate this by returning None
@@ -3081,10 +3074,17 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(choices) == 1:
             if not isinstance(choices[0], CUTLASSTemplateCaller):
                 # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
-                return choices[0].output_node()
+                node = choices[0].output_node()
+                if return_choice:
+                    return node, choices[0]
+                return node
 
         if config.deterministic:
-            return self.pick_deterministic_choice(choices).output_node()
+            choice = self.pick_deterministic_choice(choices)
+            node = choice.output_node()
+            if return_choice:
+                return node, choice
+            return node
 
         inputs_key = create_inputs_key(input_nodes)
 
@@ -3280,6 +3280,18 @@ class AlgorithmSelectorCache(PersistentCache):
                         min_speedup_threshold,
                     )
                     best_choice = min(fallback_choices, key=lambda c: timings[c])
+
+        # Test-only: force choosing decomposition (non-fallback) if available
+        if config.test_configs.force_custom_op_decomposition:
+
+            def is_fallback(c: ChoiceCaller) -> bool:
+                return isinstance(c, ExternKernelCaller) and getattr(
+                    c.choice, "use_fallback_kernel", False
+                )
+
+            non_fallback_choices = [c for c in timings if not is_fallback(c)]
+            if non_fallback_choices:
+                best_choice = min(non_fallback_choices, key=lambda c: timings[c])
 
         choice = best_choice
         node = choice.output_node()
