@@ -136,10 +136,8 @@ def up_size(size):
 class UInt4Tensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, **kwargs):
-        if elem.dtype is not torch.uint8:
-            raise AssertionError(f"expected dtype torch.uint8, got {elem.dtype}")
-        if kwargs.get("requires_grad", False):
-            raise AssertionError("requires_grad must be False")
+        assert elem.dtype is torch.uint8
+        assert not kwargs.get("requires_grad", False)
         kwargs["requires_grad"] = False
         return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=torch.uint4, **kwargs)
 
@@ -154,10 +152,8 @@ class UInt4Tensor(torch.Tensor):
 class Int4Tensor(torch.Tensor):
     @staticmethod
     def __new__(cls, elem, **kwargs):
-        if elem.dtype is not torch.uint8:
-            raise AssertionError(f"expected dtype torch.uint8, got {elem.dtype}")
-        if kwargs.get("requires_grad", False):
-            raise AssertionError("requires_grad must be False")
+        assert elem.dtype is torch.uint8
+        assert not kwargs.get("requires_grad", False)
         kwargs["requires_grad"] = False
         return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=torch.int4, **kwargs)
 
@@ -4886,16 +4882,14 @@ class TestSerialization(TestCase, SerializationMixin):
                 [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
             ], dtype=torch.uint8))
 
-            if x.dtype != dtype:
-                raise AssertionError(f"expected x.dtype == {dtype}, got {x.dtype}")
+            assert x.dtype == dtype
 
             with tempfile.NamedTemporaryFile() as checkpoint:
                 torch.save(x, checkpoint)
                 checkpoint.seek(0)
                 y = torch.load(checkpoint)
 
-            if x.dtype != y.dtype:
-                raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
+            assert x.dtype == y.dtype
 
     @skipIfTorchDynamo("getrefcount does not work in dynamo")
     def test_serializaion_no_storage_leak(self):
@@ -5155,8 +5149,7 @@ class TestSubclassSerialization(TestCase):
         # 1. Remove the STOP
         # 2. Add: MARK (for SETITEMS), push index, push value, SETITEM/SETITEMS, STOP
         # This will try to call tensor.__setitem__(100, 42.0) which should fail
-        if not original_pkl.endswith(b'.'):
-            raise AssertionError("Expected pickle to end with STOP opcode")
+        assert original_pkl.endswith(b'.'), "Expected pickle to end with STOP opcode"
 
         if opcode == b'u':  # SETITEMS needs a MARK
             malicious_pkl = (

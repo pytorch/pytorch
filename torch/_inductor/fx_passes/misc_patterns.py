@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
 
 import torch
 from torch._dynamo.utils import counters
@@ -14,20 +13,17 @@ aten = torch.ops.aten
 
 
 @functools.cache
-def _misc_patterns_init(input_device: Optional[torch.device] = None):
+def _misc_patterns_init():
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
 
     post_grad_patterns = post_grad_patterns_all[1]  # medium priority
 
-    if input_device:
-        device = str(input_device)
+    if torch.cuda.is_available():
+        # workaround https://github.com/pytorch/pytorch/issues/97894
+        device = "cuda"
     else:
-        if torch.cuda.is_available():
-            # workaround https://github.com/pytorch/pytorch/issues/97894
-            device = "cuda"
-        else:
-            device = "cpu"
+        device = "cpu"
 
     # These patterns do 2 things
     # 1. Since we know that index is completely unique, we can codegen it using
@@ -57,7 +53,6 @@ def _misc_patterns_init(input_device: Optional[torch.device] = None):
         fwd_only,
         # pyrefly: ignore [bad-argument-type]
         [post_grad_patterns, joint_graph_patterns],
-        skip_duplicates=True,
     )
 
     def randperm_index_pattern(x, slice_shape):
@@ -79,7 +74,6 @@ def _misc_patterns_init(input_device: Optional[torch.device] = None):
         # pyrefly: ignore [bad-argument-type]
         [post_grad_patterns, joint_graph_patterns],
         scalar_workaround={"slice_shape": 42},
-        skip_duplicates=True,
     )
 
     # Pattern: e8m0 extraction with ceiling rounding (for MX format scaling)

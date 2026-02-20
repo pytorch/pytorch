@@ -96,7 +96,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     MACOS_VERSION,
     MI200_ARCH,
-    NAVI_ARCH,
     parametrize,
     serialTest,
     skipIfMPS,
@@ -107,7 +106,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    xfailIf,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -535,20 +533,10 @@ def check_model(
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat = pytree.tree_leaves(actual)
 
-    def to_dtype_preserve_strides(src, dtype):
-        if any(s == 0 for s in src.stride()):
-            return src.to(dtype)
-        # Preserve strides when casting.
-        result = torch.empty_strided(
-            src.size(), src.stride(), device=src.device, dtype=dtype
-        )
-        result.copy_(src)
-        return result
-
     def reference_to_expect(actual_flat, correct_flat):
         return tuple(
             (
-                to_dtype_preserve_strides(y, x.dtype)
+                y.to(x.dtype)
                 if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
                 else y
             )
@@ -566,11 +554,6 @@ def check_model(
         correct_flat = reference_to_expect(actual_flat, correct_flat)
         correct = tree_unflatten(correct_flat, correct_spec)
 
-    def has_zero_dim(x):
-        if not isinstance(x, tuple):
-            x = (x,)
-        return any(isinstance(t, torch.Tensor) and 0 in t.size() for t in x)
-
     # Allow assert_equal to be a custom function, instead of True or False, for
     # cases where differences may not indicate incorrectness.
     if assert_equal:
@@ -583,7 +566,6 @@ def check_model(
         else:
             assert_equal_fn = self.assertEqual
 
-        check_exact_stride = exact_stride and not has_zero_dim(correct)
         assert_equal_fn(
             actual,
             correct,
@@ -591,7 +573,7 @@ def check_model(
             rtol=rtol,
             equal_nan=True,
             exact_dtype=exact_dtype,
-            exact_stride=check_exact_stride,
+            exact_stride=exact_stride,
         )
         # In case of input mutations, check that inputs are the same
         # (This never uses a custom assert_equal fn.)
@@ -617,8 +599,7 @@ def check_model(
                 assert correct_val.layout == actual_val.layout
                 if exact_dtype:
                     assert correct_val.dtype == actual_val.dtype
-                check_exact_stride = exact_stride and not has_zero_dim(correct_val)
-                if check_exact_stride:
+                if exact_stride:
                     assert correct_val.stride() == actual_val.stride()
 
     if check_gradient:
@@ -666,17 +647,15 @@ def check_model(
             else:
                 expect_grad = correct_grad
 
-            for actual_g, expect_g in zip(actual_grad, expect_grad):
-                check_exact_stride = exact_stride and not has_zero_dim(expect_g)
-                self.assertEqual(
-                    actual_g,
-                    expect_g,
-                    atol=grad_atol or atol,
-                    rtol=grad_rtol or rtol,
-                    equal_nan=True,
-                    exact_dtype=exact_dtype,
-                    exact_stride=check_exact_stride,
-                )
+            self.assertEqual(
+                actual_grad,
+                expect_grad,
+                atol=grad_atol or atol,
+                rtol=grad_rtol or rtol,
+                equal_nan=True,
+                exact_dtype=exact_dtype,
+                exact_stride=exact_stride,
+            )
 
     torch._dynamo.reset()
 
@@ -848,17 +827,9 @@ class SweepInputs2:
     def kernel(a, b):
         return (a + b,)
 
-    # Input gen types unsupported by specific backends. Subclasses or wrapper
-    # test classes can set this to skip tests that use these input types.
-    _unsupported_input_gen_types: set[str] = set()
-
     @classmethod
     def gen_template(cls, name1, name2):
         def test(self):
-            unsupported = type(self)._unsupported_input_gen_types
-            for name in (name1, name2):
-                if name in unsupported:
-                    self.skipTest(f"{name} inputs not supported by this backend")
             check_model(
                 self,
                 cls.kernel,
@@ -3778,7 +3749,6 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_pallas  # only 32-bit indexing
     @largeTensorTest("4GB", inductor=True)
     def test_large_pointwise(self):
         def fn(a):
@@ -3796,7 +3766,6 @@ class CommonTemplate:
         self.assertTrue((actual == 2).all())
 
     @skip_if_halide  # only 32-bit indexing
-    @skip_if_pallas  # only 32-bit indexing
     @largeTensorTest("3GB", inductor=True)
     def test_large_offset_pointwise(self):
         # Test 64-bit indexing is used when input views a tensor that can be
@@ -3967,7 +3936,7 @@ class CommonTemplate:
         cfn = torch.compile(backend="inductor")(fn)
         input = torch.tensor([2], dtype=torch.int32)
         mat = torch.tensor(np.random.randn(0, 0), dtype=torch.int32)
-        vec = torch.tensor([], dtype=torch.int32)
+        vec = torch.tensor([])
         with torch.no_grad():
             self.assertEqual(cfn(input, mat, vec), fn(input, mat, vec))
 
@@ -7900,6 +7869,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         template([1, 1, 8, 8], [2, 2, 0, -1])
         template([1, 1, 8, 8], [2, 2, -1, 0])
 
+    @xfail_if_mps_unimplemented  # Unsupported Border padding mode
     def test_grid_sampler_2d(self):
         def fn(a, b):
             return (
@@ -10719,30 +10689,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
-    @requires_cuda
-    def test_max_min_bool(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/174069
-        # max/min on boolean tensors returned incorrect indices in Triton
-        def fn(x):
-            return (
-                x.max(0),
-                x.min(0),
-                x.max(1),
-                x.min(1),
-            )
-
-        # Unrolled reduction
-        t1 = torch.randint(2, size=(6, 6), dtype=torch.bool)
-        self.common(fn, (t1,))
-
-        # Persistent reduction
-        t1 = torch.randint(2, size=(32, 32), dtype=torch.bool)
-        self.common(fn, (t1,))
-
-        # Non-persistent reduction
-        t1 = torch.randint(2, size=(1028, 1028), dtype=torch.bool)
-        self.common(fn, (t1,))
-
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
             out1 = aten.convolution_backward(
@@ -11481,45 +11427,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             RuntimeError, "Could not guard on data-dependent expression"
         ):
             branching(x_small)
-
-    @requires_gpu()
-    @skip_if_not_triton
-    @unittest.skipIf(
-        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
-    )
-    def test_hint_override_cache_invalidation(self):
-        """Different hint_override values must not produce stale cache hits."""
-        from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
-
-        HINT_A = 48
-        HINT_B = 99
-
-        def fn(x):
-            return x.sum(dim=0)
-
-        x = torch.randn(256, 32, device=GPU_TYPE)
-
-        with fresh_inductor_cache():
-            compiled_a = torch.compile(fn)
-            torch._dynamo.mark_dynamic(x, 0, hint_override=HINT_A)
-            _, codes_a = run_and_get_code(compiled_a, x)
-
-            compiled_b = torch.compile(fn)
-            torch._dynamo.mark_dynamic(x, 0, hint_override=HINT_B)
-            _, codes_b = run_and_get_code(compiled_b, x)
-
-        code_a = codes_a[0]
-        code_b = codes_b[0]
-
-        def has_hint(code, h):
-            return f"rand_strided(({h}," in code or f"rand_strided(({h}, " in code
-
-        self.assertTrue(has_hint(code_a, HINT_A), f"hint {HINT_A} not in first code")
-        self.assertTrue(has_hint(code_b, HINT_B), f"hint {HINT_B} not in second code")
-        self.assertFalse(
-            has_hint(code_b, HINT_A),
-            f"second compilation has hint {HINT_A}; stale cache hit",
-        )
 
     @requires_gpu()
     def test_stride_preservation_with_stride_modifying_fx_pass(self):
@@ -13379,7 +13286,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 _, mul_buf, _ = nodes
                 self.assertTrue(
                     all(
-                        V.graph.sizevars.optimization_hints(buf.get_stride()) == (1, 2)
+                        V.graph.sizevars.size_hints(buf.get_stride()) == (1, 2)
                         for buf in nodes
                     )
                 )
@@ -14926,7 +14833,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         msg="Profile not enabled on XPU CI, "
         "https://github.com/intel/torch-xpu-ops/issues/2334"
     )
-    @skipIfRocmArch(NAVI_ARCH)
     @requires_gpu_and_triton
     @parametrize("use_cat", [True, False])
     def test_copy_non_blocking_is_pinned(self, use_cat):
@@ -15597,7 +15503,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "coordinate_descent_tuning": True,
         }
     )
-    @xfailIf(not IS_BIG_GPU)  # templates require big gpu
     def test_pdl_template_and_delay(self):
         def fn(a, b):
             a = (a / (a**2).sum(-1, keepdim=True)) ** 2  # first kernel
@@ -15792,12 +15697,11 @@ if RUN_GPU or HAS_MPS:
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)
 
 if RUN_TPU:
-    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
-
-    tpu_api.tpu_device()  # initialize TPU runtime
 
     class SweepInputsTpuTest(SweepInputs2, TestCase):
-        gen = InputGen(10, "tpu")
+        # TODO(pallas): TPU tests use cpu device with _debug_cpu_to_tpu_pallas=True
+        # to route execution to TPU. See make_pallas_tpu in test_pallas.py.
+        gen = InputGen(10, "cpu")
 
     SweepInputsTpuTest.populate()
 
@@ -17354,5 +17258,5 @@ def _run_and_get_stripped_kernels(
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if RUN_CPU or RUN_GPU or HAS_MPS:
+    if RUN_CPU or RUN_GPU:
         run_tests(needs="filelock")

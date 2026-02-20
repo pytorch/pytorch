@@ -33,7 +33,6 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     IS_ARM64,
     parametrize,
-    TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
@@ -383,7 +382,6 @@ class TestTensorCreation(TestCase):
             ):
                 torch.block_diag(torch.ones(2, 2).cpu(), torch.ones(2, 2, device=device))
 
-    @skipCPUIf(TEST_WITH_TORCHDYNAMO, "test doesn't currently work with dynamo on CPU")
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_block_diag_scipy(self, device):
         import scipy.linalg
@@ -2833,8 +2831,7 @@ class TestTensorCreation(TestCase):
         tensor = torch.tensor((1, 2, 3), device=device)
 
         # need more than one device_type to test this
-        if self.device_type != 'cuda':
-            raise AssertionError(f"device_type should be 'cuda', got {self.device_type!r}")
+        assert self.device_type == 'cuda'
         for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
             for device_arg in [torch_device, cpu_device, None]:
                 if device_arg is None:

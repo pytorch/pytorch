@@ -739,7 +739,6 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if not isinstance(input, (list, tuple)):
                 broadcast_inputs.append([input] * len(a_list_input))
             else:
-                # pyrefly: ignore [bad-argument-type]
                 broadcast_inputs.append(input)
 
         groups = group_foreach_args(zip(*broadcast_inputs))
@@ -6281,15 +6280,6 @@ def _make_reduction_inner(
 
 def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
-        # For argmax/argmin on boolean tensors, cast to int32 first to ensure
-        # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
-        # Only apply on Triton backend; MPS handles bool comparisons natively.
-        if (
-            reduction_type in ("argmax", "argmin")
-            and x.get_dtype() == torch.bool
-            and is_triton(x)
-        ):
-            x = to_dtype(x, torch.int32)
         kwargs = _make_reduction_inner(
             x,
             axis=axis,

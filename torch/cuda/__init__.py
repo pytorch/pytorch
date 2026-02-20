@@ -193,7 +193,10 @@ def is_bf16_supported(including_emulation: bool = True):
 
     device = torch.cuda.current_device()
 
-    if torch.cuda.get_device_properties(device).major >= 8:
+    # Check for CUDA version and device compute capability.
+    # This is a fast way to check for it.
+    cuda_version = torch.version.cuda
+    if cuda_version is not None and torch.cuda.get_device_properties(device).major >= 8:
         return True
 
     if not including_emulation:
@@ -1885,36 +1888,26 @@ _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 __all__ = [
     # Typed storage and tensors
     "BFloat16Storage",
-    # pyrefly: ignore [bad-dunder-all]
     "BFloat16Tensor",
     "BoolStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "BoolTensor",
     "ByteStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "ByteTensor",
     "CharStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "CharTensor",
     "ComplexDoubleStorage",
     "ComplexFloatStorage",
     "DoubleStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "DoubleTensor",
     "FloatStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "FloatTensor",
     "HalfStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "HalfTensor",
     "IntStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "IntTensor",
     "LongStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "LongTensor",
     "ShortStorage",
-    # pyrefly: ignore [bad-dunder-all]
     "ShortTensor",
     "CUDAGraph",
     "CudaError",

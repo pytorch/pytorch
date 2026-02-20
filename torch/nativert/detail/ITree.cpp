@@ -326,15 +326,6 @@ class PytreeNodeRegistry {
     registry_.emplace(typeName, nodeDef);
   }
 
-  void registerOrReplaceNode(std::string_view typeName, NodeDef nodeDef) {
-    auto it = registry_.find(std::string{typeName});
-    if (it != registry_.end()) {
-      it->second = nodeDef;
-    } else {
-      registry_.emplace(typeName, nodeDef);
-    }
-  }
-
  private:
   std::unordered_map<std::string, NodeDef> registry_;
 };
@@ -387,12 +378,6 @@ ITreeSpec makeITreeSpec(
 void registerPytreeNode(std::string_view typeName, NodeDef nodeDef) {
   getPytreeNodeRegistry().withLock([&](auto& registry) {
     registry.registerNode(typeName, std::move(nodeDef));
-  });
-}
-
-void registerOrReplacePytreeNode(std::string_view typeName, NodeDef nodeDef) {
-  getPytreeNodeRegistry().withLock([&](auto& registry) {
-    registry.registerOrReplaceNode(typeName, std::move(nodeDef));
   });
 }
 

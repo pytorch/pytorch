@@ -341,8 +341,7 @@ class TestVarlenAttention(NNTestCase):
         custom_ops_called = any(
             "torch_attn._varlen_attn" in op for op in called_ops
         ) and any("torch_attn._varlen_attn_backward" in op for op in called_ops)
-        if not custom_ops_called:
-            raise AssertionError("custom varlen attention ops should have been called")
+        assert custom_ops_called
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

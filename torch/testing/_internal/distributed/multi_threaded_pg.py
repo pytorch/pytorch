@@ -560,7 +560,6 @@ class WorldData:
     tags_to_pg: dict[str, list[dist.ProcessGroup]]
     pg_to_tag: dict[dist.ProcessGroup, str]
     pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
-    comms: list
 
 
 class ThreadLocalWorld:
@@ -569,7 +568,7 @@ class ThreadLocalWorld:
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(
-                None, {}, {}, {}, {}, 0, {}, {}, {}, []
+                None, {}, {}, {}, {}, 0, {}, {}, {}
             )
         return ThreadLocalWorld._world.world
 
@@ -617,10 +616,6 @@ class ThreadLocalWorld:
     def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]:
         return self._get_world().pg_coalesce_state
 
-    @property
-    def comms(self):
-        return self._get_world().comms
-
 
 _old_pg_world = None
 _ctx_manager = None
@@ -637,9 +632,4 @@ def _install_threaded_pg():
 
 
 def _uninstall_threaded_pg():
-    global _ctx_manager
     dist.distributed_c10d._world = _old_pg_world
-    # Restore autograd multithreading state that was disabled in _install_threaded_pg
-    if _ctx_manager is not None:
-        _ctx_manager.__exit__(None, None, None)
-        _ctx_manager = None

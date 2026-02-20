@@ -220,14 +220,7 @@ def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
     return True
 
 
-def skip_if_lt_x_gpu(x, *, allow_cpu=False):
-    """Skip if fewer than x accelerators available.
-
-    Args:
-        x: Minimum number of accelerators required.
-        allow_cpu: If True, run the test on CPU-only machines (no accelerators).
-    """
-
+def skip_if_lt_x_gpu(x):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -236,8 +229,6 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
             if TEST_HPU and torch.hpu.device_count() >= x:
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
@@ -738,10 +729,7 @@ def cleanup_temp_dir() -> None:
 
 
 # Most tests operate with this worldsize
-if TEST_WITH_ROCM:
-    DEFAULT_WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
-else:
-    DEFAULT_WORLD_SIZE = 4
+DEFAULT_WORLD_SIZE = 4
 
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
@@ -1933,19 +1921,6 @@ class MultiProcContinuousTest(TestCase):
 
         # Get world_size (handles both class variable and property)
         cls.world_size = cls._get_world_size(device_type)
-
-        # Check if the specified backend is available before spawning processes
-        backend = cls.backend_str() if callable(cls.backend_str) else cls.backend_str
-        if backend is not None:
-            backend_checks = {
-                "nccl": c10d.is_nccl_available,
-                "gloo": c10d.is_gloo_available,
-                "mpi": c10d.is_mpi_available,
-                "xccl": c10d.is_xccl_available,
-            }
-            check_fn = backend_checks.get(backend)
-            if check_fn is not None and not check_fn():
-                raise unittest.SkipTest(f"Backend '{backend}' is not available")
 
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004

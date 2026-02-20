@@ -1063,10 +1063,7 @@ def distribute_module(
             if param is not None and not isinstance(param, DTensor):
                 m.register_parameter(
                     key,
-                    nn.Parameter(
-                        distribute_tensor(param.data, mesh, full_replicate),
-                        requires_grad=param.requires_grad,
-                    ),
+                    nn.Parameter(distribute_tensor(param.data, mesh, full_replicate)),
                 )
         for key, buffer in m._buffers.items():
             if buffer is not None and not isinstance(buffer, DTensor):

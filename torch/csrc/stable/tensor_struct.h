@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/headeronly/core/Layout.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
@@ -17,7 +16,6 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 using accelerator::DeviceIndex;
 using torch::headeronly::IntHeaderOnlyArrayRef;
-using torch::headeronly::Layout;
 using torch::headeronly::ScalarType;
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
@@ -428,16 +426,6 @@ class Tensor {
    * Minimum compatible version: PyTorch 2.9.
    */
   Device device() const;
-
-  // defined in tensor_inl.h to avoid circular dependencies
-  /**
-   * @brief Returns the layout of the tensor.
-   *
-   * @return The Layout of the tensor (e.g., Strided, Sparse).
-   *
-   * Minimum compatible version: PyTorch 2.9.
-   */
-  Layout layout() const;
 
   // =============================================================================
   // END of C-shimified TensorBase APIs

@@ -32,17 +32,7 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
-AtomicMode = Literal[
-    "atomic_add",
-    "atomic_max",
-    "atomic_min",
-    "atomic_and",
-    "atomic_or",
-    "atomic_xor",
-    "atomic_cas",
-    "atomic_xchg",
-]
-StoreMode = Optional[Union[AtomicMode, Literal["tma"]]]
+StoreMode = Optional[Literal["atomic_add", "tma"]]
 ReductionType = Literal[
     "argmax",
     "argmin",

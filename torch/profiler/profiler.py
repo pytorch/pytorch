@@ -129,10 +129,6 @@ class _KinetoProfile:
             When this argument is included the observer start() and stop() will be called for the
             same time window as PyTorch profiler.
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
-        post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
-            results. In this context, post-processing happens after the profiling itself has finished.
-            If specified, event parsing will stop after this duration and return partial results. Useful
-            for handling large traces that may take too long to process.
 
 
     .. note::
@@ -157,7 +153,6 @@ class _KinetoProfile:
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
         custom_trace_id_callback: Callable[[], str] | None = None,
-        post_processing_timeout_s: float | None = None,
     ) -> None:
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
@@ -169,7 +164,6 @@ class _KinetoProfile:
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events
         self.custom_trace_id_callback = custom_trace_id_callback
-        self.post_processing_timeout_s = post_processing_timeout_s
         self.profiler: prof.profile | None = None
         self.has_cudagraphs = False
         self.mem_tl: MemoryProfileTimeline | None = None
@@ -218,7 +212,6 @@ class _KinetoProfile:
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
-                post_processing_timeout_s=self.post_processing_timeout_s,
             )
         if (self.profiler is not None) and (not self.acc_events):
             _warn_once(
@@ -413,7 +406,7 @@ class _KinetoProfile:
         }
         if backend == "nccl":
             nccl_version = torch.cuda.nccl.version()
-            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
+            # pyrefly: ignore [unsupported-operation]
             dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
         return dist_info
 
@@ -630,9 +623,6 @@ class profile(_KinetoProfile):
             When this argument is included the observer start() and stop() will be called for the
             same time window as PyTorch profiler. See the examples section below for a code sample.
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
-        post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
-            results. If specified, event parsing will stop after this duration and return partial
-            results. Useful for handling large traces that may take too long to process.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -749,7 +739,6 @@ class profile(_KinetoProfile):
         # deprecated:
         use_cuda: bool | None = None,
         custom_trace_id_callback: Callable[[], str] | None = None,
-        post_processing_timeout_s: float | None = None,
     ) -> None:
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
@@ -778,7 +767,6 @@ class profile(_KinetoProfile):
             else ExecutionTraceObserver.build_execution_trace_obs_from_env(),
             acc_events=acc_events,
             custom_trace_id_callback=custom_trace_id_callback,
-            post_processing_timeout_s=post_processing_timeout_s,
         )
 
         if schedule:

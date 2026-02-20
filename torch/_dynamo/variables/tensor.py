@@ -70,7 +70,7 @@ from ..utils import (
     tensortype_to_dtype,
 )
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
 from .script_object import TorchScriptObjectVariable
 from .user_defined import UserDefinedClassVariable
@@ -481,7 +481,7 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
         else:
-            return variables.CONSTANT_VARIABLE_NONE
+            return variables.ConstantVariable(None)
 
     def method_attr__version(self, tx: "InstructionTranslator") -> VariableTracker:
         from ..tensor_version_op import _tensor_version
@@ -1191,7 +1191,6 @@ class TensorVariable(VariableTracker):
                     if node not in seen_nodes:
                         seen_nodes.add(node)
                         result.append(var)
-        # pyrefly: ignore [bad-return]
         return result
 
     def method_backward(
@@ -1253,7 +1252,7 @@ class TensorVariable(VariableTracker):
                 # No leaf tensors found - nothing to accumulate gradients into.
                 # This matches eager behavior where backward() is a no-op if there
                 # are no leaves requiring grad.
-                return CONSTANT_VARIABLE_NONE
+                return ConstantVariable.create(None)
         else:
             provided_vars = (
                 inputs.items
@@ -1449,7 +1448,7 @@ class TensorVariable(VariableTracker):
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
 
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def method_resize_(
         self,
@@ -1617,7 +1616,9 @@ class TensorVariable(VariableTracker):
 
             return vt.as_python_constant()
 
-        grad_placements_vt = kwargs.get("grad_placements", CONSTANT_VARIABLE_NONE)
+        grad_placements_vt = kwargs.get(
+            "grad_placements", ConstantVariable.create(None)
+        )
         if isinstance(grad_placements_vt, variables.UserDefinedObjectVariable):
             # grad_placement is a sequence-like structure, iterate over the value
             grad_placements_vt = variables.BuiltinVariable(tuple).call_function(

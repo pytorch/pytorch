@@ -4,7 +4,6 @@ from typing import Generic, TypeVar
 
 import torch
 
-# pyrefly: ignore [bad-dunder-all]
 __all__ = ['Await']
 
 W = TypeVar("W")

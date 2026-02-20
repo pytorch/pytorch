@@ -15,12 +15,12 @@ std::vector<Tensor> my__foreach_mul_vec(
   return torch::stable::detail::to<std::vector<Tensor>>(stack[0]);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
   m.def("my__foreach_mul_vec(Tensor[] self, Tensor[] other) -> Tensor[]");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    STABLE_LIB_NAME,
+    libtorch_agn_2_10,
     CompositeExplicitAutograd,
     m) {
   m.impl("my__foreach_mul_vec", TORCH_BOX(&my__foreach_mul_vec));

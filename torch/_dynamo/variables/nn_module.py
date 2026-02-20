@@ -1118,7 +1118,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     fn = self.value_type.forward  # type: ignore[attr-defined]
 
         if self.source:
-            source = self.get_source_by_walking_mro(tx, name)
+            source = self.get_source_by_walking_mro(name)
         else:
             source = None
 
@@ -1136,7 +1136,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         )
         with ctx:
             if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
-                fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
+                fn_vt = VariableTracker.build(tx, fn, source=source)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
                 # Ideally we would have just used VariableTracker.build(tx, fn,
@@ -1157,11 +1157,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
-                source = self.get_source_by_walking_mro(tx, name)
+                source = self.get_source_by_walking_mro(name)
             else:
                 source = None
 
-            fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
+            fn_vt = VariableTracker.build(tx, fn, source=source)
             return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
@@ -1171,12 +1171,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 method = None
 
             if isinstance(method, staticmethod):
-                source = AttrSource(
-                    self.get_source_by_walking_mro(tx, name), "__func__"
-                )
-                fn_vt = VariableTracker.build(
-                    tx, method.__func__, source=source, realize=True
-                )
+                source = AttrSource(self.get_source_by_walking_mro(name), "__func__")
+                fn_vt = VariableTracker.build(tx, method.__func__, source=source)
                 return fn_vt.call_function(tx, args, kwargs)
 
             if (

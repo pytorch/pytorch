@@ -1055,10 +1055,7 @@ class TestCudaMultiGPU(TestCase):
             except RuntimeError as e:
                 import re
 
-                if not re.match(regex, str(e)):
-                    raise AssertionError(
-                        str(e) + "\n does not match: \n" + regex
-                    ) from None
+                assert re.match(regex, str(e)), str(e) + "\n does not match: \n" + regex
         else:
             # assertRaisesRegex does not pass with Python for Jetson,
             # even though the RuntimeError matches regex using re.match

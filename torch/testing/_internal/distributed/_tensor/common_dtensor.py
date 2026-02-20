@@ -7,7 +7,6 @@ import copy
 import functools
 import itertools
 import sys
-import threading
 import types
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -56,7 +55,6 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_HPU,
     TEST_PRIVATEUSE1,
-    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
@@ -72,10 +70,7 @@ else:
     DEVICE_TYPE = "cpu"
     PG_BACKEND = "gloo"
 
-if TEST_WITH_ROCM:
-    NUM_DEVICES = min(4, max(2, torch.cuda.device_count()))
-else:
-    NUM_DEVICES = 4
+NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
 if (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) and DEVICE_COUNT > 1:
@@ -381,14 +376,9 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         # Set device before initializing process group to ensure
-        # each rank is bound to the correct GPU. However, if world_size > device_count,
-        # we skip the test.
+        # each rank is bound to the correct GPU
         if torch.accelerator.is_available():
-            if world_size > torch.accelerator.device_count():
-                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
-            else:
-                torch.accelerator.set_device_index(rank)
-
+            torch.accelerator.set_device_index(rank)
         # Call parent's _init_pg to do the actual process group initialization
         super()._init_pg(rank, world_size, rdvz_file)
 
@@ -441,8 +431,6 @@ class DTensorTestBase(MultiProcessTestCase):
             "gloo",
             "mpi",
             f"cpu:gloo,{self.device_type}:{curr_backend}",
-            "cpu:gloo,cuda:ncclx",
-            "cuda:ncclx",
             "hccl",
             "xccl",
             "fake",
@@ -545,8 +533,7 @@ TestFunc = Callable[[...], object]
 
 # wrapper to initialize comms (processgroup)
 def with_comms(
-    eager_init: Union[TestFunc, bool] = False,
-    backend: Optional[str] = None,
+    eager_init: Union[TestFunc, bool] = False, backend: Optional[str] = None
 ) -> TestFunc:
     def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
         @wraps(func)  # pyre-ignore[6]
@@ -594,20 +581,7 @@ class DTensorOpTestBase(MultiThreadedTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        # Enable thread-safe lock for ShardingPropagator since we run
-        # multi-threaded tests.
-        from torch.distributed.tensor._sharding_prop import ShardingPropagator
-
-        self._orig_fake_mode_lock = ShardingPropagator._fake_mode_lock
-        ShardingPropagator._fake_mode_lock = threading.Lock()
         self._spawn_threads()
-
-    def tearDown(self) -> None:
-        # Restore the original (no-op) lock
-        from torch.distributed.tensor._sharding_prop import ShardingPropagator
-
-        ShardingPropagator._fake_mode_lock = self._orig_fake_mode_lock
-        super().tearDown()
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
@@ -1012,9 +986,6 @@ def patched_distribute_tensor(
     tensor_dt = distribute_tensor(
         input_tensor, device_mesh, placements, src_data_rank=src_data_rank
     )
-    # Do not consider _StridedShard to express shard order
-    tensor_dt._spec.use_strided_shard_as_shard_order = False
-    tensor_dt._spec.__post_init__()
     # fix the shard order
     return redistribute(
         tensor_dt, device_mesh, placements, shard_order, use_graph_based_transform

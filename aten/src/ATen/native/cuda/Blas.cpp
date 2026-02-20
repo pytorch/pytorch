@@ -118,40 +118,24 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
  * Additionally, for ROCM we test whether the architecture supports the Lt.
  */
 static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
-  /* On ROCM, we have the following order of precedence:
-  - When hipBLASLt is NOT supported on the architecture, return true.
-  - If and only if the environment is set, then return the value that it set to.
-  - If the environment variable is NOT set, treturn a value based on the preferred BLAS backend.
-  */
-  static const auto is_addmm_cuda_lt_disabled = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
+  // When hipBLASLt is not supported on the architecture, return true
   #ifdef USE_ROCM
   const auto& archs = at::detail::getCUDAHooks().getHipblasltSupportedArchs();
   const auto is_hipblas_lt_arch_supported = at::detail::getCUDAHooks().isGPUArch(archs, device.index());
   if (!is_hipblas_lt_arch_supported) {
     return true;
   }
+  #endif
 
-  // If environment variable is explicitly set, respect it
-  if (is_addmm_cuda_lt_disabled.has_value()) {
-    return is_addmm_cuda_lt_disabled == "1";
-  }
-
-  // The available BLAS backends on ROCm are: rocBLAS, hipBLASLt, and CK.
-  const auto preferred_backend = at::globalContext().blasPreferredBackend();
-  if (preferred_backend == at::BlasBackend::Cublaslt) {
-    return false;
-  } else {
-    return true;
-  }
-
-  #else
+  // Check whether it is disabled in the env
+  static const auto is_addmm_cuda_lt_disabled = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
   if (is_addmm_cuda_lt_disabled == "1") {
     return true;
   }
 
   return false;
-  #endif
 }
+
 /*
  * Check whether for the given input we want to enable the Lt interface
  */

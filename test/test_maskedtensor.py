@@ -82,12 +82,11 @@ def _create_random_mask(shape, device):
 def _generate_sample_data(
     device="cpu", dtype=torch.float, requires_grad=True, layout=torch.strided
 ):
-    if layout not in {
+    assert layout in {
         torch.strided,
         torch.sparse_coo,
         torch.sparse_csr,
-    }:
-        raise AssertionError("Layout must be strided/sparse_coo/sparse_csr")
+    }, "Layout must be strided/sparse_coo/sparse_csr"
     shapes = [
         [],
         [2],
@@ -552,10 +551,12 @@ class TestBinary(TestCase):
         mt1 = masked_tensor(data1, mask1)
         try:
             fn(mt0, mt1)
-            raise AssertionError("expected ValueError")
+            raise AssertionError
         except ValueError as e:
-            if str(e) != "Input masks must match. If you need support for this, please open an issue on Github.":
-                raise AssertionError(f"unexpected error message: {e}") from None
+            assert (
+                "Input masks must match. If you need support for this, please open an issue on Github."
+                == str(e)
+            )
 
 class TestReductions(TestCase):
     def test_max_not_implemented(self):

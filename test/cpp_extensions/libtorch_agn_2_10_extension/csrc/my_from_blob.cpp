@@ -19,13 +19,13 @@ Tensor my_from_blob(
       data, sizes, strides, device, dtype);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
   m.def(
       "my_from_blob(int data_ptr, int[] sizes, int[] strides, Device device, ScalarType dtype) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    STABLE_LIB_NAME,
+    libtorch_agn_2_10,
     CompositeExplicitAutograd,
     m) {
   m.impl("my_from_blob", TORCH_BOX(&my_from_blob));

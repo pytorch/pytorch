@@ -17,7 +17,7 @@ from torch._inductor.fx_passes.bucketing import (
     merge_reduce_scatter_bucket,
 )
 from torch._inductor.fx_passes.overlap_preserving_bucketer import (
-    get_full_bucket_key,
+    bucket_key,
     OverlapPreservingBucketer,
 )
 from torch._inductor.fx_passes.overlap_scheduling import (
@@ -124,7 +124,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 or is_fsdp_reduce_scatter(node)
             ):
                 continue
-            key = get_full_bucket_key(node, "custom_ops")
+            key = bucket_key(node)
             if key is not None:
                 grouped_collectives[key].add(node)
 

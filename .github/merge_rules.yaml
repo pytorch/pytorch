@@ -540,7 +540,7 @@
   - Lint
   - pull
 
-- name: Accelerator / PrivateUse1
+- name: PrivateUse1
   patterns:
   - torch/accelerator/**
   - torch/utils/backend_registration.py
@@ -555,8 +555,6 @@
   approved_by:
   - albanD
   - fffrog
-  - EikanWang
-  - guangyey
   mandatory_checks_name:
   - EasyCLA
   - Lint

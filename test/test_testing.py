@@ -313,17 +313,15 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # CUDA says "device-side assert triggered"
-        # ROCm says "unspecified launch failure" or HSA_STATUS_ERROR_EXCEPTION
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
             f"Expected device assert error in stderr, got: {stderr}",
         )
-        if torch.version.cuda:
-            # should run only 1 test because it throws unrecoverable error.
-            self.assertIn('errors=1', stderr)
+        # should run only 1 test because it throws unrecoverable error.
+        self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -360,17 +358,15 @@ instantiate_device_type_tests(
 if __name__ == '__main__':
     run_tests()
 """)
-        # CUDA says "device-side assert triggered"
-        # ROCm says "unspecified launch failure" or HSA_STATUS_ERROR_EXCEPTION
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
         has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
-        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
         self.assertTrue(
             has_cuda_assert or has_hip_assert,
             f"Expected device assert error in stderr, got: {stderr}",
         )
-        if torch.version.cuda:
-            # should run only 1 test because it throws unrecoverable error.
-            self.assertIn('errors=1', stderr)
+        # should run only 1 test because it throws unrecoverable error.
+        self.assertIn('errors=1', stderr)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
@@ -2402,10 +2398,6 @@ class TestImports(TestCase):
             ignored_modules.append("torch.testing._internal.common_fsdp")
             ignored_modules.append("torch.testing._internal.common_distributed")
 
-        if sys.version_info < (3, 12):
-            # depends on Python 3.12+ syntax
-            ignored_modules.append("torch.testing._internal.py312_intrinsics")
-
         torch_dir = os.path.dirname(torch.__file__)
         for base, _, files in os.walk(torch_dir):
             prefix = os.path.relpath(base, os.path.dirname(torch_dir)).replace(os.path.sep, ".")
@@ -2466,21 +2458,15 @@ class TestOpInfos(TestCase):
 
         # Construction with natural syntax
         s = SampleInput(a, b, c, d=d, e=e)
-        if s.input is not a:
-            raise AssertionError("s.input should be a")
-        if s.args != (b, c):
-            raise AssertionError(f"s.args should be (b, c), got {s.args}")
-        if s.kwargs != dict(d=d, e=e):
-            raise AssertionError(f"s.kwargs mismatch: got {s.kwargs}")
+        assert s.input is a
+        assert s.args == (b, c)
+        assert s.kwargs == dict(d=d, e=e)
 
         # Construction with explicit args and kwargs
         s = SampleInput(a, args=(b,), kwargs=dict(c=c, d=d, e=e))
-        if s.input is not a:
-            raise AssertionError("s.input should be a")
-        if s.args != (b,):
-            raise AssertionError(f"s.args should be (b,), got {s.args}")
-        if s.kwargs != dict(c=c, d=d, e=e):
-            raise AssertionError(f"s.kwargs mismatch: got {s.kwargs}")
+        assert s.input is a
+        assert s.args == (b,)
+        assert s.kwargs == dict(c=c, d=d, e=e)
 
         # Construction with a mixed form will error
         with self.assertRaises(AssertionError):
@@ -2508,10 +2494,8 @@ class TestOpInfos(TestCase):
         # But when only input is given, metadata is allowed for backward
         # compatibility
         s = SampleInput(a, broadcasts_input=True)
-        if s.input is not a:
-            raise AssertionError("s.input should be a")
-        if not s.broadcasts_input:
-            raise AssertionError("s.broadcasts_input should be True")
+        assert s.input is a
+        assert s.broadcasts_input
 
     def test_sample_input_metadata(self) -> None:
         a, b = (object() for _ in range(2))

@@ -65,9 +65,7 @@ class AnnotationsTest(TestCase):
 
         for n in symbolic_traced.graph.nodes:
             if n.op == "placeholder":
-                expected = next(expected_iter)
-                if n.type != expected:
-                    raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
+                assert n.type == next(expected_iter)
 
     def test_annotate(self):
         class M(torch.nn.Module):
@@ -79,10 +77,7 @@ class AnnotationsTest(TestCase):
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
         for n in symbolic_traced.graph.nodes:
             if n.op == "placeholder":
-                if n.type != TensorType((1, 2, 3, Dyn)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((1, 2, 3, Dyn)), got {n.type}"
-                    )
+                assert n.type == TensorType((1, 2, 3, Dyn))
 
     def test_consistency(self):
         """
@@ -114,31 +109,29 @@ class AnnotationsTest(TestCase):
         t5 = TensorType((4, 4, 4))
         # todo switch all code to use list instead of tuple
         t6 = TensorType([1])
-        result = broadcast_types(t1, t2)
-        expected = (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
-        if result != expected:
-            raise AssertionError(f"Expected {expected}, got {result}")
-        if broadcast_types(t3, t4) != (t4, t4):
-            raise AssertionError("broadcast_types(t3, t4) mismatch")
-        if broadcast_types(t5, t6) != (t5, t5):
-            raise AssertionError("broadcast_types(t5, t6) mismatch")
+        assert broadcast_types(t1, t2) == (
+            TensorType((1, 2, 3, 4)),
+            TensorType((1, 2, 3, 4)),
+        )
+        assert broadcast_types(t3, t4) == (t4, t4)
+        assert broadcast_types(t5, t6) == (t5, t5)
 
     def test_broadcasting2(self):
         t1 = TensorType((2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
 
-        result = broadcast_types(t1, t2)
-        expected = (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
-        if result != expected:
-            raise AssertionError(f"Expected {expected}, got {result}")
+        assert broadcast_types(t1, t2) == (
+            TensorType((1, 2, 3, 4)),
+            TensorType((1, 2, 3, 4)),
+        )
 
     def test_broadcasting3(self):
         t1 = TensorType((1, 2, 3, Dyn))
         t2 = TensorType((2, 3, 4))
-        result = broadcast_types(t1, t2)
-        expected = (TensorType((1, 2, 3, Dyn)), TensorType((1, 2, 3, 4)))
-        if result != expected:
-            raise AssertionError(f"Expected {expected}, got {result}")
+        assert broadcast_types(t1, t2) == (
+            TensorType((1, 2, 3, Dyn)),
+            TensorType((1, 2, 3, 4)),
+        )
 
 
 class TypeCheckerTest(TestCase):
@@ -161,11 +154,8 @@ class TypeCheckerTest(TestCase):
 
         for n in symbolic_traced.graph.nodes:
             if n.op == "call_function":
-                if not n.meta["broadcast"]:
-                    raise AssertionError("Expected n.meta['broadcast'] to be True")
-            expected = next(expected_iter)
-            if n.type != expected:
-                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
+                assert n.meta["broadcast"]
+            assert n.type == next(expected_iter)
 
     def test_type_check_add_with_scalar(self):
         class M(torch.nn.Module):
@@ -185,9 +175,7 @@ class TypeCheckerTest(TestCase):
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
-            expected = next(expected_iter)
-            if n.type != expected:
-                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
+            assert n.type == next(expected_iter)
 
     def test_type_check_add_false(self):
         class M(torch.nn.Module):
@@ -215,14 +203,9 @@ class TypeCheckerTest(TestCase):
 
         for n in symbolic_traced.graph.nodes:
             if n.op == "placeholder":
-                expected = next(expected_iter)
-                if n.type != expected:
-                    raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
+                assert n.type == next(expected_iter)
             if n.op == "output":
-                if n.type != TensorType((1, 2, Dyn)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((1, 2, Dyn)), got {n.type}"
-                    )
+                assert n.type == TensorType((1, 2, Dyn))
 
     def test_type_check_reshape_true(self):
         class M(torch.nn.Module):
@@ -236,22 +219,13 @@ class TypeCheckerTest(TestCase):
 
         for n in symbolic_traced.graph.nodes:
             if n.op == "placeholder":
-                if n.type != TensorType((1, 6)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((1, 6)), got {n.type}"
-                    )
+                assert n.type == TensorType((1, 6))
 
             if n.op == "call_function":
-                if n.type != TensorType((1, 2, 3)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((1, 2, 3)), got {n.type}"
-                    )
+                assert n.type == TensorType((1, 2, 3))
 
             if n.op == "output":
-                if n.type != TensorType((1, 2, 3)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((1, 2, 3)), got {n.type}"
-                    )
+                assert n.type == TensorType((1, 2, 3))
 
     def test_type_check_reshape_false(self):
         class M(torch.nn.Module):
@@ -308,21 +282,11 @@ class TypeCheckerTest(TestCase):
 
         for n in symbolic_traced.graph.nodes:
             if n.op == "call_function":
-                if n.type != TensorType([2, 1, 3, 5]):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType([2, 1, 3, 5]), got {n.type}"
-                    )
+                assert n.type == TensorType([2, 1, 3, 5])
             if n.op == "output":
-                if n.type != TensorType([2, 1, 3, 5]):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType([2, 1, 3, 5]), got {n.type}"
-                    )
+                assert n.type == TensorType([2, 1, 3, 5])
             if n.op == "x":
-                if n.placeholder != TensorType([1, 2, 3, 5]):
-                    raise AssertionError(
-                        f"Expected n.placeholder == TensorType([1, 2, 3, 5]), "
-                        f"got {n.placeholder}"
-                    )
+                assert n.placeholder == TensorType([1, 2, 3, 5])
 
     def test_type_check_transpose_False(self):
         class M(torch.nn.Module):
@@ -357,25 +321,13 @@ class TypeCheckerTest(TestCase):
 
         for n in graph.nodes:
             if n.op == "placeholder":
-                if n.type != TensorType((2, 2, 5, 4)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((2, 2, 5, 4)), got {n.type}"
-                    )
+                assert n.type == TensorType((2, 2, 5, 4))
             if n.op == "output":
-                if n.type != TensorType((2, 2, 5, 4)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((2, 2, 5, 4)), got {n.type}"
-                    )
+                assert n.type == TensorType((2, 2, 5, 4))
             if n.op == "call_module":
-                if n.type != TensorType((2, 2, 5, 4)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((2, 2, 5, 4)), got {n.type}"
-                    )
+                assert n.type == TensorType((2, 2, 5, 4))
             if n.op == "call_function":
-                if n.type != TensorType((2, 2, 5, 4)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((2, 2, 5, 4)), got {n.type}"
-                    )
+                assert n.type == TensorType((2, 2, 5, 4))
 
     def test_type_check_batch_norm_2D_false(self):
         class BasicBlock(torch.nn.Module):
@@ -419,28 +371,13 @@ class TypeCheckerTest(TestCase):
         tc.type_check()
         for n in graph.nodes:
             if n.op == "placeholder":
-                if n.type != TensorType((Dyn, Dyn, Dyn, Dyn)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((Dyn, Dyn, Dyn, Dyn)), "
-                        f"got {n.type}"
-                    )
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == "call_function":
-                if n.type != TensorType((Dyn, Dyn, Dyn, Dyn)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((Dyn, Dyn, Dyn, Dyn)), "
-                        f"got {n.type}"
-                    )
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == "output":
-                if n.type != TensorType((Dyn, Dyn, Dyn, Dyn)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((Dyn, Dyn, Dyn, Dyn)), "
-                        f"got {n.type}"
-                    )
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == "call_module":
-                if n.type != TensorType((2, 2, Dyn, 4)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((2, 2, Dyn, 4)), got {n.type}"
-                    )
+                assert n.type == TensorType((2, 2, Dyn, 4))
 
         B = BasicBlock(1, 1)
         ast_rewriter = RewritingTracer()
@@ -472,28 +409,13 @@ class TypeCheckerTest(TestCase):
         tc.type_check()
         for n in graph.nodes:
             if n.op == "placeholder":
-                if n.type != TensorType((Dyn, Dyn, Dyn, Dyn)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((Dyn, Dyn, Dyn, Dyn)), "
-                        f"got {n.type}"
-                    )
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == "call_function":
-                if n.type != TensorType((Dyn, Dyn, Dyn, Dyn)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((Dyn, Dyn, Dyn, Dyn)), "
-                        f"got {n.type}"
-                    )
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == "output":
-                if n.type != TensorType((Dyn, Dyn, Dyn, Dyn)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((Dyn, Dyn, Dyn, Dyn)), "
-                        f"got {n.type}"
-                    )
+                assert n.type == TensorType((Dyn, Dyn, Dyn, Dyn))
             if n.op == "call_module":
-                if n.type != TensorType((2, 2, Dyn, 4)):
-                    raise AssertionError(
-                        f"Expected n.type == TensorType((2, 2, Dyn, 4)), got {n.type}"
-                    )
+                assert n.type == TensorType((2, 2, Dyn, 4))
 
     def test_type_check_conv2D_2(self):
         class BasicBlock(torch.nn.Module):
@@ -520,20 +442,13 @@ class TypeCheckerTest(TestCase):
         t = TensorType((5, 2, 3, 4))
         for n in graph.nodes:
             if n.op == "placeholder":
-                if n.type != t:
-                    raise AssertionError(f"Expected n.type == {t}, got {n.type}")
+                assert n.type == t
             if n.op == "call_function":
-                if n.type != t:
-                    raise AssertionError(f"Expected n.type == {t}, got {n.type}")
+                assert n.type == t
             if n.op == "output":
-                if torch.Size(n.type.__args__) != b.shape:
-                    raise AssertionError(
-                        f"Expected torch.Size(n.type.__args__) == {b.shape}, "
-                        f"got {torch.Size(n.type.__args__)}"
-                    )
+                assert torch.Size(n.type.__args__) == b.shape
             if n.op == "call_module":
-                if n.type != t:
-                    raise AssertionError(f"Expected n.type == {t}, got {n.type}")
+                assert n.type == t
 
         B = BasicBlock(1, 2)
         ast_rewriter = RewritingTracer()
@@ -637,10 +552,7 @@ class TypeCheckerTest(TestCase):
 
             for n in graph.nodes:
                 if n.op == "output":
-                    if not is_consistent(n.type, TensorType(b.size())):
-                        raise AssertionError(
-                            f"Expected n.type consistent with TensorType({b.size()})"
-                        )
+                    assert is_consistent(n.type, TensorType(b.size()))
 
             # test with intermediate annotations
             class BasicBlock(torch.nn.Module):
@@ -687,15 +599,8 @@ class TypeCheckerTest(TestCase):
 
             for n in traced.graph.nodes:
                 if n.op == "output":
-                    if n.type != TensorType(output_types[i]):
-                        raise AssertionError(
-                            f"Expected n.type == TensorType({output_types[i]}), "
-                            f"got {n.type}"
-                        )
-                    if not is_consistent(n.type, TensorType(b.size())):
-                        raise AssertionError(
-                            f"Expected n.type consistent with TensorType({b.size()})"
-                        )
+                    assert n.type == TensorType(output_types[i])
+                    assert is_consistent(n.type, TensorType(b.size()))
 
     def test_typecheck_basicblock(self):
         class BasicBlock(torch.nn.Module):
@@ -759,16 +664,11 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.target == "output":
-                if not isinstance(n.type, TensorType):
-                    raise AssertionError(
-                        f"Expected n.type to be TensorType, got {type(n.type)}"
-                    )
-                expected_size = B.forward(torch.rand(2, 2, 4, 5)).size()
-                if torch.Size(n.type.__args__) != expected_size:
-                    raise AssertionError(
-                        f"Expected torch.Size(n.type.__args__) == {expected_size}, "
-                        f"got {torch.Size(n.type.__args__)}"
-                    )
+                assert isinstance(n.type, TensorType)
+                assert (
+                    torch.Size(n.type.__args__)
+                    == B.forward(torch.rand(2, 2, 4, 5)).size()
+                )
 
     def test_type_check_conv2D_maxpool2d_flatten(self):
         class BasicBlock(torch.nn.Module):
@@ -814,9 +714,7 @@ class TypeCheckerTest(TestCase):
         traced.graph.eliminate_dead_code()
 
         for n in traced.graph.nodes:
-            expected = next(expected_iter)
-            if n.type != expected:
-                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
+            assert n.type == next(expected_iter)
 
     def test_type_check_flatten(self):
         class M(torch.nn.Module):
@@ -829,10 +727,7 @@ class TypeCheckerTest(TestCase):
         tc.type_check()
         for n in symbolic_traced.graph.nodes:
             if n.op == "output":
-                if n.type != TensorType((1, 6, 5, Dyn)):
-                    raise AssertionError(
-                        f"Expected TensorType((1, 6, 5, Dyn)), got {n.type}"
-                    )
+                assert n.type == TensorType((1, 6, 5, Dyn))
 
     def test_type_check_flatten_2(self):
         class M(torch.nn.Module):
@@ -845,10 +740,7 @@ class TypeCheckerTest(TestCase):
         tc.type_check()
         for n in symbolic_traced.graph.nodes:
             if n.op == "output":
-                if n.type != TensorType((1, Dyn, 5, Dyn)):
-                    raise AssertionError(
-                        f"Expected TensorType((1, Dyn, 5, Dyn)), got {n.type}"
-                    )
+                assert n.type == TensorType((1, Dyn, 5, Dyn))
 
     def test_type_check_flatten3(self):
         class M(torch.nn.Module):
@@ -861,13 +753,11 @@ class TypeCheckerTest(TestCase):
         tc.type_check()
         for n in symbolic_traced.graph.nodes:
             if n.op == "output":
-                if n.type != TensorType((2, 60)):
-                    raise AssertionError(f"Expected TensorType((2, 60)), got {n.type}")
+                assert n.type == TensorType((2, 60))
         r = Refine(symbolic_traced)
         r.refine()
         c = r.constraints
-        if c != [Equality(2, 2)]:
-            raise AssertionError(f"Expected [Equality(2, 2)], got {c}")
+        assert c == [Equality(2, 2)]
 
     def test_type_typechecl_maxpool2d_3dinput(self):
         class BasicBlock(torch.nn.Module):
@@ -888,10 +778,7 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.target == "output":
-                if n.type != TensorType((64, 1, 1)):
-                    raise AssertionError(
-                        f"Expected TensorType((64, 1, 1)), got {n.type}"
-                    )
+                assert n.type == TensorType((64, 1, 1))
 
     def test_type_maxpool2d_fully_static(self):
         annotation_list = [
@@ -968,10 +855,7 @@ class TypeCheckerTest(TestCase):
 
             for n in graph.nodes:
                 if n.op == "output":
-                    if not is_consistent(n.type, TensorType(b.size())):
-                        raise AssertionError(
-                            f"Expected n.type consistent with TensorType({b.size()})"
-                        )
+                    assert is_consistent(n.type, TensorType(b.size()))
 
             # test with intermediate annotations
             class BasicBlock(torch.nn.Module):
@@ -1010,15 +894,8 @@ class TypeCheckerTest(TestCase):
 
             for n in traced.graph.nodes:
                 if n.op == "output":
-                    if n.type != TensorType(output_types[i]):
-                        raise AssertionError(
-                            f"Expected n.type == TensorType({output_types[i]}), "
-                            f"got {n.type}"
-                        )
-                    if not is_consistent(n.type, TensorType(b.size())):
-                        raise AssertionError(
-                            f"Expected n.type consistent with TensorType({b.size()})"
-                        )
+                    assert n.type == TensorType(output_types[i])
+                    assert is_consistent(n.type, TensorType(b.size()))
 
     def test_flatten_fully_static(self):
         annotation_list = [
@@ -1078,10 +955,7 @@ class TypeCheckerTest(TestCase):
 
             for n in graph.nodes:
                 if n.op == "output":
-                    if not is_consistent(n.type, TensorType(b.size())):
-                        raise AssertionError(
-                            f"Expected n.type consistent with TensorType({b.size()})"
-                        )
+                    assert is_consistent(n.type, TensorType(b.size()))
 
     @skipIfNoTorchVision
     def test_resnet50(self):
@@ -1102,11 +976,7 @@ class TypeCheckerTest(TestCase):
         gm_run.graph.eliminate_dead_code()
         # here we are checking for consistency with fully dynamic nodes
         for n1, n2 in zip(gm_static.graph.nodes, gm_run.graph.nodes):
-            if not is_consistent(n1.type, TensorType(n2.meta["tensor_meta"].shape)):
-                raise AssertionError(
-                    f"Expected n1.type consistent with "
-                    f"TensorType({n2.meta['tensor_meta'].shape})"
-                )
+            assert is_consistent(n1.type, TensorType(n2.meta["tensor_meta"].shape))
 
         # here we give the same input as to runtime
         gm_static_with_types = symbolic_trace(resnet50())
@@ -1119,11 +989,7 @@ class TypeCheckerTest(TestCase):
         g = GraphTypeChecker({}, gm_static_with_types)
         g.type_check()
         for n1, n2 in zip(gm_static_with_types.graph.nodes, gm_run.graph.nodes):
-            expected_type = TensorType(n2.meta["tensor_meta"].shape)
-            if n1.type != expected_type:
-                raise AssertionError(
-                    f"Expected n1.type == {expected_type}, got {n1.type}"
-                )
+            assert n1.type == TensorType(n2.meta["tensor_meta"].shape)
 
         # apply shape inference to graph and check
         # that the batch size is equal across all layers
@@ -1132,15 +998,9 @@ class TypeCheckerTest(TestCase):
         batch_sizes = set()
         gm_static.graph.eliminate_dead_code()
         for n in gm_static.graph.nodes:
-            if not isinstance(n.type, TensorType):
-                raise AssertionError(
-                    f"Expected n.type to be TensorType, got {type(n.type)}"
-                )
+            assert isinstance(n.type, TensorType)
             batch_sizes.add(n.type.__args__[0])
-        if len(batch_sizes) != 1:
-            raise AssertionError(
-                f"Expected len(batch_sizes) == 1, got {len(batch_sizes)}"
-            )
+        assert len(batch_sizes) == 1
 
     def test_type_check_batch_norm_symbolic(self):
         class BasicBlock(torch.nn.Module):
@@ -1174,9 +1034,7 @@ class TypeCheckerTest(TestCase):
         )
 
         for n in graph.nodes:
-            expected = next(my_types)
-            if n.type != expected:
-                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
+            assert n.type == next(my_types)
 
     def test_symbolic_add_with_broadcast(self):
         class M(torch.nn.Module):
@@ -1191,11 +1049,7 @@ class TypeCheckerTest(TestCase):
         r = Refine(symbolic_traced)
         r.refine()
 
-        expected_constraints = [Equality(1, 1), Equality(2, 2), Equality(3, 3)]
-        if r.constraints != expected_constraints:
-            raise AssertionError(
-                f"Expected r.constraints == {expected_constraints}, got {r.constraints}"
-            )
+        assert r.constraints == [Equality(1, 1), Equality(2, 2), Equality(3, 3)]
         # note that there is no equality constraint between dyn and 4 because
         # dyn could be 4 or 1
 
@@ -1210,9 +1064,7 @@ class TypeCheckerTest(TestCase):
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
-            expected = next(expected_iter)
-            if n.type != expected:
-                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
+            assert n.type == next(expected_iter)
 
     def test_symbolic_add_with_broadcast_2(self):
         class M(torch.nn.Module):
@@ -1236,9 +1088,7 @@ class TypeCheckerTest(TestCase):
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
-            expected = next(expected_iter)
-            if n.type != expected:
-                raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
+            assert n.type == next(expected_iter)
 
     def test_type_check_conv2D_types(self):
         class BasicBlock(torch.nn.Module):
@@ -1264,16 +1114,8 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.op == "call_module":
-                if not isinstance(n.type.__args__[2], sympy.floor):
-                    raise AssertionError(
-                        f"Expected n.type.__args__[2] to be sympy.floor, "
-                        f"got {type(n.type.__args__[2])}"
-                    )
-                if not isinstance(n.type.__args__[3], sympy.floor):
-                    raise AssertionError(
-                        f"Expected n.type.__args__[3] to be sympy.floor, "
-                        f"got {type(n.type.__args__[3])}"
-                    )
+                assert isinstance(n.type.__args__[2], sympy.floor)
+                assert isinstance(n.type.__args__[3], sympy.floor)
 
     def test_type_check_symbolic_inferenceconv2D_maxpool2d_flatten(self):
         class BasicBlock(torch.nn.Module):
@@ -1305,7 +1147,7 @@ class TypeCheckerTest(TestCase):
 
         for n in traced.graph.nodes:
             if n.target == "conv1":
-                expected = TensorType(
+                assert n.type == TensorType(
                     (
                         4,
                         6,
@@ -1313,11 +1155,9 @@ class TypeCheckerTest(TestCase):
                         sympy.floor(sympy.symbols("~1") - 4),
                     )
                 )
-                if n.type != expected:
-                    raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
 
             elif n.target == "conv2":
-                expected = TensorType(
+                assert n.type == TensorType(
                     (
                         4,
                         16,
@@ -1325,8 +1165,6 @@ class TypeCheckerTest(TestCase):
                         sympy.floor(sympy.symbols("~5") - 4),
                     )
                 )
-                if n.type != expected:
-                    raise AssertionError(f"Expected n.type == {expected}, got {n.type}")
 
 
 if __name__ == "__main__":
