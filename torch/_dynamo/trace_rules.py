@@ -60,6 +60,7 @@ from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
+    InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
@@ -388,6 +389,8 @@ manual_torch_name_rule_map: dict[
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
     "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
+    "torch._utils_internal.justknobs_check": UserFunctionVariable,
+    "inspect.signature": InspectSignatureVariable,
 }
 
 
@@ -492,13 +495,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
-        "torch._C._cpu._is_avx2_supported",
-        "torch._C._cpu._is_avx512_supported",
-        "torch._C._cpu._is_avx512_vnni_supported",
-        "torch._C._cpu._is_avx512_bf16_supported",
-        "torch._C._cpu._is_amx_tile_supported",
-        "torch._C._cpu._is_amx_fp16_supported",
         "torch._C._cpu._init_amx",
+        "torch._C._cpu._get_cpu_capability",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -2541,13 +2539,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.chain_matmul",
         "torch.compile",
         "torch.compiled_with_cxx11_abi",
-        "torch._C._cpu._is_avx2_supported",
-        "torch._C._cpu._is_avx512_supported",
-        "torch._C._cpu._is_avx512_vnni_supported",
-        "torch._C._cpu._is_avx512_bf16_supported",
-        "torch._C._cpu._is_amx_tile_supported",
-        "torch._C._cpu._is_amx_fp16_supported",
         "torch.cpu._init_amx",
+        "torch.cpu.get_capabilities",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -3814,7 +3807,7 @@ def _force_inline() -> Iterator[None]:
     When active, check_verbose() will skip all inline/skip decision logic and
     always return SkipResult(False, ...), meaning functions will be inlined.
 
-    See _make_inlined() in higher_order_ops.py which uses this to ensure that
+    See _make_inlined() in utils.py which uses this to ensure that
     a python function is fully traced to produce the needed variable trackers.
     """
     global _force_inline_flag

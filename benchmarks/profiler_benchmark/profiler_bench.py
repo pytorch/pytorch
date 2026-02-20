@@ -78,7 +78,10 @@ if __name__ == "__main__":
             input_x = input_x.cuda()
 
         workload = None
-        assert args.workload in ["loop", "parallel"]
+        if args.workload not in ["loop", "parallel"]:
+            raise AssertionError(
+                f"args.workload must be 'loop' or 'parallel', but got '{args.workload}'"
+            )
         if args.workload == "loop":
             workload = loop_workload
         else:

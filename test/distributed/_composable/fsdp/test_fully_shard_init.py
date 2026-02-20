@@ -162,7 +162,6 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 4
 
-    @skip_if_lt_x_gpu(1)
     def test_invalid_mesh_ndim(self):
         mesh = init_device_mesh(device_type.type, (self.world_size, 1, 1))
         model = MLP(8)
@@ -170,7 +169,6 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=mesh)
 
-    @skip_if_lt_x_gpu(1)
     def test_2d_mesh_without_mesh_dim_names(self):
         mesh = init_device_mesh(device_type.type, (self.world_size // 2, 2))
         model = MLP(8)
@@ -186,7 +184,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 1
 
-    @skip_if_lt_x_gpu(1)
     def test_managed_modules_single(self):
         model = MLP(8)
         # Assume calling `fully_shard` on `model`
@@ -194,7 +191,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_managed_modules = list(model.modules())
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
-    @skip_if_lt_x_gpu(1)
     def test_managed_modules_nested(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         fully_shard(model[0])
@@ -203,7 +199,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_managed_modules = list(model[1].modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
-    @skip_if_lt_x_gpu(1)
     def test_managed_modules_nested_fully_shard_and_replicate(self):
         model = nn.Sequential(*[MLP(8) for _ in range(3)])
         replicate(model[0])
@@ -213,7 +208,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_managed_modules = list(model[1].modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
-    @skip_if_lt_x_gpu(1)
     def test_managed_modules_duplicate(self):
         mlp = MLP(8)
         model = nn.Sequential(mlp, mlp)  # duplicate MLP
@@ -223,7 +217,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_managed_modules = list(mlp.modules()) + [model]
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
-    @skip_if_lt_x_gpu(1)
     def test_managed_modules_list_of_mlps(self):
         model = nn.Sequential(*[MLP(8) for _ in range(5)])
         # Assume calling `fully_shard` on `[model[0], model[1], model[2]]`
@@ -247,7 +240,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         # Check set comparison since we do not require anything about the order
         self.assertEqual(set(managed_modules), set(expected_managed_modules))
 
-    @skip_if_lt_x_gpu(1)
     def test_managed_states_shared_params_and_buffers(self):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(3)])
         model[0].in_proj.weight = model[1].in_proj.weight
@@ -260,7 +252,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_buffers = list(model.buffers())  # de-dups shared
         self._check_managed_states(params, buffers, expected_params, expected_buffers)
 
-    @skip_if_lt_x_gpu(1)
     def test_managed_states_nested_fully_shard(self):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(2)])
         fully_shard(model[0])
@@ -271,7 +262,6 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         expected_buffers = list(model[1].buffers())
         self._check_managed_states(params, buffers, expected_params, expected_buffers)
 
-    @skip_if_lt_x_gpu(1)
     def test_managed_states_list_of_mlps(self):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(5)])
         # Assume calling `fully_shard` on `[model[0], model[1], model[2]]`
@@ -307,7 +297,6 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     def test_get_param_module_infos_shared_params(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         model[0].in_proj.weight = model[1].in_proj.weight
@@ -328,7 +317,6 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
         self.assertEqual(len(param_module_infos), len(expected_param_module_infos))
         self.assertEqual(param_module_infos, expected_param_module_infos)
 
-    @skip_if_lt_x_gpu(1)
     def test_get_param_module_infos_duplicates(self):
         mlp = MLP(8)
         model = nn.Sequential(mlp, mlp)  # shared MLP
@@ -356,7 +344,6 @@ class TestFullyShardParamModuleInfos(FSDPTestMultiThread):
             ParamModuleInfo(mlp.out_proj, "bias", [], []),
         ]
 
-    @skip_if_lt_x_gpu(1)
     def test_get_param_module_infos_list_of_mlps(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         managed_modules = _get_managed_modules((model[0], model[1]))
@@ -412,7 +399,6 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
             chunks = torch.chunk(orig_param, self.world_size, dim=0)
             self.assertEqual(sharded_param._local_tensor, chunks[self.rank])
 
-    @skip_if_lt_x_gpu(1)
     def test_raise_scalar_parameter(self):
         """Tests raising an exception when the model has scalar parameters."""
         model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
@@ -424,7 +410,6 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
         ):
             fully_shard(model)
 
-    @skip_if_lt_x_gpu(1)
     def test_raise_noncontiguous_parameter(self):
         """
         Tests raising an exception when the model has non-contiguous
@@ -487,7 +472,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_is_root(self):
         """
         Tests that ``_is_root`` is set correctly after lazy initialization.
@@ -516,7 +500,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             all_states, [root_state, model0_in_proj_state, model0_out_proj_state]
         )
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_module_and_param_fqns(self):
         """
         Tests that the module and parameter FQNs are computed correctly after
@@ -574,7 +557,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             model0_out_proj_param_fqns, {"0.out_proj.weight", "0.out_proj.bias"}
         )
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard(model[0].in_proj)
@@ -590,7 +572,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
 
-    @skip_if_lt_x_gpu(1)
     def test_fully_shard_multi_module_root(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard([model[0], model[1]])
@@ -599,7 +580,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
 
-    @skip_if_lt_x_gpu(1)
     def test_reset_sharded_param_in_lazy_init(self):
         class MyModel(nn.Module):
             def __init__(self):
@@ -1291,7 +1271,6 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         ):
             fully_shard(model, shard_placement_fn=shard_placement_fn)
 
-    @skip_if_lt_x_gpu(1)
     def test_invalid_shard_dim(self):
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 8))
 
@@ -1312,7 +1291,6 @@ class TestFullyShardOldImport(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
-    @skip_if_lt_x_gpu(1)
     def test_old_import_training(self):
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)

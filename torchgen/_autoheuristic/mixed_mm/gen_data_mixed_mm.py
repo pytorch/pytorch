@@ -119,7 +119,8 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
             if k % 256 != 0:
                 continue
 
-            assert k >= 1024 and n >= 1024, "k and n must be at least 1024"
+            if not (k >= 1024 and n >= 1024):
+                raise AssertionError("k and n must be at least 1024")
 
             if m * k >= numel_max or m * n >= numel_max or k * n >= numel_max:
                 # autotuning will not happen for tensors that are this large
