@@ -27,3 +27,4 @@
 #endif
 
 #define TORCH_VERSION_2_10_0 (((0ULL + 2) << 56) | ((0ULL + 10) << 48))
+#define TORCH_VERSION_2_11_0 (((0ULL + 2) << 56) | ((0ULL + 11) << 48))

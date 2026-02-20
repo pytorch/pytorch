@@ -344,6 +344,25 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         else:
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_dispatcher_torchbind_symmetric_memory(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        t = symm_mem.empty(numel, dtype=dtype, device=self.device)
+
+        # Exercise dispatcher schema that returns a TorchBind
+        # SymmetricMemory object (__torch__.torch.classes.c10d.SymmetricMemory).
+        sm = torch.ops.symm_mem._rendezvous(t, group_name)
+        # Exercise dispatcher schema that accepts a TorchBind
+        # SymmetricMemory object (__torch__.torch.classes.c10d.SymmetricMemory).
+        torch.ops.symm_mem._barrier(sm)
+
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
