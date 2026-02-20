@@ -168,8 +168,18 @@ def cond(
             are allowed in a branch)
 
           - The function can perform in-place mutations on its input tensors.
-            However, after cond, mutated inputs will be returned as new tensors that
-            do not share object identity with the original inputs.
+            However, outputs will always be new tensors that do not share object
+            identity with the original inputs.
+
+            Example::
+
+                def true_fn(x):
+                    return x.sin_()
+
+
+                x = torch.randn(4)
+                result = cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+                assert result is not x  # result is a new tensor, not the original x
 
     """
     if torch.compiler.is_dynamo_compiling():
