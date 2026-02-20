@@ -3949,12 +3949,6 @@ def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
 
 @register_decomposition(aten.upsample_bilinear2d.vec)
 @register_decomposition(aten.upsample_trilinear3d.vec)
-@aten.upsample_linear1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_linear1d.vec.py_impl(DispatchKey.Autograd)
-@aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
-@aten.upsample_trilinear3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_trilinear3d.vec.py_impl(DispatchKey.Autograd)
 def _upsample_linear_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scales = scale_factors if scale_factors else [None] * len(osize)
@@ -3975,7 +3969,6 @@ def upsample_linear1d(
 @register_decomposition(
     [aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out]
 )
-@aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 def upsample_bilinear2d(
     input: Tensor,
@@ -4787,7 +4780,6 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
 
 @register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
-@aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
@@ -4878,8 +4870,6 @@ def upsample_bicubic2d_default(
 
 
 @register_decomposition(aten.upsample_bicubic2d.vec)
-@aten.upsample_bicubic2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
-@aten.upsample_bicubic2d.vec.py_impl(DispatchKey.Autograd)
 @out_wrapper()
 @pw_cast_for_opmath
 def upsample_bicubic2d_vec(
