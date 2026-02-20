@@ -1719,22 +1719,21 @@ class MetaConverter(Generic[_TensorT]):
                         if symbolic_context.view_base_context is not None:
                             base_symbolic_context = symbolic_context.view_base_context
 
-                    base = self.meta_tensor(
-                        t.base,
-                        shape_env,
-                        callback,
-                        torch._dynamo.source.AttrSource(source, "_base"),
-                        base_symbolic_context,
-                    )
-                    # If the base tensor has unbacked symbols (e.g., from mark_unbacked),
-                    # we need to bind them now. Otherwise they'll be left pending and
-                    # compute_unbacked_bindings will fail when called for the view
-                    # (since the view may have concrete shapes, not the unbacked symbols).
-                    from torch.fx.experimental.symbolic_shapes import (
-                        compute_unbacked_bindings,
-                    )
-
-                    compute_unbacked_bindings(shape_env, base)
+                    # We don't track the example values of base tensors.
+                    # Allocation of unbacked symbols can happen when mark_unbacked
+                    # is called on a base tensor that have unbacked_indices.
+                    with (
+                        shape_env.ignore_fresh_unbacked_symbols()
+                        if shape_env
+                        else contextlib.nullcontext()
+                    ):
+                        base = self.meta_tensor(
+                            t.base,
+                            shape_env,
+                            callback,
+                            torch._dynamo.source.AttrSource(source, "_base"),
+                            base_symbolic_context,
+                        )
 
                     def is_c_of_r(
                         complex_dtype: torch.dtype, real_dtype: torch.dtype

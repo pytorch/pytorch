@@ -9,6 +9,9 @@ import functools
 import inspect
 import io
 import operator
+import os
+import subprocess
+import sys
 import unittest
 from collections.abc import Sequence
 from enum import Enum
@@ -4568,6 +4571,30 @@ def forward(self, x, b, y):
             res = ep.module()(*inputs)
 
         self.assertEqual(ref, res)
+
+    def test_strict_export_under_pythonoptimize(self):
+        env = dict(os.environ)
+        env["PYTHONOPTIMIZE"] = "1"
+        code = """\
+import torch
+model = torch.nn.Linear(2, 3)
+example_input = torch.randn(1, 2)
+ep = torch.export.export(model, args=(example_input,), strict=True)
+out_export = ep.module()(example_input)
+out_orig = model(example_input)
+torch.testing.assert_close(out_export, out_orig)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=f"strict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
+        )
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
