@@ -642,7 +642,6 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
         from . import (  # noqa: F401  # noqa: F401
             cpu_device_op_overrides,
             mps_device_op_overrides,
-            pallas,
         )
         from .cuda import device_op_overrides  # noqa: F401
         from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
