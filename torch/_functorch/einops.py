@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union
+from typing import Union
 
 import torch
 from torch._functorch.utils import exposed_in
 
-if TYPE_CHECKING:
-    pass
 
 __all__ = ["rearrange"]
 
