@@ -2039,6 +2039,28 @@ class SkipFunctionVariable(VariableTracker):
                 )
             except Unsupported as e:
                 raise StepUnsupported(e.msg) from None
+        elif self.value is types.FunctionType.__get__:
+            # function.__get__(func, obj[, cls]) produces a bound method.
+            # This is called by inspect._descriptor_get when resolving
+            # descriptors during inspect.signature().
+            # Note that function.__get__ does not use the 3rd argument. The
+            # reason it still has the 3rd argument is because descriptors follow
+            # a function signature that takes 3 arguments, and other descriptors
+            # (not function.__get__) can use the 3rd argument.
+            if len(args) in (2, 3) and not kwargs:
+                func_var = args[0]
+                obj_var = args[1]
+                if isinstance(func_var, UserFunctionVariable):
+                    return UserMethodVariable(
+                        func_var.fn, obj_var, source_fn=func_var.source
+                    )
+            unimplemented(
+                gb_type="unsupported function.__get__ call",
+                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
+                explanation="Dynamo only supports function.__get__(func, obj[, cls]) "
+                "where func is a user-defined function.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
