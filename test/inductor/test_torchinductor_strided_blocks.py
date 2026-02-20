@@ -1033,7 +1033,7 @@ class CommonTemplate:
         """
         x = torch.randn((9, 11, 2), device=self.device)
 
-        # If tiled, we expect 1 block pointer for the input.
+        # We expect block pointers for the input and output.
         result, (code,) = self._run_and_compare(
             functools.partial(torch.amax, dim=-1),
             x,
@@ -1051,6 +1051,32 @@ class CommonTemplate:
         # Check the code for multiple output dims.
         self._assert_pointwise_ndims(code, 2)
         self._assert_reduction_ndims(code, 1)
+
+    @xfail_if_use_tensor_descriptor
+    @parametrize("unroll", (False, True))
+    def test_reduce_last_dim_discontiguous_input(self, unroll: bool):
+        """
+        Test a [Y, X, R0_] reduction where the input tensor is discontiguous, but we
+        only reduce over the last dimension.
+        """
+        view = self._discontiguous_tensor((9, 11, 2), self.device)
+
+        # We expect block pointers for the inputs and output.
+        # Note there are two inputs if unrolled.
+        result, (code,) = self._run_and_compare(
+            functools.partial(torch.amax, dim=-1),
+            view,
+            expected_num_block_pointers=3 if unroll else 2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "unroll_reductions_threshold": 1e4 if unroll else 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple pointwise dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 0 if unroll else 1)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
