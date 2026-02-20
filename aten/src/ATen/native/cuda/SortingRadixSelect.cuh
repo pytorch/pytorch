@@ -896,6 +896,14 @@ __device__ void radixSelect(
   __syncthreads(); // so the initialization is visible to all threads in the
                    // blocks.
 
+  // buffer index for smem. We use two segments of smem for inter-warp communication of counts.
+  // Given the counting operation in countRadixUsingMaskDataSmem performs __syncthreads() internally,
+  // we need to alternate between the at most two segments of smem to avoid race conditions.
+  // No more than two iterations of the loop will be "in flight" at any given time because
+  // of the __syncthreads() in countRadixUsingMaskDataSmem.
+  // buffer_index is either 0 or 1. It is toggled after each countRadixUsingMaskDataSmem invocation.
+  int buffer_index = 0;
+
 #endif
 
   // We only consider elements x such that (x & desiredMask) == desired
@@ -908,14 +916,6 @@ __device__ void radixSelect(
   // digits; this count gets reduced by elimination when counting
   // successive digits
   int kToFind = k;
-
-  // buffer index for smem. We use two segments of smem for inter-warp communication of counts.
-  // Given the counting operation in countRadixUsingMaskDataSmem performs __syncthreads() internally,
-  // we need to alternate between the at most two segments of smem to avoid race conditions.
-  // No more than two iterations of the loop will be "in flight" at any given time because
-  // of the __syncthreads() in countRadixUsingMaskDataSmem.
-  // buffer_index is either 0 or 1. It is toggled after each countRadixUsingMaskDataSmem invocation.
-  int buffer_index = 0;
 
   // We start at the most significant digit in our radix, scanning
   // through to the least significant digit
