@@ -1817,7 +1817,10 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_getattr_functools_partial(self):
         defaults = {"x": 3, "y": 5}
 
-        def _getattr_impl(defaults, name):
+        def _getattr_impl(defaults, *args):
+            # In Python 3.14+, functools.partial is a descriptor, so
+            # __getattr__ receives (self, name) instead of just (name).
+            name = args[-1]
             if name in defaults:
                 return defaults[name]
             raise AttributeError(name)
