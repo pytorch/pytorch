@@ -2268,6 +2268,19 @@ class VariableBuilder:
         # it would have already been wrapped
         assert value not in self.tx.output.side_effects
 
+        # Check if we're wrapping the first parameter in an `__init__` method of a tensor subclass
+        # If so, skip faking since the tensor may not be fully initialized yet
+        if (
+            isinstance(source, LocalSource)
+            and source.is_input
+            and self.tx.f_code.co_name == "__init__"
+            and self.tx.f_code.co_argcount > 0
+            and source.local_name == self.tx.f_code.co_varnames[0]
+            and is_traceable_wrapper_subclass(value)
+        ):
+            # Treat as unspecialized - don't try to fake it
+            return UserDefinedObjectVariable(value, source=source)
+
         is_static_input = get_static_address_type(value) is not None
 
         if (
