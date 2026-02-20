@@ -1534,6 +1534,13 @@ class triton:
     # Default to None, which means we capture cudagraphs for all shapes.
     cudagraph_capture_sizes: Optional[tuple[Union[int, tuple[int, ...]]]] = None
 
+    # Minimum number of nodes (kernels) required for a cudagraph partition.
+    # If a partition has fewer nodes than this threshold, it won't be cudagraphed.
+    # This helps avoid overhead for very small partitions where cudagraph
+    # recording/replay cost outweighs the benefits.
+    # Set to 0 to disable this check.
+    cudagraph_min_partition_size = 0
+
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
 
