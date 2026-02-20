@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>

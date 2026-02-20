@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -104,10 +106,6 @@ void PropertyPropBase::setUnshapedType(Node* node) {
   for (auto o : node->outputs()) {
     setUnshapedType(o);
   }
-}
-
-namespace prim {
-using namespace ::c10::prim;
 }
 
 #define SHAPE_ASSERT(cond) \
