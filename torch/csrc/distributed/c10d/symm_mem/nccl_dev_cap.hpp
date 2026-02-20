@@ -11,7 +11,9 @@
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
 #define NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+#if !defined(USE_ROCM)
 #include <nccl_device.h>
+#endif
 #endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
