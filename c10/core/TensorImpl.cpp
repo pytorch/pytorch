@@ -375,6 +375,9 @@ c10::Device TensorImpl::device_custom() const {
   if (C10_UNLIKELY(python_custom_device_)) {
     return pyobj_slot_.load_pyobj_interpreter()->device(this);
   }
+  if (extra_meta_ && extra_meta_->fake_device_.has_value()) {
+    return *extra_meta_->fake_device_;
+  }
   return device_default();
 }
 
