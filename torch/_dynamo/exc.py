@@ -247,6 +247,10 @@ class CondOpArgsMismatchError(TorchDynamoException):
     Internal error from cond() due to arguments mismatch.
     """
 
+class SwitchOpArgsMismatchError(TorchDynamoException):
+    """
+    Internal error from switch() due to arguments mismatch.
+    """
 
 class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()

@@ -11,6 +11,7 @@ from torch._higher_order_ops.auto_functionalize import (
 )
 from torch._higher_order_ops.base_hop import BaseHOP
 from torch._higher_order_ops.cond import cond
+from torch._higher_order_ops.switch import switch
 from torch._higher_order_ops.effects import with_effects
 from torch._higher_order_ops.executorch_call_delegate import executorch_call_delegate
 from torch._higher_order_ops.flat_apply import flat_apply
@@ -46,6 +47,7 @@ from torch._higher_order_ops.wrap import (
 
 __all__ = [
     "cond",
+    "switch",
     "while_loop",
     "invoke_subgraph",
     "scan",
