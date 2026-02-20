@@ -182,6 +182,13 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     int64_t opaque_metadata_size,
     void (*deleter)(void*));
 
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+/**
+ * The beginning of all shims added in 2.12.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
 // Like torch_from_blob, but accepts a deleter with a context pointer.
 // This allows passing capturing lambdas across the C ABI boundary by
 // heap-allocating the callable and passing it as deleter_ctx.
@@ -201,7 +208,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob_v2(
     void (*deleter)(void* data, void* ctx),
     void* deleter_ctx);
 
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 #ifdef __cplusplus
 } // extern "C"
