@@ -363,9 +363,9 @@ def conv_layout(
     """Determine output layout for a convolution"""
     with V.graph.fake_mode:
         output = torch.ops.aten.convolution(
-            ir.ir_node_to_tensor(x, guard_shape=True),
-            ir.ir_node_to_tensor(weight, guard_shape=True),
-            ir.ir_node_to_tensor(bias, guard_shape=True),
+            ir.ir_node_to_tensor(x),
+            ir.ir_node_to_tensor(weight),
+            ir.ir_node_to_tensor(bias),
             V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
             V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
