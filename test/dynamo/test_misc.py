@@ -9922,6 +9922,7 @@ def ___make_guard_fn():
 
     def test_class_hasattr_sourceless_descriptor(self):
         """Test that hasattr on sourceless UserDefinedClassVariable does not graph break."""
+
         class FlagDescriptor:
             def __get__(self, instance, owner):
                 if hasattr(owner, "flag"):
