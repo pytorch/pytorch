@@ -113,9 +113,6 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 log = logging.getLogger(__name__)
 lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 # User-registered lowerings that take priority over built-in lowerings.
-# Used by custom op autotuning to register alternative implementations.
-# The dispatch in graph.py checks this dict first, with recursion guard via
-# V.active_user_lowering_ops to allow decompositions to call the original op.
 user_lowerings: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: dict[
