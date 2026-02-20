@@ -5,12 +5,6 @@ from typing import TYPE_CHECKING, Union
 import torch
 from torch._functorch.utils import exposed_in
 
-# Import the internal implementation
-from functorch.einops.rearrange import (
-    _create_rearrange_callable,
-)
-
-
 if TYPE_CHECKING:
     pass
 
@@ -71,6 +65,10 @@ def rearrange(
     """
     if not isinstance(tensor, torch.Tensor):
         tensor = torch.stack(tensor)
+
+    # Lazy import to avoid circular import:
+    # torch._functorch.einops -> functorch.einops (package __init__) -> torch._functorch.einops
+    from functorch.einops.rearrange import _create_rearrange_callable
 
     rearrange_callable = _create_rearrange_callable(
         tensor.ndim, pattern, **axes_lengths
