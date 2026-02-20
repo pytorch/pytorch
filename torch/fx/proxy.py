@@ -22,10 +22,11 @@ from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_
 from torch.utils._traceback import CapturedTraceback
 
+from . import config as fx_config
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
 from .immutable_collections import immutable_dict, immutable_list
-from .node import _LazyStackTrace, Argument, base_types, Node, Target
+from .node import Argument, base_types, Node, Target
 from .operator_schemas import check_for_mutable_operation
 
 
@@ -265,11 +266,17 @@ class TracerBase:
         elif self.module_stack:
             node.meta["nn_module_stack"] = copy.copy(self.module_stack)
 
-        if self.record_stack_traces and "stack_trace" not in node.meta:
-            node.meta["stack_trace"] = _LazyStackTrace(
-                CapturedTraceback.extract(),
-                self._filter_traceback_frames,
-            )
+        if self.record_stack_traces and not node.stack_trace:
+            if fx_config.do_not_emit_stack_traces:
+                node.stack_trace = "omitted"
+            else:
+                user_stack_summary = CapturedTraceback.extract().summary()
+                if user_stack_summary:
+                    user_stack_summary = self._filter_traceback_frames(
+                        user_stack_summary
+                    )
+                    if user_stack_summary:
+                        node.stack_trace = "".join(user_stack_summary.format()).strip()
 
         log.debug("create_node %s", node)
         return node
