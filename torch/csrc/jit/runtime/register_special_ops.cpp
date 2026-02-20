@@ -1,12 +1,30 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/Context.h>
+#include <ATen/ScalarOps.h>
+#include <ATen/TensorOptions.h>
+#include <ATen/Version.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/embedding_renorm.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/fill.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/split_with_sizes.h>
+#include <ATen/ops/zero.h>
+#endif
+
 #include <torch/library.h>
 
 #include <ATen/ExpandUtils.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/stack.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/api/include/torch/utils.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -28,13 +46,13 @@ c10::AliasAnalysisKind aliasAnalysisConservative() {
 }
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
-  if (!elem_type->isSubtypeOf(*NumberType::get()) &&
-      !elem_type->isSubtypeOf(*BoolType::get())) {
+  if (!elem_type->isSubtypeOf(*c10::NumberType::get()) &&
+      !elem_type->isSubtypeOf(*c10::BoolType::get())) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->repr_str();
     // special case empty list torch.tensor([])
-    if (elem_type->isSubtypeOf(*TensorType::get())) {
+    if (elem_type->isSubtypeOf(*c10::TensorType::get())) {
       if (empty_list) {
         error << "\nEmpty lists default to List[Tensor]. Add a variable "
                  "annotation to the assignment to create an empty list "
@@ -194,14 +212,14 @@ void createTensorFromList(Stack& stack) {
     pop(stack, data, dtype, device);
   }
   auto elem_type = data.type();
-  while (elem_type->isSubtypeOf(AnyListType::get())) {
+  while (elem_type->isSubtypeOf(c10::AnyListType::get())) {
     elem_type = elem_type->containedType(0);
   }
   auto sizes = compute_sizes(data);
   checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
   at::ScalarType initial_scalar_type = scalarTypeFromJitType(*elem_type);
   if (initial_scalar_type == at::ScalarType::Double) {
-    initial_scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    initial_scalar_type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
   auto tensor =
@@ -218,7 +236,7 @@ void createTensorFromList(Stack& stack) {
   }
 
   tensor = castTensorTo(tensor, dtype, device);
-  auto default_type = at::typeMetaToScalarType(at::get_default_dtype());
+  auto default_type = c10::typeMetaToScalarType(at::get_default_dtype());
 
   if (dtype.isNone() && tensor.scalar_type() != default_type &&
       tensor.numel() == 0) {
@@ -296,7 +314,7 @@ RegisterOperators reg({
             double,
             at::native::scalar_tensor(
                 scalar_val,
-                typeMetaToScalarType(c10::get_default_dtype()),
+                c10::typeMetaToScalarType(c10::get_default_dtype()),
                 std::nullopt /* layout */,
                 at::kCPU,
                 std::nullopt /* pin_memory*/))
@@ -309,7 +327,8 @@ RegisterOperators reg({
                     c10::complex<double>,
                     at::native::scalar_tensor(
                         scalar_val,
-                        typeMetaToScalarType(c10::get_default_complex_dtype()),
+                        c10::typeMetaToScalarType(
+                            c10::get_default_complex_dtype()),
                         std::nullopt /* layout */,
                         at::kCPU,
                         std::nullopt /* pin_memory */))
@@ -335,7 +354,7 @@ RegisterOperators reg({
           pop(stack, weight, input, max_norm, norm_type);
 
           // TODO: remove when script supports setting grad mode
-          torch::NoGradGuard no_grad;
+          at::NoGradGuard no_grad;
 
           at::Tensor result =
               at::embedding_renorm_(weight, input, max_norm, norm_type);
@@ -393,7 +412,7 @@ RegisterOperators reg({
             "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b, Generator? generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
-          torch::NoGradGuard no_grad;
+          at::NoGradGuard no_grad;
 
           at::Tensor tensor;
           std::optional<at::Generator> generator =
@@ -410,7 +429,7 @@ RegisterOperators reg({
             "aten::_no_grad_normal_(Tensor(a!) tensor, float mean, float std, Generator? generator=None) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
-          torch::NoGradGuard no_grad;
+          at::NoGradGuard no_grad;
 
           at::Tensor tensor;
           double mean = 0;
@@ -427,7 +446,7 @@ RegisterOperators reg({
             "aten::_no_grad_fill_(Tensor(a!) tensor, float val) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
-          torch::NoGradGuard no_grad;
+          at::NoGradGuard no_grad;
 
           at::Tensor tensor;
           double val = 0;
@@ -440,7 +459,7 @@ RegisterOperators reg({
             "aten::_no_grad_zero_(Tensor(a!) tensor) -> Tensor(a!)"),
         [](Stack& stack) {
           // TODO: remove when script supports setting grad mode
-          torch::NoGradGuard no_grad;
+          at::NoGradGuard no_grad;
 
           at::Tensor tensor;
           pop(stack, tensor);
@@ -449,11 +468,11 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::is_grad_enabled() -> bool",
-        [](Stack& stack) { push(stack, torch::GradMode::is_enabled()); },
+        [](Stack& stack) { push(stack, at::GradMode::is_enabled()); },
         aliasAnalysisConservative()),
     Operator(
         "aten::set_grad_enabled(bool val) -> ()",
-        [](Stack& stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
+        [](Stack& stack) { at::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
     Operator(
         "aten::_get_cpu_capability() -> str",
