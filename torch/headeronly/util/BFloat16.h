@@ -34,6 +34,10 @@ struct alignas(2) BFloat16 {
   // HIP wants __host__ __device__ tag, CUDA does not
   C10_HOST_DEVICE BFloat16() = default;
   // Fast conversion constructors 
+  inline C10_HOST_DEVICE BFloat16(__bf16 value) : x__bf16(value) {}
+  inline C10_HOST_DEVICE BFloat16(unsigned long value) : x__bf16(static_cast<__bf16>(value)) {}
+  inline C10_HOST_DEVICE BFloat16(unsigned int value) : x__bf16(static_cast<__bf16>(value)) {}
+  
   inline C10_HOST_DEVICE BFloat16(double value);
   explicit inline C10_HOST_DEVICE operator double() const;
   inline C10_HOST_DEVICE BFloat16(int value);
