@@ -290,17 +290,10 @@ dtensor_compiled_fails = {
     # reduction_with_dim handler.
     xfail("max", "reduction_with_dim"),
     xfail("min", "reduction_with_dim"),
-    # Decompositions that use plain tensor constructors (e.g. arange),
-    # causing mixed tensor/DTensor errors during Dynamo's fake prop.
-    xfail("corrcoef"),
-    xfail("cov"),
-    xfail("nn.functional.interpolate", "bicubic"),
-    xfail("nn.functional.interpolate", "bilinear"),
-    xfail("nn.functional.interpolate", "linear"),
-    xfail("nn.functional.interpolate", "trilinear"),
-    xfail("nn.functional.upsample_bilinear"),
     # Data-dependent outputs (SymBool, unbacked shapes) that raise
     # during DTensor's fake prop.
+    xfail("corrcoef"),
+    xfail("cov"),
     xfail("equal"),
     xfail("hash_tensor"),
     xfail("item"),
