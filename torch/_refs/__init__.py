@@ -10,7 +10,7 @@ import warnings
 from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Optional, Union, cast, overload
+from typing import Any, cast, Optional, overload, Union
 
 import torch
 import torch._prims as prims
@@ -18,29 +18,29 @@ import torch._prims_common as utils
 import torch.utils._pytree as pytree
 from torch import sym_float, sym_int, sym_max, sym_min
 from torch._prims_common import (
-    ELEMENTWISE_TYPE_PROMOTION_KIND,
-    REDUCTION_OUTPUT_TYPE_KIND,
     BoolLike,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
     DimsType,
+    dtype_to_type,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    is_contiguous_for_memory_format_or_false,
+    is_contiguous_or_false,
+    is_weakly_lesser_type,
     Number,
     NumberType,
     RealNumberType,
+    REDUCTION_OUTPUT_TYPE_KIND,
     ShapeType,
     StrideType,
     TensorLike,
     TensorLikeType,
     TensorOrNumberLikeType,
     TensorSequenceType,
-    dtype_to_type,
-    is_contiguous_for_memory_format_or_false,
-    is_contiguous_or_false,
-    is_weakly_lesser_type,
 )
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
@@ -50,6 +50,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+
 
 # Experimental module containing prototype Python references for existing
 #   PyTorch operations.
@@ -526,6 +527,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
+
 
 #
 # Elementwise unary references

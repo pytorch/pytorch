@@ -836,8 +836,7 @@ TORCH_IMPL_FUNC(clamp_out)
 
   if (min_is_nan || max_is_nan) {
     at::fill_(
-        const_cast<Tensor&>(result),
-        std::numeric_limits<double>::quiet_NaN());
+        const_cast<Tensor&>(result), std::numeric_limits<double>::quiet_NaN());
   } else if (min && max) {
     clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
@@ -846,7 +845,6 @@ TORCH_IMPL_FUNC(clamp_out)
     clamp_min_scalar_stub(device_type(), *this, min.get());
   }
 }
-
 
 TORCH_IMPL_FUNC(clamp_Tensor_out)
 (const Tensor& self,
