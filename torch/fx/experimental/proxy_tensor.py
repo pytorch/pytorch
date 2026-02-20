@@ -491,6 +491,8 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     Returns a dict converting sympy functions to python operators
     (i.e. `sympy.Mul` -> `operator.mul`)
     """
+    import sympy
+
     import torch.utils._sympy.interp
 
     handlers = {}
@@ -498,6 +500,11 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
+
+    # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
+    # Use torch.sym_sum which natively handles n-ary integer addition and
+    # already has proper FX tracing support (see _compute_proxy).
+    handlers[sympy.Add] = torch.sym_sum
     return handlers
 
 
@@ -592,17 +599,22 @@ def _build_proxy_for_sym_expr(
         if (arg_value := _build_proxy_for_sym_expr(tracer, arg)) is None:
             return None
         args.append(arg_value)
-    args = tuple(args)
 
     func: OpOverload | None = _sympy_handlers().get(expr.func)  # type: ignore[assignment]
     if not func:
         # Handler not found
         return None
 
-    if out is None:
-        out = func(*args)
+    # torch.sym_sum takes a single sequence arg, not splatted args
+    if func is torch.sym_sum:
+        call_args = (tuple(args),)
     else:
-        _sym_register(tracer, func, args, out)
+        call_args = tuple(args)
+
+    if out is None:
+        out = func(*call_args)
+    else:
+        _sym_register(tracer, func, call_args, out)
     return out
 
 
