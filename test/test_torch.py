@@ -2341,6 +2341,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
+    @skipIfTorchDynamo("Skip due to dynamo failure on scipy tracing in CI: https://github.com/pytorch/pytorch/pull/175420/")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_exponential_kstest(self, device, dtype):
         from scipy import stats
