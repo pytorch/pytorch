@@ -6,6 +6,7 @@ input/output types, metadata, config, function signatures etc.
 from __future__ import annotations
 
 import collections
+import contextvars
 import functools
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -510,6 +511,12 @@ class ViewAndMutationMeta:
     # None means use the current/default stream
     # This is populated during graph compilation when stream assignments are made
     mutated_inp_stream_indices: Optional[list[Optional[int]]] = None
+
+    # compile ID string (e.g., "1/0") for error messages
+    compile_id_str: str | None = None
+
+    # help users identify where to add .detach() in their code
+    tangent_source_stack_traces: list[str | None] | None = None
 
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
@@ -1101,6 +1108,10 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+    # Needed to save modified config variables
+    context: contextvars.Context | None = field(
+        default_factory=contextvars.copy_context
+    )
 
     def __post_init__(self) -> None:
         if self.pre_dispatch:

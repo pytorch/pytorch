@@ -450,6 +450,18 @@ class TestSparse(TestSparseBase):
         sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
         sparse_matrix = sparse_matrix.coalesce()
 
+    @dtypes(torch.float32)
+    @onlyCPU
+    # test_warn_on_sparse_tensor_invariant_checks_disabled must be called exactly once
+    def test_warn_on_sparse_tensor_invariant_checks_disabled(self, device, dtype):
+        indices = torch.tensor([[0, 1, 2], [2, 0, 1]])
+        values = torch.tensor([1, 2, 3])
+        shape = torch.Size([3, 3])
+        with torch.sparse.check_sparse_tensor_invariants(None):
+            msg = "Sparse invariant checks are implicitly disabled."
+            with self.assertWarnsRegex(UserWarning, msg):
+                x = torch.sparse_coo_tensor(indices, values, shape)
+
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
