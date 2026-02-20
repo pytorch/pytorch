@@ -432,16 +432,20 @@ def _create_fallback_choice(
 ) -> ExternKernelChoice:
     """Create fallback choice that calls the op eagerly.
 
+    Re-registration of the same name is allowed and will overwrite the previous
+    kernel. This is safe because the same name should always have equivalent behavior.
+
     TODO: Automatically detect and handle out variants (has_out_variant=True)
     for ops that support them.
     """
+    fallback_name = f"{name}_fallback"
 
     def fallback_wrapper(*args: Any) -> Any:
         return op_overload(*args, **kwargs)
 
     return ExternKernelChoice(
         kernel=fallback_wrapper,
-        name=f"{name}_fallback",
+        name=fallback_name,
         has_out_variant=False,
         op_overload=op_overload,
         use_fallback_kernel=True,
@@ -527,32 +531,29 @@ def autotune_custom_op(
 
     # Add fallback choice that calls the op eagerly (not through inductor lowering)
     # This provides a baseline to compare decompositions against
+    from torch._inductor import config
+
     fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
-    fallback_name = f"{name}_fallback"
 
-    from torch._inductor.select_algorithm import extern_kernels
+    with V.fake_mode:
+        # pyrefly: ignore [no-matching-overload]
+        fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
+        fake_output = op_overload(*fake_inputs, **fallback_kwargs)
 
-    # Skip if extern_kernel already registered to avoid duplicate registration error
-    if not hasattr(extern_kernels, fallback_name):
-        with V.fake_mode:
-            # pyrefly: ignore [no-matching-overload]
-            fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
-            fake_output = op_overload(*fake_inputs, **fallback_kwargs)
+    output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
+    output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
 
-        output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
-        output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
-
-        fallback_choice = _create_fallback_choice(name, op_overload, fallback_kwargs)
-        fallback_choice.maybe_append_choice(
-            choices=choices,
-            input_nodes=list(inputs),
-            layout=FixedLayout(
-                device=fake_output.device,
-                dtype=fake_output.dtype,
-                size=output_size,
-                stride=output_stride,
-            ),
-        )
+    fallback_choice = _create_fallback_choice(name, op_overload, fallback_kwargs)
+    fallback_choice.maybe_append_choice(
+        choices=choices,
+        input_nodes=list(inputs),
+        layout=FixedLayout(
+            device=fake_output.device,
+            dtype=fake_output.dtype,
+            size=output_size,
+            stride=output_stride,
+        ),
+    )
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
@@ -571,6 +572,18 @@ def autotune_custom_op(
         min_speedup_threshold=min_speedup_threshold,
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
+
+    # Test mode: force decomposition to win (pick first choice with a graph)
+    if config.test_configs.force_custom_op_decomposition and winning_choice.gm is None:
+        for choice in choices:
+            if choice.gm is not None:
+                log.info(
+                    "Test mode: forcing decomposition %s over fallback",
+                    getattr(choice, "name", type(choice).__name__),
+                )
+                winning_choice = choice
+                selected_result = choice.output_node()
+                break
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
     if winning_choice.gm is not None:

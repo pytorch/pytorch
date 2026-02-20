@@ -2263,6 +2263,12 @@ class TritonTemplate(KernelTemplate):
 
 
 class ExternKernelChoice:
+    """Represents an external kernel choice for algorithm selection.
+
+    Wraps an external kernel function and provides methods to bind it to
+    specific inputs/layouts for benchmarking and code generation.
+    """
+
     def __init__(
         self,
         kernel,
@@ -2277,8 +2283,11 @@ class ExternKernelChoice:
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
-        setattr(extern_kernels, name, kernel)
+        # Only register if not already present - reuse existing registration
+        if hasattr(extern_kernels, name):
+            log.debug("Reusing existing extern kernel: %s", name)
+        else:
+            setattr(extern_kernels, name, kernel)
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
@@ -2527,9 +2536,9 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        assert self.bmreq is not None
         # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
-        # pyrefly: ignore [missing-attribute]
         return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
@@ -3048,10 +3057,17 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(choices) == 1:
             if not isinstance(choices[0], CUTLASSTemplateCaller):
                 # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
-                return choices[0].output_node()
+                node = choices[0].output_node()
+                if return_choice:
+                    return node, choices[0]
+                return node
 
         if config.deterministic:
-            return self.pick_deterministic_choice(choices).output_node()
+            choice = self.pick_deterministic_choice(choices)
+            node = choice.output_node()
+            if return_choice:
+                return node, choice
+            return node
 
         inputs_key = create_inputs_key(input_nodes)
 

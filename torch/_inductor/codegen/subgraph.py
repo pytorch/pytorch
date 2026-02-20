@@ -8,6 +8,7 @@ from typing import Any
 import sympy
 
 import torch
+from torch._dynamo.utils import counters
 import torch._inductor.config as config
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
@@ -414,6 +415,7 @@ class SubgraphTemplate(KernelTemplate):
                     "Skipping decomposition %s: adds guards during tracing",
                     decomp.__name__,
                 )
+                counters["inductor"]["custom_op_decomp_guard_skips"] += 1
                 continue
 
             # Cache decomposition info for range-based dispatch
