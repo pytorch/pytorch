@@ -1244,6 +1244,83 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_graph_partition_unbacked_stride_symbols_on_input(self):
+            """Test that scheduler tracks unbacked stride symbols from graph inputs.
+
+            When a lowering wraps graph input strides with unbacked symbols
+            (e.g., for stride relaxation), the scheduler must register those
+            symbols in unbacked_symbol_to_origin_node alongside size symbols.
+            Without this, the scheduler assertion 'u<N> not in
+            unbacked_symbol_to_origin_node' fires.
+            """
+            from torch._inductor import ir
+            from torch._inductor.lowering import register_lowering
+            from torch._inductor.virtualized import V
+
+            # Op whose lowering wraps the graph input with unbacked stride symbols
+            @torch.library.custom_op("mylib::relax_strides", mutates_args=())
+            def relax_strides(x: torch.Tensor) -> torch.Tensor:
+                return x * 2.0
+
+            @relax_strides.register_fake
+            def _(x):
+                return torch.empty_like(x)
+
+            @register_lowering(torch.ops.mylib.relax_strides)
+            def _(x):
+                if isinstance(x, ir.TensorBox):
+                    inner = x.data
+                    if isinstance(inner, ir.StorageBox):
+                        inner = inner.data
+                    new_strides = []
+                    for s in inner.get_stride():
+                        u = V.graph.sizevars.shape_env.create_unbacked_symint()
+                        hint = int(V.graph.sizevars.size_hint(s, fallback=1))
+                        V.graph.sizevars.shape_env.set_real_tensor_prop_unbacked_vals(
+                            u.node.expr, hint
+                        )
+                        new_strides.append(u.node.expr)
+                    layout = ir.FixedLayout(
+                        device=inner.get_device(),
+                        dtype=inner.get_dtype(),
+                        size=inner.get_size(),
+                        stride=new_strides,
+                    )
+                    reinterp = ir.ReinterpretView(data=inner, layout=layout)
+                    x.data = ir.StorageBox(reinterp)
+                from torch._inductor.lowering import mul
+
+                return mul(x, 2.0)
+
+            # Op with data-dependent output (creates unbacked_bindings,
+            # setting has_non_input_unbacked_defs=True in the scheduler)
+            @torch.library.custom_op("mylib::get_half_size", mutates_args=())
+            def get_half_size(x: torch.Tensor) -> int:
+                return x.shape[0] // 2
+
+            @get_half_size.register_fake
+            def _(x):
+                ctx = torch.library.get_ctx()
+                return ctx.new_dynamic_size(min=0, max=x.shape[0])
+
+            def f(x):
+                y = torch.ops.mylib.relax_strides(x)
+                n = torch.ops.mylib.get_half_size(x)
+                torch._check(n >= 0)
+                torch._check(n <= x.shape[0])
+                z = x[:n]
+                return y, z
+
+            compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            x = torch.randn(8, 8, device="cuda")
+            result = compiled(x)
+            expected = f(x)
+            self.assertEqual(result[0], expected[0])
+            self.assertEqual(result[1], expected[1])
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_with_memory_plan_reuse(self):
             BATCH_SIZE = 16
             MLP_SIZE = 128

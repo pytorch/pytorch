@@ -3272,10 +3272,16 @@ class Scheduler:
                 for fs in val.free_symbols:
                     unbacked_symbol_to_origin_node[fs] = None
             elif isinstance(val, ir.TensorBox):
-                # We also need to add symbols from input size as well because
-                # AOTI doesn't lift the unbacked symints to inputs
+                # We also need to add symbols from input size/stride as well
+                # because AOTI doesn't lift the unbacked symints to inputs
                 sym_size = [s for s in val.get_size() if isinstance(s, sympy.Expr)]
                 for s in sym_size:
+                    for fs in s.free_symbols:
+                        unbacked_symbol_to_origin_node[fs] = None
+                sym_stride = [
+                    s for s in val.get_stride() if isinstance(s, sympy.Expr)
+                ]
+                for s in sym_stride:
                     for fs in s.free_symbols:
                         unbacked_symbol_to_origin_node[fs] = None
 
