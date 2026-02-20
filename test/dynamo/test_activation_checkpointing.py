@@ -2130,6 +2130,130 @@ class GraphModule(torch.nn.Module):
         with torch._dynamo.config.patch(capture_profiler_record_function=True):
             self._validate(fn, backend, x, y)
 
+    def test_compile_save_basic(self):
+        from torch.utils.checkpoint import save as checkpoint_save
+
+        def gn(x):
+            y = torch.sin(x)
+            checkpoint_save(y)
+            return torch.cos(y)
+
+        def fn(x):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                _get_custom_policy(),
+            )
+            return checkpoint(gn, x, use_reentrant=False, context_fn=context_fn)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+
+        expected = fn(x)
+        result = opt_fn(x.clone().detach().requires_grad_(True))
+        self.assertEqual(result, expected)
+
+    def test_compile_save_with_policy(self):
+        from torch.utils.checkpoint import save as checkpoint_save
+
+        def gn(x, y):
+            h = torch.matmul(x, y)
+            checkpoint_save(h)
+            return torch.sigmoid(h + torch.sin(x))
+
+        def fn(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                _get_custom_policy(),
+            )
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=context_fn)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+
+        expected = fn(x, y)
+        result = opt_fn(
+            x.clone().detach().requires_grad_(True),
+            y.clone().detach().requires_grad_(True),
+        )
+        self.assertEqual(result, expected)
+
+    def test_compile_save_gradient_correctness(self):
+        from torch.utils.checkpoint import save as checkpoint_save
+
+        def gn(x, y):
+            h = torch.matmul(x, y)
+            checkpoint_save(h)
+            return torch.relu(h)
+
+        def fn(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                _get_custom_policy(),
+            )
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=context_fn)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+
+        # Reference: eager, no compile
+        x_ref = x.clone().detach().requires_grad_(True)
+        y_ref = y.clone().detach().requires_grad_(True)
+        fn(x_ref, y_ref).sum().backward()
+
+        # Compiled
+        x_comp = x.clone().detach().requires_grad_(True)
+        y_comp = y.clone().detach().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
+        opt_fn(x_comp, y_comp).sum().backward()
+
+        self.assertEqual(x_ref.grad, x_comp.grad)
+        self.assertEqual(y_ref.grad, y_comp.grad)
+
+    def test_compile_save_sets_recompute_metadata(self):
+        from torch.utils.checkpoint import save as checkpoint_save
+
+        def gn(x):
+            y = torch.sin(x)
+            checkpoint_save(y)
+            return torch.cos(y)
+
+        def fn(x):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                _get_custom_policy(),
+            )
+            return checkpoint(gn, x, use_reentrant=False, context_fn=context_fn)
+
+        joint_graph = None
+
+        def partition_fn(joint_module, joint_inputs, *, num_fwd_outputs, **kwargs):
+            nonlocal joint_graph
+            joint_graph = joint_module
+            return min_cut_rematerialization_partition(
+                joint_module, joint_inputs, num_fwd_outputs=num_fwd_outputs, **kwargs,
+            )
+
+        backend = aot_autograd(
+            fw_compiler=nop,
+            bw_compiler=nop,
+            partition_fn=partition_fn,
+        )
+
+        x = torch.randn(4, 4, requires_grad=True)
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        opt_fn(x).sum().backward()
+
+        # Find the sin node and verify it has recompute=MUST_SAVE from save()
+        sin_nodes = [
+            n for n in joint_graph.graph.nodes
+            if n.target == torch.ops.aten.sin.default
+        ]
+        self.assertTrue(len(sin_nodes) > 0, "Expected sin node in joint graph")
+        sin_node = sin_nodes[0]
+        self.assertIn("recompute", sin_node.meta)
+        self.assertEqual(sin_node.meta["recompute"], CheckpointPolicy.MUST_SAVE)
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""

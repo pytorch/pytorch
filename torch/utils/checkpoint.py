@@ -14,6 +14,7 @@ import torch.fx.traceback as fx_traceback
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.weak import WeakTensorKeyDictionary
 from torch._C._autograd import _make_saved_tensor, SavedTensor
 from typing import NoReturn
 
@@ -34,6 +35,7 @@ __all__ = [
     "SelectiveCheckpointContext",
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
+    "save",
     "GraphExecGroup",
 ]
 
@@ -1327,6 +1329,14 @@ SAC_IGNORED_OPS = {
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
+def _get_current_caching_mode():
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+    for mode in reversed(_get_current_dispatch_mode_stack()):
+        if isinstance(mode, _CachingTorchDispatchMode):
+            return mode
+    return None
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
@@ -1336,6 +1346,8 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
     def __init__(self, policy_fn, storage) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
+        self.func_counter: Dict[Any, int] = defaultdict(int)
+        self.tensor_tracker: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if func in SAC_IGNORED_OPS:
@@ -1363,8 +1375,17 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         else:
             any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
 
+        idx = self.func_counter[func]
+        self.func_counter[func] += 1
+
+        # Track all output tensors so save() can retroactively cache them
+        tree_map(
+            lambda x: self.tensor_tracker.__setitem__(x, (func, idx, any_ret_has_alias_info)) if isinstance(x, torch.Tensor) else None,
+            out,
+        )
+
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
+            self.storage[func][idx] = tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out)
         return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
@@ -1372,11 +1393,12 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
     def ignore_compile_internals(cls):
         return True
 
-    # Used together with _CachedTorchDispatchMode to implement SAC.
+    # Used together with _CachingTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage, allow_cache_entry_mutation) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
         self.allow_cache_entry_mutation = allow_cache_entry_mutation
+        self.func_counter: Dict[Any, int] = defaultdict(int)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if func in SAC_IGNORED_OPS:
@@ -1390,16 +1412,19 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
 
         is_compiling = _is_compiling(func, args, kwargs)
 
-        if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            storage = self.storage.get(func)
-            if storage is None:
+        idx = self.func_counter[func]
+        self.func_counter[func] += 1
+
+        cached = self.storage.get(func, {}).pop(idx, None)
+        if cached is not None:
+            out = tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), cached)
+        elif policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
+            if func not in self.storage:
                 raise RuntimeError(f"{func} encountered during backward, but not found in storage")
-            if len(storage) == 0:
-                raise RuntimeError(
-                    "Trying to backward an extra time. You are only allowed to backward once "
-                    "on any region computed under selective activation checkpoint."
-                )
-            out = tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), storage.pop(0))
+            raise RuntimeError(
+                "Trying to backward an extra time. You are only allowed to backward once "
+                "on any region computed under selective activation checkpoint."
+            )
         else:
             out = func(*args, **kwargs)
         return out
@@ -1484,11 +1509,108 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     else:
         raise TypeError("policy_fn_or_list must be either a function or a list of ops.")
 
-    storage: Dict[Any, List[Any]] = defaultdict(list)
+    storage: Dict[Any, Dict[int, Any]] = defaultdict(dict)
     return (
         _CachingTorchDispatchMode(policy_fn, storage),
         _CachedTorchDispatchMode(policy_fn, storage, allow_cache_entry_mutation),
     )
+
+
+def save(tensor: torch.Tensor) -> None:
+    """Explicitly save a tensor during selective activation checkpointing.
+
+    Call this inside a checkpointed function to pin a specific intermediate
+    tensor, preventing it from being recomputed during backward. Must be used
+    within a ``create_selective_checkpoint_contexts`` context (i.e., via
+    ``context_fn``).
+
+    Example::
+
+        >>> from torch.utils.checkpoint import checkpoint, save, create_selective_checkpoint_contexts
+        >>> import functools
+        >>> def fn(x, w1, w2):
+        ...     h = x @ w1
+        ...     save(h)  # keep h in memory; don't recompute
+        ...     return torch.relu(h) @ w2
+        >>> context_fn = functools.partial(create_selective_checkpoint_contexts,
+        ...     lambda ctx, op, *a, **kw: CheckpointPolicy.PREFER_RECOMPUTE)
+        >>> out = checkpoint(fn, x, w1, w2, use_reentrant=False, context_fn=context_fn)
+
+    Args:
+        tensor: The tensor to save.
+    """
+    # During recompute (backward), save() is a no-op
+    if torch._C._current_graph_task_id() != -1:
+        return
+
+    caching_mode = _get_current_caching_mode()
+    if caching_mode is None:
+        # Under torch.compile, dynamo calls save() with FakeTensors during
+        # graph construction. The actual work happens during AOTAutograd tracing.
+        if isinstance(tensor, torch._subclasses.FakeTensor):
+            return
+        raise RuntimeError(
+            "save() must be called inside a function that is wrapped with "
+            "checkpoint() using a selective activation checkpoint context_fn."
+        )
+
+    info = caching_mode.tensor_tracker.get(tensor)
+    if info is None:
+        raise RuntimeError(
+            "save() could not find the given tensor in the current "
+            "selective activation checkpoint context. Make sure the tensor "
+            "is an output of an operator within the checkpointed region."
+        )
+
+    func, idx, any_ret_has_alias_info = info
+
+    # Under torch.compile, the caching mode already unconditionally saves
+    # all outputs. Just annotate the FX node for the partitioner.
+    if _is_compiling(func, (), None):
+        _set_save_policy_for_partitioner(tensor, CheckpointPolicy.MUST_SAVE)
+        return
+
+    caching_mode.storage[func][idx] = tree_map(
+        lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)),
+        tensor,
+    )
+
+
+def _set_save_policy_for_partitioner(tensor, policy):
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    mode = get_proxy_mode()
+    if mode is None:
+        return
+
+    # ProxyTorchDispatchMode sees tensors after FunctionalTensor is unwrapped
+    from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
+    unwrapped = mb_unwrap_functional_tensor(tensor)
+
+    proxy_tensor = mode.tracer.tensor_tracker.get(unwrapped)
+    if proxy_tensor is None:
+        return
+    node = proxy_tensor.proxy.node
+
+    if _is_getitem_of_multi_output(node):
+        parent = node.args[0]
+        parent.meta["recompute"] = policy
+        parent.meta["ac_graph_id"] = 0
+
+    node.meta["recompute"] = policy
+    node.meta["ac_graph_id"] = 0
+
+
+def _is_getitem_of_multi_output(node):
+    import operator
+    if node.target != operator.getitem:
+        return False
+    parent = node.args[0]
+    # Same check as is_multi_output in partitioners.py
+    return len(parent.users) > 0 and all(
+        u.target == operator.getitem for u in parent.users
+    )
+
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
