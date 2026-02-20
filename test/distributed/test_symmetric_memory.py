@@ -1471,14 +1471,30 @@ class LoweringTest(MultiProcContinuousTest):
 
         x_input = torch.rand(N, N, device=self.device)
 
-        # Compilation should succeed here even though we do not control allocation
-        # of the input; user is responsible for passing a symmetric memory buffer.
+        # When the input is not a symmetric memory buffer, Inductor
+        # automatically inserts a copy to a P2P-allocated comm buffer.
+        # Compilation and execution should succeed.
         compiled_input_direct = torch.compile(func_input_direct, fullgraph=True)
+        code = run_and_get_triton_code(compiled_input_direct, x_input)
 
-        # At runtime, this should raise an error because the input is not
-        # a symmetric memory buffer as required by the op.
-        with self.assertRaises(RuntimeError):
-            run_and_get_triton_code(compiled_input_direct, x_input)
+        # Verify the generated code contains a P2P allocation for the copy
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected empty_strided_p2p in generated code for auto-inserted copy",
+        )
+
+        # Verify runtime correctness: compiled result should match eager all_reduce
+        compiled_result = compiled_input_direct(x_input)
+        eager_result = x_input.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            compiled_result,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled (auto-copy to P2P) and eager all_reduce outputs do not match",
+        )
 
 
 class SymmMemSingleProcTest(TestCase):
