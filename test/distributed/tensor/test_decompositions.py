@@ -194,6 +194,14 @@ class TestDecompSharding(TestCase):
             out = aten.glu.default(x)
             self.assertEqual(out.placements, (Replicate(),))
 
+        # index_add: decomposes into index_put with accumulate=True
+        check_no_strategy(aten.index_add.default)
+        input = d_empty(4, 8, device_mesh=mesh, placements=[Shard(1)])
+        index = d_empty(2, device_mesh=mesh, placements=[Replicate()]).to(torch.long)
+        source = d_empty(2, 8, device_mesh=mesh, placements=[Shard(1)])
+        out = aten.index_add.default(input, 0, index, source)
+        self.assertEqual(out.placements, (Shard(1),))
+
         # polar: force replicate
         check_no_strategy(aten.polar.default)
         x = d_empty(16, device_mesh=mesh, placements=[Partial()])

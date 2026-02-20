@@ -1002,6 +1002,11 @@ def index_put_single_dim_strategy(
       - Self and values CAN be sharded on non-indexed dims.
         The exception is broadcasted value dimensions (size 1) - we require Replicate, but can shard self.
       - Additionally, we allow the full Partial rule on non-indexing tensors.
+
+    TODO(pianpwk): support non-contiguous indexed dims (None gaps in indices tuple,
+    e.g. (idx, None, idx)). Currently blocked by a single_dim_strategy infra bug:
+    _get_num_tensor_inputs counts None TupleStrategy children but args_strategy
+    drops them, causing a length mismatch in expand_to_full_mesh_op_strategy.
     """
     self_meta = cast(TensorMeta, args[0])
     indices_meta = cast(tuple[TensorMeta | None, ...], args[1])
@@ -1020,6 +1025,8 @@ def index_put_single_dim_strategy(
 
     # values shape = (*broadcast_shape, *non_indexed_dim_sizes)
     # Strategy format: [output, input, *indices, value]
+    # The infra flattens the indices list and drops None entries, so only
+    # non-None index tensors get a placement slot (all Replicate).
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
     for values_dim in range(broadcast_ndim, values_ndim):
         self_dim = non_indexed_dims[values_dim - broadcast_ndim]

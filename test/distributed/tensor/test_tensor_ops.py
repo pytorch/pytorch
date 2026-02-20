@@ -882,6 +882,26 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(output_accum.full_tensor(), ref_accum)
 
     @with_comms
+    def test_index_put_broadcast_values(self):
+        """Test index_put where values has size-1 broadcast dims."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # self shape (4, 8), index on dim 0 -> non-indexed dim is 1
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([0, 1], device=self.device_type)
+        global_index = [idx]
+        # values shape (2, 1) — broadcast on the non-indexed dim
+        global_value = torch.randn(2, 1, device=self.device_type)
+
+        # Shard self on non-indexed dim 1, values should be replicated (size 1)
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(1)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+
+        ref = torch.index_put(global_input, global_index, global_value)
+        output_dt = torch.index_put(input_dt, [idx_dt], value_dt)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
     def test_where_type_promotion(self):
         mesh = self.build_device_mesh()  # 1D mesh
 
