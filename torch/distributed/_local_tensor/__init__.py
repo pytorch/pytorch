@@ -960,6 +960,10 @@ class LocalTensor(torch.Tensor):
             requires_grad=requires_grad,
             _extra_dispatch_keys=extra_dispatch_keys,
         )
+        # The wrapper has no real storage (data_ptr()=0). Prevent callers
+        # (e.g. Triton kernels) from silently reading the null pointer —
+        # turn it into a clear RuntimeError instead of a CUDA IMA.
+        torch._C._set_throw_on_mutable_data_ptr(r)
 
         local_tensors = {
             r: v if not isinstance(v, AsyncCollectiveTensor) else v.wait()
@@ -985,7 +989,6 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
-            # pyrefly: ignore [bad-argument-type]
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -1238,6 +1241,10 @@ class LocalTensorMode(TorchDispatchMode):
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
+        # Cache for get_coordinate results, keyed by mesh id
+        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
+        self._coordinate_cache: dict[int, list[SymInt]] = {}
+        self._coordinate_cache_lock = threading.Lock()
 
     def __enter__(self) -> "LocalTensorMode":
         get_local_tensor_mode_list().append(self)
@@ -1553,7 +1560,7 @@ class _LocalDeviceMesh:
     """
 
     @staticmethod
-    def get_coordinate(self: DeviceMesh) -> list[int] | None:
+    def get_coordinate(self: DeviceMesh) -> list[SymInt] | None:
         # NB: In order to support submeshes the code below recreates for each
         # rank submesh with the same mesh dimensions as current mesh. We are
         # doing this because when submesh is created it is created for a particular
@@ -1562,22 +1569,35 @@ class _LocalDeviceMesh:
         lm = enabled_local_tensor_mode()
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
-        coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
-        # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
-        # error when running under torch.inference_mode()
-        rank_map = self._rank_map.clone()
-        for r in lm.ranks:
-            rank_tensor = self._layout.remap_to_tensor(rank_map)
-            rank_coords = (rank_tensor == r).nonzero().tolist()
-            assert len(rank_coords) == 1
-            for d, c in enumerate(rank_coords[0][1:]):
-                coords[d][r] = c
+        # Check cache first (fast path without lock)
+        mesh_id = id(self)
+        if mesh_id in lm._coordinate_cache:
+            return lm._coordinate_cache[mesh_id]
 
-        out = [torch.SymInt(LocalIntNode(c)) for c in coords]
-        # The output contains coordinates for each of the ranks with respect to
-        # their meshes formed from root mesh and selecting the same dimensions
-        # as the current mesh.
-        return out  # type: ignore[return-value]
+        # Acquire lock for thread safety in MPMD contexts
+        with lm._coordinate_cache_lock:
+            # Double-check after acquiring lock
+            if mesh_id in lm._coordinate_cache:
+                return lm._coordinate_cache[mesh_id]
+
+            coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
+            # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
+            # error when running under torch.inference_mode()
+            rank_map = self._rank_map.clone()
+            for r in lm.ranks:
+                rank_tensor = self._layout.remap_to_tensor(rank_map)
+                rank_coords = (rank_tensor == r).nonzero().tolist()
+                assert len(rank_coords) == 1
+                for d, c in enumerate(rank_coords[0][1:]):
+                    coords[d][r] = c
+
+            out = [torch.SymInt(LocalIntNode(c)) for c in coords]
+            # Cache the result
+            lm._coordinate_cache[mesh_id] = out
+            # The output contains coordinates for each of the ranks with respect to
+            # their meshes formed from root mesh and selecting the same dimensions
+            # as the current mesh.
+            return out  # type: ignore[return-value]
 
     @staticmethod
     def _is_current_rank_part_of_mesh(self: DeviceMesh) -> bool:
@@ -1713,6 +1733,40 @@ def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
         return ret
 
     return wrapper
+
+
+def rank_map(cb: Callable[[int], Tensor]) -> Tensor:
+    """
+    Creates a tensor by mapping a callback over the current rank.
+
+    Under LocalTensorMode, calls cb(rank) for each simulated rank and returns
+    a LocalTensor. In real distributed (no LocalTensorMode), calls
+    cb(dist.get_rank()) and returns a plain Tensor.
+    """
+    lm = enabled_local_tensor_mode()
+    if lm is not None:
+        return lm.rank_map(cb)
+    else:
+        return cb(dist.get_rank())
+
+
+def tensor_map(tensor: Tensor, cb: Callable[[int, Tensor], Tensor | None]) -> Tensor:
+    """
+    Transforms a tensor by mapping a callback over the current rank and its
+    local shard.
+
+    Under LocalTensorMode, calls cb(rank, shard) for each simulated rank and
+    returns a LocalTensor. In real distributed (no LocalTensorMode), calls
+    cb(dist.get_rank(), tensor) and returns the result directly.
+    """
+    lm = enabled_local_tensor_mode()
+    if lm is not None:
+        assert isinstance(tensor, LocalTensor)
+        return lm.tensor_map(tensor, cb)
+    else:
+        r = cb(dist.get_rank(), tensor)
+        assert r is not None
+        return r
 
 
 def maybe_disable_local_tensor_mode() -> contextlib.AbstractContextManager:

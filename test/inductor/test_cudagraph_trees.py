@@ -4655,6 +4655,61 @@ if HAS_CUDA_AND_TRITON:
             with self.assertRaises(RuntimeError):
                 f(torch.tensor(1, device="cuda"))
 
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_input_layout_symints(self):
+            """
+            Test that partition functions receive symint args derived from input
+            tensor layouts, even when the op's output shape is static.
+            Regression test for symbol_inputs being silently dropped due to
+            OrderedSet.union() (returns new set) instead of .update() (in-place).
+            """
+
+            @torch.library.custom_op(
+                "mylib::identity_unsafe",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def identity_unsafe(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @identity_unsafe.register_fake
+            def _identity_fake(x):
+                return torch.empty_like(x)
+
+            @torch.library.custom_op(
+                "mylib::pad_to_fixed",
+                mutates_args=(),
+            )
+            def pad_to_fixed(x: torch.Tensor) -> torch.Tensor:
+                n = x.shape[0]
+                result = torch.zeros(32, x.shape[1], device=x.device, dtype=x.dtype)
+                result[:n] = x
+                return result
+
+            @pad_to_fixed.register_fake
+            def _pad_fake(x):
+                return torch.empty(32, x.shape[1], device=x.device, dtype=x.dtype)
+
+            def f(x):
+                y = torch.ops.mylib.identity_unsafe(x)
+                z = torch.ops.mylib.pad_to_fixed(y)
+                return z + 1
+
+            compiled_f = torch.compile(f, mode="reduce-overhead")
+
+            def run(n):
+                x = torch.randn(n, 16, device="cuda")
+                torch._dynamo.mark_dynamic(x, 0)
+                eager_out = f(x)
+                for _ in range(3):
+                    compiled_out = compiled_f(x)
+                    self.assertEqual(eager_out, compiled_out)
+
+            run(20)
+            run(10)
+            run(25)
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):

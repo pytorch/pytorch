@@ -405,6 +405,11 @@ option(USE_MIMALLOC "Use mimalloc" OFF)
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
 if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
   set(USE_MIMALLOC ON)
+  # Disable OPT flags for mimalloc on aarch64 as it breaks ARMv8.0
+  # See https://github.com/pytorch/pytorch/issues/174344
+  if(CPU_AARCH64)
+    set(MI_NO_OPT_ARCH ON)
+  endif()
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
   # https://github.com/pytorch/pytorch/issues/138994
@@ -1184,6 +1189,10 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+  endif()
+  # needed for compat with newer versions of clang that use C++20 mangling rules
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
+    append_cxx_flag_if_supported("-fclang-abi-compat=17" CMAKE_CXX_FLAGS)
   endif()
 else()
   # Define export functions for AOTI.

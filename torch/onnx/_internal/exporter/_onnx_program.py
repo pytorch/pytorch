@@ -454,6 +454,31 @@ ONNXProgram(
             self._tempdir.cleanup()
             self._tempdir = None
 
+    def rename_axes(self, rename_mapping: dict[str | ir.SymbolicDim, str]) -> None:
+        """Rename axes in a model according to the specified rename mapping.
+
+        Example::
+
+            batch = onnx_program.model.graph.inputs[0].shape[0]
+            seq_len = onnx_program.model.graph.inputs[0].shape[2]
+            rename_mapping = {
+                batch: "batch",
+                seq_len: "seq_len",
+            }
+            onnx_program.rename_axes(rename_mapping)
+
+        Args:
+            rename_mapping: A dictionary mapping old axes to new axis names.
+                Keys can be either:
+
+                * String axis names (e.g., "s1", "s2")
+                * SymbolicDim objects obtained from the model
+                  (e.g., onnx_program.model.graph.inputs[0].shape[0])
+
+                Values must be strings representing the new axis names.
+        """
+        _ir_passes.rename_axis(self.model, rename_mapping)
+
     def _rename_dynamic_axes(
         self,
         dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],

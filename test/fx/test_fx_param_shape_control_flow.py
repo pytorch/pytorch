@@ -119,10 +119,14 @@ class TestConstParamShapeInControlFlow(TestCase):
         graph2_node_targets = [n.target for n in traced_graph2.nodes]
 
         # the second graph has an extra relu function call node
-        assert torch.mm in graph1_node_targets and torch.mm in graph2_node_targets
-        assert (
+        if not (torch.mm in graph1_node_targets and torch.mm in graph2_node_targets):
+            raise AssertionError("Expected torch.mm in both graph node targets")
+        if not (
             torch.relu not in graph1_node_targets and torch.relu in graph2_node_targets
-        )
+        ):
+            raise AssertionError(
+                "Expected torch.relu not in graph1 but in graph2 node targets"
+            )
 
     def test_param_shape_const(self):
         mymod = MyModuleParamShape(in_channels=5)
