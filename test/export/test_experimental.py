@@ -19,6 +19,7 @@ from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import flex_attention_supported_platform
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.utils import _pytree as pytree
 
@@ -439,7 +440,7 @@ def forward(self, args_0):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @flex_attention_supported_platform
     def test_aot_export_flex_attention_callable_mask_mod(self):
         """Test flex_attention AOT export with callable class as mask_mod.
 
