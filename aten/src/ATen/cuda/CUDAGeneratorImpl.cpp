@@ -170,10 +170,14 @@ uint64_t CUDAGeneratorCaptureState::finalize() {
 void CUDAGeneratorCaptureState::setup_for_replay(uint64_t seed, uint64_t philox_offset) {
   TORCH_INTERNAL_ASSERT(is_initialized(),
       "Capture state not initialized");
-  // Single H2D copy: [seed, philox_offset]
-  at::Tensor(rng_state_extragraph_).copy_(
-      at::tensor({static_cast<int64_t>(seed), static_cast<int64_t>(philox_offset)},
-                 at::TensorOptions().dtype(at::kLong).device(rng_state_extragraph_.device())));
+  // Allocate tensor in pinned memory on CPU and use async copy to CUDA
+  auto pinned_options = at::TensorOptions()
+      .dtype(at::kLong)
+      .device(at::kCPU)
+      .pinned_memory(true);
+  at::Tensor pinned_tensor = at::tensor({static_cast<int64_t>(seed), static_cast<int64_t>(philox_offset)}, pinned_options);
+
+  at::Tensor(rng_state_extragraph_).copy_(pinned_tensor, /*non_blocking=*/true);
 }
 
 /**
