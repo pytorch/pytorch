@@ -3059,6 +3059,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 assert not config.benchmark_epilogue_fusion, (
                     "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
                 )
+                assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
+                    "Pipelined autotuning not compatible yet with subgraph choices"
+                )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)
                 ]
