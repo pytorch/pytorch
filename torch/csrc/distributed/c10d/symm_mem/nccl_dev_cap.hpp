@@ -9,7 +9,7 @@
 #define NCCL_HAS_SYMMEM_SUPPORT
 #endif
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
 #define NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 #include <nccl_device.h>
 #endif
