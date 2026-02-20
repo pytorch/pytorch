@@ -432,13 +432,15 @@ def remap_dynamic_shapes_from_input_names(
 
     # Check for nested inputs only when we have actual args to inspect
     is_nested = False
+    num_flat_inputs = 0
+    tree_structure: _pytree.TreeSpec | None = None
     if inputs_for_tree:
         flat_inputs, tree_structure = _pytree.tree_flatten(inputs_for_tree)
         num_flat_inputs = len(flat_inputs)
         # Nested if flattening produces more leaves than parameters
         is_nested = num_flat_inputs > len(original_param_names)
 
-    if is_nested:
+    if is_nested and tree_structure is not None:
         # Nested case: the model has nested inputs (lists, dicts, etc.).
         # Unflatten the flat per-input-name shapes into the nested tree structure.
         # Only use the shapes for the actual input tensors (not extra output names).

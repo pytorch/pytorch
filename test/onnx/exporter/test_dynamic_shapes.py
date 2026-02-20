@@ -817,7 +817,14 @@ class TestDynamicShapes(common_utils.TestCase):
             {"a": torch.zeros(5), "b": torch.ones(5)},
             torch.ones(4),
         )
-        input_names = ["input_x", "input_y0", "input_y1", "input_a", "input_b", "input_c"]
+        input_names = [
+            "input_x",
+            "input_y0",
+            "input_y1",
+            "input_a",
+            "input_b",
+            "input_c",
+        ]
         dynamic_shapes = {
             "input_x": {0: "dim"},
             "input_y0": {0: "dim"},

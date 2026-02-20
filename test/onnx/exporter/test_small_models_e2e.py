@@ -616,7 +616,7 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         self.assertIn("bgr_image", graph_input_names)
 
     def test_export_with_input_names_and_dynamic_shapes_nested(self):
-        """Test that flat input_names with dynamic_shapes works for nested input models."""
+        """Test that input_names with nested dynamic_shapes works for nested input models."""
 
         class NestedModel(torch.nn.Module):
             def forward(
@@ -635,14 +635,22 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             {"a": torch.zeros(5), "b": torch.ones(5)},
             torch.ones(6),
         )
-        input_names = ["input_x", "input_y0", "input_y1", "input_a", "input_b", "input_c"]
+        input_names = [
+            "input_x",
+            "input_y0",
+            "input_y1",
+            "input_a",
+            "input_b",
+            "input_c",
+        ]
+        # dynamic_shapes follows nn.Module parameter structure, not flat input_names
+        dim = torch.export.Dim("dim", min=3)
+        dim_c = torch.export.Dim("dim_c", min=3)
         dynamic_shapes = {
-            "input_x": {0: torch.export.Dim("dim", min=3)},
-            "input_y0": {0: torch.export.Dim("dim", min=3)},
-            "input_y1": {0: torch.export.Dim("dim", min=3)},
-            "input_a": {0: torch.export.Dim("dim", min=3)},
-            "input_b": {0: torch.export.Dim("dim", min=3)},
-            "input_c": {0: torch.export.Dim("dim_c", min=3)},
+            "x": {0: dim},
+            "ys": [{0: dim}, {0: dim}],
+            "zs": {"a": {0: dim}, "b": {0: dim}},
+            "c": {0: dim_c},
         }
 
         onnx_program = torch.onnx.export(
@@ -696,7 +704,6 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         graph_input_names = [i.name for i in onnx_program.model.graph.inputs]
         self.assertIn("tokens", graph_input_names)
         self.assertIn("mask", graph_input_names)
-
 
     def test_export_of_static_dim_constraints(self):
         # NOTE: This test is to ensure that the static dim constraints are respected.
