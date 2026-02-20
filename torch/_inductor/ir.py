@@ -1576,8 +1576,7 @@ class Reduction(Loops):
 
         if (
             isinstance(reduction_numel, Integer)
-            and V.graph.sizevars.size_hint_or_throw(reduction_numel)
-            < config.unroll_reductions_threshold
+            and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
         ):
@@ -4145,7 +4144,7 @@ class FlexibleLayout(Layout):
         the fill order should be [1, 3, 2, 0]
         """
         assert len(sizes) == len(stride)
-        stride = [V.graph.sizevars.size_hint_or_throw(x) for x in stride]
+        stride = V.graph.sizevars.guarding_hints_or_throw(stride)
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
@@ -5198,6 +5197,19 @@ class TemplateBuffer(OperationBuffer):
             ),
             None,
         )
+
+    def is_multi_outputs_template(self) -> bool:
+        """Whether this template produces multiple outputs via MultiOutputLayout."""
+        return isinstance(self.layout, MultiOutputLayout)
+
+    def can_fuse_multi_output_epilogue(self, snode: object) -> bool:
+        """Whether scheduler node can be fused as an epilogue of this multi-output template.
+
+        Returns ``False`` by default.  Subclasses may override to support
+        additional fusion patterns (e.g. epilogue fusion with multi-output
+        extraction and pointwise operations).
+        """
+        return False
 
 
 class TritonTemplateBuffer(TemplateBuffer):
@@ -6400,7 +6412,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=(
                             get_stride_order(
-                                V.graph.sizevars.size_hints_or_throw(
+                                V.graph.sizevars.guarding_hints_or_throw(
                                     x.get_layout().stride
                                 )
                             )
@@ -9149,6 +9161,28 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
+
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_outputs,
+        )
+
+        (_, _, _, true_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
+        )
+        (_, _, _, false_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
+        )
+
+        mutated_operand_indices = OrderedSet(true_mutated_inputs) | OrderedSet(
+            false_mutated_inputs
+        )
+
+        # Create MutationOutput for each mutated operand (for scheduler dependencies)
+        conditional.mutation_outputs = [
+            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
+            for idx in sorted(mutated_operand_indices)
+        ]
+
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
