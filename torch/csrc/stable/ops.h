@@ -768,13 +768,15 @@ inline torch::stable::Tensor from_blob(
       deleter));
   return torch::stable::Tensor(ath);
 }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 /// Creates a tensor from an existing data blob with a generic callable deleter.
 ///
 /// This overload accepts any callable as the deleter, including capturing
 /// lambdas, which the from_blob above doesn't.
 ///
-/// Minimum compatible version: PyTorch 2.11.
+/// Minimum compatible version: PyTorch 2.12.
 ///
 /// @tparam F The callable type. Must be invocable with (void*).
 /// @param data Pointer to the data buffer.
@@ -856,7 +858,7 @@ inline torch::stable::Tensor from_blob(
       static_cast<void*>(heap_allocated_deleter)));
   return torch::stable::Tensor(ath);
 }
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 /// Stable version of the to.dtype_layout op.
 ///
