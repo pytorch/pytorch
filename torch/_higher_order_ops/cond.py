@@ -163,9 +163,23 @@ def cond(
           - The function must return a tensor with the same metadata, e.g. shape,
             dtype, etc.
 
-          - The function cannot have in-place mutations on inputs or global variables.
+          - The function cannot have in-place mutations on global variables.
             (Note: in-place tensor operations such as `add_` for intermediate results
             are allowed in a branch)
+
+          - The function can perform in-place mutations on its input tensors.
+            However, outputs will always be new tensors that do not share object
+            identity with the original inputs.
+
+            Example::
+
+                def true_fn(x):
+                    return x.sin_()
+
+
+                x = torch.randn(4)
+                result = cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+                assert result is not x  # result is a new tensor, not the original x
 
     """
     if torch.compiler.is_dynamo_compiling():
@@ -688,7 +702,22 @@ def _merge_output(
 
 @cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    from torch._higher_order_ops.auto_functionalize import (
+        can_auto_functionalize,
+        do_auto_functionalize_v2,
+    )
+    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+
+    hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
+    # For now, we only support auto-functionalization for cond when using python
+    # functionalization mode
+    if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        return do_auto_functionalize_v2(
+            ctx.mode,
+            hop_instance,
+            tuple(pytree.tree_flatten((pred, true_fn, false_fn, inputs))[0]),
+            {},
+        )
 
     unwrapped_inputs = ctx.unwrap_tensors(inputs)
     unwrapped_pred = ctx.unwrap_tensors(pred)

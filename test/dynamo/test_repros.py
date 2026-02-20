@@ -1636,7 +1636,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
 
         def fn(model, x):
-            return x + torch.randn(10, dtype=get_parameter_dtype(model))
+            return x + torch.randn(
+                10, dtype=get_parameter_dtype(model), device=x.device
+            )
 
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
@@ -7145,9 +7147,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             ]
             return image_latent[torch.arange(B).unsqueeze(-1), indices][:, :num_ref]
 
+        # Generate input once to ensure consistency across runs
         torch.manual_seed(54321)
         torch.cuda.manual_seed_all(54321)
-        expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
+        image_latent = torch.randn((2, 12, 16, 32, 32))
+
+        torch.manual_seed(54321)
+        torch.cuda.manual_seed_all(54321)
+        expected = f(image_latent).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
         with torch._inductor.config.patch(fallback_random=True):
@@ -7155,7 +7162,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 torch.manual_seed(54321)
                 torch.cuda.manual_seed_all(54321)
                 actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                    torch.randn((2, 12, 16, 32, 32))
+                    image_latent
                 ).sum()
                 self.assertEqual(actual, expected)
 
@@ -8708,6 +8715,40 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
                 ),
             )
 
+    def test_mro_source_cache_includes_attr_name(self):
+        # Base -> Mid -> A hierarchy: two class attributes with the same
+        # interned integer value share the same id().  The mro_source_cache
+        # must include the attribute name in its key; otherwise the second
+        # lookup returns the first attribute's source, installing a guard
+        # on the wrong key and missing mutations to the second attribute.
+        class Base:
+            x = 1
+            y = 1
+
+        class Mid(Base):
+            pass
+
+        class A(Mid):
+            pass
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(obj, t):
+            return t * obj.x + t * obj.y
+
+        obj = A()
+        t = torch.tensor([1.0])
+        result = fn(obj, t)
+        self.assertEqual(result, torch.tensor([2.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Changing y on Base must trigger recompilation.
+        Base.y = 42
+        result = fn(obj, t)
+        self.assertEqual(result, torch.tensor([43.0]))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_pytree_tree_is_leaf_with_namedtuple(self):
         # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
         from collections import namedtuple
@@ -8775,6 +8816,46 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         res1 = fn(b)
         res2 = cfunc(b_)
         self.assertEqual(res1, res2)
+
+    def test_getset_descriptor_objclass_identity(self):
+        # GetSetDescriptor.__objclass__ should preserve identity with the class
+        # under torch.compile. This is needed for inspect.getattr_static (and
+        # therefore inspect.signature) to work on callable class instances.
+        class Foo:
+            pass
+
+        desc = Foo.__dict__["__dict__"]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            if desc.__objclass__ is Foo:
+                return x + 1.0
+            return x + 2.0
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 1.0)
+
+    def test_inspect_signature_callable_class(self):
+        # inspect.signature should work on callable class instances under
+        # torch.compile, needed by flex_attention's _get_mod_type.
+        class MyCallable:
+            def __call__(self, b, h, q_idx, kv_idx):
+                return q_idx >= kv_idx
+
+        obj = MyCallable()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            sig = inspect.signature(obj)
+            num_params = sum(
+                1
+                for p in sig.parameters.values()
+                if p.default is inspect.Parameter.empty
+            )
+            return x + num_params
+
+        result = f(torch.tensor(0.0))
+        self.assertEqual(result.item(), 4.0)
 
 
 instantiate_parametrized_tests(ReproTests)
