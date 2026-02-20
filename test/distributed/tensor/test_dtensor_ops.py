@@ -302,9 +302,7 @@ dtensor_compiled_fails = {
     # Decompositions with .is_cuda checks that fail during sharding
     # propagation for aten.is_cuda / prim::device.
     xfail("nn.functional.binary_cross_entropy"),
-    xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.gaussian_nll_loss"),
-    xfail("nn.functional.logsigmoid"),
     # Miscellaneous runtime crashes (e.g. index out of bounds).
     xfail("gather"),
     xfail("index_select"),
@@ -314,8 +312,22 @@ dtensor_compiled_fails = {
     # eager DTensor failure is registered elsewhere.
     xfail("masked.argmax"),
     xfail("masked.argmin"),
+}
+
+# Ops that fail eagerly (no sharding strategy) but pass under compile because
+# the PythonDispatcher general fix decomposes them before DTensor dispatch.
+dtensor_compiled_decomp_passes = {
+    xfail("_chunk_cat"),
+    xfail("_unsafe_masked_index"),
+    xfail("nansum"),
+    xfail("nn.functional.binary_cross_entropy_with_logits"),
+    xfail("nn.functional.logsigmoid"),
     xfail("nn.functional.margin_ranking_loss"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
+    xfail("nn.functional.threshold"),
+    xfail("renorm"),
+    xfail("special.entr"),
+    xfail("special.xlog1py"),
 }
 
 # Ops that compile successfully but fail numeric checks in eager DTensor tests.
@@ -1345,7 +1357,8 @@ class TestCompiledDTensorOps(TestDTensorOps):
             | dtensor_multi_threaded_fails
             | dtensor_compiled_fails
         )
-        - dtensor_numeric_only_fails,
+        - dtensor_numeric_only_fails
+        - dtensor_compiled_decomp_passes,
     )
     def test_compiled_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op, requires_grad=False)

@@ -245,8 +245,15 @@ class OpDispatcher:
                 out = op_call.decompose(*args, **kwargs)
                 assert out is not NotImplemented
                 return out
-            else:
-                raise
+            # Under torch.compile, the PythonDispatcher may route ops here
+            # before their py_impl decomposition runs. If no sharding strategy
+            # is registered, try the decomposition table as a fallback.
+            from torch._decomp import decomposition_table
+
+            decomp_fn = decomposition_table.get(op_call, None)
+            if decomp_fn is not None:
+                return decomp_fn(*args, **kwargs)
+            raise
         except Exception as e:
             raise RuntimeError(
                 f"{e}\n\nSharding propagation failed for {op_info.schema or op_call}"
