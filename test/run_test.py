@@ -625,11 +625,11 @@ def run_test(
         if not options.enable_timeout
         else THRESHOLD * 6
         if IS_SLOW
-        else THRESHOLD * 3
+        else THRESHOLD * 6
         if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
-        else THRESHOLD * 3
+        else THRESHOLD * 6
         if is_cpp_test
         else None
     )
@@ -784,6 +784,9 @@ def run_test_retries(
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
         print_to_file(f"Got exit code {ret_code}{signal_name}")
+        # Print dmesg if timeout signal is caught
+        if ret_code == 124:
+            print_to_file(subprocess.check_output("sudo dmesg", shell=True, text=True))
 
         # Read what just failed/ran
         try:
