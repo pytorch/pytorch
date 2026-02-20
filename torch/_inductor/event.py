@@ -20,23 +20,13 @@ import itertools
 
 from torch._inductor import config
 from torch._inductor.codegen.wrapper import IndentedBuffer, WrapperLine
+from torch._inductor.stream_utils import (
+    DEFAULT_STREAM_IDX,
+    ENTRANCE_EVENT,
+    EVENT_NAME_TEMPLATE,
+    get_stream_name,
+)
 from torch.utils._ordered_set import OrderedSet
-
-
-DEFAULT_STREAM: str = "default_stream"
-DEFAULT_STREAM_IDX: int = 0
-ENTRANCE_EVENT: str = "event0"
-EVENT_NAME_TEMPLATE: str = "event{event_idx:d}"
-STREAM_NAME_TEMPLATE: str = "stream{stream_idx:d}"
-
-
-@functools.lru_cache
-def get_stream_name(stream_idx: int) -> str:
-    """Generate CUDA Stream name from stream index number."""
-    if stream_idx == 0:
-        return DEFAULT_STREAM
-    else:
-        return STREAM_NAME_TEMPLATE.format(stream_idx=stream_idx)
 
 
 @functools.total_ordering
