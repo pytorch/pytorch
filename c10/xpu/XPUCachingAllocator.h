@@ -89,7 +89,8 @@ C10_XPU_API void createOrIncrefPool(
 C10_XPU_API void beginAllocateToPool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id,
-    std::function<bool(sycl::queue*)> filter);
+    std::function<bool(sycl::queue*)> filter,
+    bool is_graph_capture = false);
 
 C10_XPU_API void endAllocateToPool(
     c10::DeviceIndex device,

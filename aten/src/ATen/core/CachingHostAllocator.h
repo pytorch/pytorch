@@ -742,23 +742,23 @@ struct CachingHostAllocatorImpl {
       std::function<bool(c10::Stream)> filter) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
     create_or_incref_pool_under_lock(pool_id);
-    for (auto it2 = captures_underway_.begin(); it2 != captures_underway_.end();
+    for (auto it2 = pool_diversions_.begin(); it2 != pool_diversions_.end();
          ++it2) {
       TORCH_CHECK(
           it2->first != pool_id,
           "beginAllocateToPool: already recording to mempool_id");
     }
-    captures_underway_.emplace_back(pool_id, std::move(filter));
-    captures_underway_empty_.store(false, std::memory_order_relaxed);
+    pool_diversions_.emplace_back(pool_id, std::move(filter));
+    pool_diversions_empty_.store(false, std::memory_order_relaxed);
   }
 
   void end_allocate_to_pool(c10::MempoolId_t pool_id) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
-    for (auto it = captures_underway_.begin(); it != captures_underway_.end();
+    for (auto it = pool_diversions_.begin(); it != pool_diversions_.end();
          ++it) {
       if (it->first == pool_id) {
-        captures_underway_.erase(it);
-        captures_underway_empty_.store(captures_underway_.empty(), std::memory_order_relaxed);
+        pool_diversions_.erase(it);
+        pool_diversions_empty_.store(pool_diversions_.empty(), std::memory_order_relaxed);
         return;
       }
     }
@@ -789,13 +789,13 @@ struct CachingHostAllocatorImpl {
 
  private:
   std::tuple<c10::MempoolId_t, BlockPool&> get_allocation_pool_for_current_stream() {
-    if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
+    if (C10_LIKELY(pool_diversions_empty_.load(std::memory_order_relaxed))) {
       return {c10::MempoolId_t{0, 0}, default_pool_};
     }
 
     std::shared_lock<std::shared_mutex> lg(instance_mutex_);
     S stream = get_current_stream();
-    for (auto& entry : captures_underway_) {
+    for (auto& entry : pool_diversions_) {
       if (entry.second(stream)) {
         auto it = graph_pools_.find(entry.first);
         TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
@@ -881,7 +881,7 @@ protected:
     // Stream capture can allocate only to private pools. If there
     // are no private pools for which capture is currently underway,
     // then by modus tollens the current stream is not capturing.
-    if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
+    if (C10_LIKELY(pool_diversions_empty_.load(std::memory_order_relaxed))) {
       return false;
     }
     return stream_is_capturing(get_current_stream());
@@ -922,23 +922,23 @@ private:
   // instance variables
 
   // instance_mutex_ protects graphs_pools_, graph_pools_freeable_,
-  // and captures_underway_, as well as the use_count field of
+  // and pool_diversions_, as well as the use_count field of
   // PrivatePools in graph_pools_ and graph_pools_freeable_.  We use a
   // shared mutex because we want to allow for multiple private pools
   // to be allocated to concurrently.  Does not protect default_pool_,
   // which has its own mutex.
   alignas(hardware_destructive_interference_size) mutable std::shared_mutex instance_mutex_;
 
-  // We manually maintain the invariant that captures_underway_empty_
-  // == captures_underway_.empty() outside of zones guarded by
+  // We manually maintain the invariant that pool_diversions_empty_
+  // == pool_diversions_.empty() outside of zones guarded by
   // instance_mutex_. This trick allows for us to check whether any
-  // captures are currently underway without ever taking a lock on
-  // instance_mutex_ (which guards captures_underway_), which is much
+  // pool diversions are active without ever taking a lock on
+  // instance_mutex_ (which guards pool_diversions_), which is much
   // more expensive than a relaxed memory load on this atomic. Read
   // more here:
   // https://github.com/pytorch/pytorch/pull/167507#discussion_r2586418965
   // It is important to use only "relaxed" loads and stores.
-  std::atomic<bool> captures_underway_empty_{true};
+  std::atomic<bool> pool_diversions_empty_{true};
 
   // Private pools for captures
   ska::flat_hash_map<c10::MempoolId_t, std::unique_ptr<PrivatePool>, c10::MempoolIdHash>
@@ -947,9 +947,9 @@ private:
   ska::flat_hash_map<c10::MempoolId_t, PrivatePool*, c10::MempoolIdHash>
       graph_pools_freeable_;
 
-  // Track active capture contexts requesting allocations to specific pools
+  // LIFO stack of active pool redirections (user mempools and graph captures).
   std::vector<
-      std::pair<c10::MempoolId_t, std::function<bool(c10::Stream)>>> captures_underway_;
+      std::pair<c10::MempoolId_t, std::function<bool(c10::Stream)>>> pool_diversions_;
 
   // corresponds to c10::MempoolId_t{0,0}
   BlockPool default_pool_;

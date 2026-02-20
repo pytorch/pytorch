@@ -1427,32 +1427,45 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_beginAllocateCurrentStreamToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+      [](c10::DeviceIndex device,
+         at::cuda::MempoolId_t mempool_id,
+         bool is_graph_capture = false) {
         auto stream = at::cuda::getCurrentCUDAStream(device);
         TORCH_CHECK(stream, "Expected stream capture to be under way");
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-            device, mempool_id, [stream](cudaStream_t target) {
-              return target == stream;
-            });
+            device,
+            mempool_id,
+            [stream](cudaStream_t target) { return target == stream; },
+            is_graph_capture);
       });
 
   m.def(
       "_cuda_beginAllocateToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+      [](c10::DeviceIndex device,
+         at::cuda::MempoolId_t mempool_id,
+         bool is_graph_capture = false) {
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-            device, mempool_id, [](cudaStream_t) { return true; });
+            device,
+            mempool_id,
+            [](cudaStream_t) { return true; },
+            is_graph_capture);
       });
 
   m.def(
       "_cuda_beginAllocateCurrentThreadToPool",
-      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+      [](c10::DeviceIndex device,
+         at::cuda::MempoolId_t mempool_id,
+         bool is_graph_capture = false) {
         auto tid = std::this_thread::get_id();
 
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
-            device, mempool_id, [=](cudaStream_t) {
+            device,
+            mempool_id,
+            [=](cudaStream_t) {
               auto current_tid = std::this_thread::get_id();
               return current_tid == tid;
-            });
+            },
+            is_graph_capture);
       });
 
   m.def(

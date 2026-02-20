@@ -616,8 +616,9 @@ def _use_cuda_memory_pool_manager(
     with torch.cuda.stream(stream), torch.device(device):
         # Begin allocate to mem pool for all memory allocation on the current thread.
         # This is thread safe since a thread can only warmup or record 1 cudagraph
-        # at the same time.
-        torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool)
+        # at the same time. Mark cudagraph-tree warmup as capture-like so allocator
+        # free/reuse behavior matches real capture in the same pool.
+        torch._C._cuda_beginAllocateCurrentThreadToPool(device, mem_pool, True)
         try:
             yield
         finally:

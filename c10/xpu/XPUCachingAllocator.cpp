@@ -1734,7 +1734,7 @@ class DeviceCachingAllocator {
   // Called by XPUGraph::capture_begin
   void beginAllocateToPool(
       MempoolId_t mempool_id,
-      std::function<bool(sycl::queue*)> filter) {
+      std::function<bool(sycl::queue*)> filter bool is_graph_capture = false) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
     auto not_found = std::all_of(
@@ -2016,10 +2016,11 @@ class NativeCachingAllocator : public XPUAllocator {
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(sycl::queue*)> filter) {
+      std::function<bool(sycl::queue*)> filter,
+      bool is_graph_capture = false) {
     assertValidDevice(device);
     device_allocators[device]->beginAllocateToPool(
-        std::move(mempool_id), std::move(filter));
+        std::move(mempool_id), std::move(filter), is_graph_capture);
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -2097,9 +2098,10 @@ void createOrIncrefPool(
 void beginAllocateToPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    std::function<bool(sycl::queue*)> filter) {
+    std::function<bool(sycl::queue*)> filter,
+    bool is_graph_capture) {
   return native_allocator.beginAllocateToPool(
-      device, mempool_id, std::move(filter));
+      device, mempool_id, std::move(filter), is_graph_capture);
 }
 
 void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {

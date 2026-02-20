@@ -798,7 +798,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)> /*filter*/) override {
+      std::function<bool(cudaStream_t)> /*filter*/,
+      bool /*is_graph_capture*/ = false) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());

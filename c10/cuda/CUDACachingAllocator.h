@@ -134,7 +134,8 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)> filter) = 0;
+      std::function<bool(cudaStream_t)> filter,
+      bool is_graph_capture = false) = 0;
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
@@ -360,8 +361,10 @@ inline CheckpointDelta setCheckpointPoolState(
 inline void beginAllocateToPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    std::function<bool(cudaStream_t)> filter) {
-  get()->beginAllocateToPool(device, mempool_id, std::move(filter));
+    std::function<bool(cudaStream_t)> filter,
+    bool is_graph_capture = false) {
+  get()->beginAllocateToPool(
+      device, mempool_id, std::move(filter), is_graph_capture);
 }
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {

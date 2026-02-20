@@ -1293,7 +1293,9 @@ class MemPool(_MemPool):
 
 
 @contextlib.contextmanager
-def use_mem_pool(pool: MemPool, device: "Device" = None):
+def use_mem_pool(
+    pool: MemPool, device: "Device" = None, is_graph_capture: bool = False
+):
     r"""A context manager that routes allocations to a given pool.
 
     Args:
@@ -1302,6 +1304,11 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         device (torch.device or int, optional): selected device. Uses MemPool on
             the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
+        is_graph_capture (bool, optional): if ``True``, the allocator treats
+            this pool as if CUDA graph capture is underway -- block frees are
+            deferred, ``process_events`` is skipped, and OOM recovery is
+            disabled, matching the behavior during actual graph capture.
+            Defaults to ``False``.
 
     .. note::
         This context manager makes only current thread's allocations route to
@@ -1312,7 +1319,7 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     device_index = (
         torch.cuda.current_device() if device is None else _get_device_index(device)
     )
-    _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
+    _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id, is_graph_capture)
     try:
         yield
     finally:

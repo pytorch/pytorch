@@ -106,7 +106,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
-  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, filter);
+  c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+      capture_dev_, mempool_id_, filter, /*is_graph_capture=*/true);
 
   at::getHostAllocator(at::kCUDA)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
     return filter(CUDAStream(CUDAStream::UNCHECKED, stream));
