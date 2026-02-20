@@ -689,6 +689,37 @@ class _PreparedSingleDimStrategy:
             ]
         )
 
+    def neighbor_placements(
+        self, input_idx: int, current: Placement
+    ) -> list[Placement]:
+        """Return valid placement transitions for one input on one mesh dim.
+
+        Transition rules follow DTensor redistribute semantics:
+        - Replicate -> any allowed Shard or Partial (local view, free)
+        - Shard -> Replicate (allgather), or different Shard (all-to-all)
+        - Partial -> Replicate (allreduce), or any allowed Shard (reduce-scatter)
+        """
+        # Note: circular import
+        from torch.distributed.tensor.placement_types import Partial
+
+        neighbors: list[Placement] = []
+
+        if isinstance(current, Replicate):
+            neighbors.extend(self.allowed_sharding_per_input[input_idx])
+            neighbors.extend(self.allowed_partial_per_input[input_idx])
+
+        elif isinstance(current, (Shard, _StridedShard)):
+            neighbors.append(Replicate())
+            neighbors.extend(
+                s for s in self.allowed_sharding_per_input[input_idx] if s != current
+            )
+
+        elif isinstance(current, Partial):
+            neighbors.append(Replicate())
+            neighbors.extend(self.allowed_sharding_per_input[input_idx])
+
+        return neighbors
+
 
 def _dijkstra_expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
@@ -731,7 +762,6 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
     """
     # Note: circular import
     from torch.distributed.tensor._ops.utils import generate_redistribute_costs
-    from torch.distributed.tensor.placement_types import Partial
 
     # Extract input DTensorSpecs from op_schema.args_schema, handling both
     # raw DTensorSpec and OpStrategy wrappers (the caller wraps specs in OpStrategy)
@@ -751,33 +781,24 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         if any(isinstance(p, _StridedShard) for p in spec.placements):
             return None
 
-    # Generate single-dim strategies and build lookup tables
     prepared = _PreparedSingleDimStrategy(
         single_dim_strategy, op_schema, output_tensor_meta, num_inputs=num_inputs
     )
 
-    # Build src_strategies wrapping input specs for redistribute cost computation
-    src_strategies = [OpStrategy([OpSpec(spec)]) for spec in input_specs]
-
-    initial_input_placements = tuple(spec.placements for spec in input_specs)
+    initial_placements = tuple(spec.placements for spec in input_specs)
     first_result: OpStrategy | None = None
 
-    def _try_match(
-        input_placements: tuple[tuple[Placement, ...], ...],
-    ) -> OpStrategy | None:
-        return prepared.try_propagate(mesh, input_placements, input_specs)
-
-    # Fast path: if initial placements already match, skip PQ entirely
-    fast_result = _try_match(initial_input_placements)
+    # Fast path: if initial placements already match a strategy, skip search
+    fast_result = prepared.try_propagate(mesh, initial_placements, input_specs)
     if fast_result is not None:
         fast_result._pq_transitions = []  # type: ignore[attr-defined]
         if _collect_all_matches is not None:
-            _collect_all_matches.add(initial_input_placements)
+            _collect_all_matches.add(initial_placements)
             first_result = fast_result
         else:
             return fast_result
 
-    # Pre-compute mesh topology and per-input comm_bytes_gb for direct cost computation
+    # Pre-compute mesh topology and per-input comm bytes for cost computation
     mesh_topo = MeshTopoInfo.build_from_mesh(mesh)
     per_input_comm_bytes_gb: list[float] = []
     for spec in input_specs:
@@ -791,6 +812,9 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
                 num_shards *= mesh_topo.mesh_dim_devices[i]
         per_input_comm_bytes_gb.append(total_bytes / num_shards / (1024**3))
 
+    # Wrap input specs for generate_redistribute_costs (called on match)
+    src_strategies = [OpStrategy([OpSpec(spec)]) for spec in input_specs]
+
     pq: list[_PQEntry] = []
     visited: set[tuple[tuple[Placement, ...], ...]] = set()
     cost_caches: list[dict[tuple[Placement, ...], float]] = [
@@ -800,7 +824,7 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
     initial_per_input_costs = (0.0,) * num_inputs
     heapq.heappush(
         pq,
-        _PQEntry(0.0, initial_input_placements, [], initial_per_input_costs),
+        _PQEntry(0.0, initial_placements, [], initial_per_input_costs),
     )
 
     def _push_neighbor(
@@ -821,7 +845,7 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
             changed_cost = cached
         else:
             changed_cost = _compute_redistribute_cost(
-                initial_input_placements[input_idx],
+                initial_placements[input_idx],
                 candidate_key,
                 mesh_topo,
                 per_input_comm_bytes_gb[input_idx],
@@ -850,7 +874,7 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
             continue
         visited.add(entry.placements)
 
-        match_result = _try_match(entry.placements)
+        match_result = prepared.try_propagate(mesh, entry.placements, input_specs)
         if match_result is not None:
             # Replace zero redistribute costs with actual costs from src
             match_spec = match_result.strategies[0]
@@ -889,64 +913,14 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         for mesh_dim in range(mesh.ndim):
             for input_idx in range(len(entry.placements)):
                 current_p = entry.placements[input_idx][mesh_dim]
-
-                # Replicate -> Shard (local chunk, free)
-                if isinstance(current_p, Replicate):
-                    for sharding in prepared.allowed_sharding_per_input[input_idx]:
-                        _push_neighbor(
-                            input_idx,
-                            mesh_dim,
-                            sharding,
-                            entry,
-                        )
-                    # Replicate -> Partial (local, free)
-                    for partial in prepared.allowed_partial_per_input[input_idx]:
-                        _push_neighbor(
-                            input_idx,
-                            mesh_dim,
-                            partial,
-                            entry,
-                        )
-
-                # Shard -> Replicate (allgather)
-                if isinstance(current_p, (Shard, _StridedShard)):
-                    _push_neighbor(
-                        input_idx,
-                        mesh_dim,
-                        Replicate(),
-                        entry,
-                    )
-                    # Shard -> different Shard (all-to-all)
-                    for sharding in prepared.allowed_sharding_per_input[input_idx]:
-                        if sharding != current_p:
-                            _push_neighbor(
-                                input_idx,
-                                mesh_dim,
-                                sharding,
-                                entry,
-                            )
-
-                # Partial -> Replicate (allreduce)
-                if isinstance(current_p, Partial):
-                    _push_neighbor(
-                        input_idx,
-                        mesh_dim,
-                        Replicate(),
-                        entry,
-                    )
-                    # Partial -> Shard (reduce-scatter)
-                    for sharding in prepared.allowed_sharding_per_input[input_idx]:
-                        _push_neighbor(
-                            input_idx,
-                            mesh_dim,
-                            sharding,
-                            entry,
-                        )
+                for neighbor_p in prepared.neighbor_placements(input_idx, current_p):
+                    _push_neighbor(input_idx, mesh_dim, neighbor_p, entry)
 
     if _collect_all_matches is not None and first_result is not None:
         return first_result
 
     raise AssertionError(
-        f"No valid strategy found for op_schema {op_schema}. "
+        f"No valid strategy found for op_schema {op_schema} "
+        f"on {mesh}). "
         f"Explored {len(visited)} strategy combinations."
     )
