@@ -162,7 +162,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,4
+moco,pass,7
 
 
 
@@ -202,7 +202,6 @@ pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,0
 
 
 

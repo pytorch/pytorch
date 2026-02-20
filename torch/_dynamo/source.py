@@ -286,12 +286,10 @@ class AttrSource(ChainedSource):
 
     def __post_init__(self) -> None:
         assert self.base, "Can't construct an AttrSource without a valid base source"
-        if "." in self.member:
-            member_parts = self.member.split(".")
-            object.__setattr__(
-                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
-            )
-            object.__setattr__(self, "member", member_parts[-1])
+        assert "." not in self.member, (
+            f"AttrSource member must not contain '.', got {self.member!r}. "
+            "Use OutputGraph.get_chained_attr_source() for dotted paths."
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -327,13 +325,13 @@ class GenericAttrSource(ChainedSource):
     member: str
 
     def __post_init__(self) -> None:
-        assert self.base, "Can't construct an AttrSource without a valid base source"
-        if "." in self.member:
-            member_parts = self.member.split(".")
-            object.__setattr__(
-                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
-            )
-            object.__setattr__(self, "member", member_parts[-1])
+        assert self.base, (
+            "Can't construct a GenericAttrSource without a valid base source"
+        )
+        assert "." not in self.member, (
+            f"GenericAttrSource member must not contain '.', got {self.member!r}. "
+            "Use OutputGraph.get_chained_attr_source() for dotted paths."
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)

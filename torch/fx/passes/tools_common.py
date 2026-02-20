@@ -60,12 +60,16 @@ def get_node_target(
     "torch". e.g. _VariableFunctionsClass.relu would become torch.relu.
     """
 
-    assert node.op in CALLABLE_NODE_OPS, (
-        "Expect op types of " + ", ".join(CALLABLE_NODE_OPS) + f", but found {node.op}"
-    )
+    if node.op not in CALLABLE_NODE_OPS:
+        raise AssertionError(
+            "Expect op types of "
+            + ", ".join(CALLABLE_NODE_OPS)
+            + f", but found {node.op}"
+        )
 
     if node.op == "call_module":
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError(f"Expected str target, got {type(node.target)}")
         submod = submodules[node.target]
         submod_type = getattr(submod, "_base_class_origin", type(submod))
         return get_acc_ops_name(submod_type)
@@ -77,7 +81,8 @@ def get_node_target(
             else _get_qualified_name(target)
         )
     else:
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError(f"Expected str target, got {type(node.target)}")
         return node.target
 
 
@@ -382,9 +387,10 @@ def stable_topological_sort(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 heapq.heappush(ready_queue, (node_to_id[user], user))
 
     # Check if all nodes were processed
-    assert len(new_graph.nodes) == len(gm.graph.nodes), (
-        f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}"
-    )
+    if len(new_graph.nodes) != len(gm.graph.nodes):
+        raise AssertionError(
+            f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}"
+        )
 
     new_graph._codegen = gm.graph._codegen
     gm.graph = new_graph

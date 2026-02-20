@@ -380,7 +380,8 @@ def _flatten_chunks_output(
     # transpose chunk dim and flatten structure
     # flat_output_chunks is flat list of chunks
     flat_output_chunks = list(zip(*flat_chunks_output))
-    assert arg_spec is not None
+    if arg_spec is None:
+        raise AssertionError("arg_spec must not be None")
     return flat_output_chunks, arg_spec
 
 
@@ -391,12 +392,17 @@ def _concat_chunked_outputs(
 ) -> list[Tensor]:
     # concat chunks on out_dim
     flat_out_dims = _broadcast_to_and_flatten(out_dims, arg_spec)
-    assert flat_out_dims is not None
-    assert len(flat_out_dims) == len(flat_output_chunks)
+    if flat_out_dims is None:
+        raise AssertionError("flat_out_dims must not be None")
+    if len(flat_out_dims) != len(flat_output_chunks):
+        raise AssertionError(
+            f"len(flat_out_dims)={len(flat_out_dims)} != len(flat_output_chunks)={len(flat_output_chunks)}"
+        )
     flat_output: list[Tensor] = []
     for idx, out_dim in enumerate(flat_out_dims):
         chunk = flat_output_chunks[idx]
-        assert chunk is not None
+        if chunk is None:
+            raise AssertionError(f"chunk at index {idx} must not be None")
         flat_output.append(torch.cat(chunk, dim=out_dim))
         # release tensors
         flat_output_chunks[idx] = None
@@ -539,7 +545,8 @@ def wrap_batched(
 ) -> tuple[Any, ...]:
     flat_args, spec = tree_flatten(args)
     flat_bdims = _broadcast_to_and_flatten(bdims, spec)
-    assert flat_bdims is not None
+    if flat_bdims is None:
+        raise AssertionError("flat_bdims must not be None")
     result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
     return result
 

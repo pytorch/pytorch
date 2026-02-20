@@ -227,7 +227,7 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                             if nested:
                                 results.extend(nested)
                                 continue
-                    logger.warning("failed to resolve %s to a triton kernel", name)
+                    logger.debug("failed to resolve %s to a triton kernel", name)
                 elif assignments is not None and name in assignments:
                     # trace through local assignments
                     for rhs_expr in assignments[name]:
@@ -237,7 +237,7 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                         )
                         results.extend(traced)
                 else:
-                    logger.warning("%s not found in namespace or assignments", name)
+                    logger.debug("%s not found in namespace or assignments", name)
 
             return results
 

@@ -38,6 +38,8 @@ jobs:
     container:
       image: ${{ inputs.docker_image }}
       options: --gpus all --ipc=host --tty
+      volumes:
+        - /mnt/hf_cache:/mnt/hf_cache
     steps:
       - name: Install system dependencies
         run: |
@@ -188,6 +190,8 @@ jobs:
         working-directory: vllm-project/vllm
         env:
           HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          HF_HOME: /mnt/hf_cache
+          TRANSFORMERS_OFFLINE: 1
           # vLLM-related environment variables
           ENGINE_VERSION: v1
           SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
