@@ -132,7 +132,6 @@ def get_ignored_functions() -> set[Callable]:
         torch.manual_seed,
         torch.initial_seed,
         torch.seed,
-        torch.thread_safe_generator,
         torch.save,
         torch.load,
         torch.set_printoptions,

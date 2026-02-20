@@ -1107,7 +1107,7 @@ struct GemmHelper {
     // Create a scratchpad buffer for the brgemm execution
     scratchpad = std::vector<uint8_t>(brg.get_scratchpad_size());
     // Prepare default vector of pairs of tensors A and B offsets for each batch.
-    A_B_offsets.reserve(1);
+    A_B_offsets.resize(1);
     A_B_offsets[0] = std::make_pair(0, 0);
   }
   dnnl::ukernel::brgemm brg;
