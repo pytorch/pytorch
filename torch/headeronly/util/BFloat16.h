@@ -33,6 +33,10 @@ struct alignas(2) BFloat16 {
   };
   // HIP wants __host__ __device__ tag, CUDA does not
   C10_HOST_DEVICE BFloat16() = default;
+  // Fast conversion constructors 
+  explicit inline C10_HOST_DEVICE BFloat16(double value);
+  explicit inline C10_HOST_DEVICE BFloat16(int value);
+  explicit inline C10_HOST_DEVICE BFloat16(int64_t value);
 #else
   uint16_t x;
   BFloat16() = default;
@@ -130,7 +134,9 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 /// Constructors
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
     :
-#if defined(__CUDACC__) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if defined(__HIPCC__)
+      x__bf16(static_cast<__bf16>(value))
+#elif defined(__CUDACC__) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
       x(__bfloat16_as_ushort(__float2bfloat16(value)))
 #elif defined(__SYCL_DEVICE_ONLY__) && \
     defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
@@ -141,6 +147,15 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 #endif
 {  
 }
+
+#if defined(__HIPCC__)
+inline C10_HOST_DEVICE BFloat16::BFloat16(int value)
+  : x__bf16(static_cast<__bf16>(value)) {}
+inline C10_HOST_DEVICE BFloat16::BFloat16(int64_t value)
+  : x__bf16(static_cast<__bf16>(value)) {}  
+inline C10_HOST_DEVICE BFloat16::BFloat16(double value)
+  : x__bf16(static_cast<__bf16>(value)) {}
+#endif
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
