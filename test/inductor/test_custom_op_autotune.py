@@ -7,6 +7,8 @@ config specifies an optional decomposition function and its associated parameter
 Inductor benchmarks all variants and automatically selects the best performing one.
 """
 
+import unittest
+
 import torch
 import torch._inductor.runtime.benchmarking
 from torch._dynamo.utils import counters
@@ -18,7 +20,7 @@ from torch._inductor.kernel.custom_op import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
 
 
 torch.set_float32_matmul_precision("high")
@@ -959,6 +961,7 @@ class TestCustomOpAutoTune(TestCase):
         torch.testing.assert_close(result, test_mat1 @ test_mat2, rtol=1e-1, atol=1e-1)
 
     @skipIfXpu
+    @unittest.skipIf(not IS_BIG_GPU, "Test requires large GPU memory")
     def test_empty_config_generator_falls_back_to_triton(self):
         """Test that empty config_generator falls back to normal mm autotuning.
 
