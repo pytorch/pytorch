@@ -1486,48 +1486,6 @@ def error_on_graph_break(
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
 
 
-class CudagraphOverrideContextManager:
-    """Context manager that overrides cudagraph recording during tracing."""
-
-    def __init__(self, fwd: Optional[bool] = None, bwd: Optional[bool] = None) -> None:
-        self.fwd = fwd
-        self.bwd = bwd
-
-    __call__ = wrap_dunder_call_ctx_manager
-
-    def __enter__(self) -> None:
-        pass
-
-    def __exit__(
-        self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> None:
-        pass
-
-
-def override_cudagraphs(
-    fwd: Optional[bool] = None, bwd: Optional[bool] = None
-) -> CudagraphOverrideContextManager:
-    """
-    Context manager/decorator to override cudagraph recording for compiled graphs.
-
-    When used as a context manager, overrides cudagraphs for all graph segments
-    within the block (including across graph breaks).
-
-    When used as a decorator, marks a function so that any compiled graph
-    inlining it will have cudagraphs overridden.
-
-    Args:
-        fwd: If False, disable cudagraphs for forward. If True, force enable.
-             If None, don't override.
-        bwd: If False, disable cudagraphs for backward. If True, force enable.
-             If None, don't override.
-    """
-    return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
-
-
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
     """
     Check if a method is marked as `dynamo_disable` recursively. It returns:
