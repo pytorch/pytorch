@@ -351,6 +351,10 @@ aten::lt.Tensor
 aten::lt.Tensor_out
 aten::lt_.Scalar
 aten::lt_.Tensor
+aten::max_pool2d_with_indices
+aten::max_pool2d_with_indices.out
+aten::max_pool3d_with_indices
+aten::max_pool3d_with_indices.out
 aten::maximum
 aten::maximum.out
 aten::mean
