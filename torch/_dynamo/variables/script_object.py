@@ -140,7 +140,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
                 )
 
         if ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
+            return VariableTracker.build(tx, obj)
 
         source = AttrSource(self.source, name) if self.source else None
         return VariableTracker.build(tx, obj, source)
@@ -172,7 +172,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
         var_args = TupleVariable(list(args))
         var_kwargs = ConstDictVariable(
-            {ConstantVariable(k): v for k, v in kwargs.items()}
+            {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
         )
         constant_args = var_args.as_python_constant()
         constant_kwargs = var_kwargs.as_python_constant()
