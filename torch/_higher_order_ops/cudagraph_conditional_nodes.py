@@ -69,8 +69,8 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
         # Warm up both sides of this torch.cond()
         if func is torch.ops.higher_order.cond:
             if torch.cuda.is_current_stream_capturing():
-                # This is a call to torch.cond() nested within either
-                # another torch.cond() function.
+                # This is a call to torch.cond() nested within another
+                # torch.cond() function.
                 with self:
                     # We re-enter the mode in case of nested calls to torch.cond()
                     return if_else_node(*args)

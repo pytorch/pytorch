@@ -2,14 +2,12 @@
 import contextlib
 import functools
 import unittest
-import warnings
 
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
-from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
@@ -49,11 +47,13 @@ from torch.testing._internal.common_utils import (
 
 @contextlib.contextmanager
 def check_cudagraphs_not_skipped(test_case):
+    counters = torch._dynamo.utils.counters
     old_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
     try:
         yield
     finally:
-        # reset before the assert, because otherwise the reset is skipped
+        # reset before the assert, because otherwise the reset is
+        # skipped in case of assertion error
         new_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
         counters["inductor"]["cudagraph_skips"] = old_cudagraph_skips
         test_case.assertEqual(
@@ -9993,7 +9993,7 @@ class TestControlFlowNN(TestCase):
 )
 class TestControlFlowAndRNG(TestCase):
     @parametrize("rng_func", ["custom_generator", "default_generator"])
-    def test_rng_with_conditional_nodes_warns(self, rng_func):
+    def test_rng_with_conditional_nodes_errors(self, rng_func):
         pred = torch.tensor(True, device="cuda")
         x = torch.ones(10, dtype=torch.float32, device="cuda")
 
@@ -10020,18 +10020,11 @@ class TestControlFlowAndRNG(TestCase):
             return torch.cond(pred, rng_func, lambda x: 2 * x, [x])
 
         compiled_func = torch.compile(func, backend="cudagraphs")
-
-        with warnings.catch_warnings(record=True) as warning_objs:
-            for i in range(3):
-                compiled_func(pred, x)
-
-        # Warn first for conditional node warmup, warn second for the
-        # graph capture that we will actually use.
-        self.assertEqual(len(warning_objs), 2)
-
-        warning_message = "You used random numbers in a cuda graph that uses conditional nodes. The previous design assumed that all RNG operations would execute only once, unconditionally, but this is no longer guaranteed with data-dependent control flow. Running with the cuda graph repeatedly may not match running without the cuda graph."  # noqa: B950
-        for warning in warning_objs:
-            self.assertTrue(warning_message in str(warning.message))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "RNG within data-dependent conditional nodes is not supported yet",
+        ):
+            compiled_func(pred, x)
 
 
 instantiate_parametrized_tests(TestHopSchema)
