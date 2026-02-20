@@ -9200,6 +9200,28 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
+
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_outputs,
+        )
+
+        (_, _, _, true_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
+        )
+        (_, _, _, false_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
+        )
+
+        mutated_operand_indices = OrderedSet(true_mutated_inputs) | OrderedSet(
+            false_mutated_inputs
+        )
+
+        # Create MutationOutput for each mutated operand (for scheduler dependencies)
+        conditional.mutation_outputs = [
+            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
+            for idx in sorted(mutated_operand_indices)
+        ]
+
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
