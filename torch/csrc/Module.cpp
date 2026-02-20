@@ -125,10 +125,6 @@
 #endif
 #endif
 
-#ifdef USE_ROCM
-#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
-#endif
-
 #ifdef USE_XPU
 #include <ATen/native/transformers/xpu/sdp_utils.h>
 #ifndef _WIN32
@@ -787,16 +783,8 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       int32_t device_id,
       void** out_stream) {
     try {
-#ifdef USE_ROCM
-      if (device_type == kDLROCM) {
-        *out_stream =
-            c10::hip::getCurrentHIPStreamMasqueradingAsCUDA(device_id).stream();
-        return 0;
-      }
-#endif
-
-#ifdef USE_CUDA
-      if (device_type == kDLCUDA) {
+#if defined(USE_CUDA) || defined(USE_ROCM)
+      if (device_type == kDLCUDA || device_type == kDLROCM) {
         *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
         return 0;
       }
