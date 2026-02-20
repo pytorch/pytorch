@@ -1329,7 +1329,12 @@ SAC_IGNORED_OPS = {
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
-_current_caching_mode: Optional["_CachingTorchDispatchMode"] = None
+def _get_current_caching_mode():
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+    for mode in reversed(_get_current_dispatch_mode_stack()):
+        if isinstance(mode, _CachingTorchDispatchMode):
+            return mode
+    return None
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
@@ -1343,17 +1348,6 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.storage = storage
         self.func_counter: Dict[Any, int] = defaultdict(int)
         self.tensor_tracker: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
-
-    def __enter__(self):
-        global _current_caching_mode
-        self._prev_caching_mode = _current_caching_mode
-        _current_caching_mode = self
-        return super().__enter__()
-
-    def __exit__(self, *args):
-        global _current_caching_mode
-        _current_caching_mode = self._prev_caching_mode
-        return super().__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if func in SAC_IGNORED_OPS:
@@ -1549,7 +1543,8 @@ def save(tensor: torch.Tensor) -> None:
     if torch._C._current_graph_task_id() != -1:
         return
 
-    if _current_caching_mode is None:
+    caching_mode = _get_current_caching_mode()
+    if caching_mode is None:
         # Under torch.compile, dynamo calls save() with FakeTensors during
         # graph construction. The actual work happens during AOTAutograd tracing.
         if isinstance(tensor, torch._subclasses.FakeTensor):
@@ -1559,7 +1554,7 @@ def save(tensor: torch.Tensor) -> None:
             "checkpoint() using a selective activation checkpoint context_fn."
         )
 
-    info = _current_caching_mode.tensor_tracker.get(tensor)
+    info = caching_mode.tensor_tracker.get(tensor)
     if info is None:
         raise RuntimeError(
             "save() could not find the given tensor in the current "
@@ -1568,14 +1563,17 @@ def save(tensor: torch.Tensor) -> None:
         )
 
     func, idx, any_ret_has_alias_info = info
-    _current_caching_mode.storage[func][idx] = tree_map(
+
+    # Under torch.compile, the caching mode already unconditionally saves
+    # all outputs. Just annotate the FX node for the partitioner.
+    if _is_compiling(func, (), None):
+        _set_save_policy_for_partitioner(tensor, CheckpointPolicy.MUST_SAVE)
+        return
+
+    caching_mode.storage[func][idx] = tree_map(
         lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)),
         tensor,
     )
-
-    # Under torch.compile, annotate the FX node so the partitioner
-    # knows this tensor should not be recomputed.
-    _set_save_policy_for_partitioner(tensor, CheckpointPolicy.MUST_SAVE)
 
 
 def _set_save_policy_for_partitioner(tensor, policy):
@@ -1608,7 +1606,10 @@ def _is_getitem_of_multi_output(node):
     if node.target != operator.getitem:
         return False
     parent = node.args[0]
-    return "tensor_meta" not in parent.meta and node.op == "call_function"
+    # Same check as is_multi_output in partitioners.py
+    return len(parent.users) > 0 and all(
+        u.target == operator.getitem for u in parent.users
+    )
 
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
