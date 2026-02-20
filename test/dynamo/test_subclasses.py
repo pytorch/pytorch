@@ -374,6 +374,41 @@ class CtxSubclassTensor(torch.Tensor):
         return return_and_correct_aliasing(func, args, kwargs, out)
 
 
+class DeferredInitSubclass(torch.Tensor):
+    """
+    A traceable wrapper subclass that calls super().__init__() BEFORE
+    setting instance attributes (similar to torchao patterns).
+    """
+
+    @staticmethod
+    def __new__(cls, data, scale):
+        return torch.Tensor._make_wrapper_subclass(
+            cls, data.shape, dtype=data.dtype, device=data.device
+        )
+
+    def __init__(self, data, scale):
+        super().__init__()
+        self._data = data
+        self._scale = scale
+
+    def __tensor_flatten__(self):
+        return ["_data"], {"_scale": self._scale}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, ctx, outer_size, outer_stride):
+        return cls(inner_tensors["_data"], ctx["_scale"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        args_inner = pytree.tree_map_only(DeferredInitSubclass, lambda x: x._data, args)
+        out = func(*args_inner, **kwargs)
+        if isinstance(out, torch.Tensor):
+            return DeferredInitSubclass(out, args[0]._scale)
+        return out
+
+
 def func(a):
     return a.sin()
 
@@ -3327,6 +3362,50 @@ class <lambda>(torch.nn.Module):
         )
 """,  # noqa: B950
         )
+
+    def test_wrap_tensor_returns_user_defined_object_for_self_in_init(self):
+        """
+        Test that wrap_tensor returns UserDefinedObjectVariable when wrapping
+        the `self` parameter in an __init__ method of a traceable wrapper subclass.
+        """
+        from unittest.mock import MagicMock
+
+        from torch._dynamo.source import LocalSource
+        from torch._dynamo.variables.builder import VariableBuilder
+        from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
+        from torch._guards import tracing, TracingContext
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        # Create a traceable wrapper subclass tensor
+        data = torch.randn(4, 4)
+        tensor = DeferredInitSubclass(data, 2.0)
+        self.assertTrue(is_traceable_wrapper_subclass(tensor))
+
+        # Mock the InstructionTranslator (tx) with required attributes
+        mock_tx = MagicMock()
+        mock_tx.f_code.co_name = "__init__"
+        mock_tx.f_code.co_argcount = 3
+        mock_tx.f_code.co_varnames = ("self", "data", "scale")
+        mock_tx.output.side_effects = {}
+        mock_tx.output.input_source_to_var = {}
+        mock_tx.output.variable_tracker_cache = MagicMock()
+        mock_tx.output.variable_tracker_cache.get.return_value = None
+
+        # Create LocalSource for 'self' parameter
+        source = LocalSource(local_name="self", is_input=True)
+
+        # Create a TracingContext and use tracing() context manager
+        ctx = TracingContext(fake_mode=None)
+        with tracing(ctx):
+            builder = VariableBuilder(mock_tx, source)
+
+            # Call wrap_tensor - with the fix enabled, this should return
+            # UserDefinedObjectVariable instead of trying to fake the tensor
+            result = builder.wrap_tensor(tensor)
+
+        # With the fix: expect UserDefinedObjectVariable
+        # Without the fix: would try to fake and potentially fail
+        self.assertIsInstance(result, UserDefinedObjectVariable)
 
 
 instantiate_parametrized_tests(SubclassTests)
