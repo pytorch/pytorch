@@ -131,7 +131,7 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
     pass
 
 
-class ShapeEnvGuardError(RuntimeError):
+class _ShapeEnvGuardError(RuntimeError):
     """Raised when a guard is attempted while the ShapeEnv is in error-on-guard mode."""
 
 
@@ -4507,7 +4507,7 @@ class ShapeEnv:
 
     @contextmanager
     def error_on_new_guards(self) -> Iterator[None]:
-        """Context manager that raises ShapeEnvGuardError if a guard is attempted.
+        """Context manager that raises _ShapeEnvGuardError if a guard is attempted.
 
         Temporarily freezes the ShapeEnv and makes _check_frozen raise
         instead of warn, so that guard-installing code paths produce an
@@ -7338,7 +7338,7 @@ class ShapeEnv:
     # and if so issue a warning (or raise if error_on_new_guards is set)
     def _check_frozen(self, expr: sympy.Basic, concrete_val: sympy.Basic) -> None:
         if self._error_on_new_guards:
-            raise ShapeEnvGuardError(
+            raise _ShapeEnvGuardError(
                 f"Guard attempted while ShapeEnv guards are frozen: {expr} == {concrete_val}"
             )
         if self.frozen:
