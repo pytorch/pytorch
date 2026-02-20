@@ -26,6 +26,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 import torch
@@ -44,7 +45,9 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor.placement_types import Partial, Placement, Shard
+from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
+from torch.testing._internal.common_utils import make_tensor
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.utils import _pytree as pytree
 
@@ -66,6 +69,50 @@ SKIP_OPS: dict[str, str] = {
     "randint_like": "non-deterministic (random sampling)",
     "randn_like": "non-deterministic (random sampling)",
     "uniform": "non-deterministic (random sampling)",
+}
+
+
+def _sample_inputs_aten_index(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for aten.index.Tensor (advanced indexing with Tensor?[]).
+
+    Index values must stay in-bounds even when the validator shards the values
+    tensor (halving dim sizes for world_size=2), so we cap indices at
+    dim_size // 2.
+    """
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # 2D, single index on dim 0: shape (8, 4), indices in [0, 4)
+    t = make((8, 4))
+    idx = torch.randint(0, 4, (4,), device=device)
+    yield SampleInput(t, args=([idx, None],))
+
+    # 2D, single index on dim 1: shape (8, 4), indices in [0, 2)
+    t = make((8, 4))
+    idx = torch.randint(0, 2, (2,), device=device)
+    yield SampleInput(t, args=([None, idx],))
+
+    # 3D, two consecutive indices on dims 0 and 1
+    t = make((8, 4, 6))
+    idx0 = torch.randint(0, 4, (2,), device=device)
+    idx1 = torch.randint(0, 2, (2,), device=device)
+    yield SampleInput(t, args=([idx0, idx1, None],))
+
+    # 3D, two non-consecutive indices on dims 0 and 2
+    t = make((8, 4, 6))
+    idx0 = torch.randint(0, 4, (2,), device=device)
+    idx2 = torch.randint(0, 3, (2,), device=device)
+    yield SampleInput(t, args=([idx0, None, idx2],))
+
+
+_CUSTOM_OPINFOS: dict[str, list[opinfo_core.OpInfo]] = {
+    "index": [
+        opinfo_core.OpInfo(
+            "index",
+            op=torch.ops.aten.index.Tensor,
+            dtypes=floating_types(),
+            sample_inputs_func=_sample_inputs_aten_index,
+        )
+    ],
 }
 
 
@@ -695,9 +742,13 @@ class _CaptureAtenOp(torch.utils._python_dispatch.TorchDispatchMode):
 
 def get_aten_op_for_sample(
     op: Callable[..., Any], sample: SampleInput, op_name: str = ""
-) -> tuple[OpOverload | None, tuple[Any, ...], dict[str, Any]]:
+) -> tuple[OpOverload | None, tuple[Any, ...], dict[str, Any], tuple[Any, ...] | None]:
     """
     Determine the actual aten op that will be dispatched for a given sample.
+
+    Returns (aten_op, non_tensor_args, non_tensor_kwargs, captured_aten_args).
+    captured_aten_args is the full args tree from aten dispatch, preserving
+    pytree structure (e.g., Tensor?[] lists with None entries).
     """
     with _CaptureAtenOp(op_name) as capture:
         try:
@@ -715,14 +766,14 @@ def get_aten_op_for_sample(
     elif capture.all_ops:
         captured_op, captured_args, captured_kwargs = capture.all_ops[0]
     else:
-        return None, (), {}
+        return None, (), {}, None
 
     non_tensor_args = tuple(a for a in captured_args if not isinstance(a, torch.Tensor))
     non_tensor_kwargs = {
         k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
     }
 
-    return captured_op, non_tensor_args, non_tensor_kwargs
+    return captured_op, non_tensor_args, non_tensor_kwargs, captured_args
 
 
 def query_single_dim_strategy(
@@ -730,6 +781,7 @@ def query_single_dim_strategy(
     tensors: list[tuple[str, torch.Tensor]],
     mesh: DeviceMesh | None,
     kwargs: dict[str, Any] | None = None,
+    captured_aten_args: tuple[Any, ...] | None = None,
 ) -> list[list[Placement]] | None:
     """
     Query DTensor's single-dim strategy for given input tensors.
@@ -742,9 +794,20 @@ def query_single_dim_strategy(
 
     strategy_func = propagator.op_single_dim_strategy_funcs[op_overload]
 
-    args_meta = tuple(
-        TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype) for _, t in tensors
-    )
+    if captured_aten_args is not None:
+        # Use the captured aten args tree to build args_meta preserving
+        # pytree structure (e.g., for aten.index.Tensor's Tensor?[] arg)
+        def _to_meta(x: object) -> object:
+            if isinstance(x, torch.Tensor):
+                return TensorMeta(shape=x.shape, stride=x.stride(), dtype=x.dtype)
+            return x
+
+        args_meta = pytree.tree_map(_to_meta, captured_aten_args)
+    else:
+        args_meta = tuple(
+            TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype)
+            for _, t in tensors
+        )
 
     try:
         result = strategy_func(op_overload, args_meta, kwargs or {})
@@ -769,6 +832,10 @@ def get_opinfo_by_name(name: str) -> list[opinfo_core.OpInfo]:
     matches = [op for op in op_db if op.name == name]
     if matches:
         return matches
+
+    # Check custom OpInfos for ops not in the standard op_db
+    if name in _CUSTOM_OPINFOS:
+        return _CUSTOM_OPINFOS[name]
 
     # Suggest alternatives
     candidates = _find_opinfo_candidates(name)
@@ -806,7 +873,7 @@ def resolve_op_names(patterns: list[str]) -> list[str]:
     "nn.functional.*"). Short names like "relu" are resolved unambiguously
     or an error is raised with suggestions.
     """
-    all_opinfo_names = sorted({op.name for op in op_db})
+    all_opinfo_names = sorted({op.name for op in op_db} | _CUSTOM_OPINFOS.keys())
     resolved: list[str] = []
     seen: set[str] = set()
 
@@ -823,7 +890,7 @@ def resolve_op_names(patterns: list[str]) -> list[str]:
             continue
 
         # Exact match
-        if pattern in {op.name for op in op_db}:
+        if pattern in all_opinfo_names:
             if pattern not in seen:
                 resolved.append(pattern)
                 seen.add(pattern)
@@ -932,6 +999,7 @@ def _query_dtensor_rules(
     output_shape: tuple[int, ...],
     world_size: int,
     verbose: bool,
+    captured_aten_args: tuple[Any, ...] | None = None,
 ) -> set[ComboKey]:
     """Query DTensor's claimed sharding rules via single-dim, op_strategy, or decomp paths.
 
@@ -948,7 +1016,11 @@ def _query_dtensor_rules(
 
     if aten_op in propagator.op_single_dim_strategy_funcs:
         strategy_result = query_single_dim_strategy(
-            aten_op, tensors, None, kwargs=non_tensor_kwargs
+            aten_op,
+            tensors,
+            None,
+            kwargs=non_tensor_kwargs,
+            captured_aten_args=captured_aten_args,
         )
         if strategy_result:
             for combo in strategy_result:
@@ -1385,8 +1457,8 @@ def compare_operator(
             ]
             output_placement_options = get_1d_output_placements_for_tensor(first_gt)
 
-            aten_op, non_tensor_args, non_tensor_kwargs = get_aten_op_for_sample(
-                op, sample, opinfo.name
+            aten_op, non_tensor_args, non_tensor_kwargs, captured_aten_args = (
+                get_aten_op_for_sample(op, sample, opinfo.name)
             )
 
             dtensor_rules = _query_dtensor_rules(
@@ -1398,6 +1470,7 @@ def compare_operator(
                 output_shape,
                 world_size,
                 verbose,
+                captured_aten_args=captured_aten_args,
             )
 
             ground_truth_valid: set[ComboKey] = set()
@@ -1526,6 +1599,9 @@ def get_registered_op_names() -> list[str]:
     for base_name in base_names:
         if base_name in opinfo_by_name:
             # Direct match (e.g., "add" -> OpInfo named "add")
+            result.add(base_name)
+        elif base_name in _CUSTOM_OPINFOS:
+            # Match via custom OpInfos (e.g., "index" for aten.index.Tensor)
             result.add(base_name)
         elif base_name in opinfo_by_aten_name:
             # Match via aten_name (e.g., "relu" -> OpInfo "nn.functional.relu"
