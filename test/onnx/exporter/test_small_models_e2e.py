@@ -616,7 +616,12 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         self.assertIn("bgr_image", graph_input_names)
 
     def test_export_with_input_names_and_dynamic_shapes_nested(self):
-        """Test that input_names with nested dynamic_shapes works for nested input models."""
+        """Test that flat input_names-keyed dynamic_shapes works for nested input models.
+
+        Users provide flat input_names (one per tensor leaf) and dynamic_shapes
+        keyed by those same flat names. The remapping should unflatten them into
+        the nested structure that torch.export expects.
+        """
 
         class NestedModel(torch.nn.Module):
             def forward(
@@ -635,6 +640,7 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             {"a": torch.zeros(5), "b": torch.ones(5)},
             torch.ones(6),
         )
+        # Flat input_names (one per tensor leaf)
         input_names = [
             "input_x",
             "input_y0",
@@ -643,14 +649,16 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             "input_b",
             "input_c",
         ]
-        # dynamic_shapes follows nn.Module parameter structure, not flat input_names
+        # dynamic_shapes keyed by flat input_names, NOT by original param names
         dim = torch.export.Dim("dim", min=3)
         dim_c = torch.export.Dim("dim_c", min=3)
         dynamic_shapes = {
-            "x": {0: dim},
-            "ys": [{0: dim}, {0: dim}],
-            "zs": {"a": {0: dim}, "b": {0: dim}},
-            "c": {0: dim_c},
+            "input_x": {0: dim},
+            "input_y0": {0: dim},
+            "input_y1": {0: dim},
+            "input_a": {0: dim},
+            "input_b": {0: dim},
+            "input_c": {0: dim_c},
         }
 
         onnx_program = torch.onnx.export(
@@ -667,43 +675,62 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             self.assertIn(name, graph_input_names)
 
     def test_export_with_input_names_and_dynamic_shapes_llm(self):
-        """Test input_names + dynamic_shapes for an LLM-style model (most popular architecture)."""
+        """Test input_names + dynamic_shapes for an LLM-style model with KV cache (nested input)."""
 
-        class SimpleLLM(torch.nn.Module):
+        class LLMWithKVCache(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.embed = torch.nn.Embedding(100, 32)
                 self.linear = torch.nn.Linear(32, 100)
 
-            def forward(self, input_ids, attention_mask):
+            def forward(
+                self,
+                input_ids: torch.Tensor,
+                attention_mask: torch.Tensor,
+                past_key_values: list[torch.Tensor],
+            ):
                 x = self.embed(input_ids)
                 x = x * attention_mask.unsqueeze(-1)
+                # Simulate using past KV cache
+                for kv in past_key_values:
+                    x = x + kv
                 return self.linear(x)
 
-        model = SimpleLLM().eval()
-        batch, seq_len = 2, 10
+        model = LLMWithKVCache().eval()
+        batch, seq_len, hidden = 2, 10, 32
         input_ids = torch.randint(0, 100, (batch, seq_len))
         attention_mask = torch.ones(batch, seq_len)
+        # 2-layer KV cache
+        past_kv = [
+            torch.randn(batch, seq_len, hidden),
+            torch.randn(batch, seq_len, hidden),
+        ]
 
+        # Flat input_names (one per tensor leaf, including KV cache entries)
+        input_names = ["tokens", "mask", "past_kv_0", "past_kv_1"]
         batch_dim = torch.export.Dim("batch")
         seq_dim = torch.export.Dim("seq_len")
+        # dynamic_shapes keyed by flat input_names
+        dynamic_shapes = {
+            "tokens": {0: batch_dim, 1: seq_dim},
+            "mask": {0: batch_dim, 1: seq_dim},
+            "past_kv_0": {0: batch_dim, 1: seq_dim},
+            "past_kv_1": {0: batch_dim, 1: seq_dim},
+        }
 
         onnx_program = torch.onnx.export(
             model,
-            (input_ids, attention_mask),
+            (input_ids, attention_mask, past_kv),
             dynamo=True,
             verbose=False,
-            input_names=["tokens", "mask"],
+            input_names=input_names,
             output_names=["logits"],
-            dynamic_shapes={
-                "tokens": {0: batch_dim, 1: seq_dim},
-                "mask": {0: batch_dim, 1: seq_dim},
-            },
+            dynamic_shapes=dynamic_shapes,
         )
         self.assertIsNotNone(onnx_program)
         graph_input_names = [i.name for i in onnx_program.model.graph.inputs]
-        self.assertIn("tokens", graph_input_names)
-        self.assertIn("mask", graph_input_names)
+        for name in input_names:
+            self.assertIn(name, graph_input_names)
 
     def test_export_of_static_dim_constraints(self):
         # NOTE: This test is to ensure that the static dim constraints are respected.
