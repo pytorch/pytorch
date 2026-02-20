@@ -722,6 +722,40 @@ def forward(self, pred_1, x_1):
         total.backward()
         self.assertEqual(x.grad, 2 * x)
 
+    def test_switch_zero_args(self):
+        branches = (
+            lambda: torch.zeros(3),
+            lambda: torch.ones(3),
+            lambda: 2.0 * torch.ones(3),
+        )
+
+        result = torch.switch(0, branches, [])
+        self.assertEqual(result, branches[0]())
+
+        result = torch.switch(1, branches, [])
+        self.assertEqual(result, branches[1]())
+
+        result = torch.switch(2, branches, [])
+        self.assertEqual(result, branches[2]())
+
+    def test_switch_multiple_args(self):
+        x = torch.ones(3)
+        y = torch.tensor([1., 2., 3.])
+        branches = (
+            lambda x, y: x + y,
+            lambda x, y: x * y,
+            lambda x, y: x - 0.5 * y,
+        )
+
+        result = torch.switch(0, branches, (x, y))
+        self.assertEqual(result, branches[0](x, y))
+
+        result = torch.switch(1, branches, (x, y))
+        self.assertEqual(result, branches[1](x, y))
+
+        result = torch.switch(2, branches, (x, y))
+        self.assertEqual(result, branches[2](x, y))
+
     def test_switch_invalid_index(self):
         x = torch.ones(3)
         branches = (torch.sin, torch.cos)
