@@ -48,13 +48,8 @@ struct alignas(2) BFloat16 {
       from_bits_t /*unused*/)
       : x(bits) {}
 
-#if defined(__HIPCC__)
-  inline C10_HOST_DEVICE BFloat16(const __bf16& value);
-  inline C10_HOST_DEVICE operator __bf16() const;
-#else    
   /* implicit */ inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
-#endif
 
 #if defined(__CUDACC__)
   inline C10_HOST_DEVICE BFloat16(const __nv_bfloat16& value);
@@ -132,14 +127,6 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
-#if defined(__HIPCC__)
-/// Constructors
-inline C10_HOST_DEVICE BFloat16::BFloat16(const __bf16& value) : x__bf16(value) {}
-/// Implicit conversions
-inline C10_HOST_DEVICE BFloat16::operator __bf16() const {
-  return x__bf16;
-}
-#else
 /// Constructors
 inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
     :
@@ -152,10 +139,14 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
       // RNE by default
       x(detail::round_to_nearest_even(value))
 #endif
+{  
+}
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
-#if defined(__CUDACC__)
+#if defined(__HIPCC__)
+  return static_cast<float>(x__bf16);
+#elif defined(__CUDACC__)
   return __bfloat162float(*reinterpret_cast<const __nv_bfloat16*>(&x));
 #elif defined(__SYCL_DEVICE_ONLY__) && \
     defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
@@ -179,7 +170,6 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(const __nv_bfloat16& value) {
 inline C10_HOST_DEVICE BFloat16::operator __nv_bfloat16() const {
   return *reinterpret_cast<const __nv_bfloat16*>(&x);
 }
-#endif
 
 #if defined(SYCL_EXT_ONEAPI_BFLOAT16_MATH_FUNCTIONS)
 inline C10_HOST_DEVICE BFloat16::BFloat16(
