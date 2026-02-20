@@ -18,7 +18,8 @@ namespace torch::jit {
 
 struct Graph;
 
-using ::c10::ArrayRef;
+template <typename T>
+using ArrayRef = at::ArrayRef<T>;
 using ::c10::TensorType;
 using ::c10::TypePtr;
 
