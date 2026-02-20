@@ -28,7 +28,7 @@ Tensor my_sum_dim1(Tensor self) {
       std::nullopt);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
   m.def(
       "my_sum(Tensor self, int[]? dim=None, bool keepdim=False, ScalarType? dtype=None) -> Tensor");
   m.def("my_sum_all(Tensor self) -> Tensor");
@@ -36,7 +36,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    STABLE_LIB_NAME,
+    libtorch_agn_2_10,
     CompositeExplicitAutograd,
     m) {
   m.impl("my_sum", TORCH_BOX(&my_sum));

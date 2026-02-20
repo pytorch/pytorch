@@ -57,7 +57,7 @@ from ..utils import (
     set_torch_function_mode_stack,
 )
 from .base import VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserMethodVariable
 from .lazy import LazyVariableTracker
@@ -203,12 +203,12 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         from .torch import TorchInGraphFunctionVariable
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
-            return CONSTANT_VARIABLE_NONE
+            return ConstantVariable.create(None)
 
         TorchInGraphFunctionVariable(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         from .torch import TorchInGraphFunctionVariable
@@ -216,7 +216,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
             tx, [], {}
         )
-        return CONSTANT_VARIABLE_NONE
+        return ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         ty = NoEnterTorchFunctionMode
@@ -679,9 +679,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 elif isinstance(attr, property):
                     getter_source = AttrSource(attr_source, "fget")
                     getter = attr.fget
-                    getter_var = VariableTracker.build(
-                        tx, getter, source=getter_source, realize=True
-                    )
+                    getter_var = VariableTracker.build(tx, getter, source=getter_source)
                     return getter_var.call_function(tx, [self], {})
 
                 elif isinstance(attr, classmethod):

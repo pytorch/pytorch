@@ -630,7 +630,6 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
             if isinstance(val, (bool, int, float)):
                 normalized_expected.append(val)
             else:
-                # pyrefly: ignore [bad-argument-type]
                 normalized_expected.append(str(val))
 
         matching_entries = []
@@ -1461,21 +1460,6 @@ class GraphModuleSerializer(metaclass=Final):
                         )
                     arguments.append(TensorArgument(name=a.name))
                 return Argument.create(as_tensors=arguments)
-            elif all(isinstance(a, (list, tuple)) for a in arg) and all(
-                all(isinstance(t, torch.fx.Node) for t in inner) for inner in arg
-            ):
-                # nested list of tensors (List[List[Tensor]])
-                nested_arguments = []
-                for inner_list in arg:
-                    inner_arguments = []
-                    for node in inner_list:
-                        if node.op == "get_attr":
-                            raise SerializeError(
-                                "getattr nodes containing tensors should not appear in the graph"
-                            )
-                        inner_arguments.append(TensorArgument(name=node.name))
-                    nested_arguments.append(inner_arguments)
-                return Argument.create(as_nested_tensors=nested_arguments)
             elif all(isinstance(a, (torch.fx.Node, type(None))) for a in arg):
                 # list of optional tensors
                 def serialize_optional_tensor_args(a):
@@ -2087,7 +2071,6 @@ class GraphModuleSerializer(metaclass=Final):
         for user in node.users:
             if user.target is not operator.getitem:
                 raise AssertionError(f"User node {user} of {node} is incorrect")
-            # pyrefly: ignore [unsupported-operation]
             idx_to_name[user.args[1]] = user.name
 
         for idx, _ in enumerate(meta_val):
@@ -2095,13 +2078,11 @@ class GraphModuleSerializer(metaclass=Final):
             # However, we need a name for them so that the number of outputs will
             # correctly match the schema. Just assign a dummy name.
             if idx not in idx_to_name:
-                # pyrefly: ignore [unsupported-operation]
                 idx_to_name[idx] = f"{node.name}_unused_{idx}"
 
         arg_list = []
         for i, element_meta_val in enumerate(meta_val):
             arg_list.append(
-                # pyrefly: ignore [bad-index]
                 self.serialize_tensor_output(idx_to_name[i], element_meta_val)
             )
 
@@ -3073,12 +3054,6 @@ class GraphModuleDeserializer(metaclass=Final):
             elif typ_ == "as_int_lists":
                 # Convert list of lists back to list of tuples for Triton grids
                 return [tuple(dims) for dims in value]
-            elif typ_ == "as_nested_tensors":
-                # nested list of tensors (List[List[Tensor]])
-                return [
-                    [self.serialized_name_to_node[arg.name] for arg in inner_list]
-                    for inner_list in value
-                ]
             elif typ_ in ("as_sym_ints", "as_sym_bools", "as_sym_floats"):
                 return [self.deserialize_sym_argument(arg) for arg in value]
             elif typ_ == "as_optional_tensors":
@@ -3762,8 +3737,6 @@ def _canonicalize_graph(
             return None
         elif a.type == "as_string_to_argument":
             return None
-        elif a.type == "as_nested_tensors":
-            return a.as_nested_tensors
         else:
             raise AssertionError(f"Unknown input type to the ExportedProgram: {a}")
 

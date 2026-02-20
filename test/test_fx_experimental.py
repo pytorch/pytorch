@@ -101,8 +101,7 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
-        if dag.nodes[0].logical_device_ids != [1]:
-            raise AssertionError(f"expected logical_device_ids == [1], got {dag.nodes[0].logical_device_ids}")
+        assert dag.nodes[0].logical_device_ids == [1]
 
     def test_lack_of_devices(self):
         class TestModule(torch.nn.Module):
@@ -122,8 +121,7 @@ class TestFXExperimental(JitTestCase):
             ret = partitioner.partition_graph(traced, m, partitioner_config)
         except RuntimeError:
             catch_runtime_error = True
-        if not catch_runtime_error:
-            raise AssertionError("expected RuntimeError")
+        assert catch_runtime_error
 
     def test_large_node_error(self):
         class TestModule(torch.nn.Module):
@@ -154,8 +152,7 @@ class TestFXExperimental(JitTestCase):
             ret = partitioner.partition_graph(traced, m, partitioner_config)
         except RuntimeError:
             catch_runtime_error = True
-        if not catch_runtime_error:
-            raise AssertionError("expected RuntimeError")
+        assert catch_runtime_error
 
     def test_partition_node_manipulation(self):
         class TestModule(torch.nn.Module):
@@ -174,16 +171,14 @@ class TestFXExperimental(JitTestCase):
         partitioner_config = PartitionerConfig(devices)
         ret = partitioner.partition_graph(traced, m, partitioner_config)
         partition = partitioner.partitions[0]
-        if partition.used_mem_bytes != 112:
-            raise AssertionError(f"expected used_mem_bytes == 112, got {partition.used_mem_bytes}")
+        assert partition.used_mem_bytes == 112
         # Select add_2 node to remove
         selected_node = None
         for node in partition.nodes:
             if node.name == "add_2":
                 selected_node = node
         partition.remove_node(selected_node)
-        if partition.used_mem_bytes != 80:
-            raise AssertionError(f"expected used_mem_bytes == 80, got {partition.used_mem_bytes}")
+        assert partition.used_mem_bytes == 80
 
     def test_size_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -215,8 +210,7 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(traced(a, b), module_with_submodules(a, b))
         for i, node in enumerate(dag.nodes):
-            if node.logical_device_ids != [i]:
-                raise AssertionError(f"expected logical_device_ids == [{i}], got {node.logical_device_ids}")
+            assert node.logical_device_ids == [i]
 
     def test_partition_device_mapping(self):
         class TestModule(torch.nn.Module):
@@ -245,11 +239,9 @@ class TestFXExperimental(JitTestCase):
         self.assertEqual(traced(a), module_with_submodules(a))
         for i, node in enumerate(dag.nodes):
             if i == 1:
-                if node.logical_device_ids != [1]:
-                    raise AssertionError(f"expected logical_device_ids == [1], got {node.logical_device_ids}")
+                assert node.logical_device_ids == [1]
             else:
-                if node.logical_device_ids != [0]:
-                    raise AssertionError(f"expected logical_device_ids == [0], got {node.logical_device_ids}")
+                assert node.logical_device_ids == [0]
 
     def test_sparse_nn_partition(self):
         class MyRecommendationModule(torch.nn.Module):
@@ -311,8 +303,7 @@ class TestFXExperimental(JitTestCase):
         module_with_submodules = ret.module_with_submodules
         dag = ret.dag
         self.assertEqual(traced(a, b, offset), module_with_submodules(a, b, offset))
-        if len(module_with_submodules.graph.nodes) != 24:
-            raise AssertionError(f"expected 24 nodes, got {len(module_with_submodules.graph.nodes)}")
+        assert len(module_with_submodules.graph.nodes) == 24
 
     def test_partition_latency(self):
         class TestModule(torch.nn.Module):
@@ -362,17 +353,14 @@ class TestFXExperimental(JitTestCase):
         )
         for p in partition_to_latency_mapping:
             if p.partition_id == 0:
-                if partition_to_latency_mapping[p] != (128.0, 80.0, 160.0):
-                    raise AssertionError(f"expected (128.0, 80.0, 160.0), got {partition_to_latency_mapping[p]}")
+                assert partition_to_latency_mapping[p] == (128.0, 80.0, 160.0)
             else:
-                if partition_to_latency_mapping[p] != (16.0, 32.0, 32.0):
-                    raise AssertionError(f"expected (16.0, 32.0, 32.0), got {partition_to_latency_mapping[p]}")
+                assert partition_to_latency_mapping[p] == (16.0, 32.0, 32.0)
         transfer_rate_bytes_per_sec = 2
         critical_path_latency_sec = get_latency_of_partitioned_graph(
             partitions, partition_to_latency_mapping, transfer_rate_bytes_per_sec
         )
-        if critical_path_latency_sec != 208.0:
-            raise AssertionError(f"expected 208.0, got {critical_path_latency_sec}")
+        assert critical_path_latency_sec == 208.0
 
     def test_cost_aware_partition(self):
         class MyModule(torch.nn.Module):
@@ -434,8 +422,7 @@ class TestFXExperimental(JitTestCase):
             partition_to_latency_mapping,
             partitioner_config.transfer_rate_bytes_per_sec,
         )
-        if critical_path_latency_sec != 160.0:
-            raise AssertionError(f"expected 160.0, got {critical_path_latency_sec}")
+        assert critical_path_latency_sec == 160.0
 
     def test_aot_based_partition(self):
         class TestModule(torch.nn.Module):
@@ -474,10 +461,8 @@ class TestFXExperimental(JitTestCase):
         dag = ret.dag
         self.assertEqual(module_with_submodules(a), traced(a))
         for node in dag.nodes:
-            if node.size_bytes != 48:
-                raise AssertionError(f"expected size_bytes == 48, got {node.size_bytes}")
-            if node.logical_device_ids != [0]:
-                raise AssertionError(f"expected logical_device_ids == [0], got {node.logical_device_ids}")
+            assert node.size_bytes == 48
+            assert node.logical_device_ids == [0]
 
     def test_replace_target_nodes_with(self):
         class testModule(torch.nn.Module):
@@ -488,8 +473,7 @@ class TestFXExperimental(JitTestCase):
         traced = symbolic_trace(m)
         input1 = torch.randn(1)
         input2 = torch.randn(1)
-        if (input1 + input2) != traced(input1, input2):
-            raise AssertionError("traced output mismatch")
+        assert (input1 + input2) == traced(input1, input2)
         graph_manipulation.replace_target_nodes_with(
             fx_module=traced,
             old_op="call_function",
@@ -497,8 +481,7 @@ class TestFXExperimental(JitTestCase):
             new_op="call_function",
             new_target=operator.mul,
         )
-        if (input1 * input2) != traced(input1, input2):
-            raise AssertionError("traced output mismatch after replacement")
+        assert (input1 * input2) == traced(input1, input2)
 
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
@@ -606,7 +589,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b  # noqa: S101
+                assert a == b
                 return a + b
 
         m = M()
@@ -665,7 +648,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b, "test message"  # noqa: S101
+                assert a == b, "test message"
                 return a + b
 
         m = M()
@@ -693,7 +676,7 @@ class TestFXExperimental(JitTestCase):
     def test_call_to_assert_with_empty_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
-                assert a == b, ""  # noqa: S101
+                assert a == b, ""
                 return a + b
 
         m = M()
@@ -725,7 +708,7 @@ class TestFXExperimental(JitTestCase):
 An error message with
 terrible spacing
                 """
-                assert a == b, error_msg  # noqa: S101
+                assert a == b, error_msg
                 return a + b
 
         m = M()
@@ -1214,10 +1197,8 @@ class {test_classname}(torch.nn.Module):
                         normalized_args2 = normalize_module(
                             traced, node.target, node.args, node.kwargs
                         )
-                        if normalized_args != normalized_args2:
-                            raise AssertionError("normalized_args mismatch")
-                        if not normalized_args:
-                            raise AssertionError("expected normalized_args to be truthy")
+                        assert normalized_args == normalized_args2
+                        assert normalized_args
                         node.args = normalized_args.args
                         node.kwargs = normalized_args.kwargs
 
@@ -1365,8 +1346,7 @@ class {test_classname}(torch.nn.Module):
         # by default, fx transform loses type annotation of getitem nodes.
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                if node.type is not None:
-                    raise AssertionError(f"expected node.type is None, got {node.type}")
+                assert node.type is None
 
         annotate_getitem_nodes(my_module_traced.graph)
 
@@ -1380,8 +1360,7 @@ class {test_classname}(torch.nn.Module):
         # by default, fx transform loses type annotation of getitem nodes.
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                if node.type is not None:
-                    raise AssertionError(f"expected node.type is None, got {node.type}")
+                assert node.type is None
 
         annotate_getitem_nodes(my_module_traced.graph)
 
@@ -1537,18 +1516,13 @@ class {test_classname}(torch.nn.Module):
 
         for node in traced.graph.nodes:
             if node.op == "call_module":
-                if not hasattr(node, "attrs_for_lowering"):
-                    raise AssertionError("expected node to have attrs_for_lowering")
+                assert hasattr(node, "attrs_for_lowering")
                 para_list = attrs_for_lowering[node.attrs_for_lowering["name"]]
 
                 # node.attrs_for_lowering has an addition field of class name
-                if len(para_list) + 1 != len(node.attrs_for_lowering):
-                    raise AssertionError(
-                        f"attrs_for_lowering length mismatch: {len(para_list) + 1} != {len(node.attrs_for_lowering)}"
-                    )
+                assert len(para_list) + 1 == len(node.attrs_for_lowering)
                 for p_name in para_list:
-                    if p_name not in node.attrs_for_lowering:
-                        raise AssertionError(f"{p_name} not in node.attrs_for_lowering")
+                    assert p_name in node.attrs_for_lowering
 
     def test_merge_matmuls(self):
         """
@@ -1831,8 +1805,7 @@ class TestNormalizeOperators(JitTestCase):
 
             def jit_infer_type(v):
                 inferred_arg_type = torch._C._jit_try_infer_type(v)
-                if not inferred_arg_type.success():
-                    raise AssertionError("expected inferred_arg_type.success()")
+                assert inferred_arg_type.success()
                 t = _torchscript_type_to_python_type(inferred_arg_type.type())
                 return t
 
@@ -1932,8 +1905,7 @@ class TestModule(torch.nn.Module):
                     normalized_args = node.normalized_arguments(
                         traced, arg_types, kwarg_types
                     )
-                    if not normalized_args:
-                        raise AssertionError("expected normalized_args to be truthy")
+                    assert normalized_args
                     node.args = normalized_args.args
                     node.kwargs = normalized_args.kwargs
             traced.recompile()

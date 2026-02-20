@@ -14,7 +14,6 @@ __all__ = [
     "Block",
     "FileLinter",
     "is_empty",
-    # pyrefly: ignore [bad-dunder-all]
     "LineWithSets",
     "LintResult",
     "ParseError",

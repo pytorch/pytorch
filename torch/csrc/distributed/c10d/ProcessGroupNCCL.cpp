@@ -922,7 +922,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
   globalStore_ =
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
-  debugInfoPipeFile_ = getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
   auto desyncDebug = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -1779,8 +1778,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
     // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(
-        pg_->globalRank(), pg_->debugInfoPipeFile_, pg_->traceBufferSize_);
+    dumpPipe.emplace(pg_->globalRank());
   }
   while (true) {
     // This won't have any lock since this lock is only used here.
@@ -3744,9 +3742,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
 
   if (nanCheck) {
-    at::cuda::CUDAStreamGuard guard(ncclStream);
     for (const auto& input : inputs) {
-      checkForNan(input);
+      checkForNan(input, ncclStream);
     }
   }
 
@@ -4223,8 +4220,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
   if (enableNanCheck_ && opType == OpType::SEND) {
-    at::cuda::CUDAStreamGuard guard(ncclStream);
-    checkForNan(tensor);
+    checkForNan(tensor, ncclStream);
   }
 
   if (!coalescing_state_) {

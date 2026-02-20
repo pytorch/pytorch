@@ -273,8 +273,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         output = module(input)
 
         grad = torch.randn(2, 2, 5, 10, 10, dtype=dtype, device=device)[:, 1]
-        if grad.is_contiguous():
-            raise AssertionError("Expected grad to not be contiguous")
+        assert not grad.is_contiguous()
         output.backward(grad, retain_graph=True)
         self.assertIsNotNone(input.grad)
         result = input.grad.data.clone()

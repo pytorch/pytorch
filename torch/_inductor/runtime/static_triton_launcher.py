@@ -93,7 +93,6 @@ class StaticallyLaunchedTritonKernel:
         def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
             # pyrefly: ignore [missing-attribute]
             if hasattr(kernel.metadata, param_name):
-                # pyrefly: ignore [missing-attribute]
                 if getattr(kernel.metadata, param_name) > 0:
                     raise NotImplementedError(
                         f"{scratch_name} scratch not yet supported"

@@ -323,7 +323,6 @@ def _print_readable(
     include_device=False,
     colored=False,
     expanded_def=False,
-    additional_meta=None,
 ):
     graph = module.graph
     if graph is None or not isinstance(graph, torch.fx.Graph):
@@ -336,7 +335,6 @@ def _print_readable(
         include_device=include_device,
         colored=colored,
         expanded_def=expanded_def,
-        additional_meta=additional_meta,
     )
     module_code = verbose_python_code.src
     module_code = module_code.lstrip("\n")
@@ -354,7 +352,6 @@ def _print_readable(
                     include_stride=include_stride,
                     include_device=include_device,
                     colored=colored,
-                    additional_meta=additional_meta,
                 )
             )
     submodule_code = "\n".join(submodule_code_list)
@@ -1061,16 +1058,9 @@ class {module_name}(torch.nn.Module):
         # but may result in less-readable output.
         fast_sympy_print: bool = False,
         expanded_def: bool = False,
-        additional_meta: Optional[list[str]] = None,
     ):
         """
-        Return the Python code generated for current GraphModule and its children GraphModules.
-
-        Args:
-            additional_meta: Optional list of meta keys to include in the output.
-                For each key in the list, if it exists in node.meta, its value
-                will be shown in the format "key: value".
-                Example: `print_readable(additional_meta=["seq_nr"])`.
+        Return the Python code generated for current GraphModule and its children GraphModules
         """
         ctx_mgr = contextlib.ExitStack()
         with ctx_mgr:
@@ -1090,7 +1080,6 @@ class {module_name}(torch.nn.Module):
                 include_device,
                 colored,
                 expanded_def,
-                additional_meta,
             )
             return r
 

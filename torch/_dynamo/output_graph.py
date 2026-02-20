@@ -22,7 +22,6 @@ The module supports key Dynamo features including:
 import collections
 import contextlib
 import copy
-import dataclasses
 import functools
 import inspect
 import itertools
@@ -106,10 +105,7 @@ from .exc import (
 )
 from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
-from .graph_id_filter import (
-    get_backend_override_for_compile_id,
-    get_inductor_config_override_for_compile_id,
-)
+from .graph_id_filter import get_backend_override_for_compile_id
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
@@ -119,7 +115,6 @@ from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
-    DictGetItemSource,
     GetItemSource,
     GlobalStateSource,
     is_constant_source,
@@ -137,11 +132,9 @@ from .utils import (
     checkpoint_params,
     CleanupHook,
     clone_inputs,
-    compilation_time_metrics,
     count_calls,
     counters,
     dynamo_timed,
-    get_chromium_event_logger,
     get_instruction_source_311,
     get_locals_to_steal,
     get_static_address_type,
@@ -195,24 +188,6 @@ RootGuardManager = guards.RootGuardManager
 # as static in case user overrides fn ptr
 og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
-
-
-def _wrap_with_inductor_config(
-    compiler_fn: Any, config_patches: dict[str, Any]
-) -> Callable[..., Any]:
-    """
-    Wrap a compiler function to apply inductor config patches during compilation.
-    """
-    from torch._inductor import config as inductor_config
-
-    def wrapped(gm: Any, example_inputs: Any) -> Any:
-        with inductor_config.patch(config_patches):
-            return compiler_fn(gm, example_inputs)
-
-    # Preserve function metadata for logging
-    wrapped.__name__ = getattr(compiler_fn, "__name__", "<wrapped>")
-    wrapped.__wrapped__ = compiler_fn  # type: ignore[attr-defined]
-    return wrapped
 
 
 @dataclass(frozen=True)
@@ -351,36 +326,6 @@ class WrapperBackend:
 
 
 Scope = dict[str, object]
-
-
-@dataclass
-class BytecodeTracingTimings:
-    """Accumulated wall-clock time (ns) for major components during Dynamo
-    bytecode tracing that are not related to variable trackers.  Each field
-    is an int accumulator that gets bumped via ``time.time_ns()`` in the
-    corresponding hot-path wrapper.  To add a new timer, add a field here
-    and wire up the wrapper in the relevant function."""
-
-    get_fake_value_ns: int = 0
-    create_proxy_ns: int = 0
-    wrap_to_fake_tensor_and_record_ns: int = 0
-    variable_builder_call_ns: int = 0
-
-    def report_and_reset(self) -> None:
-        """Flush accumulated timings to the bytecode_tracing chromium event
-        and to compilation_time_metrics, then reset all counters."""
-        chromium_log = get_chromium_event_logger()
-        # pyrefly: ignore [implicit-any]
-        event_data = {}
-        for f in dataclasses.fields(self):
-            ns_val = getattr(self, f.name)
-            if ns_val > 0:
-                key = f.name.removesuffix("_ns")
-                event_data[f"{key}_time_s"] = ns_val / 1e9
-                compilation_time_metrics.setdefault(key, []).append(ns_val / 1e9)
-                setattr(self, f.name, 0)
-        if event_data:
-            chromium_log.try_add_event_data("bytecode_tracing", **event_data)
 
 
 @dataclass
@@ -710,23 +655,6 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
-        # Cache for sources resolved via MRO walk, keyed by id(obj).
-        # When the same descriptor (e.g. property) is reached from multiple
-        # subclasses, we reuse the first source to avoid redundant guards.
-        # We thought of rolling this in variable_tracker_cache but here
-        # different sources point to the same object, we also don't want it to
-        # go through the side effects cache because even though these objects
-        # are same, we dont want OBJECT_ALIASING guards on them. For these
-        # objects, we have DICT_CONTAINS absent guards on the mro walk, so there
-        # is no need of the OBJECT_ALIASING guards.
-        self.mro_source_cache: dict[tuple[int, str], DictGetItemSource] = {}
-        # Tracks (id(klass), attr_name) pairs that already have a
-        # DICT_CONTAINS absent guard installed during MRO walks.  When
-        # multiple subclasses share the same intermediate MRO class, we
-        # only need to guard the absence once per (class, attr) pair.
-        self.guarded_mro_absent_keys: set[tuple[int, str]] = set()
-        # Cache for inspect.signature results: function -> VariableTracker
-        self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
         self.code_options: dict[str, Any] = dict(code_options)
         self.output_instructions: list[Instruction] = []
@@ -822,8 +750,6 @@ class OutputGraph(OutputGraphCommon):
 
         self.compiler_trace_stack = contextlib.ExitStack()
 
-        self.bytecode_tracing_timings = BytecodeTracingTimings()
-
         # These are the ambient, currently-global saved_tensor_hooks stashed in autograd,
         # that are set for the entire duration of the compiled region.
         # This is an invariant today because we graph break on the saved_tensor_hook
@@ -887,7 +813,6 @@ class OutputGraph(OutputGraphCommon):
             )
 
     def mark_bytecode_tracing_stop(self) -> None:
-        self.bytecode_tracing_timings.report_and_reset()
         self.compiler_trace_stack.close()
         # Record profiler timing for the root function and dump stats
         if config.dynamo_profiler and self.profiler_state is not None:
@@ -1462,7 +1387,6 @@ class OutputGraph(OutputGraphCommon):
                 needs_alias[stolen_name] = []
             needs_alias[stolen_name].append(x)
 
-        # pyrefly: ignore [implicit-any]
         visited = {}
         overridden_sources: dict[Source, Source] = {}
         for arg in self.graphargs:
@@ -1823,13 +1747,11 @@ class OutputGraph(OutputGraphCommon):
             for val, count in pass1.uses.items():
                 # If it's already a local source, no need to cache it
                 if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
-                    # pyrefly: ignore [unsupported-operation]
                     tempvars[val] = None
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
                 graph_output_var,
-                # pyrefly: ignore [bad-argument-type]
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
@@ -2040,7 +1962,6 @@ class OutputGraph(OutputGraphCommon):
                             var.value, _ExportModuleSpecTrackerDict
                         ):
                             for k, v in var.items.items():
-                                # pyrefly: ignore [implicit-any]
                                 specs = {}
                                 # pyrefly: ignore[missing-attribute]
                                 for k_spec, val in v.items.items():
@@ -2659,15 +2580,6 @@ class OutputGraph(OutputGraphCommon):
             or self.compiler_fn
         )
 
-        # Check for per-graph inductor config override (for debugging/bisecting)
-        inductor_config_override = get_inductor_config_override_for_compile_id(
-            self.dynamo_compile_id, config.debug_inductor_config_override
-        )
-        if inductor_config_override:
-            compiler_fn = _wrap_with_inductor_config(
-                compiler_fn, inductor_config_override
-            )
-
         name = (
             compiler_fn.__name__
             if hasattr(compiler_fn, "__name__")
@@ -2994,9 +2906,6 @@ class OutputGraph(OutputGraphCommon):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
-        self.mro_source_cache.clear()
-        self.guarded_mro_absent_keys.clear()
-        self.signature_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
@@ -3332,26 +3241,6 @@ class SubgraphTracer(fx.Tracer):
                     node.meta["stack_trace"] = meta["stack_trace"]
 
     def create_proxy(
-        self,
-        kind: str,
-        target: Any,
-        args: Any,
-        kwargs: Any,
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
-        proxy_factory_fn: Optional[Callable[[fx.Node], fx.Proxy]] = None,
-    ) -> fx.Proxy:
-        _t0 = time.time_ns()
-        try:
-            return self._create_proxy(
-                kind, target, args, kwargs, name, type_expr, proxy_factory_fn
-            )
-        finally:
-            self.output_graph.bytecode_tracing_timings.create_proxy_ns += (
-                time.time_ns() - _t0
-            )
-
-    def _create_proxy(
         self,
         kind: str,
         target: Any,

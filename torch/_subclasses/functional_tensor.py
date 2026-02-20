@@ -784,7 +784,6 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
 
-    # pyrefly: ignore [implicit-any]
     def functionalize(self, inner_f: Callable) -> Callable:
         return dispatch_functionalize(inner_f, self.mode)
 
@@ -842,7 +841,6 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _unwrap_all_tensors_from_functional(args, reapply_views=_reapply_views())
 
-    # pyrefly: ignore [implicit-any]
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(inner_f)
 
@@ -884,7 +882,6 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
             args, reapply_views=self.interpreter.functionalize_add_back_views()
         )
 
-    # pyrefly: ignore [implicit-any]
     def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(
             inner_f,

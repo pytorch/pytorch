@@ -67,8 +67,7 @@ def _run_mypy() -> dict[str, list[str]]:
                 directory,
             ]
         )
-        if stderr:
-            raise AssertionError(stderr)
+        assert not stderr, stderr
         stdout = stdout.replace("*", "")
 
         # Parse the output
@@ -233,8 +232,7 @@ class TestTyping(TestCase):
             lines = _parse_reveals(fin)
 
         output_mypy = self.get_mypy_output()
-        if path not in output_mypy:
-            raise AssertionError(f"path {path} not in mypy output")
+        assert path in output_mypy
         for error_line in output_mypy[path]:
             match = re.match(
                 r"^.+\.py:(?P<lineno>\d+):(?P<colno>\d+): note: .+$",
@@ -243,10 +241,7 @@ class TestTyping(TestCase):
             if match is None:
                 raise ValueError(f"Unexpected reveal line format: {error_line}")
             lineno = int(match.group("lineno")) - 1
-            if "Revealed type is" not in error_line:
-                raise AssertionError(
-                    f"expected 'Revealed type is' in error_line: {error_line}"
-                )
+            assert "Revealed type is" in error_line
 
             marker = lines[lineno]
             _test_reveal(path, marker, error_line, 1 + lineno)

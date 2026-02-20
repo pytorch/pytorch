@@ -215,7 +215,7 @@ class Venv:
     AGGRESSIVE_UPDATE_PACKAGES = (
         "uv",
         "pip",
-        "setuptools<82",
+        "setuptools",
         "packaging",
         "wheel",
         "build[uv]",

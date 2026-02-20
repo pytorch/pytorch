@@ -41,7 +41,6 @@ def get_extension():
         "cxx": [
             "-DTORCH_STABLE_ONLY",
             "-DTORCH_TARGET_VERSION=0x0209000000000000",
-            "-DSTABLE_LIB_NAME=libtorch_agn_2_9",
         ],
     }
     if not IS_WINDOWS:
@@ -56,7 +55,6 @@ def get_extension():
         extra_compile_args["nvcc"] = [
             "-O2",
             "-DTORCH_TARGET_VERSION=0x0209000000000000",
-            "-DSTABLE_LIB_NAME=libtorch_agn_2_9",
         ]
         extension = CUDAExtension
         sources.extend(CSRC_DIR.glob("**/*.cu"))

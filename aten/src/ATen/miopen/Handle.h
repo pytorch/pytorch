@@ -5,5 +5,5 @@
 
 namespace at::native {
 
-TORCH_CUDA_CPP_API miopenHandle_t getMiopenHandle();
+TORCH_HIP_CPP_API miopenHandle_t getMiopenHandle();
 } // namespace at::native
