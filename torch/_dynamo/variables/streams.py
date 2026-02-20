@@ -16,7 +16,7 @@ from ..graph_bytecode_inputs import (
 )
 from ..source import CurrentStreamSource
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
 from .lazy import LazyVariableTracker
 
@@ -329,7 +329,7 @@ class StreamVariable(StreamContextVariable):
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
-            return ConstantVariable(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "query":
             return wrap_fx_proxy_cls(
                 target_cls=ConstantVariable,
@@ -356,13 +356,14 @@ class StreamVariable(StreamContextVariable):
             # constant values
             other = args[0]
             if not isinstance(other, StreamVariable):
-                return ConstantVariable.create(NotImplemented)
+                return VariableTracker.build(tx, NotImplemented)
 
             if other.source:
                 assert self.source is not None
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](self.value, other.value)  # type: ignore[arg-type]
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[name](self.value, other.value),  # type: ignore[arg-type]
             )
 
         return super().call_method(tx, name, args, kwargs)
@@ -457,7 +458,7 @@ class EventVariable(VariableTracker):
                 ),
                 {},
             )
-            return ConstantVariable(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "record":
             tx.output.create_proxy(
                 "call_function",
@@ -468,12 +469,12 @@ class EventVariable(VariableTracker):
                 ),
                 {},
             )
-            return ConstantVariable(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "synchronize":
             tx.output.create_proxy(
                 "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
             )
-            return ConstantVariable(None)
+            return CONSTANT_VARIABLE_NONE
         elif name == "query":
             return wrap_fx_proxy_cls(
                 target_cls=ConstantVariable,

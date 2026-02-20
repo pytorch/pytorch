@@ -129,7 +129,11 @@ def populate_stream_timeline(
         total_time = 0.0
         for node in graph.nodes:
             # mlazos: not sure if we should include forward here too but don't think it matters
-            if is_bwd_node(node) and get_stream(node) == stream_index:
+            if (
+                node.op == "call_function"
+                and is_bwd_node(node)
+                and get_stream(node) == stream_index
+            ):
                 total_time += get_roofline_estimate(node)
                 stream_to_timeline[stream_index][node] = (
                     total_time  # NB: total time includes the node's runtime
@@ -254,12 +258,12 @@ def insert_backward_syncs(gm: torch.fx.GraphModule) -> None:
     """Inserts stream syncs for backward nodes if consumer and producer are on different streams"""
     node_to_wait_event_ind: dict[Node, int] = {}
     for node in gm.graph.nodes:
-        if is_bwd_node(node):
+        if node.op == "call_function" and is_bwd_node(node):
             flat_args = _get_flat_args(node, {})
             cur_node_stream = get_stream(node)
 
             for arg in flat_args:
-                if is_bwd_node(arg):
+                if arg.op == "call_function" and is_bwd_node(arg):
                     arg_stream = get_stream(arg)
                     if arg_stream != cur_node_stream and get_device(arg).type != "cpu":
                         insert_sync(gm.graph, node, arg, node_to_wait_event_ind)
@@ -276,7 +280,7 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
     # a trace of all the nodes running in a given stream
     stream_to_exec_trace: dict[Optional[int], IndexedDict[Node, float]] = {}
     for node in gm.graph.nodes:
-        if is_bwd_node(node):
+        if node.op == "call_function" and is_bwd_node(node):
             allocating_stream = get_stream(node)
             users = list(node.users.keys())
             if not users:

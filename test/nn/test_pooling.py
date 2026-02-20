@@ -837,9 +837,12 @@ torch.cuda.synchronize()
             error_msg = error_msgs[module_name]
 
             if should_error:
-                # CUDA shows assertion message, ROCm shows HIP error with launch failure
+                # CUDA shows assertion message
+                # ROCm shows launch failure or HSA_STATUS_ERROR_EXCEPTION
                 has_cuda_assert = error_msg in output
-                has_hip_error = "HIP error" in output and "launch failure" in output
+                has_hip_error = (
+                    "launch failure" in output or "HSA_STATUS_ERROR_EXCEPTION" in output
+                )
                 self.assertTrue(
                     has_cuda_assert or has_hip_error,
                     f"Expected device assert error, got: {output[-500:]}",
