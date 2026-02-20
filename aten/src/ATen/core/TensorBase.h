@@ -571,6 +571,10 @@ class TORCH_API TensorBase {
     return impl_->is_meta();
   }
 
+  bool is_fake() const {
+    return impl_->is_fake();
+  }
+
   /// Returns if a `Tensor` is an inference tensor.
   bool is_inference() const {
     return impl_->is_inference();
