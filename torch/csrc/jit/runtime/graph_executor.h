@@ -13,7 +13,8 @@ TORCH_DECLARE_bool(torch_jit_enable_new_executor);
 TORCH_DECLARE_bool(torch_jit_execution_plan_reuse_code_graph);
 
 namespace torch::jit {
-using ::c10::ArrayRef;
+template <typename T>
+using ArrayRef = at::ArrayRef<T>;
 struct Block;
 struct Value;
 struct GraphExecutorState;
