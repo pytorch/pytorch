@@ -13,6 +13,8 @@ from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
 
+import typing_extensions
+
 import sympy
 from sympy import Expr
 
@@ -1291,7 +1293,8 @@ class GraphLowering(torch.fx.Interpreter):
                 self.unaligned_buffers.add(target)
         return tensor
 
-    def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
+    @typing_extensions.override
+    def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg]
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
