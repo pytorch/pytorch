@@ -66,6 +66,7 @@ from torch._logging import dtrace_structured, LazyString, structured, trace_stru
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
+from torch.fx.experimental._config import AggressiveGuardFreeMode
 from torch.fx.experimental.recording import (
     FakeTensorMeta,
     record_shapeenv_event,
@@ -7807,19 +7808,22 @@ class ShapeEnv:
 
             # Try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
-            if torch.fx.experimental._config.aggressive_guard_free_semantics < 2:
+            if (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+                < AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS
+            ):
                 fast_result = self._maybe_fast_eval_comparison(expr)
                 if fast_result is not None:
                     return fast_result
 
             # Aggressive guard-free semantics:
-            # Level 1: use value range analysis (bound_sympy) before returning fallback
-            # Level 2: skip range analysis entirely, just return fallback_value
+            # VALUE_RANGE_ANALYSIS: use value range analysis (bound_sympy) before returning fallback
+            # SKIP_RANGE_ANALYSIS: skip range analysis entirely, just return fallback_value
             aggressive_level = (
                 torch.fx.experimental._config.aggressive_guard_free_semantics
             )
-            if hint is None and aggressive_level and fallback_value is not None:
-                if aggressive_level >= 2:
+            if hint is None and aggressive_level > 0 and fallback_value is not None:
+                if aggressive_level >= AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS:
                     # Skip range analysis entirely
                     self._log_suppressed_dde(orig_expr, fallback_value)
                     return fallback_value
