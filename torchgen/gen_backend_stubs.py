@@ -551,8 +551,8 @@ def run(
 ) -> None:
     # Assumes that this file lives at torchgen/gen_backend_stubs.py
     root = Path(__file__).absolute().parent.parent
-    common_dir = os.path.join(root, "aten/src") # Assumes root is pytorch_root
-    if not os.path.exists(common_dir): # This file is out-of-tree.
+    common_dir = os.path.join(root, "aten/src")  # Assumes root is pytorch_root
+    if not os.path.exists(common_dir):  # This file is out-of-tree.
         common_dir = os.path.join(root, "torchgen/packaged")
 
     template_dir = os.path.join(common_dir, "ATen/templates")
