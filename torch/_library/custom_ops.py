@@ -92,13 +92,14 @@ def custom_op(
 
     The following types are supported for the wrapped function's input parameters:
 
-        ``torch.Tensor``, ``int``, ``float``, ``bool``, ``str``,
-        ``torch.types.Number``, ``torch.dtype``, ``torch.device``,
-        and ``Optional`` variants of all the above.
-        ``Sequence`` variants are supported for ``torch.Tensor``, ``int``,
-        ``float``, ``bool``, and ``torch.types.Number``.
-        Types registered via :func:`torch.library.register_opaque_type` are
-        also supported.
+        - Scalars: ``int``, ``float``, ``bool``, ``str``, ``torch.types.Number``
+        - Tensors: ``torch.Tensor``
+        - Enums/devices: ``torch.dtype``, ``torch.device``
+        - Flat list of the same type: ``list[torch.Tensor]``,
+          ``list[int]``, ``list[float]``, ``list[bool]``,
+          ``list[torch.types.Number]``
+        - Optionals: ``Optional`` of any of the above scalar/tensor types
+        - Types registered via :func:`torch.library.register_opaque_type`
 
     The following types are supported for the return value:
 
@@ -157,6 +158,18 @@ def custom_op(
         >>>     return torch.ones(3)
         >>>
         >>> bar("cpu")
+        >>>
+        >>> # Example of a custom op with list inputs
+        >>> @custom_op("mylib::weighted_sum", mutates_args=())
+        >>> def weighted_sum(
+        >>>     tensors: list[Tensor],
+        >>>     weights: list[float],
+        >>> ) -> Tensor:
+        >>>     return sum(t * w for t, w in zip(tensors, weights))
+        >>>
+        >>> x = torch.randn(3)
+        >>> y = torch.randn(3)
+        >>> out = weighted_sum([x, y], [0.3, 0.7])
 
     """
 
