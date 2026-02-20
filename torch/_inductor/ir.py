@@ -346,29 +346,22 @@ def get_stride_order(
 
 
 @overload
-def ir_node_to_tensor(x: None, replace_symbols_with_hints: bool = False) -> None: ...
+def ir_node_to_tensor(x: None, guard_shape: bool = True) -> None: ...
 
 
 @overload
-def ir_node_to_tensor(
-    x: IRNode, replace_symbols_with_hints: bool = False
-) -> torch.Tensor: ...
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
 
 
 def ir_node_to_tensor(
-    x: Optional[IRNode], replace_symbols_with_hints: bool = False
+    x: Optional[IRNode], guard_shape: bool = True
 ) -> Optional[torch.Tensor]:
-    # When replace_symbols_with_hints=False (default), sizes/strides remain as
-    # symbolic expressions, so downstream operations on the resulting tensor (e.g.,
-    # shape comparisons inside a kernel's meta function) may install guards. When
-    # True, symbolic expressions are replaced with concrete integer hints via
-    # size_hint, preventing any downstream guards.
     if x is None:
         return None
 
     shape_fn: Callable[[Union[int, Expr]], Union[int, Expr]]
-    if replace_symbols_with_hints:
-        shape_fn = V.graph.sizevars.optimization_hint
+    if not guard_shape:
+        shape_fn = V.graph.sizevars.size_hint
     else:
         shape_fn = identity
     size = [shape_fn(s) for s in x.get_size()]
@@ -6237,7 +6230,7 @@ class ExternKernel(InputsKernel):
                     torch.cuda.default_generators[device_index].clone_state()
                 )
             else:
-                example_args.append(ir_node_to_tensor(x))
+                example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)

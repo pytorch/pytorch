@@ -4277,7 +4277,7 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
         )
 
     flat_args = [
-        torch._inductor.ir.ir_node_to_tensor(a, replace_symbols_with_hints=True)
+        torch._inductor.ir.ir_node_to_tensor(a, guard_shape=False)
         if _is_tensor_ir(a)
         else a
         for a in flat_args
