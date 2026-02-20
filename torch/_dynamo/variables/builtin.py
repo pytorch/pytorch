@@ -2438,12 +2438,8 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
-<<<<<<< HEAD
             # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, isinstance(arg_type, isinstance_type))
-=======
-            return ConstantVariable.create(isinstance(arg_type, isinstance_type))
->>>>>>> b06158dc0e4 (Remove unused ignores)
 
         isinstance_type_tuple: tuple[type, ...]
         if isinstance(isinstance_type, type) or callable(
@@ -2503,12 +2499,8 @@ class BuiltinVariable(VariableTracker):
 
         # WARNING: This might run arbitrary user code `__subclasscheck__`.
         # See the comment in call_isinstance above.
-<<<<<<< HEAD
         # pyrefly: ignore [unbound-name]
         return VariableTracker.build(tx, issubclass(left_ty_py, right_ty_py))
-=======
-        return variables.ConstantVariable(issubclass(left_ty_py, right_ty_py))
->>>>>>> b06158dc0e4 (Remove unused ignores)
 
     def call_super(
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
