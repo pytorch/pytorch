@@ -45,7 +45,16 @@ import traceback
 import types
 import weakref
 from collections import deque
-from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import (
+    Any,
+    cast,
+    NoReturn,
+    Optional,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypeIs
 
 import torch
@@ -648,7 +657,7 @@ def _detect_and_normalize_assert_statement(
                 ].argval
             else:
                 error_msg = "assertion error"
-            self.push(ConstantVariable.create(error_msg))
+            self.push(VariableTracker.build(self, error_msg))
             return True
 
     return False
@@ -763,6 +772,7 @@ def generic_jump(
         value: VariableTracker = self.pop()
         if (
             config.rewrite_assert_with_torch_assert
+            and sys.flags.optimize == 0
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
         ):
             error_msg: VariableTracker = self.pop()
@@ -877,8 +887,9 @@ def generic_jump(
                 if result.is_python_constant():
                     result_value = result.as_python_constant()
                     if method_name == "__bool__" and not isinstance(result_value, bool):
-                        msg = variables.ConstantVariable.create(
-                            f"__bool__ should return bool, returned {type(result_value).__name__}"
+                        msg = VariableTracker.build(
+                            self,
+                            f"__bool__ should return bool, returned {type(result_value).__name__}",
                         )
                         exc.raise_observed_exception(TypeError, self, args=[msg])
                     if isinstance(result_value, (bool, int)) and truth_fn(result_value):
@@ -2168,7 +2179,7 @@ class InstructionTranslatorBase(
             return VariableTracker.build(self, val, var_source)
         else:
             assert is_builtin_constant(val)
-            return ConstantVariable.create(value=val)
+            return VariableTracker.build(self, val)
 
     def load_builtin(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval(inst.argval))
@@ -2271,7 +2282,7 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__setattr__",
-            [ConstantVariable("__traceback__"), new_tb],
+            [VariableTracker.build(self, "__traceback__"), new_tb],
             {},
         )
 
@@ -2290,7 +2301,7 @@ class InstructionTranslatorBase(
             and isinstance(val, variables.ExceptionVariable)
             and val.exc_type is StopIteration
         ):
-            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            val = VariableTracker.build(self, RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
         # Capture the python_stack when the exception is first raised.
         # This preserves the original exception location even if the exception
@@ -2325,7 +2336,7 @@ class InstructionTranslatorBase(
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
             if not len(self.exn_vt_stack):
-                msg = ConstantVariable("No active exception to reraise")
+                msg = VariableTracker.build(self, "No active exception to reraise")
                 exc.raise_observed_exception(RuntimeError, self, args=[msg])
 
             # re-raise the previous exception. Here CPython refers to the exception
@@ -2354,7 +2365,12 @@ class InstructionTranslatorBase(
                 curr_exc = self.exn_vt_stack.get_current_exception()
                 self._attach_traceback_to_exception(curr_exc)
                 cause = self._create_exception_type(from_vt)
-                curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
+                curr_exc.call_method(
+                    self,  # pyrefly: ignore [bad-argument-type]
+                    "__setattr__",
+                    [VariableTracker.build(self, "__cause__"), cause],
+                    {},
+                )  # type: ignore[arg-type, union-attr, assignment]
 
     def CLEANUP_THROW(self, inst: Instruction) -> None:
         # https://github.com/python/cpython/pull/96010
@@ -2469,7 +2485,7 @@ class InstructionTranslatorBase(
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
                     self.push(
-                        variables.ConstantVariable(self.current_instruction.offset)
+                        VariableTracker.build(self, self.current_instruction.offset)
                     )
 
                 # 3) push the exception to the stack
@@ -2699,7 +2715,7 @@ class InstructionTranslatorBase(
         return False
 
     def CHECK_EXC_MATCH(self, inst: Instruction) -> None:
-        self.push(variables.ConstantVariable(self.check_if_exc_matches()))
+        self.push(VariableTracker.build(self, self.check_if_exc_matches()))
 
     def JUMP_IF_NOT_EXC_MATCH(self, inst: Instruction) -> None:
         if not self.check_if_exc_matches():
@@ -2712,7 +2728,7 @@ class InstructionTranslatorBase(
             self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst: Instruction) -> None:
-        self.call_function(BuiltinVariable(iter), [self.pop()], {})
+        self.call_function(VariableTracker.build(self, iter), [self.pop()], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -2847,9 +2863,9 @@ class InstructionTranslatorBase(
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
-        result = BuiltinVariable(getattr).call_function(
+        result = VariableTracker.build(self, getattr).call_function(
             self,  # type: ignore[arg-type]
-            [obj, ConstantVariable.create(attr)],
+            [obj, VariableTracker.build(self, attr)],
             {},
         )
         self.push(result)
@@ -2868,17 +2884,17 @@ class InstructionTranslatorBase(
     )
     def STORE_ATTR(self, inst: Instruction) -> None:
         val, obj = self.popn(2)
-        BuiltinVariable(setattr).call_function(
+        VariableTracker.build(self, setattr).call_function(
             self,  # type: ignore[arg-type]
-            [obj, ConstantVariable.create(inst.argval), val],
+            [obj, VariableTracker.build(self, inst.argval), val],
             {},
         )
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
         obj = self.pop()
-        BuiltinVariable(delattr).call_function(
+        VariableTracker.build(self, delattr).call_function(
             self,  # type: ignore[arg-type]
-            [obj, ConstantVariable.create(inst.argval)],
+            [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
 
@@ -3480,7 +3496,7 @@ class InstructionTranslatorBase(
             return
 
         items = self.popn(inst.argval)
-        self.push(ListVariable(items, mutation_type=ValueMutationNew()))
+        self.push(VariableTracker.build(self, items))
 
     def BUILD_SET(self, inst: Instruction) -> None:
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
@@ -3521,20 +3537,23 @@ class InstructionTranslatorBase(
 
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
-        self.push(ConstDictVariable(d, mutation_type=ValueMutationNew()))
+        self.push(VariableTracker.build(self, d))
 
     def BUILD_MAP_UNPACK(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
         # ensure everything is a dict
-        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]  # type: ignore[arg-type]
+        items = [
+            VariableTracker.build(self, dict).call_function(self, [x], {})
+            for x in items
+        ]  # type: ignore[arg-type]
         result: dict[Any, Any] = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
             result.update(x.items)
         self.push(
-            ConstDictVariable(
+            VariableTracker.build(
+                self,
                 result,
-                mutation_type=ValueMutationNew(),
             )
         )
 
@@ -3550,9 +3569,9 @@ class InstructionTranslatorBase(
         assert len(keys) == len(values)
 
         self.push(
-            ConstDictVariable(
+            VariableTracker.build(
+                self,
                 dict(zip(keys, values)),
-                mutation_type=ValueMutationNew(),
             )
         )
 
@@ -3601,7 +3620,7 @@ class InstructionTranslatorBase(
             # MAKE_FUNCTION behavior actually changed in 3.11, see
             # https://github.com/python/cpython/pull/93189/
             assert hasattr(code.value, "co_qualname")  # type: ignore[attr-defined]
-            fn_name = ConstantVariable.create(value=code.value.co_qualname)  # type: ignore[attr-defined]
+            fn_name = VariableTracker.build(self, code.value.co_qualname)  # type: ignore[attr-defined]
         defaults = None
         closure = None
         annotations = None
@@ -3749,11 +3768,11 @@ class InstructionTranslatorBase(
 
     def _convert_value(self, value: VariableTracker, flag: int) -> VariableTracker:
         if flag == 1:
-            return BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 2:
-            return BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, repr).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 3:
-            return BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, ascii).call_function(self, [value], {})  # type: ignore[arg-type]
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
@@ -3772,7 +3791,9 @@ class InstructionTranslatorBase(
 
         value = self._convert_value(value, flags & 0x03)
 
-        fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
+        fmt_var = VariableTracker.build(
+            self, "{:" + fmt_spec.as_python_constant() + "}"
+        )
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
@@ -3782,8 +3803,7 @@ class InstructionTranslatorBase(
         if (flags & 0x04) == 0x04:
             fmt_spec = self.pop()
         else:
-            fmt_spec = ConstantVariable.create("")
-
+            fmt_spec = VariableTracker.build(self, "")
         return self._format_value(fmt_spec, flags)
 
     def BUILD_STRING(self, inst: Instruction) -> None:
@@ -3867,7 +3887,9 @@ class InstructionTranslatorBase(
         obj.call_method(self, "extend", [v], {})  # type: ignore[arg-type]
 
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
-        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
+        self.push(
+            VariableTracker.build(self, tuple).call_function(self, [self.pop()], {})
+        )  # type: ignore[arg-type]
 
     def STOPITERATION_ERROR(self, inst: Instruction) -> None:
         # wrap the generator body in a try: ... except StopIteration: ... which
@@ -3878,13 +3900,13 @@ class InstructionTranslatorBase(
         val = self.stack[-1]
         assert self._isinstance_exception(val)
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
-            new_val = variables.BuiltinVariable(RuntimeError).call_function(
+            new_val = VariableTracker.build(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
-                [ConstantVariable("generator raised StopIteration")],
+                [VariableTracker.build(self, "generator raised StopIteration")],
                 {},
             )
-            new_val.call_setattr(self, ConstantVariable("__context__"), val)  # type: ignore[attr-defined]
-            new_val.call_setattr(self, ConstantVariable("__cause__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, VariableTracker.build(self, "__context__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, VariableTracker.build(self, "__cause__"), val)  # type: ignore[attr-defined]
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst: Instruction) -> None:
@@ -3904,7 +3926,7 @@ class InstructionTranslatorBase(
     def GET_LEN(self, inst: Instruction) -> None:
         tos = self.stack[-1]
         if tos.is_python_constant():
-            self.push(ConstantVariable.create(len(tos.as_python_constant())))
+            self.push(VariableTracker.build(self, len(tos.as_python_constant())))
         else:
             self.push(tos.call_method(self, "__len__", [], {}))
 
@@ -3934,7 +3956,7 @@ class InstructionTranslatorBase(
 
     def MATCH_CLASS(self, inst: Instruction) -> None:
         subject, cls, names = self.popn(3)
-        arg = ConstantVariable.create(inst.arg)
+        arg = VariableTracker.build(self, inst.arg)
         self.push(
             self.inline_user_function_return(
                 VariableTracker.build(self, impl_MATCH_CLASS),
@@ -3946,7 +3968,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 11):
             # for versions < 3.11, also push the boolean result
             tos = self.stack[-1]
-            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
+            self.push(VariableTracker.build(self, not istype(tos, ConstantVariable)))
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
         keys = self.stack[-1]
@@ -3963,7 +3985,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 11):
             # for versions < 3.11, also push the boolean result
             tos = self.stack[-1]
-            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
+            self.push(VariableTracker.build(self, not istype(tos, ConstantVariable)))
 
     def LOAD_ASSERTION_ERROR(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval("AssertionError"))
@@ -4256,11 +4278,38 @@ class InstructionTranslatorBase(
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
             self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
+        elif inst.argval == 7:
+            # INTRINSIC_TYPEVAR
+            v = self.pop().as_python_constant()
+            tv = variables.TypingVariable(TypeVar(v))
+            self.push(tv)
         else:
             unimplemented(
                 gb_type="Missing CALL_INTRINSIC_1 handler",
                 context=f"CALL_INTRINSIC_1 operand: {inst.argval}",
                 explanation=f"No handler implemented for CALL_INTRINSIC_1 {inst.argval} instruction.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+    def CALL_INTRINSIC_2(self, inst: Instruction) -> None:
+        arg2 = self.pop()
+        arg1 = self.pop()
+        if inst.argval == 4:
+            # INTRINSIC_SET_FUNCTION_TYPE_PARAMS
+            # same as => arg1.__type_params__ = arg2
+            assert isinstance(arg1, BaseUserFunctionVariable)
+            arg1.call_method(
+                self,
+                "__setattr__",
+                [ConstantVariable.create("__type_params__"), arg2],
+                {},
+            )
+            self.push(arg1)
+        else:
+            unimplemented(
+                gb_type="Missing CALL_INTRINSIC_2 handler",
+                context=f"CALL_INTRINSIC_2 operand: {inst.argval}",
+                explanation=f"No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 
@@ -4302,7 +4351,7 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
-            attr = attr.call_function(self, [ConstantVariable.create(1)], {})
+            attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
             fn.annotations = attr
         elif flags & 0x08:
             fn.closure = attr
@@ -4327,7 +4376,7 @@ class InstructionTranslatorBase(
         self.push(self._convert_value(self.pop(), inst.argval))
 
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
-        self._format_value(ConstantVariable.create(""), 0)
+        self._format_value(VariableTracker.build(self, ""), 0)
 
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
@@ -4376,7 +4425,7 @@ class InstructionTranslatorBase(
             self.PUSH_NULL(inst)
 
     def LOAD_SMALL_INT(self, inst: Instruction) -> None:
-        self.push(ConstantVariable.create(inst.argval))
+        self.push(VariableTracker.build(self, inst.argval))
 
     # See
     # https://github.com/python/cpython/blob/7519ac294fc5c4fd7fb9cb8dc0edc960688cf887/Python/pylifecycle.c#L814
@@ -6174,7 +6223,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if not isinstance(tos, ListIteratorVariable):
             self.pop()
-            res = BuiltinVariable(iter).call_function(self, [tos], {})  # type: ignore[arg-type]
+            res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
 
     def RETURN_VALUE(self, inst: Instruction) -> None:

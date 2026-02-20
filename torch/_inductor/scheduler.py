@@ -5199,7 +5199,9 @@ class Scheduler:
             ):
                 candidates.append(
                     (
-                        V.graph.sizevars.size_hint(lhs_dep.get_numel(), fallback=0),
+                        V.graph.sizevars.optimization_hint(
+                            lhs_dep.get_numel(), fallback=0
+                        ),
                         lhs_dep,
                         rhs_dep,
                     )
@@ -7028,7 +7030,17 @@ class BaseScheduling:  # noqa: docstring_linter
         In this context, we verify whether node1 represents the Multi-Output Template
         and node2 corresponds to one of its outputs. If so, we further check if
         backend supports this fusion.
+
+        Delegates to ``TemplateBuffer.can_fuse_multi_output_epilogue`` which
+        TemplateBuffer subclasses may override to allow fusion of additional node types.
         """
+        template_buf = node1.get_template_node()
+        if not isinstance(template_buf, ir.TemplateBuffer):
+            return False
+        if not template_buf.is_multi_outputs_template():
+            return False
+        if template_buf.can_fuse_multi_output_epilogue(node2):
+            return True
         return False
 
     def fuse(

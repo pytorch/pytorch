@@ -251,20 +251,23 @@ def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int)
     """
     Helper for partial reductions in Pallas kernels.
 
-    Reorders axes and reduces, returning result with keepdims-style shape
-    for proper in-kernel broadcasting.
+    Reduces over contiguous axes whose product matches *red_numel* in the
+    original (un-tiled) tensor, returning the result with keepdims-style
+    shape for proper in-kernel broadcasting.
+
+    When running inside a tiled pallas_call the actual tile shape may differ
+    from ``(pw_numel, red_numel)``, so we reduce directly over the discovered
+    axes instead of reshaping to exact sizes.
 
     Args:
         reduce_fn: The reduction function to apply (e.g., jnp.sum, jnp.max)
         v: The input array to reduce
-        pw_numel: The number of pointwise elements
-        red_numel: The number of reduction elements
+        pw_numel: The number of pointwise elements (used for axis detection)
+        red_numel: The number of reduction elements (used for axis detection)
 
     Returns:
         Reduced array with keepdims-style shape
     """
-    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
-
     shape = tuple(v.shape)
     # Find contiguous axes whose product = red_numel (search from right)
     red_axes = None
@@ -279,13 +282,8 @@ def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int)
             break
     if red_axes is None:
         red_axes = [len(shape) - 1]
-    # Build output shape with 1s for reduced dimensions (keepdims style)
-    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
-    # Move pointwise axes to front, reduction axes to back
-    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
-    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
-    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
-    return result.reshape(out_shape)
+    result = reduce_fn(v, axis=tuple(red_axes), keepdims=True)
+    return result
 
 
 def pallas_gpu_pad_inputs(inputs: list[Any], alignment: int = 128) -> list[Any]:
@@ -349,3 +347,256 @@ def pallas_gpu_unpad_results(
             orig_numel = math.prod(shape)
             unpadded.append(res[:orig_numel].reshape(shape))
     return unpadded[0] if len(unpadded) == 1 else tuple(unpadded)
+
+
+# ---------------------------------------------------------------------------
+# Pallas CPU / TPU tiling helpers
+# ---------------------------------------------------------------------------
+# TPU alignment: last dim must be full or a multiple of 128,
+#                second-to-last dim must be full or a multiple of 8.
+_TPU_ALIGN_LAST = 128
+_TPU_ALIGN_SECOND_LAST = 8
+
+
+def _pallas_tile_size(dim: int, alignment: int, max_tile: int = 1024) -> int:
+    """Pick the largest aligned tile size <= max_tile for *dim*.
+
+    If *dim* is already <= alignment the full dimension is used (no tiling
+    on this axis).
+    """
+    if dim <= alignment:
+        return dim
+    t = min(max_tile, dim)
+    t = (t // alignment) * alignment
+    return max(alignment, t)
+
+
+def pallas_compute_tiling(
+    ref_shape: tuple[int, ...],
+    transpose: bool = False,
+    skip_last_n: int = 0,
+    exact_only: bool = False,
+) -> tuple[tuple[int, ...], tuple[int, ...], dict[int, int]]:
+    """Compute tile shape, grid and axis→grid-dim mapping for CPU/TPU.
+
+    Always uses TPU-compatible alignment (last dim multiple of 128,
+    second-to-last multiple of 8) so that the same generated kernel works
+    on both CPU-interpret and real TPU.
+
+    When *transpose* is True and nd >= 2, both last-2 dims use the same
+    square tile size based on the smaller alignment so that transposed
+    buffers can use the same tile for both dims.
+
+    *skip_last_n* prevents tiling the last N dimensions (used when those
+    dims correspond to internal reduction ranges that must remain full).
+
+    *exact_only* restricts tiling to dimensions that divide evenly by the
+    tile size (no remainder blocks).  Required on TPU where Mosaic needs
+    block shapes to match the XLA memory layout.
+
+    Returns ``(tile_shape, grid, axis_to_grid)`` where *axis_to_grid*
+    maps each tiled reference-shape axis index to its position in the
+    grid tuple.
+
+    When no dimension benefits from tiling the grid is ``(1,)`` and the
+    tile covers the full tensor.
+    """
+    nd = len(ref_shape)
+    if nd == 0:
+        return (), (1,), {}
+
+    # Effective number of dims eligible for tiling
+    tileable_nd = nd - skip_last_n
+
+    tile = list(ref_shape)
+    grid_parts: list[int] = []
+    axis_to_grid: dict[int, int] = {}  # ref axis → grid dim
+
+    # Pick alignment based on the physical position of the axis in the
+    # tensor, not its position in the tileable subset.  The TPU requires
+    # the physical last dim to be a multiple of 128 and the physical
+    # second-to-last dim to be a multiple of 8.
+    def _align(ax: int) -> int:
+        return _TPU_ALIGN_LAST if ax == nd - 1 else _TPU_ALIGN_SECOND_LAST
+
+    def _can_tile_ax(dim: int, t: int) -> bool:
+        """Check if tiling dim to t is valid."""
+        if t >= dim:
+            return False
+        if exact_only and dim % t != 0:
+            return False
+        return True
+
+    if transpose and tileable_nd >= 2:
+        # Square tile for both last-2 tileable dims
+        ax_last = tileable_nd - 1
+        ax_second = tileable_nd - 2
+        min_dim = min(ref_shape[ax_last], ref_shape[ax_second])
+        t = _pallas_tile_size(min_dim, max(_align(ax_last), _align(ax_second)))
+
+        if _can_tile_ax(ref_shape[ax_second], t):
+            tile[ax_second] = t
+            axis_to_grid[ax_second] = len(grid_parts)
+            grid_parts.append(ref_shape[ax_second] // t)
+
+        if _can_tile_ax(ref_shape[ax_last], t):
+            tile[ax_last] = t
+            axis_to_grid[ax_last] = len(grid_parts)
+            grid_parts.append(ref_shape[ax_last] // t)
+    else:
+        # Second-to-last tileable dim (added first so it becomes grid dim 0)
+        if tileable_nd >= 2:
+            ax = tileable_nd - 2
+            t = _pallas_tile_size(ref_shape[ax], _align(ax))
+            if _can_tile_ax(ref_shape[ax], t):
+                tile[ax] = t
+                axis_to_grid[ax] = len(grid_parts)
+                grid_parts.append((ref_shape[ax] + t - 1) // t)
+
+        # Last tileable dim
+        if tileable_nd >= 1:
+            ax = tileable_nd - 1
+            t = _pallas_tile_size(ref_shape[ax], _align(ax))
+            if _can_tile_ax(ref_shape[ax], t):
+                tile[ax] = t
+                axis_to_grid[ax] = len(grid_parts)
+                grid_parts.append((ref_shape[ax] + t - 1) // t)
+
+    grid = tuple(grid_parts) if grid_parts else (1,)
+    return tuple(tile), grid, axis_to_grid
+
+
+def pallas_make_block_spec(
+    buf_shape: tuple[int, ...],
+    ref_shape: tuple[int, ...],
+    tile_shape: tuple[int, ...],
+    axis_to_grid: dict[int, int],
+    n_grid: int,
+    swap_last_two: bool = False,
+    is_output: bool = False,
+) -> Any:
+    """Build a ``pl.BlockSpec`` for *buf_shape* given tiling of *ref_shape*.
+
+    Lower-ndim buffers are right-aligned with the reference shape (numpy
+    broadcast rules).  Dimensions that match a tiled reference dimension
+    are tiled; broadcast dimensions (size 1 or absent) are kept full.
+
+    When *buf_nd > ref_nd* (reduction inputs), we find an alignment offset
+    so the ref dims map into the buffer.  Extra dims are kept at full size
+    with index 0 in the index_map.
+
+    When *swap_last_two* is True, the last two buffer dims are swapped
+    relative to the reference: ref axis -2 maps to buf axis -1 and vice versa.
+
+    When *is_output* is True and *buf_nd < ref_nd*, left-alignment is used
+    as a fallback (for reduction outputs whose trailing dims were reduced).
+    """
+    from jax.experimental import (  # pyrefly: ignore [import-error, missing-import]
+        pallas as pl,
+    )
+
+    buf_nd = len(buf_shape)
+    ref_nd = len(ref_shape)
+
+    if buf_nd == 0:
+        # Scalar — untouched regardless of grid shape.
+        return pl.BlockSpec((), _make_index_map([], buf_nd, n_grid))
+
+    bs = list(buf_shape)
+    tiled_pairs: list[tuple[int, int]] = []
+
+    if buf_nd > ref_nd:
+        # Reduction input: find alignment offset k where ref dims map into buf.
+        align_k = 0
+        for k in range(buf_nd - ref_nd + 1):
+            ok = True
+            for i in range(ref_nd):
+                if ref_shape[i] == 1:
+                    continue
+                if buf_shape[k + i] != ref_shape[i]:
+                    ok = False
+                    break
+            if ok:
+                align_k = k
+                break
+
+        for ref_ax, grid_dim in axis_to_grid.items():
+            buf_ax = align_k + ref_ax
+            if 0 <= buf_ax < buf_nd and buf_shape[buf_ax] == ref_shape[ref_ax]:
+                bs[buf_ax] = tile_shape[ref_ax]
+                tiled_pairs.append((buf_ax, grid_dim))
+
+    elif swap_last_two and buf_nd >= 2 and ref_nd >= 2:
+        # Transposed buffer: last-2 dims of buf are swapped vs ref.
+        for ref_ax, grid_dim in axis_to_grid.items():
+            # Map ref axis to buf axis with swap on the last two
+            if ref_ax == ref_nd - 2:
+                buf_ax = buf_nd - 1
+            elif ref_ax == ref_nd - 1:
+                buf_ax = buf_nd - 2
+            else:
+                buf_ax = ref_ax - (ref_nd - buf_nd)
+
+            if 0 <= buf_ax < buf_nd and buf_shape[buf_ax] == ref_shape[ref_ax]:
+                bs[buf_ax] = tile_shape[ref_ax]
+                tiled_pairs.append((buf_ax, grid_dim))
+
+    else:
+        # Standard right-alignment, with left-alignment fallback for
+        # reduction outputs (e.g. sum(dim=-1) on (10,10) → (10,)).
+        for ref_ax, grid_dim in axis_to_grid.items():
+            buf_ax = ref_ax - (ref_nd - buf_nd)
+            if 0 <= buf_ax < buf_nd and buf_shape[buf_ax] == ref_shape[ref_ax]:
+                bs[buf_ax] = tile_shape[ref_ax]
+                tiled_pairs.append((buf_ax, grid_dim))
+            elif (
+                is_output
+                and buf_nd < ref_nd
+                and 0 <= ref_ax < buf_nd
+                and buf_shape[ref_ax] == ref_shape[ref_ax]
+            ):
+                # Left-aligned match for output: buf dim i matches ref dim i
+                # (reduction output whose trailing dims were reduced away)
+                bs[ref_ax] = tile_shape[ref_ax]
+                tiled_pairs.append((ref_ax, grid_dim))
+
+    return pl.BlockSpec(
+        tuple(bs),
+        _make_index_map(tiled_pairs, buf_nd, n_grid, swap_last_two=swap_last_two),
+    )
+
+
+def _make_index_map(
+    tiled_pairs: list[tuple[int, int]],
+    buf_nd: int,
+    n_grid: int,
+    swap_last_two: bool = False,
+) -> Any:
+    """Return an index_map callable for ``pl.BlockSpec``.
+
+    *tiled_pairs* is a list of ``(buf_axis, grid_dim)`` indicating which
+    buffer axes receive a grid index.  All other axes return 0 (full block).
+
+    When *swap_last_two* is True the grid args for the last two buffer dims
+    are swapped so that the tile iteration follows the transposed layout.
+
+    All returned values are explicitly ``jnp.int32`` so that TPU Mosaic
+    lowering (which rejects 64-bit types) works when ``jax_enable_x64`` is
+    active.  The casts are created inside the function body (not captured)
+    to satisfy JAX's "index_map must not capture constants" rule.
+    """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
+    # Pre-build the mapping so the returned lambda is a plain lookup.
+    mapping = dict(tiled_pairs)
+
+    if n_grid == 0 or (n_grid == 1 and not mapping):
+        return lambda _i: tuple(jnp.int32(0) for _ in range(buf_nd))
+
+    def index_map(*grid_args):
+        return tuple(
+            jnp.int32(grid_args[mapping[d]]) if d in mapping else jnp.int32(0)
+            for d in range(buf_nd)
+        )
+
+    return index_map
