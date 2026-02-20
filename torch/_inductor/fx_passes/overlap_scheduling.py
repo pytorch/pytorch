@@ -1508,10 +1508,14 @@ def gather_node_runtime_estimations(
             compute_benchmarked.append(estimations[node])
             compute_analytical.append(estimate_runtime_analytical(node))
         elif node.op == "call_function" and node not in estimations:
-            # Memory-bound ops (elementwise, reductions, etc.)
-            est = estimate_mem_bound_runtime_ms(node)
-            if est > 0:
-                estimations[node] = est
+            if custom_runtime_estimation is not None:
+                est = custom_runtime_estimation(node, None)
+                if est is not None:
+                    estimations[node] = est
+            else:
+                est = estimate_mem_bound_runtime_ms(node)
+                if est > 0:
+                    estimations[node] = est
 
     # Fusion region costs (call_module nodes from collapse_fusion_regions)
     for node, region in fusion_region_of.items():
