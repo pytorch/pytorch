@@ -46,7 +46,7 @@ namespace at {
 
 namespace internal {
 // Global state for scientific notation control
-bool& print_sci_mode() {
+static bool& print_sci_mode() {
   static bool enabled = true;
   return enabled;
 }
@@ -396,7 +396,7 @@ std::ostream& print(
 }
 
 // API to control scientific notation
-void set_print_sci_mode(bool enabled) {
+void set_printoption_sci_mode(bool enabled) {
   internal::print_sci_mode() = enabled;
 }
 

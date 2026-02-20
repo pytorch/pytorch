@@ -1,10 +1,10 @@
-#include <torch/print.h>
 #include <ATen/core/Formatting.h>
+#include <torch/print.h>
 
 namespace torch {
 
-void set_print_sci_mode(bool enabled) {
-  at::set_print_sci_mode(enabled);
+void set_printoption_sci_mode(bool enabled) {
+  at::set_printoption_sci_mode(enabled);
 }
 
 } // namespace torch

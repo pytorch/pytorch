@@ -14,11 +14,11 @@
 #include <torch/nested.h>
 #include <torch/nn.h>
 #include <torch/optim.h>
+#include <torch/print.h>
 #include <torch/serialize.h>
 #include <torch/sparse.h>
 #include <torch/special.h>
 #include <torch/types.h>
 #include <torch/utils.h>
-#include <torch/print.h>
 #include <torch/version.h>
 #include <torch/xpu.h>

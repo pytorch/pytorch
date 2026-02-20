@@ -24,6 +24,6 @@ inline std::ostream& operator<<(std::ostream & out, const Tensor & t) {
 TORCH_API void print(const Tensor & t, int64_t linesize=80);
 
 // API to control scientific notation in tensor printing
-TORCH_API void set_print_sci_mode(bool enabled);
+TORCH_API void set_printoption_sci_mode(bool enabled);
 
-}
+} // namespace at
