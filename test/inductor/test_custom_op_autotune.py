@@ -7,8 +7,6 @@ config specifies an optional decomposition function and its associated parameter
 Inductor benchmarks all variants and automatically selects the best performing one.
 """
 
-import unittest
-
 import torch
 import torch._inductor.runtime.benchmarking
 from torch._dynamo.utils import counters
@@ -19,7 +17,11 @@ from torch._inductor.kernel.custom_op import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -1088,7 +1090,7 @@ class TestCustomOpAutoTune(TestCase):
         This validates that multiple compilations using the same fallback name
         don't cause assertion errors. The first registered kernel is reused.
         """
-        from torch._inductor.select_algorithm import ExternKernelChoice, extern_kernels
+        from torch._inductor.select_algorithm import extern_kernels, ExternKernelChoice
 
         test_name = f"test_reregister_{id(self)}"
 
@@ -1110,6 +1112,92 @@ class TestCustomOpAutoTune(TestCase):
         # The FIRST kernel should still be registered (not overwritten)
         registered_kernel = getattr(extern_kernels, test_name)
         self.assertIs(registered_kernel, kernel_v1)
+
+    def test_fallback_choice_reuse(self):
+        """Test that _create_fallback_choice reuses the same kernel for the same op_overload.
+
+        Since fallback now uses op_overload directly with a name derived from the op,
+        multiple calls to _create_fallback_choice for the same op should reuse
+        the same registered kernel in extern_kernels.
+        """
+        from torch._inductor.kernel.custom_op import _create_fallback_choice
+        from torch._inductor.select_algorithm import extern_kernels
+
+        test_op_name = f"test_lib::fallback_reuse_{id(self)}"
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def reuse_test_op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @reuse_test_op.register_fake
+        def _(x: torch.Tensor):
+            return torch.empty_like(x)
+
+        # Get the op_overload from the custom op
+        op_overload = reuse_test_op._opoverload
+
+        # Create fallback choice twice for the same op_overload
+        choice1 = _create_fallback_choice(op_overload)
+        choice2 = _create_fallback_choice(op_overload)
+
+        # Both should have the same name
+        self.assertEqual(choice1.name, choice2.name)
+
+        # The registered kernel should be the same object (op_overload)
+        registered_kernel = getattr(extern_kernels, choice1.name)
+        self.assertIs(registered_kernel, op_overload)
+
+    @skipIfXpu
+    @parametrize("force_choice", [None, True, False])
+    def test_kwargs_codegen(self, force_choice):
+        """Test that kwargs are correctly passed through codegen for both fallback and decomposition.
+
+        This validates that when a custom op is called with non-default kwargs:
+        1. Fallback path: kwargs flow through ExternKernelCaller to FallbackKernel.create
+        2. Decomposition path: kwargs are passed via functools.partial to the decomposition
+
+        Tests all paths via force_custom_op_decomposition:
+        - None: normal autotuning
+        - True: force decomposition
+        - False: force fallback
+        """
+        test_op_name = f"test_lib::kwargs_codegen_{id(self)}_{force_choice}"
+
+        def scale_impl(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def kwargs_op(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @kwargs_op.register_fake
+        def _(x: torch.Tensor, scale: float = 1.0):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            kwargs_op,
+            configs=[CustomOpConfig(scale_impl)],
+            name=f"kwargs_codegen_test_{force_choice}",
+        )
+
+        x = torch.ones(4, 4, device=self.device, dtype=self.dtype)
+        scale_value = 3.0
+        expected = x * scale_value
+
+        @torch.compile
+        def test_model(x):
+            return kwargs_op(x, scale=scale_value)
+
+        torch._dynamo.reset()
+        with config.patch({"test_configs.force_custom_op_decomposition": force_choice}):
+            result = test_model(x)
+
+        path_name = {None: "autotuned", True: "decomposition", False: "fallback"}[
+            force_choice
+        ]
+        torch.testing.assert_close(
+            result, expected, rtol=1e-3, atol=1e-3, msg=f"{path_name} path failed"
+        )
 
     @skipIfXpu
     @config.patch(
@@ -1187,6 +1275,9 @@ class TestCustomOpAutoTune(TestCase):
                 atol=1e-5,
                 msg=f"Failed for shape[0]={first_dim}: symbolic tracing may have captured concrete value",
             )
+
+
+instantiate_parametrized_tests(TestCustomOpAutoTune)
 
 
 if __name__ == "__main__":
