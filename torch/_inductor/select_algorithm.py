@@ -2266,12 +2266,6 @@ class TritonTemplate(KernelTemplate):
 
 
 class ExternKernelChoice:
-    """Represents an external kernel choice for algorithm selection.
-
-    Wraps an external kernel function and provides methods to bind it to
-    specific inputs/layouts for benchmarking and code generation.
-    """
-
     def __init__(
         self,
         kernel,
@@ -2286,14 +2280,11 @@ class ExternKernelChoice:
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        # Only register if not already present - reuse existing registration
-        if hasattr(extern_kernels, name):
-            log.debug("Reusing existing extern kernel: %s", name)
-        else:
-            setattr(extern_kernels, name, kernel)
+        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
+        setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
@@ -2410,7 +2401,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
-        if config.profile_bandwidth_with_do_bench_using_profiling:
+        if (
+            config.profile_bandwidth_with_do_bench_using_profiling
+            and not self._benchmark_with_cudagraphs
+        ):
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
