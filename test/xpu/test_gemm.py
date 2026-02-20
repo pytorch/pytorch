@@ -238,13 +238,13 @@ class TestBasicGEMM(TestCase):
                     activation=activation,
                 )
 
-    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
+    @precisionOverride({torch.float: 1e-4, torch.half: 1e-1})
     @dtypes(torch.float32, torch.half, torch.double, torch.complex64)
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
-    @precisionOverride({torch.float: 1e-4, torch.double: 1e-6, torch.half: 1e-1})
+    @precisionOverride({torch.float: 1e-4, torch.half: 1e-1})
     @dtypes(torch.float, torch.half, torch.double)
     def test_addmm_badmm_scalar_tnesor_input(self, device, dtype):
         input = torch.tensor(1).to(device=device, dtype=dtype)
@@ -638,7 +638,7 @@ class TestBasicGEMM(TestCase):
         for b1, b2, ref, out_tensor in generate_tensor():
             self._test_addbmm_baddbmm("addbmm", b1, b2, ref, out_tensor)
 
-    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5, torch.float64: 1e-6})
+    @precisionOverride({torch.half: 0.1, torch.bfloat16: 0.5})
     @dtypes(torch.float64, torch.float32, torch.bfloat16, torch.half, torch.complex64)
     @tf32_on_and_off(0.01)
     def test_baddbmm(self, device, dtype):
@@ -908,7 +908,6 @@ class TestBasicGEMM(TestCase):
                 y = torch.baddbmm(input, mat1, mat2, beta=0.0, out=out)
                 self.assertEqual(y_ref, y)
 
-    @precisionOverride({torch.double: 1e-6})
     @dtypes(torch.float, torch.double)
     @tf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
@@ -933,7 +932,6 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -948,7 +946,6 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-6,
             torch.float: 1e-4,
             torch.bfloat16: 5e-2,
             torch.half: 5e-2,
@@ -997,7 +994,6 @@ class TestBasicGEMM(TestCase):
 
     @precisionOverride(
         {
-            torch.double: 1e-8,
             torch.float: 1e-4,
             torch.bfloat16: 0.6,
             torch.half: 1e-1,
