@@ -549,9 +549,13 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
 def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: str | None = None
 ) -> None:
-    # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
-    pytorch_root = Path(__file__).absolute().parent.parent
-    template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")
+    # Assumes that this file lives at torchgen/gen_backend_stubs.py
+    root = Path(__file__).absolute().parent.parent
+    common_dir = os.path.join(root, "aten/src")  # Assumes root is pytorch_root
+    if not os.path.exists(common_dir):  # This file is out-of-tree.
+        common_dir = os.path.join(root, "torchgen/packaged")
+
+    template_dir = os.path.join(common_dir, "ATen/templates")
 
     def make_file_manager(install_dir: str) -> FileManager:
         return FileManager(
@@ -560,10 +564,8 @@ def run(
 
     fm = make_file_manager(output_dir)
 
-    native_yaml_path = os.path.join(
-        pytorch_root, "aten/src/ATen/native/native_functions.yaml"
-    )
-    tags_yaml_path = os.path.join(pytorch_root, "aten/src/ATen/native/tags.yaml")
+    native_yaml_path = os.path.join(common_dir, "ATen/native/native_functions.yaml")
+    tags_yaml_path = os.path.join(common_dir, "ATen/native/tags.yaml")
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,

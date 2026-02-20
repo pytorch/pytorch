@@ -20,7 +20,6 @@ checks and proper tracking of distributed state and operations across processes.
 
 import functools
 import inspect
-from collections.abc import Sequence
 from typing import Any, Literal, TYPE_CHECKING
 
 import torch
@@ -28,18 +27,15 @@ from torch.fx.experimental._backward_state import BackwardState
 
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable, EnumVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
@@ -144,135 +140,8 @@ class WorldMetaClassVariable(DistributedVariable):
             assert self.source
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return EnumVariable(self.value.NON_GROUP_MEMBER)
+            return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
-
-
-class PlacementClassVariable(DistributedVariable):
-    @staticmethod
-    def is_placement_type(value: object) -> bool:
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if not DistributedVariable.is_available():
-            return False
-
-        from torch.distributed.tensor.placement_types import Placement
-
-        return isinstance(value, type) and issubclass(value, Placement)
-
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if self.source:
-            # NOTE: we don't need to track mutations to the placement class as they
-            # are supposed to be immutable.
-            new_obj = self.value.__new__(self.value)
-            var = PlacementVariable(new_obj)
-            if inspect.getattr_static(self.value, "__init__", None):
-                var.call_method(tx, "__init__", args, kwargs)
-                return var
-
-        return super().call_function(tx, args, kwargs)
-
-
-class PlacementVariable(DistributedVariable):
-    @staticmethod
-    def is_placement(value: object) -> bool:
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if not DistributedVariable.is_available():
-            return False
-        from torch.distributed.tensor.placement_types import Placement
-
-        return isinstance(value, Placement)
-
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "dim":
-            return ConstantVariable.create(self.value.dim)
-        return super().var_getattr(tx, name)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from . import ConstantVariable
-
-        # Placement types dynamo tracking only allows following methods
-        # and __setattr__  is for case like `Shard(dim)` and methods.
-        # Methods in the list must satisfy:
-        #    1. Input arguments are constants and do not need to be guarded on;
-        #    2. Output is constant with respect to their inputs
-        constant_fold_functions = [
-            "__init__",
-            "__setattr__",
-            "is_shard",
-            "is_partial",
-            "is_replicate",
-        ]
-
-        if name in constant_fold_functions:
-            try:
-                value_type = type(self.value)
-                if inspect.getattr_static(value_type, "__getattr__", None) is not None:
-                    unimplemented(
-                        gb_type="Placement with custom __getattr__ not supported",
-                        context=f"{value_type.__name__} with custom __getattr__",
-                        explanation="Dynamo does not support Placement types with custom __getattr__ methods",
-                        hints=[
-                            "Use Placement types without custom __getattr__ methods",
-                            "Move the Placement usage outside the compiled region",
-                        ],
-                    )
-                method = inspect.getattr_static(value_type, name)
-            except AttributeError:
-                method = None
-            if method is object.__init__:
-                return CONSTANT_VARIABLE_NONE
-
-            args = [x.as_python_constant() for x in args]
-            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            assert method is not None
-            if name == "__setattr__":
-                method(self.value, *args, **kwargs)
-                return self
-            constant_val = method(self.value, *args, **kwargs)
-            return ConstantVariable.create(constant_val)
-
-        return super().call_method(tx, name, args, kwargs)  # type: ignore[arg-type]
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        # Reconstruct the Placement object by calling its constructor
-        # e.g., Shard(0), Replicate(), Partial()
-        from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
-
-        placement_type = type(self.value)
-
-        # Load the placement class
-        codegen.add_push_null(
-            lambda: codegen.load_import_from(
-                "torch.distributed.tensor.placement_types", placement_type.__name__
-            )
-        )
-
-        # For Shard, we need to pass the dim argument
-        if isinstance(self.value, Shard):
-            codegen(ConstantVariable.create(self.value.dim))
-            codegen.extend_output(create_call_function(1, False))
-        # Replicate and Partial have no required args
-        elif istype(self.value, (Replicate, Partial)):
-            codegen.extend_output(create_call_function(0, False))
-        else:
-            super().reconstruct(codegen)
 
 
 class DeviceMeshVariable(DistributedVariable):
@@ -291,9 +160,9 @@ class DeviceMeshVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "ndim":
-            return ConstantVariable.create(self.value.ndim)
+            return VariableTracker.build(tx, self.value.ndim)
         if name == "device_type":
-            return ConstantVariable.create(self.value.device_type)
+            return VariableTracker.build(tx, self.value.device_type)
         if name == "mesh_dim_names":
             source = self.source
             if source:
@@ -311,16 +180,18 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "size":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
+            return VariableTracker.build(
+                tx, self.value.size(*const_args, **const_kwargs)
+            )
         if name == "get_coordinate":
-            return ConstantVariable.create(self.value.get_coordinate())
+            return VariableTracker.build(tx, self.value.get_coordinate())
         if name == "get_rank":
-            return ConstantVariable.create(self.value.get_rank())
+            return VariableTracker.build(tx, self.value.get_rank())
         if name == "get_local_rank":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value.get_local_rank(*const_args, **const_kwargs)
+            return VariableTracker.build(
+                tx, self.value.get_local_rank(*const_args, **const_kwargs)
             )
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
@@ -329,7 +200,7 @@ class DeviceMeshVariable(DistributedVariable):
                 self.value.get_group(*const_args, **const_kwargs)
             )
         if name == "_is_current_rank_part_of_mesh":
-            return ConstantVariable.create(self.value._is_current_rank_part_of_mesh())
+            return VariableTracker.build(tx, self.value._is_current_rank_part_of_mesh())
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         if name == "_flatten":
@@ -343,8 +214,8 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "_sym_get_coordinate":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value._sym_get_coordinate(*const_args, **const_kwargs)
+            return VariableTracker.build(
+                tx, self.value._sym_get_coordinate(*const_args, **const_kwargs)
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -379,17 +250,17 @@ class ProcessGroupVariable(DistributedVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "rank":
-            return variables.ConstantVariable.create(self.value.rank())
+            return VariableTracker.build(tx, self.value.rank())
         if name == "size":
-            return variables.ConstantVariable.create(self.value.size())
+            return VariableTracker.build(tx, self.value.size())
         if name == "_get_backend_name":
-            return variables.ConstantVariable.create(self.value._get_backend_name())
+            return VariableTracker.build(tx, self.value._get_backend_name())
 
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "group_name":
-            return variables.ConstantVariable.create(self.value.group_name)
+            return VariableTracker.build(tx, self.value.group_name)
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)

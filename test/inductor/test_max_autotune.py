@@ -1365,7 +1365,7 @@ class TestMaxAutotune(TestCase):
                 ).run(code[0])
             else:
                 FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_0.run"
+                    "triton_.*_fused_.*.run"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
@@ -1379,7 +1379,7 @@ class TestMaxAutotune(TestCase):
                 ).run(code[0])
             else:
                 FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_mm_0.run"
+                    "triton_.*_fused_.*.run"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
@@ -1516,7 +1516,7 @@ class TestMaxAutotune(TestCase):
                 out.backward()
 
                 FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_0.run"
+                    "triton_.*_fused_.*.run"
                 ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                     r"256\*s[0-9]+"
                 ).check_regex("s[0-9]+ = 8").run(
@@ -2485,6 +2485,7 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "max_autotune_gemm_backends": "ATEN,TRITON",
             "force_pointwise_cat": True,
+            "max_autotune_defer_layout_freezing": True,
         }
     )
     @parametrize("epilogue", (True, False))
@@ -4279,16 +4280,10 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
     """Tests for AsyncPipelinedAutotuning path."""
 
     SKIP_TESTS = {
-        "test_max_autotune_decompose_k": "Subgraphs not supported with async pipelining",
         "test_inf_timing": "Logs not consistent with async pipelined autotuning",
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
-        # Contiguous transform tests - SubgraphChoiceCaller not supported with async pipelining
-        "test_max_autotune_contiguous_transform_mm": "Subgraphs not supported with async pipelining",
-        "test_max_autotune_contiguous_transform_addmm": "Subgraphs not supported with async pipelining",
-        "test_max_autotune_contiguous_transform_non_contiguous_second_matrix": "Subgraphs not supported with async pipelining",
-        "test_max_autotune_contiguous_transform_with_epilogue": "Subgraphs not supported with async pipelining",
         # XPU specific skips due to lack of multiprocess tensor reduction support (issue #170636)
         "test_max_autotune_addmm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
         "test_max_autotune_regular_mm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
