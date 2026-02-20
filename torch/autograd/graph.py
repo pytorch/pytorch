@@ -355,6 +355,14 @@ class save_on_cpu(saved_tensors_hooks):
     Use this context-manager to trade compute for GPU memory usage (e.g.
     when your model doesn't fit in GPU memory during training).
 
+    .. warning::
+
+        When ``pin_memory=True``, the GPU to CPU copy during packing is
+        asynchronous. Accessing saved tensors on CPU (e.g. via
+        ``grad_fn._saved_self``) before the CUDA stream has finished may
+        yield incorrect data. Call :func:`torch.cuda.synchronize` first
+        if you need to read them.
+
     Args:
         pin_memory (bool): If ``True`` tensors will be saved to CPU pinned memory
                            during packing and copied to GPU asynchronously during both
