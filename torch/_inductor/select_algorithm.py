@@ -2534,6 +2534,7 @@ class ExternKernelCaller(ChoiceCaller):
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
+        # pyrefly: ignore[missing-attribute]
         self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
 

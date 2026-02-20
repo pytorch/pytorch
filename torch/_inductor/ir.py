@@ -606,6 +606,10 @@ class IRNode:
     def get_defining_op(self) -> Optional[Operation]:
         return None
 
+    def get_subgraphs(self) -> list[Subgraph]:
+        """Return subgraphs contained in this node"""
+        return []
+
     def get_stack_traces(self) -> OrderedSet[str]:
         # Return stack traces to user model code
         # A single IRNode could correspond to multiple lines of code
@@ -860,6 +864,7 @@ class IRNode:
 class Operation:
     def __post_init__(self) -> None:
         self.operation_name: Optional[str] = None
+        self._config_patches: dict[str, Any] = {}
 
     def get_device(self) -> Optional[torch.device]:
         raise NotImplementedError
@@ -875,6 +880,14 @@ class Operation:
     def get_operation_name(self) -> str:
         assert self.operation_name is not None
         return self.operation_name
+
+    def get_config_patches(self) -> dict[str, Any]:
+        """Get config patches for this operation (e.g., coordinate_descent_tuning)."""
+        return self._config_patches
+
+    def set_config_patches(self, patches: dict[str, Any]) -> None:
+        """Set config patches for this operation."""
+        self._config_patches = patches
 
     def is_extern(self) -> bool:
         return False
@@ -7117,6 +7130,7 @@ class SubgraphBuffer(ExternKernel):
         gm: torch.fx.GraphModule,
         example_inputs: list[Any],
         subgraph_name: str,
+        config_patches: dict[str, Any] | None = None,
     ):
         super().__init__(None, layout, input_nodes)
         self.gm = gm
@@ -7138,13 +7152,22 @@ class SubgraphBuffer(ExternKernel):
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
-            # Don't bother autotuning on Triton here
-            with inductor_config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
-            ):
+            # Base config: don't autotune Triton, but allow other optimizations
+            base_patches = {
+                "max_autotune": False,
+                "max_autotune_gemm": False,
+                "max_autotune_gemm_backends": "ATEN",
+            }
+            # Merge with user config_patches (e.g., coordinate_descent_tuning)
+            merged_patches: dict[str, Any] = {**base_patches, **(config_patches or {})}
+            with inductor_config.patch(merged_patches):
                 self.subgraph.run(*self.example_inputs)
+
+            # Tag all operations in subgraph with config_patches
+            # These will be applied during kernel codegen via SIMD scheduling
+            if config_patches:
+                for op in self.subgraph.operations:
+                    op.set_config_patches(config_patches.copy())
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         class CodegenGraph:
@@ -7154,6 +7177,7 @@ class SubgraphBuffer(ExternKernel):
 
         assert is_node_sequence(self.inputs)
         outer_inputs = [t.codegen_reference() for t in self.inputs]
+
         wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
             [*self.sym_inputs, *outer_inputs],
@@ -8882,6 +8906,9 @@ class InvokeSubgraph(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+    def get_subgraphs(self) -> list[Subgraph]:
+        return [self.subgraph] if self.subgraph else []
+
     @classmethod
     def create(
         cls, subgraph: Subgraph, *operands: IRNode
@@ -9035,6 +9062,14 @@ class Conditional(ExternKernel):
 
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+
+    def get_subgraphs(self) -> list[Subgraph]:
+        subgraphs = []
+        if self.true_subgraph:
+            subgraphs.append(self.true_subgraph)
+        if self.false_subgraph:
+            subgraphs.append(self.false_subgraph)
+        return subgraphs
 
     @staticmethod
     def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
@@ -9260,6 +9295,14 @@ class WhileLoop(ExternKernel):
 
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+
+    def get_subgraphs(self) -> list[Subgraph]:
+        subgraphs = []
+        if self.cond_subgraph:
+            subgraphs.append(self.cond_subgraph)
+        if self.body_subgraph:
+            subgraphs.append(self.body_subgraph)
+        return subgraphs
 
     # Accidental aliasing can be created due to cse, where the empty buffers we
     # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.
