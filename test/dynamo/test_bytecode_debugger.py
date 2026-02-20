@@ -170,17 +170,22 @@ class TestBytecodeDebugger(TestCase):
 
         def test_logic(sess, initial):
             output = initial
-            # Step until we hit a CALL instruction (or PRECALL on Python 3.11)
+            # Step until we hit the CALL that invokes the compiled graph
+            # function (forward), skipping instrumentation calls
+            # (record_pregraph_bytecode_enter/exit).
             if sys.version_info >= (3, 12):
-                call_pattern = r">>>.*\[\d+\]:\s*CALL\b"
+                call_pattern = r">>>.*\[\s*\d+\]:\s*CALL\b"
             elif sys.version_info >= (3, 11):
-                call_pattern = r">>>.*\[\d+\]:\s*PRECALL\b"
+                call_pattern = r">>>.*\[\s*\d+\]:\s*PRECALL\b"
             else:
-                call_pattern = r">>>.*\[\d+\]:\s*CALL_FUNCTION\b"
-            while not re.search(call_pattern, output):
+                call_pattern = r">>>.*\[\s*\d+\]:\s*CALL_FUNCTION\b"
+            while True:
+                while not re.search(call_pattern, output):
+                    output = yield "s"
+                stack_output = yield "stack"
+                if "forward" in stack_output and "record_pregraph" not in stack_output:
+                    break
                 output = yield "s"
-            # Get the stack at CALL/PRECALL
-            stack_output = yield "stack"
 
             # Extract just the stack lines (skip prompt)
             lines = [
@@ -425,21 +430,24 @@ Stack (TOS at end):
 
         def test_logic(sess, initial):
             output = initial
-            # Step until we hit a CALL instruction (or PRECALL on Python 3.11)
+            # Step until we hit the CALL that invokes the compiled graph
+            # function. See test_stack_command for details.
             if sys.version_info >= (3, 12):
-                call_pattern = r">>>.*\[\d+\]:\s*CALL\b"
+                call_pattern = r">>>.*\[\s*\d+\]:\s*CALL\b"
             elif sys.version_info >= (3, 11):
-                call_pattern = r">>>.*\[\d+\]:\s*PRECALL\b"
+                call_pattern = r">>>.*\[\s*\d+\]:\s*PRECALL\b"
             else:
-                call_pattern = r">>>.*\[\d+\]:\s*CALL_FUNCTION\b"
-            while not re.search(call_pattern, output):
+                call_pattern = r">>>.*\[\s*\d+\]:\s*CALL_FUNCTION\b"
+            while True:
+                while not re.search(call_pattern, output):
+                    output = yield "s"
+                stack_output = yield "__stack__"
+                if "forward" in stack_output and "record_pregraph" not in stack_output:
+                    break
                 output = yield "s"
 
-            # Access __stack__ - should have function, NULL, and tensor
-            output = yield "__stack__"
-
             # Normalize addresses and tensor values
-            normalized = re.sub(r"0x[0-9a-f]+", "0xADDR", output)
+            normalized = re.sub(r"0x[0-9a-f]+", "0xADDR", stack_output)
             normalized = re.sub(r"tensor\([^)]+\)", "tensor(...)", normalized)
             # Extract just the list part
             match = re.search(r"\[.*\]", normalized, re.DOTALL)
