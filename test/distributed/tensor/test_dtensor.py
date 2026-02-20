@@ -825,6 +825,30 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(out_t.placements, (Shard(1),))
         self.assertEqual(out_t.full_tensor(), dt.full_tensor().T)
 
+    @with_comms
+    def test_autograd_function_without_materialize_grads(self):
+        device_mesh = self.build_device_mesh()
+
+        class MultiOutputFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.set_materialize_grads(False)
+                return (x * 2), (y * 3)
+
+            @staticmethod
+            def backward(ctx, grad_out1, grad_out2):
+                assert grad_out2 is None
+                return grad_out1 * 2, grad_out2
+
+        x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        x = DTensor.from_local(x_local, device_mesh, [Replicate()])
+        y = DTensor.from_local(y_local, device_mesh, [Replicate()])
+
+        out1, _ = MultiOutputFunc.apply(x, y)
+
+        loss = out1.sum()
+        loss.backward()
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
