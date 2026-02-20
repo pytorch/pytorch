@@ -6,6 +6,7 @@ input/output types, metadata, config, function signatures etc.
 from __future__ import annotations
 
 import collections
+import contextvars
 import functools
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -1107,6 +1108,10 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+    # Needed to save modified config variables
+    context: contextvars.Context | None = field(
+        default_factory=contextvars.copy_context
+    )
 
     def __post_init__(self) -> None:
         if self.pre_dispatch:

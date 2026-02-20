@@ -2839,6 +2839,9 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                         out,
                     )
 
+                if aot_config.context is not None:
+                    impl_fn = functools.partial(aot_config.context.run, impl_fn)
+
                 needs_grad = torch.is_grad_enabled() and any(
                     t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
                 )

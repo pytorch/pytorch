@@ -170,6 +170,10 @@ soft_actor_critic,pass,6
 
 
 
+speech_transformer,pass,16
+
+
+
 squeezenet1_1,pass,6
 
 
