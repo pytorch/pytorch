@@ -382,14 +382,12 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                 # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
                     # pyrefly: ignore [bad-index]
-                    # pyrefly: ignore [bad-index]
                     "dynamo_flat_name_to_original_fqn"
                 ]
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
                 # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore [bad-index]
                     # pyrefly: ignore [bad-index]
                     "dynamo_compile_id"
                 ]
