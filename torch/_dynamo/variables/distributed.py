@@ -25,7 +25,7 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 from torch.fx.experimental._backward_state import BackwardState
 
-from .. import compiled_autograd
+from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
@@ -33,7 +33,6 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
-from .constant import ConstantVariable, EnumVariable
 
 
 if TYPE_CHECKING:
@@ -133,17 +132,15 @@ class WorldMetaClassVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "WORLD":
-            from .builder import SourcelessBuilder
-
             assert self.source
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return SourcelessBuilder.create(tx, self.value.WORLD)
+            return ProcessGroupVariable(self.value.WORLD)
         elif name == "NON_GROUP_MEMBER":
             assert self.source
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return EnumVariable(self.value.NON_GROUP_MEMBER)
+            return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
 
 
@@ -163,9 +160,9 @@ class DeviceMeshVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "ndim":
-            return ConstantVariable.create(self.value.ndim)
+            return VariableTracker.build(tx, self.value.ndim)
         if name == "device_type":
-            return ConstantVariable.create(self.value.device_type)
+            return VariableTracker.build(tx, self.value.device_type)
         if name == "mesh_dim_names":
             source = self.source
             if source:
@@ -180,34 +177,32 @@ class DeviceMeshVariable(DistributedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
         if name == "size":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
+            return VariableTracker.build(
+                tx, self.value.size(*const_args, **const_kwargs)
+            )
         if name == "get_coordinate":
-            return ConstantVariable.create(self.value.get_coordinate())
+            return VariableTracker.build(tx, self.value.get_coordinate())
         if name == "get_rank":
-            return ConstantVariable.create(self.value.get_rank())
+            return VariableTracker.build(tx, self.value.get_rank())
         if name == "get_local_rank":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value.get_local_rank(*const_args, **const_kwargs)
+            return VariableTracker.build(
+                tx, self.value.get_local_rank(*const_args, **const_kwargs)
             )
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return SourcelessBuilder.create(
-                tx, self.value.get_group(*const_args, **const_kwargs)
+            return ProcessGroupVariable(
+                self.value.get_group(*const_args, **const_kwargs)
             )
         if name == "_is_current_rank_part_of_mesh":
-            return ConstantVariable.create(self.value._is_current_rank_part_of_mesh())
+            return VariableTracker.build(tx, self.value._is_current_rank_part_of_mesh())
         if name == "_get_or_create_default_group":
-            return SourcelessBuilder.create(
-                tx, self.value._get_or_create_default_group()
-            )
+            return ProcessGroupVariable(self.value._get_or_create_default_group())
         if name == "_flatten":
             from .builder import SourcelessBuilder
 
@@ -219,10 +214,69 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "_sym_get_coordinate":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value._sym_get_coordinate(*const_args, **const_kwargs)
+            return VariableTracker.build(
+                tx, self.value._sym_get_coordinate(*const_args, **const_kwargs)
             )
         return super().call_method(tx, name, args, kwargs)
+
+
+class ProcessGroupVariable(DistributedVariable):
+    """
+    We don't want a ProcessGroup object to end up in our output graph.
+
+    But it's common for dynamo to intercept a PG that is then used to get info like
+    rank() or world_size(), as well as passed to utility functions in distributed_c10d
+    which desugar it into plain types like a ranklist and tag.
+
+    For convenience and proper guarding, we construct a variable type.
+
+    TODO: make it possible to use ProcessGroupVariable as input to simple functions
+          like _expand_group without dynamo complaining about making a proxy for it.
+          It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
+          torch library functions are dealing with tensor-like types and would have proxies
+          for their args.
+    TODO: should we make this inherit VT instead of UDOV? Do we want any of the default behaviors
+          or just graph-break whenever one of our special cases is not hit?
+    """
+
+    def as_python_constant(self) -> Any:
+        return self.value
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "rank":
+            return VariableTracker.build(tx, self.value.rank())
+        if name == "size":
+            return VariableTracker.build(tx, self.value.size())
+        if name == "_get_backend_name":
+            return VariableTracker.build(tx, self.value._get_backend_name())
+
+        return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "group_name":
+            return VariableTracker.build(tx, self.value.group_name)
+        if name in ["rank", "size"]:
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+            )
+        # TODO should this just raise unimplemented?
+        return super().var_getattr(tx, name)
+
+    @staticmethod
+    def is_process_group(value: object) -> bool:
+        # we can't rely on importing/accessing torch distributed, it is not always built.
+        if not DistributedVariable.is_available():
+            return False
+        from torch._C._distributed_c10d import ProcessGroup
+        from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
+
+        return istype(value, (ProcessGroup, FakeProcessGroup))
 
 
 class BackwardHookVariable(VariableTracker):

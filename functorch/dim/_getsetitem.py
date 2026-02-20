@@ -205,7 +205,8 @@ def setitem(self: Any, index: Any, rhs: Any) -> None:
                     )
 
         # Match RHS tensor to result levels
-        assert rhs_info.tensor is not None, "Cannot match levels on None tensor"
+        if rhs_info.tensor is None:
+            raise AssertionError("Cannot match levels on None tensor")
         matched_rhs = _match_levels(
             rhs_info.tensor, rhs_info.levels, iinfo.result_levels
         )
@@ -507,7 +508,8 @@ def getsetitem_flat(
             d = inp
             # Use safe indexing to avoid triggering __torch_function__
             dim_idx = _safe_index(seen_dims, d)
-            assert dim_idx is not None, f"Dim {d} not found in seen_dims"
+            if dim_idx is None:
+                raise AssertionError(f"Dim {d} not found in seen_dims")
             if seen_dims_nuses[dim_idx] == 1:
                 flat_inputs[i] = slice(None)
                 result_levels.append(DimEntry(d))
@@ -536,7 +538,8 @@ def getsetitem_flat(
         for i in range(len(flat_inputs)):
             if tensor_inputs[i] is not None:
                 t = tensor_inputs[i].tensor
-                assert t is not None, "TensorInfo should have valid tensor data"
+                if t is None:
+                    raise AssertionError("TensorInfo should have valid tensor data")
                 if (
                     not tensor_inputs[i].has_device
                     and device_holding_tensor is not None

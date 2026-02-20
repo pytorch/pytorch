@@ -1322,7 +1322,7 @@
 - func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: logical_xor_out
+    CPU, CUDA, MTIA: logical_xor_out
     MPS: logical_xor_out_mps
   tags: pointwise
 
@@ -6569,6 +6569,7 @@
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
+    MPS: _unique_mps
   autogen: _unique.out
 
 - func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)

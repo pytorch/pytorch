@@ -911,6 +911,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
+  // NOTE: This default value (2000) is duplicated in FlightRecorder.hpp.
+  // Keep in sync. See FlightRecorder.hpp for details.
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -920,6 +922,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
   globalStore_ =
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
+  debugInfoPipeFile_ = getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
   auto desyncDebug = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -1776,7 +1779,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
     // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(pg_->globalRank());
+    dumpPipe.emplace(
+        pg_->globalRank(), pg_->debugInfoPipeFile_, pg_->traceBufferSize_);
   }
   while (true) {
     // This won't have any lock since this lock is only used here.
@@ -3740,8 +3744,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
 
   if (nanCheck) {
+    at::cuda::CUDAStreamGuard guard(ncclStream);
     for (const auto& input : inputs) {
-      checkForNan(input, ncclStream);
+      checkForNan(input);
     }
   }
 
@@ -4218,7 +4223,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
   if (enableNanCheck_ && opType == OpType::SEND) {
-    checkForNan(tensor, ncclStream);
+    at::cuda::CUDAStreamGuard guard(ncclStream);
+    checkForNan(tensor);
   }
 
   if (!coalescing_state_) {

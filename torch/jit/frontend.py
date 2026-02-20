@@ -277,7 +277,10 @@ def get_jit_class_def(cls, self_name):
     py_ast = ast.parse(dedent_src)
 
     class_ast = py_ast.body[0]
-    assert isinstance(class_ast, ast.ClassDef)
+    if not isinstance(class_ast, ast.ClassDef):
+        raise AssertionError(
+            f"Expected class definition, got {type(class_ast).__name__}"
+        )
 
     # Special case for dataclasses. In general we need access to the source code for
     # an object in order to JIT compile it. But the dataclasses module dynamically synthesizes
