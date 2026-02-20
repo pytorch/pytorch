@@ -7,6 +7,8 @@ config specifies an optional decomposition function and its associated parameter
 Inductor benchmarks all variants and automatically selects the best performing one.
 """
 
+import unittest
+
 import torch
 import torch._inductor.runtime.benchmarking
 from torch._dynamo.utils import counters
@@ -22,7 +24,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
 
 
 torch.set_float32_matmul_precision("high")
@@ -963,6 +965,7 @@ class TestCustomOpAutoTune(TestCase):
         torch.testing.assert_close(result, test_mat1 @ test_mat2, rtol=1e-1, atol=1e-1)
 
     @skipIfXpu
+    @unittest.skipIf(not IS_BIG_GPU, "Test requires large GPU memory")
     def test_empty_config_generator_falls_back_to_triton(self):
         """Test that empty config_generator falls back to normal mm autotuning.
 
@@ -1108,6 +1111,57 @@ class TestCustomOpAutoTune(TestCase):
         choice2 = _create_fallback_choice(op_overload)
 
         self.assertIs(choice1, choice2)
+
+    @skipIfXpu
+    @config.patch({"test_configs.force_custom_op_decomposition": False})
+    def test_fallback_different_kwargs(self):
+        """Test that the same fallback ExternKernelChoice works with different kwargs.
+
+        Previously, kwargs were baked into the fallback wrapper at choice creation
+        time, so a second call with different kwargs would either fail (duplicate
+        extern kernel) or use stale kwargs. Now kwargs are passed at bind time,
+        so both calls in the same compiled function get their own correct kwargs.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        test_op_name = "test_lib::fallback_kwargs"
+
+        def scale_impl(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def kwargs_op(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @kwargs_op.register_fake
+        def _(x: torch.Tensor, scale: float = 1.0):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            kwargs_op,
+            configs=[CustomOpConfig(scale_impl)],
+            name="fallback_kwargs_test",
+        )
+
+        x = torch.ones(4, 4, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x):
+            a = kwargs_op(x, scale=2.0)
+            b = kwargs_op(x, scale=5.0)
+            return a, b
+
+        torch._dynamo.reset()
+        (result_a, result_b), codes = run_and_get_code(test_model, x)
+
+        torch.testing.assert_close(result_a, x * 2.0, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(result_b, x * 5.0, rtol=1e-3, atol=1e-3)
+
+        # Both calls should use the same fallback kernel with different kwargs in codegen
+        code = "\n".join(codes)
+        breakpoint()
+        self.assertIn("scale=2.0", code)
+        self.assertIn("scale=5.0", code)
 
     @skipIfXpu
     @parametrize("force_choice", [None, True, False])
