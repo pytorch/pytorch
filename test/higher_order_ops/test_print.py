@@ -847,27 +847,33 @@ class TestHopPrintDTensor(DTensorTestBase):
 
     @with_comms
     @skipIfTorchDynamo("Skipped under Dynamo")
-    def test_print_dtensor_no_get_rank_in_graph(self):
-        """Verify dist.get_rank() is not traced into the compiled graph.
-
-        All ranks must produce identical compiled graphs. The graph should
-        not contain any get_rank calls.
-        """
+    def test_print_dtensor_compiled_sharded(self):
+        """Verify compiled sharded DTensor prints match eager output per rank."""
         device_mesh = self.build_device_mesh()
         full_tensor = torch.arange(8, dtype=torch.float, device=self.device_type)
-        dtensor = DTensor.from_local(full_tensor, device_mesh, [Replicate()])
+        local_shard = full_tensor.chunk(self.world_size)[self.rank]
+        dtensor = DTensor.from_local(local_shard, device_mesh, [Shard(0)])
 
         def f(x):
+            x = x + x
             torch._higher_order_ops.print("val: {}", x)
-            return x + x
+            return x
 
-        backend = AotEagerAndRecordGraphs()
-        compiled_f = torch.compile(f, backend=backend, fullgraph=True)
-        with patch("sys.stdout", new_callable=io.StringIO):
-            compiled_f(dtensor)
+        local_doubled = local_shard + local_shard
+        expected = f"val: {local_doubled}\n"
 
-        graph_code = backend.fw_graphs[0].code
-        self.assertNotIn("get_rank", graph_code)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            eager_result = f(dtensor)
+            eager_output = mock_stdout.getvalue()
+        self.assertEqual(eager_output, expected)
+
+        opt_f = torch.compile(f, backend="aot_eager", fullgraph=True)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            compiled_result = opt_f(dtensor)
+            compiled_output = mock_stdout.getvalue()
+
+        self.assertEqual(compiled_result.to_local(), eager_result.to_local())
+        self.assertEqual(compiled_output, expected)
 
 
 @instantiate_parametrized_tests
