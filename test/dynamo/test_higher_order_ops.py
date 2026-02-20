@@ -746,9 +746,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         c: "i64[u0, 1]" = l_x_.nonzero()
-
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
@@ -782,9 +780,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         c: "i64[u0, 1]" = l_x_.nonzero()
-
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int_1 <= 3
@@ -902,9 +898,7 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         c: "i64[u0, 1]" = l_x_.nonzero()
-
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int <= 3
@@ -973,18 +967,14 @@ class GraphModule(torch.nn.Module):
         l_y_ = L_y_
 
         c: "i64[u0, 1]" = l_x_.nonzero()
-
         sym_size_int_2: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-
         ge: "Sym(u0 >= 0)" = sym_size_int_2 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int_2 <= 3
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 3 on node 'le'");  le = _assert_scalar_default_1 = None
 
         d: "i64[u1, 1]" = l_y_.nonzero();  l_y_ = None
-
         sym_size_int_3: "Sym(u1)" = torch.ops.aten.sym_size.int(d, 0)
-
         ge_1: "Sym(u1 >= 0)" = sym_size_int_3 >= 0
         _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_2 = None
         le_1: "Sym(u1 <= 3)" = sym_size_int_3 <= 3
@@ -6310,6 +6300,25 @@ class GraphModule(torch.nn.Module):
         got = opt(x)
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(expected, got)
+
+    def test_vmap_scalar_tensor_indexing(self):
+        data = torch.arange(20).reshape(2, 10)
+        b_indices = torch.arange(2)
+        n_indices = torch.arange(10)
+
+        def vmap_index_fn(data_in, b_indices, n_indices):
+            def index_fn(b, n):
+                return data_in[b, n]
+
+            return torch.func.vmap(index_fn, in_dims=(None, 0))(b_indices, n_indices)
+
+        eager_result = vmap_index_fn(data, b_indices, n_indices)
+
+        compiled_result = torch.compile(vmap_index_fn, backend="eager", fullgraph=True)(
+            data, b_indices, n_indices
+        )
+
+        self.assertEqual(eager_result, compiled_result)
 
     def test_vmap(self):
         def fn(x):

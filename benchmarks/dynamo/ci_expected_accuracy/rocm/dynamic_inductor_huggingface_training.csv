@@ -62,7 +62,7 @@ MT5ForConditionalGeneration,pass,5
 
 
 
-MegatronBertForCausalLM,fail_accuracy,5
+MegatronBertForCausalLM,pass,5
 
 
 

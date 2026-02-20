@@ -25,7 +25,7 @@ for the elements of the batches of inputs. An example of this is :meth:`torch.mm
 :meth:`torch.bmm`. It is possible to implement batched computation as a loop over batch elements,
 and apply the necessary math operations to the individual batch elements, for efficiency reasons
 we are not doing that, and typically perform computation for the whole batch. The mathematical
-libraries that we are calling, and PyTorch internal implementations of operations can produces
+libraries that we are calling, and PyTorch internal implementations of operations can produce
 slightly different results in this case, compared to non-batched computations. In particular,
 let ``A`` and ``B`` be 3D tensors with the dimensions suitable for batched matrix multiplication.
 Then ``(A@B)[0]`` (the first element of the batched result) is not guaranteed to be bitwise

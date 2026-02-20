@@ -84,7 +84,7 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
             }
         ):
             compiled_fn = torch.compile(matmul)
@@ -118,7 +118,7 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
             }
         ):
             compiled_fn = torch.compile(matmul)
@@ -157,7 +157,7 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
             }
         ):
             compiled_fn = torch.compile(fn)
@@ -201,7 +201,7 @@ class TestNVUniversalGemm(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "NVGEMM",
-                    "cuda.nvgemm_max_profiling_configs": 3,
+                    "nvgemm_max_profiling_configs": 3,
                 }
             ):
                 result, (code,) = run_and_get_code(
@@ -249,13 +249,125 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
             }
         ):
             compiled_fn = torch.compile(bmm)
             result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
+
+    def test_scaled_gemm_mxfp8(self):
+        """Test MXFP8 scaled GEMM with NVGEMM backend.
+
+        Note: Invalid inputs (wrong shapes, dtypes, K not divisible by 16, etc.)
+        are caught early by Dynamo's _check_scaled_mm_sizes in torch/_meta_registrations.py.
+        NVGEMM can assume inputs are valid by the time they reach kernel selection.
+        """
+        from torch._inductor.utils import ceildiv
+
+        m, n, k = 256, 512, 1024
+        block_size = 32
+        device = "cuda"
+
+        def _round_up(x, multiple):
+            return ((x + multiple - 1) // multiple) * multiple
+
+        def _prep_k(K, scale_size):
+            """Prepare K dimension for 32-4-4 swizzle requirements."""
+            return _round_up(ceildiv(K, scale_size), 4)
+
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float32
+            )
+
+        # Create FP8 tensors
+        a_fp8 = torch.randint(-1, 2, (m, k), device=device).to(torch.float8_e4m3fn)
+        # B is N x K, then transposed to K x N for scaled_mm
+        b_fp8 = torch.randint(-1, 2, (n, k), device=device).to(torch.float8_e4m3fn).T
+
+        # Scale factors in float8_e8m0fnu (MXFP8 format)
+        # Shape: (M, prep_k(K, 32)) for A, (prep_k(K, 32), N) for B
+        scale_a = torch.rand(m, _prep_k(k, block_size), device=device).to(
+            torch.float8_e8m0fnu
+        )
+        scale_b = torch.rand(_prep_k(k, block_size), n, device=device).to(
+            torch.float8_e8m0fnu
+        )
+
+        # Get reference result from eager mode (ATen)
+        expected = scaled_mm(a_fp8, b_fp8, scale_a, scale_b)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "nvgemm_max_profiling_configs": 3,
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            compiled_fn = torch.compile(scaled_mm)
+            result = compiled_fn(a_fp8, b_fp8, scale_a, scale_b)
+
+        torch.testing.assert_close(result, expected)
+
+    def test_grouped_gemm(self):
+        """Test grouped GEMM with NVGEMM backend.
+
+        This test runs the same shape twice with different offsets to verify that
+        different offset distributions produce correct results.
+
+        Note: GroupedGemm currently only supports TN layout (column-major B).
+        B is created with shape (g, k, n) but column-major inner layout via permute.
+        """
+        g, k, n = 4, 256, 256
+        dtype = torch.bfloat16
+        device = "cuda"
+
+        def grouped_mm(a, b, offsets):
+            return torch._grouped_mm(a, b, offs=offsets)
+
+        b = torch.randn(g, n, k, device=device, dtype=dtype).permute(0, 2, 1)
+
+        m_per_group_1 = [64, 64, 64, 64]
+        total_m_1 = sum(m_per_group_1)
+        offsets_1 = torch.tensor(
+            [sum(m_per_group_1[: i + 1]) for i in range(g)],
+            device=device,
+            dtype=torch.int32,
+        )
+        a_1 = torch.randn(total_m_1, k, device=device, dtype=dtype)
+
+        m_per_group_2 = [32, 96, 48, 80]
+        total_m_2 = sum(m_per_group_2)
+        assert total_m_1 == total_m_2, "Total M must match for cache key test"
+        offsets_2 = torch.tensor(
+            [sum(m_per_group_2[: i + 1]) for i in range(g)],
+            device=device,
+            dtype=torch.int32,
+        )
+        a_2 = torch.randn(total_m_2, k, device=device, dtype=dtype)
+
+        expected_1 = grouped_mm(a_1, b, offsets_1)
+        expected_2 = grouped_mm(a_2, b, offsets_2)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            compiled_fn = torch.compile(grouped_mm)
+
+            result_1 = compiled_fn(a_1, b, offsets_1)
+            torch.testing.assert_close(result_1, expected_1)
+
+            result_2 = compiled_fn(a_2, b, offsets_2)
+            torch.testing.assert_close(result_2, expected_2)
+
+            self.assertFalse(torch.allclose(result_1, result_2))
 
 
 class TestNVUniversalGemmHeuristics(TestCase):
@@ -374,7 +486,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 2,
+                "nvgemm_max_profiling_configs": 2,
             }
         ):
             compiled_fn = torch.compile(fn, dynamic=True)
@@ -395,7 +507,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 2,
+                "nvgemm_max_profiling_configs": 2,
             }
         ):
             compiled_fn = torch.compile(matmul, dynamic=True)

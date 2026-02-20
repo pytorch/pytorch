@@ -48,6 +48,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
@@ -97,6 +98,7 @@ register_op_strategy(
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
+        prims.view_of.default,
     ]
 )(propagate_single_input_strategy)
 
@@ -272,39 +274,33 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
     return new_factory_strategy
 
 
-@register_op_strategy(aten.bucketize.Tensor)
-def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
-    """Just propagate input sharding, but expect replicated for boundaries input."""
-    mesh = op_schema.get_mesh_from_args()
-    input_strategy, boundaries_strategy = op_schema.args_schema
-    bucketize_strategy = OpStrategy([])
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    if not isinstance(boundaries_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(boundaries_strategy)}")
-    for arg_strategy in input_strategy.strategies:
-        arg_spec = DTensorSpec(
-            mesh,
-            arg_strategy.output_spec.placements,
-            arg_strategy.output_spec.tensor_meta,
-        )
-        replica_spec = DTensorSpec(
-            mesh,
-            tuple([Replicate()] * mesh.ndim),
-            boundaries_strategy.strategies[0].output_spec.tensor_meta,
-        )
-        bucketize_strategy.strategies.append(
-            OpSpec(
-                output_specs=arg_spec,
-                input_specs=(arg_spec, replica_spec),
-                redistribute_cost=[
-                    generate_redistribute_costs(input_strategy, arg_spec),
-                    generate_redistribute_costs(boundaries_strategy, replica_spec),
-                ],
-            )
-        )
+@register_single_dim_strategy(aten.bucketize.Tensor)
+def bucketize_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Bucketize returns indices into a sorted boundary tensor.
 
-    return bucketize_strategy
+    Three families of strategies:
+    1. Shard the input (and output) on any dim, keep boundaries replicated.
+    2. Shard boundaries on dim 0, replicate input, output is Partial("sum").
+       Each rank counts how many of its local boundary values each input
+       element exceeds; summing across ranks gives the correct global index.
+    3. Partial("max") or Partial("min") input with replicated boundaries.
+       Bucketize is monotonically non-decreasing in its input, so reducing
+       local bucket indices with max (or min) across ranks gives the same
+       result as bucketizing the reduced input values.
+    """
+    input_meta, _boundaries_meta = args_schema
+    assert isinstance(input_meta, TensorMeta)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(len(input_meta.shape)):
+        strategies.append(
+            [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim), Replicate()]
+        )
+    strategies.append([Partial("sum"), Replicate(), _ShardingPlaceholder(0)])
+    for reduce_op in ("max", "min"):
+        strategies.append([Partial(reduce_op), Partial(reduce_op), Replicate()])
+    return strategies
 
 
 @register_op_strategy(aten.select.int, schema_info=RuntimeSchemaInfo(1))
@@ -791,8 +787,9 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     first_input_strategy = input_strategies[0]
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
-    # normalize the dim to be within the common input ndim
-    dim = normalize_dim(dim, common_input_ndim)
+    # normalize the dim to be within the output ndim (input ndim + 1),
+    # since stack inserts a new dimension
+    dim = normalize_dim(dim, common_input_ndim + 1)
 
     mesh = first_input_strategy.mesh
 
@@ -834,8 +831,12 @@ def cat_single_dim_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_list = args_schema[0]
     # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
-    assert isinstance(input_list, tuple), type(input_list)
+    assert isinstance(input_list, (tuple, list)), type(input_list)
     assert all(isinstance(tm, TensorMeta) for tm in input_list)
+
+    if isinstance(input_list, list):
+        input_list = tuple(input_list)
+
     num_inputs = len(input_list)
     ndim_set = {len(meta.shape) for meta in input_list}
     assert len(ndim_set) in (1, 2), (
@@ -850,7 +851,9 @@ def cat_single_dim_strategy(
     for i in range(common_ndim):
         if i != cat_dim:
             single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+    # pyrefly: ignore [bad-argument-type]
     single_dim_strategies.append([Partial("sum")] * (1 + num_inputs))
+    # pyrefly: ignore [bad-return]
     return single_dim_strategies
 
 
@@ -972,51 +975,74 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
 def index_put_single_dim_strategy(
     op: OpOverload, args: ArgsType, kwargs: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    """Single-dim sharding strategy for index_put.
+    """Single-dim sharding strategy for index_put(self, indices, values).
 
     Strategy format: [output, input, *indices, value]
-    Indices are always Replicate.
+
+    How index_put works:
+
+      indices is a tuple of index tensors and Nones:
+      - an index tensor at entry i means self is indexed on dim i.
+      - a None at entry i means all elements along dim i are selected (like :).
+      - any trailing dims (if self.ndim > len(indices)) are also not indexed
+        (i.e. implicit trailing Nones).
+
+      All non-None index tensors are broadcast together to produce a
+      broadcasted indexing shape. Each position in this broadcasted shape
+      serves as an indexing coordinate into self. Each coordinate selects a
+      tensor element, or a slice (if non-indexed dims exist).
+
+      values is a tensor that's broadcastable to (*broadcasted_shape, *non_indexed_dim_sizes).
+      Each position in broadcasted_shape selects a slice of values,
+      and writes it into the corresponding slice of self.
+
+    Sharding rules (possibly conservative and incomplete):
+      - Index tensors: always Replicate (every rank needs all coordinates).
+      - Self cannot be sharded on indexed dims (local position != global position).
+      - Self and values CAN be sharded on non-indexed dims.
+        The exception is broadcasted value dimensions (size 1) - we require Replicate, but can shard self.
+      - Additionally, we allow the full Partial rule on non-indexing tensors.
     """
     self_meta = cast(TensorMeta, args[0])
     indices_meta = cast(tuple[TensorMeta | None, ...], args[1])
     values_meta = cast(TensorMeta, args[2])
 
-    num_indices = sum(1 for idx in indices_meta if idx is not None)
-    replicated_indices: list[Placement] = [Replicate()] * num_indices
-    self_ndim = len(self_meta.shape)
+    # Determine indexed vs non-indexed dims of self.
+    indexed_dims = {i for i, idx in enumerate(indices_meta) if idx is not None}
+    non_indexed_dims = [d for d in range(len(self_meta.shape)) if d not in indexed_dims]
+    n_indexed = len(indexed_dims)
     values_ndim = len(values_meta.shape)
-    size_offset = self_ndim - values_ndim
 
+    # Explicitly compute the broadcast shape of the index tensors.
+    # We could probably derive it in a smarter way, but this is more explicit.
+    index_shapes = [idx.shape for idx in indices_meta if idx is not None]
+    broadcast_ndim = len(torch.broadcast_shapes(*index_shapes)) if index_shapes else 0
+
+    # values shape = (*broadcast_shape, *non_indexed_dim_sizes)
+    # Strategy format: [output, input, *indices, value]
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for values_dim in range(broadcast_ndim, values_ndim):
+        self_dim = non_indexed_dims[values_dim - broadcast_ndim]
+        strategies.append(
+            [
+                _ShardingPlaceholder(self_dim),
+                _ShardingPlaceholder(self_dim),
+                *([Replicate()] * n_indexed),
+                Replicate()
+                if values_meta.shape[values_dim] == 1
+                else _ShardingPlaceholder(values_dim),
+            ]
+        )
 
-    # Shard on non-indexed dims only (indexed dims would cause incorrect updates
-    # since different ranks may have different rows for the same index)
-    for self_dim in range(num_indices, self_ndim):
-        values_dim = self_dim - size_offset
-        if 0 <= values_dim < values_ndim:
-            strategies.append(
-                [
-                    _ShardingPlaceholder(self_dim),  # output
-                    _ShardingPlaceholder(self_dim),  # input
-                    *replicated_indices,  # indices (always Replicate)
-                    _ShardingPlaceholder(values_dim),  # value
-                ]
-            )
-
-    # Partial for input/output/value (indices are always Replicate):
-    # each rank holds a partial sum, and index_put updates on partial sums
-    # still produce correct partial sums after reduction.
+    # full-partial rule on non-indexing tensors
     strategies.append(
         [
-            Partial(),  # output
-            Partial(),  # input
-            *replicated_indices,  # indices (always Replicate)
-            Partial(),  # value
+            Partial(),
+            Partial(),
+            *([Replicate()] * n_indexed),
+            Partial(),
         ]
     )
-
-    # Replicate strategy is automatically inserted by the single_dim_strategy infra.
-
     return strategies
 
 
@@ -1250,3 +1276,28 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+
+@register_op_strategy(aten.eye.m_out)
+def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Strategy for torch.eye with out= parameter.
+    The sharding is determined by the out tensor's placement.
+    """
+    # eye.m_out has signature: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+    # The out kwarg is a DTensor that determines the sharding
+    out_spec = op_schema.kwargs_schema["out"]
+    assert isinstance(out_spec, OpStrategy), (
+        f"Expected OpStrategy for out, got {type(out_spec)}"
+    )
+
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=strategy.output_spec,
+                input_specs=[strategy.output_spec],  # out is both input and output
+                redistribute_cost=[[0.0]],
+            )
+            for strategy in out_spec.strategies
+        ]
+    )

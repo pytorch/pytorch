@@ -721,6 +721,7 @@ def audio(tag, tensor, sample_rate=44100):
         array = array.clip(-1, 1)
     if array.ndim != 1:
         raise AssertionError("input tensor should be 1 dimensional.")
+    # pyrefly: ignore [no-matching-overload]
     array = (array * np.iinfo(np.int16).max).astype("<i2")
 
     import io

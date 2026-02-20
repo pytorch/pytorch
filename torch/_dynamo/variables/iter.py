@@ -114,10 +114,6 @@ class ItertoolsVariable(VariableTracker):
                 )
 
             def retrieve_const_key(key: VariableTracker) -> Any:
-                from ..utils import specialize_symnode
-
-                # Unwrap LazyVariableTracker to get the underlying variable
-                key = specialize_symnode(key)
                 if isinstance(key, variables.SymNodeVariable):
                     return key.evaluate_expr()
                 elif key.is_python_constant():
@@ -269,7 +265,7 @@ class IteratorVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
-            return variables.ConstantVariable.create(True)
+            return variables.CONSTANT_VARIABLE_TRUE
         return super().call_obj_hasattr(tx, name)
 
     def call_method(

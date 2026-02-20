@@ -312,7 +312,12 @@ def _set_compilation_env():
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode_det = detect_fake_mode(inputs)
+    fake_mode_det = None
+    for inp in pytree.tree_leaves(inputs):
+        if isinstance(inp, FakeTensor):
+            fake_mode_det = inp.fake_mode
+            break
+
     fake_mode: AbstractContextManager = nullcontext()
     tracing_mode = "fake"
     if fake_mode_det is not None:
@@ -514,6 +519,7 @@ def _from_fun(t):
                 # which could be either FunctionalTensorWrapper or FunctionalTensor
                 torch._sync(t)
                 maybe_unfunc_t = torch._from_functional_tensor(t)
+            # pyrefly: ignore[missing-attribute]
             return maybe_unfunc_t.clone()
     return t
 
@@ -598,14 +604,20 @@ def unmask_none_gradients(grads, operands):
 
 
 def _maybe_fake_prop_ignore_unbacked(fn, args):
-    with ExitStack() as ctx_stack:
-        if (fake_mode := detect_fake_mode(args)) is not None:
-            ctx_stack.enter_context(fake_mode)
-            if fake_mode.shape_env is not None:
-                ctx_stack.enter_context(
-                    fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                )
-        return fn(*args)
+    with suspend_functionalization(), disable_functional_mode():
+        with disable_proxy_modes_tracing():
+            unfunc_args = [_from_fun(arg) for arg in args]
+        with ExitStack() as ctx_stack:
+            ctx_stack.enter_context(
+                torch.utils._python_dispatch._disable_current_modes()
+            )
+            if (fake_mode := detect_fake_mode(unfunc_args)) is not None:
+                ctx_stack.enter_context(fake_mode)
+                if fake_mode.shape_env is not None:
+                    ctx_stack.enter_context(
+                        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                    )
+            return fn(*unfunc_args)
 
 
 def redirect_to_mode(hop: OperatorBase, mode):
@@ -1223,25 +1235,31 @@ def materialize_as_graph(
 
     @torch._dynamo.disable(recursive=True, reason=None)
     def _materialize_as_graph_inner():
+        from torch._guards import active_fake_mode
+        from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
         with suspend_functionalization(), disable_functional_mode():
-            with disable_proxy_modes_tracing():
-                unfunc_t = [_from_fun(arg) for arg in args]
+            fake_mode = None
+            if _CURRENT_MAKE_FX_TRACER is not None:
+                fake_mode = _CURRENT_MAKE_FX_TRACER.fake_tensor_mode
+            if fake_mode is None:
+                fake_mode = active_fake_mode()
 
             with contextlib.ExitStack() as stack:
                 stack.enter_context(
                     torch.utils._python_dispatch._disable_current_modes()
                 )
+                if fake_mode is not None:
+                    stack.enter_context(fake_mode)
+
+                with disable_proxy_modes_tracing():
+                    unfunc_t = [_from_fun(arg) for arg in args]
+
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
                 )
                 if force_enable_grad:
                     stack.enter_context(torch.enable_grad())
-                # fake_mode is needed because parent tracer's fake_mode might
-                # be None but the associated inputs have fake mode or there
-                # is a global tracing context with fake mode. We nneed to
-                # make sure the fake mode when tracing subgraph is consistent.
-                if fake_mode := detect_fake_mode(unfunc_t):
-                    stack.enter_context(fake_mode)
                 return _maybe_reenter_make_fx(
                     fn, subgraph_decomp_table=subgraph_decomp_table
                 )(*unfunc_t)
