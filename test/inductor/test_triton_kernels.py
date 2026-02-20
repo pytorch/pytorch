@@ -202,13 +202,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_triton_kernel_functionalize(self):
-        from functorch import make_fx
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
             FunctionalTensorMode,
             PythonFunctionalizeAPI,
         )
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         kernel_side_table.reset_table()
 
@@ -326,10 +326,11 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     def test_triton_kernel_clone_wekdeps(self):
-        from functorch import make_fx
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._inductor.choices import InductorChoices
         from torch._inductor.compile_fx import compile_fx_inner
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         TENSOR_SIZE = 30_000_000
         BLOCK_SIZE = 1024
@@ -392,7 +393,7 @@ def forward(self, x_1, output_1):
 
         gm = make_fx(f, tracing_mode="fake")(t)
 
-        with inductor_config.patch({"inductor_choices_class": NoFusionChoices}):
+        with V.set_choices_handler(NoFusionChoices()):
             log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
             with ctx():
                 compiled_gm = compile_fx_inner(gm, [t])
@@ -1034,7 +1035,7 @@ def forward(self, x_1, output_1):
             functools.partial(call_triton_add, grid_type=2, num=200, autotuned=True),
             functools.partial(call_triton_add, grid_type=3, autotuned=True),
         ]
-        from functorch import make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         tracing_mode = "symbolic" if dynamic else "fake"
 
@@ -4190,7 +4191,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         result = f(x, x)
         self.assertEqual(result, x + x)
 
-        from functorch import make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
