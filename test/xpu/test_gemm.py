@@ -175,6 +175,12 @@ class TestBasicGEMM(TestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
+        # Test inplace versions if they exist.
+        if hasattr(t, f.__name__ + "_"):
+            out_tensor = torch.broadcast_to(t, res1.shape).clone()
+            getattr(out_tensor, f.__name__ + "_")(m, v, alpha=alpha, beta=beta)
+            self.assertEqual(res1, out_tensor)
+
     def _test_addmm_impl(self, func, activation, device, dtype):
         M = torch.randn(10, 25, device="cpu", dtype=torch.float32).to(dtype).to(device)
         m1 = torch.randn(10, 50, device="cpu", dtype=torch.float32).to(dtype).to(device)
