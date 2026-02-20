@@ -228,8 +228,10 @@ __device__ __forceinline__ void fastAtomicAdd(
 // This function implements a committed store.
 // Upon returning, the store is committed to global memory.
 // This is useful in avoiding the need for fences.
+// If mutiple stores are done in a row there is option to skip the hardware wait
+// and leave the only last store to do the hardware wait
 template <typename T>
-__device__ inline void cmtdStore(void* address, T value) {
+__device__ inline void cmtdStore(void* address, T value, bool fence = true) {
       int constexpr num_long_per_val = sizeof(value)/sizeof(long);
       int constexpr num_int_per_val = sizeof(value)/sizeof(int);
       int constexpr num_short_per_val = sizeof(value)/sizeof(short);
@@ -252,6 +254,8 @@ __device__ inline void cmtdStore(void* address, T value) {
       else if constexpr (num_char_per_val*sizeof(char) == sizeof(value))
         for (int i=0; i<num_char_per_val; i++)
           __hip_atomic_store(reinterpret_cast<char *>(address)+i, _pnr.c[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      if(!fence) // skip harware wait, useful if mutiple stores are done in a row
+        return;
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #ifdef __gfx1250__
       asm volatile("s_wait_loadcnt(0)" ::: "memory");
