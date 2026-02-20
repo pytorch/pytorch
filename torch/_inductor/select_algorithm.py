@@ -419,6 +419,7 @@ class TritonTemplateKernel(TritonKernel):
         prologue_loads_all_inputs=False,
         hint_override: Optional[int] = None,
         triton_meta: Optional[dict[str, object]] = None,
+        always_freeze_layout: bool = False,
     ) -> None:
         if tma_store:
             pass
@@ -540,6 +541,11 @@ class TritonTemplateKernel(TritonKernel):
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
+
+        # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
+        # always freeze the layout immediately, bypassing layout constraints.
+        # This is used by FlexAttention templates which require frozen layouts.
+        self.always_freeze_layout = always_freeze_layout
 
         # Extra functions to be exposed during partial template rendering.
         self.extra_template_env_fns: list[Callable[..., Any]] = []
@@ -1581,11 +1587,9 @@ class TritonTemplateKernel(TritonKernel):
         node_name = node.get_name()
 
         if isinstance(layout, ir.FlexibleLayout):
-            if (
-                not use_aten_gemm_kernels()
-                or not config.max_autotune_defer_layout_freezing
-            ):
-                # No ExternKernel fallback available, freeze immediately
+            if not use_aten_gemm_kernels() or self.always_freeze_layout:
+                # No ExternKernel fallback available, or always_freeze_layout is set
+                # (e.g., for FlexAttention templates), freeze immediately
                 node.data.freeze_layout()
             else:
                 # Compute what strides WOULD be if frozen, without actually freezing
@@ -1771,6 +1775,7 @@ class TritonTemplate(KernelTemplate):
         debug=False,
         cache_codegen_enabled_for_template=False,
         prologue_loads_all_inputs=False,
+        always_freeze_layout: bool = False,
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
@@ -1784,6 +1789,10 @@ class TritonTemplate(KernelTemplate):
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
+        # When always_freeze_layout is True, the kernel will always freeze layouts
+        # immediately instead of using layout constraints. This is used by
+        # FlexAttention templates which require frozen layouts.
+        self.always_freeze_layout = always_freeze_layout
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -1905,6 +1914,7 @@ class TritonTemplate(KernelTemplate):
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
             "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
+            "always_freeze_layout": self.always_freeze_layout,
         }
 
         if HAS_WARP_SPEC:
