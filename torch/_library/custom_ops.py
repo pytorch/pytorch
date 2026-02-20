@@ -90,6 +90,21 @@ def custom_op(
             have a specific reason not to.
             Example: "(Tensor x, int y) -> (Tensor, Tensor)".
 
+    The following types are supported for the wrapped function's input parameters:
+
+        ``torch.Tensor``, ``int``, ``float``, ``bool``, ``str``,
+        ``torch.types.Number``, ``torch.dtype``, ``torch.device``,
+        and ``Optional`` variants of all the above.
+        ``Sequence`` variants are supported for ``torch.Tensor``, ``int``,
+        ``float``, ``bool``, and ``torch.types.Number``.
+        Types registered via :func:`torch.library.register_opaque_type` are
+        also supported.
+
+    The following types are supported for the return value:
+
+        ``torch.Tensor``, ``list[torch.Tensor]``, ``int``, ``float``,
+        ``bool``, ``torch.types.Number``.
+
     .. note::
         We recommend not passing in a ``schema`` arg and instead letting us infer
         it from the type annotations. It is error-prone to write your own schema.
