@@ -1,5 +1,6 @@
 #pragma once
 
+#if !defined(USE_ROCM)
 #if USE_NCCL
 
 #include <nccl.h>
@@ -18,3 +19,4 @@
 #define NCCL_HAS_ONE_SIDED_API
 #endif
 #endif // USE_NCCL
+#endif // USE_ROCM
