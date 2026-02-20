@@ -92,7 +92,6 @@ LLM_UNARY_OP_NAMES = {
 LLM_BINARY_OP_NAMES = {
     "sub",
     "mul",
-    "div",
     "remainder",
     "fmod",
     "maximum",
@@ -370,7 +369,6 @@ EAGER_EQUIV_XFAILS = {
         "matmul": {fp32},
     },
     "inductor_default": {
-        "div": {fp32},
         "reciprocal": {fp32},
         "sigmoid": {fp32},
         "nn.functional.gelu": {fp32},
@@ -428,7 +426,6 @@ UNARY_NUMERICAL_XFAILS = {
 
 BINARY_NUMERICAL_XFAILS = {
     "inductor_default": {
-        "div": {fp16, fp32},
         "fmod": {bf16, fp32},
         "remainder": {ALL},
     },
