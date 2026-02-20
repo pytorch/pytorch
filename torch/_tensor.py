@@ -271,6 +271,14 @@ class Tensor(torch._C.TensorBase):
             memo[id(self)] = new_tensor
             return new_tensor
 
+    def to(self, *args, **kwargs):
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.to, (self,), self, *args, **kwargs)
+        result = super().to(*args, **kwargs)
+        if result is not self and self.__dict__:
+            torch._dynamo.utils.copy_dynamo_tensor_attributes(self, result)
+        return result
+
     def __reduce_ex__(self, proto):
         materialize_fake_tensors = (
             torch.serialization._serialization_tls.materialize_fake_tensors
