@@ -33,6 +33,7 @@ from torch.distributed.checkpoint.metadata import (
     MetadataIndex,
     TensorProperties,
     TensorStorageMetadata,
+    _MEM_FORMAT_ENCODING,
 )
 from torch.distributed.checkpoint.planner import (
     LoadItemType,
@@ -93,6 +94,58 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     return ShardedTensor._init_from_local_shards_and_global_metadata(
         local_shards=local_shards, sharded_tensor_metadata=sharded_tensor_md
     )
+
+
+class TestTensorPropertiesStrides(TestCase):
+    def test_create_from_tensor_populates_strides(self):
+        tensor = torch.rand(4, 8) # shape [4, 8], strides (8, 1)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (8, 1))
+
+    def test_create_from_tensor_non_contiguous_strides(self):
+        tensor = torch.rand(5, 10).t()  # shape [10, 5], strides (1, 10)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (1, 10))
+
+    def test_create_from_tensor_transposed_strides(self):
+        tensor = torch.rand(2, 1).t()  # shape [1, 2], strides (1, 1)
+        self.assertEqual(tensor.shape, (1, 2))
+        self.assertEqual(tensor.stride(), (1, 1))
+
+        props = TensorProperties.create_from_tensor(tensor)
+        # Test that even though (2, 1) is a valid stride,
+        # but we still retain the original strides (1, 1)
+        self.assertEqual(props.strides, tensor.stride())
+        self.assertNotEqual(props.strides, (2, 1))
+
+    def test_strides_default_none(self):
+        props = TensorProperties(dtype=torch.float32)
+        self.assertIsNone(props.strides)
+
+    def test_getstate_setstate_roundtrip_with_strides(self):
+        props = TensorProperties.create_from_tensor(torch.rand(3, 4))
+        state = props.__getstate__()
+        self.assertEqual(len(state), 6)
+
+        restored = TensorProperties.__new__(TensorProperties)
+        restored.__setstate__(state)
+        self.assertEqual(restored.strides, (4, 1))
+        self.assertEqual(restored.dtype, props.dtype)
+
+    def test_setstate_backward_compat_without_strides(self):
+        # Old checkpoints have 5-element state tuples (no strides field).
+        old_state = (
+            torch.float32,
+            torch.strided,
+            False,
+            _MEM_FORMAT_ENCODING.TORCH_CONTIGUOUS_FORMAT,
+            False,
+        )
+        restored = TensorProperties.__new__(TensorProperties)
+        restored.__setstate__(old_state)
+        self.assertIsNone(restored.strides)
+        self.assertEqual(restored.dtype, torch.float32)
+        self.assertEqual(restored.memory_format, torch.contiguous_format)
 
 
 class TestSavePlan(TestCase):

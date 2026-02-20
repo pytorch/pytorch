@@ -97,8 +97,9 @@ class ShardedTensorBase(torch.Tensor):
         if dtype is None:
             dtype = torch.get_default_dtype()
 
+        strides = kwargs.get("strides", None)
         tensor_properties = TensorProperties(
-            dtype, layout, requires_grad, pin_memory=pin_memory
+            dtype, layout, requires_grad, pin_memory=pin_memory, strides=strides
         )
         sharded_tensor_metadata = sharding_spec.build_metadata(
             sizes, tensor_properties=tensor_properties
@@ -171,6 +172,7 @@ class ShardedTensorBase(torch.Tensor):
             layout=tensor_properties.layout,
             pin_memory=tensor_properties.pin_memory,
             requires_grad=tensor_properties.requires_grad,
+            strides=tensor_properties.strides,
         )
 
         # check if shards_metadata have overlap shards
@@ -990,6 +992,7 @@ class ShardedTensor(ShardedTensorBase):
             layout=tensor_properties.layout,
             pin_memory=tensor_properties.pin_memory,
             requires_grad=tensor_properties.requires_grad,
+            strides=tensor_properties.strides,
         )
 
         def _raise_if_mismatch(expected, actual, prop_name, rank, is_property=False):

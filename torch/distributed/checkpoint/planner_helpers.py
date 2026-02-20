@@ -165,6 +165,7 @@ def _sharded_tensor_metadata(
         requires_grad=shard_properties.requires_grad,
         memory_format=shard_properties.memory_format,
         pin_memory=shard_properties.pin_memory,
+        strides=shard_properties.strides,
     )
 
     return TensorWriteData(
