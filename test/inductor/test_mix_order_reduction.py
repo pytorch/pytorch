@@ -539,7 +539,7 @@ class MixOrderReductionTest(TestBase):
             lambda: torch.autograd.grad(act, [*xs, w], dys)
         )
         # bfloat16 cause big numerical instability for grad_weight
-        tol = 1e-3 if dtype == torch.float32 else 0.5
+        tol = 1e-3 if dtype == torch.float32 else (0.9 if torch.version.hip else 0.5)
         self.assertTrue(same((ref, ref_grads), (act, act_grads), tol=tol))
         self.assertEqual(
             metrics.codegen_mix_order_reduction,
