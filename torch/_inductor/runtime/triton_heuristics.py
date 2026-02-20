@@ -4111,18 +4111,11 @@ class GridExpr:
         kernel_name: str,
     ) -> GridExpr:
         """Factory method for lazy compile mode."""
-        grid_type = inductor_meta.get("grid_type") if inductor_meta else None
-        if grid_type is None:
-            # User-defined kernel: use extra_launcher_args or dummy values
-            grid = cls(inductor_meta=inductor_meta or {}, mode="cpp")
-            extra_args = (
-                inductor_meta.get("extra_launcher_args", []) if inductor_meta else []
-            )
-
-            grid.x_grid = extra_args[0] if len(extra_args) >= 1 else 1
-            grid.y_grid = extra_args[1] if len(extra_args) >= 2 else 1
-            grid.z_grid = extra_args[2] if len(extra_args) >= 3 else 1
-            return grid
+        assert inductor_meta is not None, (
+            "inductor_meta must be specified for lazy compile"
+        )
+        grid_type = inductor_meta.get("grid_type", None)
+        assert grid_type is not None, "grid_type must be specified for lazy compile"
         grid_cls = globals()[grid_type]
         assert issubclass(grid_cls, GridExpr)
         grid = grid_cls(inductor_meta=inductor_meta, mode="cpp")

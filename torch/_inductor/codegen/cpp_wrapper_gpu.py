@@ -405,8 +405,7 @@ class DeferredTritonCallWrapper:
         if num_wrapper_args != len(wrapper_arg_names):
             raise AssertionError(
                 f"Mismatch between ({num_wrapper_args}) arg_types and "
-                f"{len(wrapper_arg_names)} signature params: "
-                f"arg_types={self.arg_types}, signature={signature}"
+                f"{len(wrapper_arg_names)} wrapper_arg_names for {self.kernel_name}."
             )
 
         # Append grid args: passed to wrapper. Kernel args will handle grids separately.
