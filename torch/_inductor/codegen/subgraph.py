@@ -8,6 +8,11 @@ import sympy
 import torch
 import torch._inductor.config as config
 from torch._inductor import ir
+from torch._inductor.autotune_process import (
+    SubgraphCPUBenchmarkRequest,
+    SubgraphGPUBenchmarkRequest,
+    TensorMeta,
+)
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
     Buffer,
@@ -91,8 +96,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         # Cached decomposition info for range-based dispatch (set via cache_decomposition)
         self.decomposition: Callable[..., Any] | None = None
         self.decomposition_kwargs: dict[str, Any] = {}
-        # Cache compiled module to avoid recompiling on every benchmark call
-        self._compiled_module: Any = None
+
+        # Pre-compile and create benchmark request for async autotuning
+        # Must happen in __init__ because compilation requires virtualized context (V.graph, V.debug)
+        with V.fake_mode:
+            self._compiled_module = self._compile_for_benchmarking()
+            self.bmreq = self._create_benchmark_request()
 
     def _compute_sym_input_values(self) -> list[int]:
         """Extract concrete dimension values for sym_inputs from example_inputs.
@@ -162,15 +171,35 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
+                benchmark_fusion=False,
             ):
                 bm_graph_lowering.run(*self.example_inputs)
                 return bm_graph_lowering.compile_to_module()
 
-    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        """Regular benchmarking: compile and use benchmarker with warmup/rep."""
-        if self._compiled_module is None:
-            self._compiled_module = self._compile_for_benchmarking()
+    def _create_benchmark_request(
+        self,
+    ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
+        """Create a benchmark request for async autotuning."""
+        input_tensor_meta = TensorMeta.from_irnodes(self.input_nodes)
+        output_tensor_meta = TensorMeta.from_irnodes(self.layout)
 
+        if self.layout.device.type == "cpu":
+            bmreq_cls = SubgraphCPUBenchmarkRequest
+        else:
+            bmreq_cls = SubgraphGPUBenchmarkRequest
+
+        return bmreq_cls(
+            kernel_name=self.name,
+            input_tensor_meta=input_tensor_meta,
+            output_tensor_meta=output_tensor_meta,
+            extra_args=tuple(),
+            module_path=self._compiled_module.__file__,
+            module_cache_key=self._compiled_module.key,
+            sym_input_values=self.sym_input_values,
+        )
+
+    def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
+        """Regular benchmarking: use pre-compiled module with benchmarker."""
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
         if config.profile_bandwidth_with_do_bench_using_profiling:
@@ -183,9 +212,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
     def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
         """Run once for collective benchmarking (barrier sync handled by caller)."""
-        if self._compiled_module is None:
-            self._compiled_module = self._compile_for_benchmarking()
-
         self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
