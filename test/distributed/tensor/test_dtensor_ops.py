@@ -214,6 +214,7 @@ dtensor_fails = {
     xfail("unbind"),
     xfail("uniform"),
     xfail("unflatten"),
+    xfail("unsafe_chunk"),
     xfail("_unsafe_masked_index"),
     xfail("_unsafe_masked_index_put_accumulate"),
     xfail("view"),
@@ -272,6 +273,95 @@ dtensor_multi_threaded_fails = {
     xfail("nn.functional.huber_loss"),
     xfail("masked.cumprod"),
     skip("nn.functional.multi_head_attention_forward"),
+}
+
+# Ops that fail to compile with DTensor + torch.compile(fullgraph=True).
+# These are compile-time failures, NOT numeric correctness issues.
+dtensor_compiled_fails = {
+    # Data-dependent outputs (unbacked shapes) from DTensor's argminmax_handler.
+    xfail("argmax"),
+    xfail("argmin"),
+    # Sharding propagation failures for expand-like ops with sharded inputs
+    # where the local tensor size doesn't match the expand target.
+    xfail("broadcast_to"),
+    xfail("expand"),
+    xfail("expand_as"),
+    # Data-dependent outputs (unbacked shapes) from DTensor's max/min
+    # reduction_with_dim handler.
+    xfail("max", "reduction_with_dim"),
+    xfail("min", "reduction_with_dim"),
+    # Decompositions that use plain tensor constructors (e.g. arange),
+    # causing mixed tensor/DTensor errors during Dynamo's fake prop.
+    xfail("corrcoef"),
+    xfail("cov"),
+    xfail("nn.functional.interpolate", "bicubic"),
+    xfail("nn.functional.interpolate", "bilinear"),
+    xfail("nn.functional.interpolate", "linear"),
+    xfail("nn.functional.interpolate", "trilinear"),
+    xfail("nn.functional.upsample_bilinear"),
+    # Data-dependent outputs (SymBool, unbacked shapes) that raise
+    # during DTensor's fake prop.
+    xfail("equal"),
+    xfail("hash_tensor"),
+    xfail("item"),
+    xfail("narrow"),
+    xfail("nonzero_static"),
+    # Decompositions with .is_cuda checks that fail during sharding
+    # propagation for aten.is_cuda / prim::device.
+    xfail("nn.functional.binary_cross_entropy"),
+    xfail("nn.functional.binary_cross_entropy_with_logits"),
+    xfail("nn.functional.gaussian_nll_loss"),
+    xfail("nn.functional.logsigmoid"),
+    # Miscellaneous runtime crashes (e.g. index out of bounds).
+    xfail("gather"),
+    xfail("index_select"),
+    xfail("scatter"),
+    xfail("scatter_add"),
+    # False positives: these have no sharding strategy and their
+    # eager DTensor failure is registered elsewhere.
+    xfail("masked.argmax"),
+    xfail("masked.argmin"),
+    xfail("nn.functional.margin_ranking_loss"),
+    xfail("nn.functional.multilabel_soft_margin_loss"),
+}
+
+# Ops that compile successfully but fail numeric checks in eager DTensor tests.
+# These are excluded from TestCompiledDTensorOps skip list since we don't check numerics.
+dtensor_numeric_only_fails = {
+    xfail("arange"),
+    xfail("broadcast_shapes"),
+    xfail("eye"),
+    xfail("full"),
+    xfail("full_like"),
+    xfail("linspace"),
+    xfail("logspace"),
+    xfail("narrow_copy"),
+    xfail("nn.functional.glu"),
+    xfail("nn.functional.hardshrink"),
+    xfail("nn.functional.huber_loss"),
+    xfail("nn.functional.smooth_l1_loss"),
+    xfail("nn.functional.softshrink"),
+    xfail("ones"),
+    xfail("randint"),
+    xfail("randn"),
+    xfail("scalar_tensor"),
+    xfail("signal.windows.bartlett"),
+    xfail("signal.windows.blackman"),
+    xfail("signal.windows.cosine"),
+    xfail("signal.windows.exponential"),
+    xfail("signal.windows.gaussian"),
+    xfail("signal.windows.general_cosine"),
+    xfail("signal.windows.general_hamming"),
+    xfail("signal.windows.hamming"),
+    xfail("signal.windows.hann"),
+    xfail("signal.windows.kaiser"),
+    xfail("signal.windows.nuttall"),
+    xfail("sparse.mm", "reduce"),
+    xfail("sparse.sampled_addmm"),
+    xfail("squeeze_copy"),
+    xfail("stack"),
+    xfail("unsafe_chunk"),
+    xfail("zeros"),
 }
 
 # Ops in dtensor_fails that have no sharding strategy (NotImplementedError).
@@ -464,7 +554,6 @@ dtensor_fails_no_strategy = {
     xfail("unfold_copy"),
     xfail("unique"),
     xfail("unique_consecutive"),
-    xfail("unsafe_chunk"),
     xfail("unsafe_split"),
     xfail("var_mean"),
     xfail("var_mean", "unbiased"),
@@ -1204,6 +1293,71 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             )
 
 
+class TestCompiledDTensorOps(TestDTensorOps):
+    """
+    Test DTensor ops compile successfully with aot_eager backend.
+    Uses fake PG for speed - focuses on compilation, not output correctness.
+    """
+
+    _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestCompiledDTensorOps")
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.distributed.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
+        torch._dynamo.reset()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+
+    def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
+        # Skip output comparison - we only care that compilation succeeds
+        pass
+
+    def run_dtensor_crossref(self, func, args, kwargs):
+        """
+        Override to compile with aot_eager and verify compilation succeeds.
+        Does not check output correctness.
+        """
+        to_dtensor = DTensorConverter(self.mesh, args, kwargs)
+
+        for dtensor_args, dtensor_kwargs in to_dtensor:
+            if not to_dtensor.successful():
+                continue
+
+            torch._dynamo.reset()
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def compiled_func(*a, **kw):
+                return func(*a, **kw)
+
+            # Just run - if it compiles and runs without error, we pass
+            compiled_func(*dtensor_args, **dtensor_kwargs)
+
+    @suppress_warnings
+    @ops(_op_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        _op_db,
+        "TestCompiledDTensorOps",
+        "test_compiled_dtensor_op_db",
+        (
+            dtensor_fails
+            | dtensor_fails_no_strategy
+            | dtensor_multi_threaded_fails
+            | dtensor_compiled_fails
+        )
+        - dtensor_numeric_only_fails,
+    )
+    def test_compiled_dtensor_op_db(self, dtype, op):
+        self.run_opinfo_test(dtype, op, requires_grad=False)
+
+
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
 instantiate_device_type_tests(
     TestMultiThreadedDTensorOps, globals(), only_for=(DEVICE_TYPE,)
@@ -1217,6 +1371,10 @@ instantiate_device_type_tests(
 
 instantiate_device_type_tests(
     TestSingleDimStrategies, globals(), only_for=(DEVICE_TYPE,)
+)
+
+instantiate_device_type_tests(
+    TestCompiledDTensorOps, globals(), only_for=(DEVICE_TYPE,)
 )
 
 if __name__ == "__main__":
