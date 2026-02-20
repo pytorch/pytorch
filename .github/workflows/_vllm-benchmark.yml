@@ -130,7 +130,7 @@ jobs:
         with:
           repository: pytorch/pytorch-integration-testing
           path: pytorch/pytorch-integration-testing
-          ref: strict-check_benchmark_results
+          ref: main
 
       - name: Check if the device is supported
         run: |
