@@ -11,6 +11,7 @@ from torch._dynamo.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    xfailIf,
 )
 
 
@@ -190,7 +191,7 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             else:
                 self.assertIn(einops_method, output)
 
-    @unittest.expectedFailure
+    @xfailIf(einops_version == "0.8.2")
     @parametrize(
         "method",
         ["reduce", "repeat", "pack", "unpack", "einsum", "rearrange"],
