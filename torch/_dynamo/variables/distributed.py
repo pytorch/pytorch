@@ -32,7 +32,6 @@ from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from .base import VariableTracker
-from .constant import EnumVariable
 
 
 if TYPE_CHECKING:
@@ -142,7 +141,7 @@ class WorldMetaClassVariable(DistributedVariable):
             assert self.source
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return EnumVariable(self.value.NON_GROUP_MEMBER)
+            return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
 
 
