@@ -303,6 +303,7 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
         partition_fn=None,
         decompositions={},
         inference_compiler=None,
+        context=None,
         num_params_buffers=input.num_params_buffers,
         aot_id=input.aot_id,
         keep_inference_input_mutations=input.keep_inference_input_mutations,
