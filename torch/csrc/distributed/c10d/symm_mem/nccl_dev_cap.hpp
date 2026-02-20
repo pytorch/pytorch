@@ -2,7 +2,7 @@
 
 #if USE_NCCL
 
-#include <rccl/rccl.h>
+#include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
