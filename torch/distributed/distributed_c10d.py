@@ -143,7 +143,7 @@ _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
 
 try:
-    # pyrefly: ignore [import-error, missing-import]
+    # pyrefly: ignore [missing-import]
     from torchcomms._comms import _BackendWrapper, new_comm
 
     _TORCHCOMM_AVAILABLE = True
@@ -2060,7 +2060,6 @@ def _new_process_group_helper(
             # Keep a reference so the comm outlives this function scope.
             _world.comms.append(comm)
             group_name = GroupName(group_name)
-            # pyrefly: ignore [bad-assignment]
             backend_class = _BackendWrapper(comm)
             backend_type = ProcessGroup.BackendType.CUSTOM
         elif backend_str == Backend.MPI:
@@ -5010,19 +5009,16 @@ def barrier(
     if isinstance(device_ids, list):
         opts.device_ids = device_ids
         # use only the first device id
-        # pyrefly: ignore [read-only]
         opts.device = torch.device(device.type, device_ids[0])
     elif getattr(group, "bound_device_id", None) is not None:
         # Use device id from `init_process_group(device_id=...)`
         opts.device = group.bound_device_id  # type: ignore[assignment]
     elif device.type == "cpu" or _get_object_coll_device(group) == "cpu":
-        # pyrefly: ignore [read-only]
         opts.device = torch.device("cpu")
     else:
         # Use the current device set by the user. If user did not set any, this
         # may use default device 0, causing issues like hang or all processes
         # creating context on device 0.
-        # pyrefly: ignore [read-only]
         opts.device = device
         if group.rank() == 0:
             warnings.warn(  # warn only once
