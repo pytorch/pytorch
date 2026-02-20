@@ -5,7 +5,6 @@ from pathlib import Path
 from tempfile import mktemp
 
 import click
-
 import spin
 
 
