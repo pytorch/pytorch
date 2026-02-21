@@ -625,11 +625,11 @@ def run_test(
         if not options.enable_timeout
         else THRESHOLD * 6
         if IS_SLOW
-        else THRESHOLD * 6
+        else THRESHOLD * 3
         if should_retry
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
-        else THRESHOLD * 6
+        else THRESHOLD * 3
         if is_cpp_test
         else None
     )
