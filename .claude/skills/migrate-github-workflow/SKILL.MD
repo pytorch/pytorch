@@ -233,6 +233,19 @@ Key patterns from the lint migration:
 
 ## Tips for Success
 
+- **Change summary comment:** Always add a comment block at the top of
+  the migrated workflow file listing all changes made. Example:
+  ```yaml
+  # Migration to ARC runners:
+  # - Runner: linux.4xlarge → c.a.linux.c7i.4xlarge
+  # - Container: quay.io/pypa/manylinux_2_34_x86_64
+  # - Replaced setup-linux with direct setup-uv (upstream action has old EC2 logic)
+  # - Replaced pip install with uv pip install
+  # - Added OIDC AWS credentials (no EC2 instance profile on ARC)
+  # - Installed awscli early (was pre-installed on EC2)
+  # - Added dnf install unzip (not on manylinux by default)
+  # - Removed teardown-linux
+  ```
 - **Commit strategy:** When migrating a top-level workflow and its
   reusable workflows together, prefer separate commits for each file
 - **TBD runners:** If a runner maps to TBD, leave a `<TBD>` placeholder
