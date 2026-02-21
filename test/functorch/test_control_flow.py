@@ -842,6 +842,51 @@ def forward(self, pred_1, x_1):
             x = torch.randn(4)
             self.assertEqual(optimized(idx, x), model(idx, x))
 
+    def test_switch_vmap_non_batched_index(self):
+        branches = (
+            lambda x: x + 1.0,
+            lambda x: x * 2.0,
+            lambda x: x * x,
+        )
+
+        def fn(x):
+            return torch.switch(torch.tensor([-1]), branches, (x,))
+
+        a = torch.arange(15.0).reshape(3, 5)
+        result = torch.vmap(fn)(a)
+        self.assertEqual(result, a + 1.0)
+
+    def test_switch_vmap_batched_index(self):
+        branches = (
+            lambda x: x + 1.0,
+            lambda x: x * 2.0,
+            lambda x: x * x,
+        )
+
+        def fn(idx, x):
+            return torch.switch(idx, branches, (x,))
+
+        indices = torch.tensor([[-1], [0], [1], [2]])
+        a = torch.tensor([[1., 2., 3.], [1., 2., 3.], [4., 5., 6.], [7., 8., 9.]])
+        result = torch.vmap(fn)(indices, a)
+        expected = torch.tensor([[2., 3., 4.], [2., 3., 4.], [8., 10., 12.], [49., 64., 81.]])
+        self.assertEqual(result, expected)
+
+    def test_cond_vmap_batched_pred(self):
+        def fn(pred, x):
+            return torch.cond(
+                pred,
+                lambda x: x + 1.0,
+                lambda x: x * 2.0,
+                (x,),
+            )
+
+        preds = torch.tensor([[True], [False], [True]])
+        a = torch.tensor([[1., 2., 3.], [4., 5., 6.], [7., 8., 9.]])
+        result = torch.vmap(fn)(preds, a)
+        expected = torch.tensor([[2., 3., 4.], [8., 10., 12.], [8., 9., 10.]])
+        self.assertEqual(result, expected)
+
     def test_cond_autograd_complex(self):
         def true_fn(x):
             return torch.abs((x**2).sin())

@@ -165,7 +165,6 @@ def switch(
     from torch._higher_order_ops.utils import setup_compilation_env
 
     with setup_compilation_env() as backend:
-        # NOTE: torch.compile probably doesn't work for switch
         return torch.compile(_switch_op_wrapper, backend=backend, fullgraph=True)(
             index, branches, operands
         )
@@ -379,6 +378,7 @@ def switch_batch_rule(interpreter, index, branches, inputs):
     index_is_batched = isinstance(index, torch.Tensor) and is_batchedtensor(index)
     index_ = get_unwrapped(index) if index_is_batched else index
 
+    # unbatched tensors are not vmapped
     tensors, in_dims = zip(
         *[
             (get_unwrapped(t), maybe_get_bdim(t)) if is_batchedtensor(t) else (t, None)
@@ -387,12 +387,15 @@ def switch_batch_rule(interpreter, index, branches, inputs):
     )
 
     if index_is_batched:
+        # prepend "index" and vmap everything
         tensors = (index_,) + tensors
         in_dims = (0,) + in_dims
 
         def fn(idx, *args):
-            branch_outs = [branch(*args)[0] for branch in branches]
-            return torch.index_select(torch.stack(branch_outs), 0, idx)
+            branch_outs = torch.stack(
+                tuple(branch(*args)[0] for branch in branches)
+            )
+            return branch_outs[torch.clamp(idx, 0, len(branches)).squeeze()]
 
         with interpreter.lower():
             result = torch.vmap(fn, in_dims=in_dims)(*tensors)
