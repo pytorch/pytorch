@@ -486,8 +486,8 @@ def foreach_map_fn(*args: Any) -> Any:
 
 def foreach_lerp_inplace(
     self,
-    end: list[torch.Tensor] | tuple[torch.Tensor, ...] | None,
-    weight: Sequence[bool | complex | float | int],
+    end: list[torch.Tensor] | tuple[torch.Tensor, ...],
+    weight: float | int | torch.Tensor,
 ) -> None:
     # Decompose lerp via addcmul_ for FMA.  Uses the same dual-formula
     # approach as CUDA's native lerp to get bitwise identical results:
