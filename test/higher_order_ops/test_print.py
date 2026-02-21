@@ -1,5 +1,6 @@
 # Owner(s): ["module: higher order operators"]
 import io
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -8,8 +9,12 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
 
 
-if torch.distributed.available():
+if torch.distributed.is_available():
     from torch.distributed.tensor import DTensor, Replicate, Shard
+    from torch.testing._internal.distributed._tensor.common_dtensor import (
+        DTensorTestBase,
+        with_comms,
+    )
 
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -19,10 +24,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TestCase,
-)
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    with_comms,
 )
 
 
@@ -681,7 +682,12 @@ def forward(self, arg1_1):
         )
 
 
-class TestHopPrintDTensor(DTensorTestBase):
+@unittest.skipIf(
+    not torch.distributed.is_available(), "torch.distributed not available"
+)
+class TestHopPrintDTensor(
+    DTensorTestBase if torch.distributed.is_available() else TestCase
+):
     @property
     def world_size(self) -> int:
         return 4
