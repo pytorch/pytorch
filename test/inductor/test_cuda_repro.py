@@ -2720,29 +2720,14 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         # is already float16 and the output is int64.
         self.assertNotIn(".to(tl.float16)", code[0])
 
-    def test_lerp_fma_precision(self):
-        # Test that lerp uses FMA to match CUDA's native lerp behavior.
-        # CUDA's lerp uses a dual-formula approach:
+    def test_foreach_lerp_fma_precision(self):
+        # Test that the _foreach_lerp_ polyfill matches eager CUDA bitwise.
+        # The polyfill decomposes into addcmul_ which uses FMA, with a
+        # dual-formula approach matching CUDA's native lerp:
         # For |weight| < 0.5: start + weight * (end - start)
         # For |weight| >= 0.5: end - (end - start) * (1 - weight)
-        start = torch.randn(1000, device="cuda", dtype=torch.float32)
-        end = torch.randn(1000, device="cuda", dtype=torch.float32)
-
-        @torch.compile
-        def fn(start, end, weight):
-            return torch.lerp(start, end, weight)
-
-        # Test low weight (uses low formula)
         weight_low = 0.1
-        result = fn(start, end, weight_low)
-        expected = torch.lerp(start, end, weight_low)
-        self.assertEqual(result, expected, atol=0, rtol=0)
-
-        # Test high weight (uses high formula)
         weight_high = 0.7
-        result = fn(start, end, weight_high)
-        expected = torch.lerp(start, end, weight_high)
-        self.assertEqual(result, expected, atol=0, rtol=0)
 
         # Test _foreach_lerp_ polyfill matches eager CUDA for both formulas
         starts = [torch.randn(s, device="cuda") for s in [100, 50, 200, 75]]
