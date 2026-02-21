@@ -1704,7 +1704,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
             getattr_fn = self._check_for_getattr()
-            if isinstance(getattr_fn, types.FunctionType):
+            if callable(getattr_fn):
                 # Dynamo is going to trace the __getattr__ function with
                 # args=name. Set the source accordingly.
                 if (
@@ -1718,12 +1718,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # Manually trace out the nn module __getattr__ to avoid large compilation latency.
                     out = self.manually_trace_nn_module_getattr(tx, name)
                 else:
-                    new_source = None
-                    if self.source:
-                        new_source = AttrSource(self.source, "__getattr__")
-                    out = variables.UserMethodVariable(
-                        getattr_fn, self, source=new_source
-                    ).call_function(tx, [VariableTracker.build(tx, name)], {})
+                    getattr_source: Source | None = None
+                    if self.cls_source:
+                        getattr_source = self.get_source_by_walking_mro(
+                            tx, "__getattr__"
+                        )
+                    getattr_vt = VariableTracker.build(
+                        tx, getattr_fn, source=getattr_source
+                    )
+                    # Functions are descriptors - Python binds self via
+                    # __get__, so the effective call is func(self, name).
+                    # Non-descriptor callables (e.g. functools.partial,
+                    # callable class instances) are called with just (name).
+                    if hasattr(getattr_fn, "__get__"):
+                        args = [self, variables.ConstantVariable.create(name)]
+                    else:
+                        args = [variables.ConstantVariable.create(name)]
+                    out = getattr_vt.call_function(tx, args, {})
 
                 if self.source and getattr_fn is torch.nn.Module.__getattr__:
                     if isinstance(
