@@ -494,9 +494,7 @@ void CUDAGraph::end_capture_to_conditional_node() {
   }
 
   CUDAStream stream = conditional_node_streams_.top().current_stream();
-  cudaGraph_t graph{};
-  AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), &graph));
-  descendent_graphs_.push_back(graph);
+  AT_CUDA_CHECK(cudaStreamEndCapture(stream.stream(), nullptr));
   conditional_node_streams_.pop();
   conditional_graph_capture_ids_.pop();
   conditional_rng_snapshots_.pop();

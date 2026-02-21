@@ -10026,6 +10026,19 @@ class TestControlFlowAndRNG(TestCase):
         ):
             compiled_func(pred, x)
 
+    def test_rng_outside_conditional_nodes_does_not_error(self):
+        pred = torch.tensor(True, device="cuda")
+        x = torch.ones(10, dtype=torch.float32, device="cuda")
+
+        def func(pred, x):
+            y = torch.cond(pred, lambda t: 2 * t, lambda t: 3 * t, [x])
+            return y + torch.randn(*y.shape, dtype=y.dtype, device=y.device)
+
+        compiled_func = torch.compile(func, backend="cudagraphs")
+        for _ in range(3):
+            out = compiled_func(pred, x)
+            self.assertEqual(out.shape, x.shape)
+
 
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)

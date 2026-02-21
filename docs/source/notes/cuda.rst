@@ -1333,8 +1333,6 @@ and you suspect its runtime is at least somewhat CPU-limited.
     https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#creating-a-graph-using-stream-capture
 .. _cudaGraphLaunch:
     https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
-.. _issue 144787:
-    https://github.com/pytorch/pytorch/issues/144787#issuecomment-2606480564
 .. _conditional nodes:
     https://developer.nvidia.com/blog/dynamic-control-flow-in-cuda-graphs-with-conditional-nodes/
 
