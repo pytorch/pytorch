@@ -179,7 +179,6 @@ if TYPE_CHECKING:
     from torch._dynamo.dynamo_profiler import DynamoProfilerState
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._inductor import _CudagraphAnnotation
     from torch.multiprocessing.reductions import StorageWeakRef
 
 log = logging.getLogger(__name__)
@@ -652,11 +651,6 @@ class OutputGraph(OutputGraphCommon):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # Cudagraph annotation is set during inlining in
-        # InliningInstructionTranslator.build_inline_tracer when a decorated
-        # function is inlined.
-        self.cudagraph_annotation: Optional[_CudagraphAnnotation] = None
-
         self.region_tracker = GraphRegionTracker()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
@@ -696,7 +690,6 @@ class OutputGraph(OutputGraphCommon):
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.tracing_context.traced_code.append(f_code)
-        self.tracing_context.cudagraph_annotation = self.cudagraph_annotation
         self.traced_code = self.tracing_context.traced_code
         self.dynamo_compile_id: Optional[CompileId] = (
             CompileContext.current_compile_id()
@@ -1830,13 +1823,11 @@ class OutputGraph(OutputGraphCommon):
             for val, count in pass1.uses.items():
                 # If it's already a local source, no need to cache it
                 if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
-                    # pyrefly: ignore [unsupported-operation]
                     tempvars[val] = None
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
                 graph_output_var,
-                # pyrefly: ignore [bad-argument-type]
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
@@ -2437,9 +2428,6 @@ class OutputGraph(OutputGraphCommon):
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
             gm.meta["backend_id"] = name
 
-            if self.cudagraph_annotation is not None:
-                gm.meta["cudagraph_annotation"] = self.cudagraph_annotation
-
             graph_code_log.debug(
                 "%s",
                 lazy_format_graph_code(
@@ -2727,7 +2715,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore [unbound-name, bad-return]
+        # pyrefly: ignore [bad-return]
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
@@ -3174,7 +3162,6 @@ def check_pt2_compliant_op(
                 hints=[],
             )
 
-        # pyrefly: ignore [unbound-name]
         op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
@@ -3182,7 +3169,6 @@ def check_pt2_compliant_op(
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
-                # pyrefly: ignore [unbound-name]
                 f"which resolves to the overload ({overload}) that is "
                 f"not PT2 compliant.",
             )
