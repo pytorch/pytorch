@@ -98,6 +98,12 @@ def torch_vital_set(value):
         else:
             del os.environ['TORCH_VITAL']
 
+# Dynamo traces into scipy (not in THIRDPARTY_SKIPLIST) which needs deep
+# recursion. In CI the test runner consumes stack frames before tests run,
+# so ensure enough headroom for dynamo to trace and fall back gracefully.
+sys.setrecursionlimit(max(sys.getrecursionlimit(), 100000))
+torch._dynamo.set_recursion_limit(100000)
+
 # Tests Vital Signs for Torch
 # FIXME: document or deprecate whatever this is
 class TestBasicVitalSigns(TestCase):
@@ -2301,7 +2307,6 @@ class TestTorchDeviceType(TestCase):
                     check(x, correction, fw, aw)
 
     @skipIfNoSciPy
-    @skipIfTorchDynamo("Skip due to dynamo failure on scipy tracing in CI: https://github.com/pytorch/pytorch/pull/175420/")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_uniform_kstest(self, device, dtype):
         from scipy import stats
@@ -2327,7 +2332,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipIfTorchDynamo("Skip due to dynamo failure on scipy tracing in CI: https://github.com/pytorch/pytorch/pull/175420/")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
@@ -2343,7 +2347,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipIfTorchDynamo("Skip due to dynamo failure on scipy tracing in CI: https://github.com/pytorch/pytorch/pull/175420/")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_exponential_kstest(self, device, dtype):
         from scipy import stats
@@ -2355,7 +2358,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipIfTorchDynamo("Skip due to dynamo failure on scipy tracing in CI: https://github.com/pytorch/pytorch/pull/175420/")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
