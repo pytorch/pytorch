@@ -2744,6 +2744,83 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         expected = torch.lerp(start, end, weight_high)
         self.assertEqual(result, expected, atol=0, rtol=0)
 
+        # Test _foreach_lerp_ polyfill matches eager CUDA for both formulas
+        starts = [torch.randn(s, device="cuda") for s in [100, 50, 200, 75]]
+        ends = [torch.randn(s, device="cuda") for s in [100, 50, 200, 75]]
+
+        for weight in [weight_low, weight_high]:
+            starts_compiled = [s.clone() for s in starts]
+            starts_eager = [s.clone() for s in starts]
+
+            torch._dynamo.reset()
+
+            @torch.compile
+            def foreach_fn(s, e):
+                torch._foreach_lerp_(s, e, weight)
+
+            foreach_fn(starts_compiled, ends)
+            torch._foreach_lerp_(starts_eager, ends, weight)
+            for sc, se in zip(starts_compiled, starts_eager):
+                self.assertEqual(sc, se, atol=0, rtol=0)
+
+        # Test _foreach_lerp_ with tensor weight (e.g. 1 - beta1 from tensor
+        # betas in Adam).  The polyfill uses torch.where to select the dual
+        # formula per-element.
+        for w_val in [weight_low, weight_high]:
+            starts_compiled = [s.clone() for s in starts]
+            starts_eager = [s.clone() for s in starts]
+            w_tensor = torch.tensor(w_val, device="cuda")
+
+            torch._dynamo.reset()
+
+            @torch.compile
+            def foreach_tensor_fn(s, e, w):
+                torch._foreach_lerp_(s, e, w)
+
+            foreach_tensor_fn(starts_compiled, ends, w_tensor)
+            torch._foreach_lerp_(starts_eager, ends, w_val)
+            for sc, se in zip(starts_compiled, starts_eager):
+                self.assertEqual(sc, se, atol=0, rtol=0)
+
+    @config.patch("eager_numerics.pow_precision", True)
+    def test_pow_precision(self):
+        # Test that pow(scalar, tensor) matches eager bitwise when using
+        # eager_numerics.pow_precision, which uses inline PTX to match CUDA's powf.
+        def fn(exp):
+            return torch.pow(0.9, exp)
+
+        exp = torch.arange(1, 101, device="cuda", dtype=torch.float32)
+
+        eager_result = fn(exp)
+        compiled_result = torch.compile(fn)(exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    def test_pow_precision_fp64(self):
+        # Test that pow matches eager bitwise for fp64.
+        # libdevice.pow matches CUDA's pow for fp64 (no FTZ issues).
+        def fn(base, exp):
+            return torch.pow(base, exp)
+
+        base = torch.tensor([0.9, 0.999, 0.5, 0.8], device="cuda", dtype=torch.float64)
+        exp = torch.tensor(
+            [50.0, 100.0, 10.0, 20.0], device="cuda", dtype=torch.float64
+        )
+
+        eager_result = fn(base, exp)
+        compiled_result = torch.compile(fn)(base, exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    @config.patch("eager_numerics.division_rounding", True)
+    def test_reciprocal_precision_rounding(self):
+        # Test that reciprocal matches eager when division_rounding is enabled.
+        # This requires OpDecompositions.reciprocal to use float32 constant so
+        # that div_rn can be applied (the dtype check requires both operands float32).
+        def fn(x):
+            return torch.reciprocal(x)
+
+        x = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
+        self.common(fn, [x])
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
