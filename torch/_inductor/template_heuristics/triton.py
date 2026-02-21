@@ -2032,7 +2032,8 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 dtype,
                 dtype,
                 dtype,
-                device.a_stride,
+                device,
+                a_stride,
                 b_stride,
                 c_stride,
             )
