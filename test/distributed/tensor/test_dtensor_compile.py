@@ -544,7 +544,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
         device_mesh = init_device_mesh(self.device_type, (2, 2))
 
-        def test_placements(x_placements, y_placements, out_placements):
+        def test_placements(x_placements, y_placements, out_placements=None):
             # create DTensors with unbacked outer/inner sizes
             x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=x_placements)
             y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=y_placements)
@@ -554,11 +554,20 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
             # full-graph capture
             torch._dynamo.reset()
-            fn = torch.compile(torch.mm, backend="aot_eager", fullgraph=True)
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+            fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
             out = fn(x_dt, y_dt)
 
             # check output placements
-            self.assertEqual(out.placements, out_placements)
+            if out_placements is not None:
+                self.assertEqual(out.placements, out_placements)
+
+            # test on uneven shardings
+            dx = d_randn(20, 17, device_mesh=device_mesh, placements=x_placements)
+            dy = d_randn(17, 5, device_mesh=device_mesh, placements=y_placements)
+            out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(out.shape, eager_out.shape)
 
         test_placements(
             (Replicate(), Replicate()),
@@ -571,6 +580,14 @@ def forward(self, b_parametrizations_buffer_original0, x):
         test_placements(
             (Replicate(), Shard(0)), (Replicate(), Replicate()), (Replicate(), Shard(0))
         )
+
+        # note: just check that these run; it's reasonable for the output placements to change,
+        # depending on how tie-breaking is done.
+        test_placements((Partial(), Partial()), (Partial(), Partial()))
+        test_placements((Partial(), Partial()), (Shard(0), Replicate()))
+        test_placements((Replicate(), Shard(0)), (Replicate(), Shard(0)))
+        test_placements((Shard(0), Shard(1)), (Shard(1), Shard(0)))
+        test_placements((Partial(), Replicate()), (Shard(0), Shard(0)))
 
     @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
     def test_dtensor_matmul_zero_size_shards(self):
@@ -664,6 +681,54 @@ def forward(self, b_parametrizations_buffer_original0, x):
             ),
             unbacked_dims={1: [1]},
         )
+
+    def test_dtensor_matmul_cost_hint_or_upper_bound(self):
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (4,))
+
+        x_dt = DTensor.from_local(
+            torch.randn(8, 8),
+            device_mesh=device_mesh,
+            placements=[Shard(0)],
+        )
+        y_dt = DTensor.from_local(
+            torch.randn(8, 8),
+            device_mesh=device_mesh,
+            placements=[Shard(1)],
+        )
+        torch._dynamo.decorators.mark_unbacked(x_dt, 0)
+        torch._dynamo.decorators.mark_unbacked(y_dt, 1)
+
+        # large k dim tells compiler it's cheaper to all-gather on x
+        def f1(x, y):
+            torch._check(x.size(0) <= 32)
+            torch._check(y.size(1) <= 16384)
+            return x @ y
+
+        out = torch.compile(f1, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
+        self.assertEqual(out.placements, (Shard(1),))
+
+        # for the reverse, all-gather on y
+        def f2(x, y):
+            torch._check(x.size(0) <= 16384)
+            torch._check(y.size(1) <= 32)
+            return x @ y
+
+        out = torch.compile(f2, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
+        self.assertEqual(out.placements, (Shard(0),))
+
+        # specifying hint_override also determines the strategy
+        def f3(x, y):
+            return x @ y
+
+        x_dt = x_dt + 1
+        y_dt = y_dt + 1
+        torch._dynamo.decorators.mark_unbacked(x_dt, 0, hint_override=16)
+        torch._dynamo.decorators.mark_unbacked(x_dt, 1, hint_override=1024)
+
+        out = torch.compile(f3, backend="aot_eager", fullgraph=True)(x_dt, y_dt)
+        self.assertEqual(out.placements, (Shard(1),))
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")

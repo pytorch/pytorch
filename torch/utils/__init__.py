@@ -11,7 +11,6 @@ from torch.utils import (
     data as data,
     deterministic as deterministic,
     hooks as hooks,
-    pytree as pytree,
 )
 from torch.utils.backend_registration import (
     generate_methods_for_privateuse1_backend,

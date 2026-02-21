@@ -3749,6 +3749,16 @@
       ]
     }
   ],
+  "GB5799": [
+    {
+      "Gb_type": "unsupported function.__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0313": [
     {
       "Gb_type": "torch.cond: differing branch outputs",

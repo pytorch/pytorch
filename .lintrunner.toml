@@ -117,6 +117,8 @@ include_patterns = [
     'torchgen/**/*.pyi',
     'functorch/**/*.py',
     'functorch/**/*.pyi',
+    'tools/**/*.py',
+    'tools/**/*.pyi',
 ]
 exclude_patterns = []
 command = [

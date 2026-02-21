@@ -1113,11 +1113,10 @@ class CaptureOutput:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
-        # pyrefly: ignore [bad-assignment, not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
         return runtime_env.forward_callable(
             backend_id,
-            compiled_fn,  # pyrefly: ignore [bad-argument-type]
+            compiled_fn,
             extra_globals=extra_globals,
         )
 
@@ -1137,7 +1136,6 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
 
         resolved_call = mod.__call__
         if hasattr(resolved_call, "__self__"):
-            # pyrefly: ignore [missing-attribute]
             resolved_call = resolved_call.__func__
 
         # Mirrored from NNModuleVariable.call_function:
@@ -1297,7 +1295,6 @@ def _fullgraph_capture_frame(
             frame.locals,
             frame.builtins,
             frame.closure,
-            # pyrefly: ignore [bad-argument-type]
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
             export_constraints=constraints,  # type: ignore[arg-type]
@@ -2033,7 +2030,6 @@ class ConvertFrame:
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         return lambda backend: convert_frame(
-            # pyrefly: ignore [bad-argument-type]
             backend,
             self._hooks,
         )
