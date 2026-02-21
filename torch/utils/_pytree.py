@@ -2240,3 +2240,11 @@ def key_get(obj: Any, kp: KeyPath) -> Any:
     for k in kp:
         obj = k.get(obj)
     return obj
+
+
+# Pre-load to make `torch.utils.pytree` available immediately after `torch.utils` is imported.
+# See the `if TYPE_CHECKING` block at the top of `torch/utils/__init__.py` for more details.
+import torch.utils.pytree as _
+
+
+del _
