@@ -2588,6 +2588,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertIn('buf', l.state_dict())
         self.assertEqual(l.state_dict()['buf'], buf)
 
+    def test_property_setter_respected(self):
+        class ModuleWithProperty(nn.Module):
+            def __init__(self, external_param):
+                super().__init__()
+                self.parameter_pointer = external_param
+
+            @property
+            def parameter_pointer(self):
+                return self._parameter_pointer[0]
+
+            @parameter_pointer.setter
+            def parameter_pointer(self, parameter):
+                self._parameter_pointer = [parameter]
+
+        param = nn.Parameter(torch.tensor(1.0))
+        module = ModuleWithProperty(param)
+        self.assertIs(module.parameter_pointer, param)
+        self.assertEqual(list(module.parameters()), [])
+
+        new_param = nn.Parameter(torch.tensor(2.0))
+        module.parameter_pointer = new_param
+        self.assertIs(module.parameter_pointer, new_param)
+        self.assertEqual(list(module.parameters()), [])
+
     def test_container_copy(self):
         class Model(nn.Module):
             def __init__(self) -> None:
