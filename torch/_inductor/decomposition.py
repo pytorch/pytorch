@@ -133,11 +133,6 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.baddbmm,  # upcasts to fp32, perf issue
     # FMA ops - we have lowerings that use FMA to match eager CUDA behavior
     aten.lerp,
-    aten.addcmul,
-    aten._foreach_addcmul.Scalar,
-    aten.addcdiv,
-    aten.addcdiv_,
-    aten._foreach_addcdiv.Scalar,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
