@@ -117,6 +117,8 @@ include_patterns = [
     'torchgen/**/*.pyi',
     'functorch/**/*.py',
     'functorch/**/*.pyi',
+    'tools/**/*.py',
+    'tools/**/*.pyi',
 ]
 exclude_patterns = []
 command = [
@@ -1696,6 +1698,10 @@ command = [
 ]
 include_patterns = [
     'test/**/test_*.py',
+]
+exclude_patterns = [
+    # CPython tests
+    'test/dynamo/cpython/**',
 ]
 
 # 'header_only_linter' reports on properly testing header-only APIs.

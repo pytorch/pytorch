@@ -551,6 +551,13 @@ cudagraph_unsafe_unbacked_ops: list[str] = []
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
+# Whether template autotuning should defer layout freezing until scheduling time for inputs,
+# prioritizing other fusions over choosing the template case. If inputs have a different layout
+# than what was autotuned due to some other fusion, then default to aten.
+max_autotune_defer_layout_freezing: bool = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_DEFER_LAYOUT_FREEZING", "0") == "1"
+)
+
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
@@ -568,11 +575,14 @@ force_same_precision: bool = Config(
 # as expected before turning it on for everyone.
 multi_kernel_hints: list[int] = []
 
+
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# NVGEMM: NVIDIA Universal GEMM via cutlass_api (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
@@ -893,6 +903,8 @@ combo_kernel_max_num_args = 250
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, only pointwise kernels are eligible for combo kernel fusion.
+combo_kernels_pointwise_only = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1052,13 +1064,19 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
-    # Bucket exposed collectives first
-    bucket_exposed_first: bool = True
+    # Bucket exposed collectives first (None means auto)
+    bucket_exposed_first: bool | None = None
+
+    # Experimental setting to bucket only internode communications
+    bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
+
+    # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
+    prioritize_bucketing_during_scheduling: bool = True
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1329,13 +1347,6 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
 
 enable_autograd_for_aot: bool = False
-
-_debug_cpu_to_tpu_pallas: bool = Config(
-    env_name_force="PALLAS_TARGET_TPU", default=False
-)
-pallas_take_first_jax_device_only: bool = Config(
-    env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
-)
 
 
 def get_worker_log_path() -> Optional[str]:
@@ -2270,6 +2281,9 @@ cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 # Backend to use for CUDA codegen either
 # "triton", "halide" (experimental) or "pallas" (experimental)
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
+
+# Backend to use for TPU codegen
+tpu_backend: Literal["pallas"] = "pallas"
 
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"
