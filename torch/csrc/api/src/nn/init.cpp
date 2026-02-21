@@ -1,24 +1,24 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/nn/init.h>
 
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <ATen/TensorIndexing.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
 #else
-#include <ATen/ops/empty.h>
-#include <ATen/ops/normal.h>
-#include <ATen/ops/uniform.h>
-#include <ATen/ops/zeros_like.h>
-#include <ATen/ops/ones_like.h>
-#include <ATen/ops/fill.h>
-#include <ATen/ops/eye.h>
-#include <ATen/ops/randn.h>
-#include <ATen/ops/linalg_qr.h>
 #include <ATen/ops/diag.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/eye.h>
+#include <ATen/ops/fill.h>
+#include <ATen/ops/linalg_qr.h>
+#include <ATen/ops/normal.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/randn.h>
 #include <ATen/ops/randperm.h>
+#include <ATen/ops/uniform.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -181,7 +181,8 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
     auto zero_indices =
         row_indices.slice(/*dim=*/0, /*start=*/0, /*end=*/num_zeros);
     tensor.index_put_(
-        {zero_indices, torch::tensor(column, tensor.options().dtype(c10::kLong))},
+        {zero_indices,
+         torch::tensor(column, tensor.options().dtype(c10::kLong))},
         at::zeros(num_zeros, tensor.options()));
   }
 

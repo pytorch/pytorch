@@ -5,9 +5,9 @@
 
 #include <ATen/core/ATen_fwd.h>
 namespace torch {
-using at::Tensor;
 using at::Scalar;
-}
+using at::Tensor;
+} // namespace torch
 
 namespace torch {
 
