@@ -189,6 +189,20 @@ inline common_dtype<T, U> floor_divide(T x, U y) {
   return ::metal::floor(x / y);
 }
 
+// Workaround for Metal compiler bug: the compiler produces wrong results
+// when optimizing fused (x / A) % B expressions for integral types.
+// Using volatile prevents the compiler from fusing the operations.
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> safe_mod(T x, U y) {
+  volatile auto tmp = x;
+  return tmp % y;
+}
+
 // fmod
 template <
     typename T,
