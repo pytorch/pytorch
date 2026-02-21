@@ -1,9 +1,25 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/nn/init.h>
 
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <ATen/TensorIndexing.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
+#else
+#include <ATen/ops/diag.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/eye.h>
+#include <ATen/ops/fill.h>
+#include <ATen/ops/linalg_qr.h>
+#include <ATen/ops/normal.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/randn.h>
+#include <ATen/ops/randperm.h>
+#include <ATen/ops/uniform.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -38,7 +54,7 @@ double calculate_kaiming_std(
     double a,
     FanModeType mode,
     NonlinearityType nonlinearity) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
@@ -66,12 +82,12 @@ double calculate_gain(NonlinearityType nonlinearity, double param) {
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor constant_(Tensor tensor, Scalar value) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   return tensor.fill_(value);
 }
 
 Tensor dirac_(Tensor tensor) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
 
   TORCH_CHECK(
       tensor.ndimension() >= 3 && tensor.ndimension() <= 5,
@@ -100,26 +116,26 @@ Tensor dirac_(Tensor tensor) {
 }
 
 Tensor eye_(Tensor matrix) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   TORCH_CHECK(
       matrix.ndimension() == 2, "Only tensors with 2 dimensions are supported");
-  return torch::eye_out(matrix, matrix.size(0), matrix.size(1));
+  return at::eye_out(matrix, matrix.size(0), matrix.size(1));
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor normal_(Tensor tensor, double mean, double std) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   return tensor.normal_(mean, std);
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor ones_(Tensor tensor) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   return tensor.fill_(1);
 }
 
 Tensor orthogonal_(Tensor tensor, double gain) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
 
   TORCH_CHECK(
       tensor.ndimension() >= 2,
@@ -127,16 +143,16 @@ Tensor orthogonal_(Tensor tensor, double gain) {
 
   const auto rows = tensor.size(0);
   const auto columns = tensor.numel() / rows;
-  auto flattened = torch::randn({rows, columns});
+  auto flattened = at::randn({rows, columns});
 
   if (rows < columns) {
     flattened.t_();
   }
 
   // Compute the qr factorization
-  auto [q, r] = torch::linalg_qr(flattened);
+  auto [q, r] = at::linalg_qr(flattened);
   // Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
-  auto d = torch::diag(r, 0);
+  auto d = at::diag(r, 0);
   auto ph = d.sign();
   q *= ph;
 
@@ -151,7 +167,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
 }
 
 Tensor sparse_(Tensor tensor, double sparsity, double std) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
 
   TORCH_CHECK(
       tensor.ndimension() == 2, "Only tensors with 2 dimensions are supported");
@@ -161,12 +177,13 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
   const int64_t num_zeros = std::ceil(sparsity * static_cast<double>(rows));
   tensor.normal_(0, std);
   for (const auto column : c10::irange(columns)) {
-    auto row_indices = torch::randperm(rows, tensor.options().dtype(kLong));
+    auto row_indices = at::randperm(rows, tensor.options().dtype(c10::kLong));
     auto zero_indices =
         row_indices.slice(/*dim=*/0, /*start=*/0, /*end=*/num_zeros);
     tensor.index_put_(
-        {zero_indices, torch::tensor(column, tensor.options().dtype(kLong))},
-        torch::zeros(num_zeros, tensor.options()));
+        {zero_indices,
+         torch::tensor(column, tensor.options().dtype(c10::kLong))},
+        at::zeros(num_zeros, tensor.options()));
   }
 
   return tensor;
@@ -174,7 +191,7 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor uniform_(Tensor tensor, double low, double high) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   return tensor.uniform_(low, high);
 }
 
@@ -184,7 +201,7 @@ Tensor kaiming_uniform_(
     double a,
     FanModeType mode,
     NonlinearityType nonlinearity) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   // Calculate uniform bounds from standard deviation
   const auto bound = std::sqrt(3.0) * std;
@@ -197,14 +214,14 @@ Tensor kaiming_normal_(
     double a,
     FanModeType mode,
     NonlinearityType nonlinearity) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
 
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   return tensor.normal_(0, std);
 }
 
 Tensor xavier_normal_(Tensor tensor, double gain) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
 
   Fan fan(tensor);
   const auto std =
@@ -213,7 +230,7 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
 }
 
 Tensor xavier_uniform_(Tensor tensor, double gain) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   Fan fan(tensor);
   const auto std =
       gain * std::sqrt(2.0 / static_cast<double>(fan.in + fan.out));
@@ -224,7 +241,7 @@ Tensor xavier_uniform_(Tensor tensor, double gain) {
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor zeros_(Tensor tensor) {
-  NoGradGuard guard;
+  at::NoGradGuard guard;
   return tensor.zero_();
 }
 

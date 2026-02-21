@@ -2,7 +2,12 @@
 
 #include <torch/csrc/Export.h>
 #include <torch/enum.h>
-#include <torch/types.h>
+
+#include <ATen/core/ATen_fwd.h>
+namespace torch {
+using at::Scalar;
+using at::Tensor;
+} // namespace torch
 
 namespace torch {
 
