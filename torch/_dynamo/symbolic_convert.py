@@ -5871,6 +5871,66 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         return tracer
 
+    def run(self) -> None:
+        """Optimized dispatch loop for inlined functions.
+
+        Skips per-step checks that are unnecessary during inlining:
+        error_on_graph_break (set once in inline_call_), should_compile_partial_graph
+        (always False unless nested_graph_breaks), verbose logging, bytecode
+        trace logging.
+        """
+        dispatch_table = self.dispatch_table
+        instructions = self.instructions
+        output = self.output
+        ip = self.instruction_pointer
+
+        with self.run_ctx_mgr():
+            try:
+                output.push_tx(self)
+                self.start_point = ip
+                try:
+                    while ip is not None:
+                        self.current_instruction = inst = instructions[ip]
+                        ip = ip + 1
+                        self.instruction_pointer = ip
+
+                        if inst.starts_line:
+                            self.starts_line(inst.starts_line)
+
+                        self.update_block_stack(inst)
+
+                        try:
+                            dispatch_table[inst.opcode](self, inst)
+                        except exc.ObservedException as e:
+                            self.exception_handler(e)
+                            ip = self.instruction_pointer
+                            continue
+                        except (ReturnValueOp, YieldValueOp):
+                            break
+
+                        if output.should_exit:
+                            break
+
+                        ip = self.instruction_pointer
+                except Exception as e:
+                    if self.is_tracing_resume_prologue:
+                        raise ResumePrologueTracingError(
+                            "Error while tracing through a Dynamo-generated resume function prologue. "
+                            "Errors are not allowed when tracing resume function prologues.\n"
+                            f"{type(e).__qualname__}: {str(e)}"
+                        ).with_traceback(e.__traceback__) from None
+                    raise
+            except TensorifyScalarRestartAnalysis:
+                raise
+            except BackendCompilerFailed:
+                raise
+            except Exception as e:
+                if self.exec_recorder:
+                    e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+                raise
+            finally:
+                self.output.pop_tx()
+
     def inline_call_(self) -> VariableTracker:
         parent = self.parent
         parent.has_no_inlined_calls = False
@@ -5880,6 +5940,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
             strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
+
+        self.error_on_graph_break = _get_error_on_graph_break()
 
         try:
             with strict_ctx:
