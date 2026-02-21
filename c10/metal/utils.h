@@ -191,7 +191,6 @@ inline common_dtype<T, U> floor_divide(T x, U y) {
 
 // Workaround for Metal compiler bug: the compiler produces wrong results
 // when optimizing fused (x / A) % B expressions for integral types.
-// Using volatile prevents the compiler from fusing the operations.
 template <
     typename T,
     typename U,
