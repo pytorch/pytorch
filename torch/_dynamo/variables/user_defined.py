@@ -1732,9 +1732,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # Non-descriptor callables (e.g. functools.partial,
                     # callable class instances) are called with just (name).
                     if hasattr(getattr_fn, "__get__"):
-                        args = [self, ConstantVariable.create(name)]
+                        args = [self, variables.ConstantVariable.create(name)]
                     else:
-                        args = [ConstantVariable.create(name)]
+                        args = [variables.ConstantVariable.create(name)]
                     out = getattr_vt.call_function(tx, args, {})
 
                 if self.source and getattr_fn is torch.nn.Module.__getattr__:
