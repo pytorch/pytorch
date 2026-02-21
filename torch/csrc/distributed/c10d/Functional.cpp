@@ -331,7 +331,9 @@ at::Tensor isend(
   std::vector<at::Tensor> input_wrap = {input};
   auto work = group->send(input_wrap, dst, tag);
   c10d::register_work(input, work);
-  return input;
+  auto placeholder = at::empty({0}, input.options());
+  c10d::register_work(placeholder, work);
+  return placeholder;
 }
 
 at::Tensor irecv(
@@ -356,19 +358,15 @@ std::vector<at::Tensor> batch_p2p_ops(
   TORCH_CHECK(tensors.size() == N, "");
   TORCH_CHECK(peer_list.size() == N, "");
   TORCH_CHECK(tag_list.size() == N, "");
-
   if (N == 0)
-    return {at::Tensor()}; // maybe emit a warning
+    return {at::Tensor()};
   auto group = c10d::resolve_process_group(group_name);
-
   auto device = tensors[0].device().type();
   auto backend = group->getBackend(device);
   bool should_coalesce = backend->supportsCoalescing();
-
   if (should_coalesce) {
     group->startCoalescing(device);
   }
-
   std::vector<c10::intrusive_ptr<c10d::Work>> works;
   std::vector<at::Tensor> result_tensors;
   works.reserve(N);
@@ -382,36 +380,37 @@ std::vector<at::Tensor> batch_p2p_ops(
           tt,
           static_cast<int64_t>(peer_list[i]),
           static_cast<int64_t>(tag_list[i]));
-
+      auto placeholder = at::empty({0}, t.options());
+      if (work) {
+        c10d::register_work(t, work);
+        c10d::register_work(placeholder, work);
+        works.push_back(std::move(work));
+      }
+      result_tensors.push_back(std::move(placeholder));
     } else if (op_list[i] == "irecv") {
       work = group->recv(
           tt,
           static_cast<int64_t>(peer_list[i]),
           static_cast<int64_t>(tag_list[i]));
+      if (work) {
+        c10d::register_work(t, work);
+        works.push_back(std::move(work));
+      }
+      result_tensors.push_back(std::move(t));
     } else {
       TORCH_CHECK(false, "Unsupported async op " + op_list[i]);
     }
-
-    if (work) {
-      c10d::register_work(t, work);
-      works.push_back(std::move(work));
-    }
-
-    result_tensors.push_back(std::move(t));
   }
-
   if (should_coalesce) {
     auto work = group->endCoalescing(device);
     if (!work)
       TORCH_CHECK(
           false,
           "The coalesced work object returned from group->endCoalescing() is empty");
-
     for (auto tensor : result_tensors) {
       c10d::register_work(tensor, work);
     }
   }
-
   return result_tensors;
 }
 

@@ -1393,7 +1393,7 @@ def _wait_tensor_meta(self, *args):
 
 
 def _isend_meta(self, *args):
-    return torch.empty_like(self)
+    return torch.empty(0, dtype=self.dtype, device=self.device)
 
 
 def _irecv_meta(self, *args):
@@ -1402,7 +1402,8 @@ def _irecv_meta(self, *args):
 
 def _batch_p2p_ops_meta(op_list, peer_list, tag_list, tensors, group_name):
     return [
-        t if op == "irecv" else torch.empty_like(t) for op, t in zip(op_list, tensors)
+        t if op == "irecv" else torch.empty(0, dtype=t.dtype, device=t.device)
+        for op, t in zip(op_list, tensors)
     ]
 
 

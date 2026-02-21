@@ -33,6 +33,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import istype
 from .base import VariableTracker
+from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
