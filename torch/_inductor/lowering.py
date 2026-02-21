@@ -7269,31 +7269,6 @@ def lerp_tensor(start, end, weight):
     )
 
 
-register_foreach_pointwise(aten._foreach_lerp.Scalar, lerp_scalar)
-
-
-def _foreach_lerp_scalarlist(start, end, weight):
-    """
-    Foreach version of lerp with per-tensor scalar weights.
-    Uses foreach_group_loop for consistent grouping behavior.
-    """
-    realize_outputs = (
-        len(V.graph.current_node.users) == 0
-        or V.graph.current_node.target in inplace_foreach_ops
-        or cur_node_has_non_foreach_users()
-    )
-
-    # Pair each (start, end, weight) together
-    groups = group_foreach_args(zip(start, end, weight))
-
-    def apply_fn(args):
-        return lerp_scalar(*args)
-
-    return foreach_group_loop(groups, len(start), apply_fn, realize_outputs)
-
-
-_register_foreach_lowering(aten._foreach_lerp.ScalarList, _foreach_lerp_scalarlist)
-
 
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
