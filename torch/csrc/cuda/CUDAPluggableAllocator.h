@@ -105,7 +105,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void beginAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)> /*filter*/) override;
+      std::function<bool(cudaStream_t)> /*filter*/,
+      bool /*is_graph_capture*/ = false) override;
   void endAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id) override;

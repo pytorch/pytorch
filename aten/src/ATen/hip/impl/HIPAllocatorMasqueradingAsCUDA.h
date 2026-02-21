@@ -123,8 +123,10 @@ public:
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(hipStream_t)> filter) override {
-    allocator_->beginAllocateToPool(device, mempool_id, filter);
+      std::function<bool(hipStream_t)> filter,
+      bool is_graph_capture = false) override {
+    allocator_->beginAllocateToPool(
+        device, mempool_id, filter, is_graph_capture);
   }
 
   void endAllocateToPool(

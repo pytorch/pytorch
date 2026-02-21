@@ -254,7 +254,8 @@ std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(std::string handle) {
 void CUDAPluggableAllocator::beginAllocateToPool(
     c10::DeviceIndex device,
     c10::cuda::MempoolId_t mempool_id,
-    std::function<bool(cudaStream_t)> filter) {
+    std::function<bool(cudaStream_t)> filter,
+    bool /*is_graph_capture*/) {
   if (begin_allocate_to_pool_fn_) {
     begin_allocate_to_pool_fn_(device, mempool_id, std::move(filter));
   }
