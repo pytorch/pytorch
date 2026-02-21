@@ -1666,7 +1666,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.UserMethodVariable(
                     getattribute_fn,
                     self,
-                    # pyrefly: ignore[unbound-name]
                     source=new_source,
                 ).call_function(tx, [VariableTracker.build(tx, name)], {})
             except ObservedAttributeError:

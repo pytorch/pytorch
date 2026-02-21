@@ -307,13 +307,11 @@ def increment_op_count(cnt: int) -> None:
 def calculate_time_spent() -> dict[str, float]:
     total_by_key = {}
     for phase, timing in cumulative_time_spent_ns.items():
-        # pyrefly: ignore [unsupported-operation]
         total_by_key[phase] = timing / 1e9
 
     total_by_key["total_wall_time"] = total_by_key.get(
         "entire_frame_compile", 0
     ) + total_by_key.get("entire_backward_compile", 0)
-    # pyrefly: ignore [bad-return]
     return total_by_key
 
 
@@ -2442,7 +2440,6 @@ def is_jit_model(
     Union[
         torch.jit._trace.TopLevelTracedModule,
         torch.jit._script.RecursiveScriptModule,
-        # pyrefly: ignore [invalid-param-spec]
         torch.jit.ScriptFunction[Any, Any],
         torch.jit.ScriptModule,
     ]
@@ -2828,16 +2825,13 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, Union[V, Any]]]:
     if istype(obj, (dict, OrderedDict)):
         return obj.items()
     elif isinstance(obj, OrderedDict):
-        # pyrefly: ignore [bad-argument-type]
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
-        # pyrefly: ignore [bad-argument-type]
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
 def nn_module_new(cls: Any) -> Any:
     obj = object_new(cls)
-    # pyrefly: ignore [bad-argument-type]
     torch.nn.Module.__init__(obj)
     return obj
 
@@ -4864,7 +4858,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args: Any) -> Any:
-        # pyrefly: ignore [annotation-mismatch, redefinition]
+        # pyrefly: ignore [redefinition]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
