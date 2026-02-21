@@ -1132,7 +1132,6 @@ class BytecodeDispatchTableMeta(type):
             op: getattr(cls, opname, functools.partial(_missing, opname))
             for opname, op in dis.opmap.items()
         }
-        # pyrefly: ignore [missing-attribute]
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
@@ -2698,7 +2697,7 @@ class InstructionTranslatorBase(
                 return True
             elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
                 exc_instance.fn,
-                # pyrefly: ignore [invalid-argument, missing-attribute]
+                # pyrefly: ignore [invalid-argument]
                 expected_type.fn,
             ):
                 return True
@@ -2765,16 +2764,12 @@ class InstructionTranslatorBase(
             assert isinstance(null, NullVariable)
 
         if not isinstance(
-            # pyrefly: ignore [unbound-name]
             argsvars,
             BaseListVariable,
-            # pyrefly: ignore [unbound-name]
         ) and argsvars.has_force_unpack_var_sequence(self):
-            # pyrefly: ignore [unbound-name]
             argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
 
         # Unpack for cases like fn(**obj) where obj is a map
-        # pyrefly: ignore [unbound-name]
         if isinstance(kwargsvars, UserDefinedObjectVariable):
             kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
@@ -2793,9 +2788,9 @@ class InstructionTranslatorBase(
             )
 
         # Map to a dictionary of str -> VariableTracker
-        # pyrefly: ignore [bad-assignment, missing-attribute, unbound-name]
+        # pyrefly: ignore [bad-assignment, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore [bad-argument-type, missing-attribute, unbound-name]
+        # pyrefly: ignore [bad-argument-type, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(
@@ -3659,17 +3654,14 @@ class InstructionTranslatorBase(
                 "(i.e. `a, b, c = d`).",
                 hints=[*graph_break_hints.USER_ERROR],
             )
-        # pyrefly: ignore [unbound-name]
         if len(val) != inst.argval:
             unimplemented(
                 gb_type="Length mismatch when unpacking object for UNPACK_SEQUENCE",
-                # pyrefly: ignore [unbound-name]
                 context=f"expected length: {inst.argval}, actual: {len(val)}",
                 explanation=f"{seq} unpacked to a list for the UNPACK_SEQUENCE bytecode "
                 "(i.e. `a, b, c = d`) with unexpected length.",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
-        # pyrefly: ignore [unbound-name]
         for i in reversed(val):
             self.push(i)
 
@@ -4631,7 +4623,6 @@ class InstructionTranslatorBase(
         return ComprehensionAnalysis(
             end_ip=scan_ip,
             result_var=result_var,
-            # pyrefly: ignore [unbound-name]
             result_on_stack=result_on_stack,
             iterator_vars=iterator_vars,
             walrus_vars=walrus_vars,
