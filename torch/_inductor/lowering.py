@@ -58,7 +58,7 @@ from torch.utils._sympy.functions import (
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
-from .decomposition import decompositions, decomps_to_exclude, get_decompositions
+from .decomposition import decompositions, get_decompositions
 from .ir import (
     BaseView,
     DtypeView,
@@ -2304,15 +2304,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    def is_in_exclude_set(op, exclude_set):
-        if op in exclude_set:
-            return True
-        if hasattr(op, "overloadpacket"):
-            return op.overloadpacket in exclude_set
-        return False
-
-    skip_decomp = is_in_exclude_set(op, decomps_to_exclude)
-    assert op not in decompositions or override_decomp or skip_decomp, (
+    # When emulate_precision_casts is enabled, we skip decomposing addcmul ops
+    # to use the inductor lowering which preserves FMA semantics.
+    # For _foreach_addcdiv, we use the native CUDA kernel.
+    skip_decomp_for_precision = config.emulate_precision_casts and op in {
+        aten.addcmul,
+        aten._foreach_addcmul.Scalar,
+        aten._foreach_addcdiv.Scalar,
+    }
+    assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
@@ -7145,141 +7145,6 @@ def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
 
 
 _register_foreach_lowering(aten._foreach_addcmul.Scalar, _foreach_addcmul_scalar)
-
-
-def _lerp_low_formula(weight_val, diff, start_val, use_fma):
-    """Low formula for lerp: start + weight * (end - start)"""
-    if use_fma:
-        return ops.fma(weight_val, diff, start_val)
-    else:
-        return ops.add(start_val, ops.mul(weight_val, diff))
-
-
-def _lerp_high_formula(one_minus_weight, diff, end_val, use_fma):
-    """High formula for lerp: end - (end - start) * (1 - weight)"""
-    if use_fma:
-        neg_one_minus_weight = ops.neg(one_minus_weight)
-        return ops.fma(neg_one_minus_weight, diff, end_val)
-    else:
-        return ops.sub(end_val, ops.mul(one_minus_weight, diff))
-
-
-@register_lowering(aten.lerp.Scalar, broadcast=True)
-def lerp_scalar(start, end, weight):
-    """
-    Computes linear interpolation using the same dual-formula approach as CUDA lerp.
-
-    For |weight| < 0.5: start + weight * (end - start)
-    For |weight| >= 0.5: end - (end - start) * (1 - weight)
-
-    This dual-formula approach ensures numerical stability and exact results
-    when weight equals 0 or 1.
-    """
-    dtype = get_promoted_dtype(
-        start,
-        end,
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    )
-
-    start_loader = start.make_loader()
-    end_loader = end.make_loader()
-
-    # FMA is only available for floating-point types on CUDA (non-AMD)
-    device = start.get_device()
-    use_fma = (
-        dtype.is_floating_point
-        and not torch.version.hip
-        and device is not None
-        and device.type == "cuda"
-    )
-    # Determine which formula to use based on weight value
-    # Convert to float for comparison in case weight is a sympy expression
-    weight_float = float(weight)
-    # Use -weight_float if negative to get absolute value (avoid shadowed abs)
-    use_high_formula = (weight_float if weight_float >= 0 else -weight_float) >= 0.5
-
-    # Pre-compute 1 - weight in target dtype to match CUDA's precision.
-    # This avoids constant folding in Python float64 precision.
-    if use_high_formula:
-        # Compute subtraction in target dtype to match CUDA's rounding behavior
-        one_minus_weight_value = (1.0 - torch.tensor(weight_float, dtype=dtype)).item()
-
-    def inner_fn(idx):
-        start_val = start_loader(idx)
-        end_val = end_loader(idx)
-        diff = ops.sub(end_val, start_val)
-
-        if use_high_formula:
-            one_minus_weight = ops.constant(one_minus_weight_value, dtype)
-            return _lerp_high_formula(one_minus_weight, diff, end_val, use_fma)
-        else:
-            weight_val = ops.constant(weight_float, dtype)
-            return _lerp_low_formula(weight_val, diff, start_val, use_fma)
-
-    return Pointwise.create(
-        device=start.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=start.get_size(),
-    )
-
-
-@register_lowering(aten.lerp.Tensor, broadcast=True)
-def lerp_tensor(start, end, weight):
-    """
-    Computes linear interpolation using the same dual-formula approach as CUDA lerp.
-
-    For |weight| < 0.5: start + weight * (end - start)
-    For |weight| >= 0.5: end - (end - start) * (1 - weight)
-
-    This dual-formula approach ensures numerical stability and exact results
-    when weight equals 0 or 1.
-    """
-    dtype = get_promoted_dtype(
-        start,
-        end,
-        weight,
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    )
-
-    start_loader = start.make_loader()
-    end_loader = end.make_loader()
-    weight_loader = weight.make_loader()
-
-    # FMA is only available for floating-point types on CUDA (non-AMD)
-    device = start.get_device()
-    use_fma = (
-        dtype.is_floating_point
-        and not torch.version.hip
-        and device is not None
-        and device.type == "cuda"
-    )
-
-    def inner_fn(idx):
-        start_val = start_loader(idx)
-        end_val = end_loader(idx)
-        weight_val = weight_loader(idx)
-        diff = ops.sub(end_val, start_val)
-
-        low_result = _lerp_low_formula(weight_val, diff, start_val, use_fma)
-
-        one_val = ops.constant(1.0, dtype)
-        one_minus_weight = ops.sub(one_val, weight_val)
-        high_result = _lerp_high_formula(one_minus_weight, diff, end_val, use_fma)
-
-        # Select formula based on |weight| >= 0.5
-        abs_weight = ops.abs(weight_val)
-        threshold = ops.constant(0.5, dtype)
-        use_high = ops.ge(abs_weight, threshold)
-        return ops.where(use_high, high_result, low_result)
-
-    return Pointwise.create(
-        device=start.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=start.get_size(),
-    )
-
 
 
 register_pointwise_numeric_ldf64(aten.cos)
