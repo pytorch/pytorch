@@ -1814,6 +1814,55 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(torch.allclose(ref3, res3))
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
+    def test_getattr_functools_partial(self):
+        defaults = {"x": 3, "y": 5}
+
+        def _getattr_impl(defaults, *args):
+            # In Python 3.14+, functools.partial is a descriptor, so
+            # __getattr__ receives (self, name) instead of just (name).
+            name = args[-1]
+            if name in defaults:
+                return defaults[name]
+            raise AttributeError(name)
+
+        class Foo:
+            __getattr__ = partial(_getattr_impl, defaults)
+
+        obj = Foo()
+
+        def fn(x):
+            return x * obj.x + obj.y
+
+        x = torch.ones(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_getattr_callable_class(self):
+        class GetAttrHandler:
+            def __init__(self, defaults):
+                self.defaults = defaults
+
+            def __call__(self, name):
+                if name in self.defaults:
+                    return self.defaults[name]
+                raise AttributeError(name)
+
+        class Foo:
+            __getattr__ = GetAttrHandler({"x": 3, "y": 5})
+
+        obj = Foo()
+
+        def fn(x):
+            return x * obj.x + obj.y
+
+        x = torch.ones(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
     @expectedFailureDynamic
