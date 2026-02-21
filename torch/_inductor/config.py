@@ -551,6 +551,13 @@ cudagraph_unsafe_unbacked_ops: list[str] = []
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
+# Whether template autotuning should defer layout freezing until scheduling time for inputs,
+# prioritizing other fusions over choosing the template case. If inputs have a different layout
+# than what was autotuned due to some other fusion, then default to aten.
+max_autotune_defer_layout_freezing: bool = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_DEFER_LAYOUT_FREEZING", "0") == "1"
+)
+
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
@@ -568,11 +575,14 @@ force_same_precision: bool = Config(
 # as expected before turning it on for everyone.
 multi_kernel_hints: list[int] = []
 
+
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# NVGEMM: NVIDIA Universal GEMM via cutlass_api (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.

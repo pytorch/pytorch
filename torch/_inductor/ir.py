@@ -461,11 +461,8 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
-        if not V.graph.sizevars.statically_known_equals(
-            s1, s2
-        ) and V.graph.sizevars.symbolic_hint(s1) != V.graph.sizevars.symbolic_hint(s2):
+        if not V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2)):
             return False
-
     return True
 
 
@@ -1299,8 +1296,13 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
-        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
+        # TODO Laith support unbacked!
+        reduction_numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
+            reduction_numel
+        )
+        numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
+            sympy_product(ranges)
+        )
 
         should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
@@ -1353,8 +1355,10 @@ class Reduction(Loops):
                         new_reduction_ranges,
                     ) = extract_input_node_reduction_ranges(input_node)
                 if new_ranges is not None and new_reduction_ranges is not None:
-                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
-                        sympy_product(new_ranges + new_reduction_ranges)
+                    extracted_numel_hint = (
+                        V.graph.sizevars.replace_backed_symbols_with_hints(
+                            sympy_product(new_ranges + new_reduction_ranges)
+                        )
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         log.debug(
@@ -9161,6 +9165,28 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
+
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_outputs,
+        )
+
+        (_, _, _, true_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
+        )
+        (_, _, _, false_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
+        )
+
+        mutated_operand_indices = OrderedSet(true_mutated_inputs) | OrderedSet(
+            false_mutated_inputs
+        )
+
+        # Create MutationOutput for each mutated operand (for scheduler dependencies)
+        conditional.mutation_outputs = [
+            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
+            for idx in sorted(mutated_operand_indices)
+        ]
+
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
