@@ -4315,15 +4315,15 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
 
-        _wrap_for_grad: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+        child: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
 
-        child: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(_wrap_for_grad);  child = None
+        child_1: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(child);  child_1 = None
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
-        sin: "f32[5]" = _wrap_for_grad.sin();  _wrap_for_grad = None
+        sin: "f32[5]" = child.sin();  child = None
         primals_out: "f32[]" = sin.sum();  sin = None
 
         results: "f32[]" = torch._C._functorch._unwrap_for_grad(primals_out, 1);  primals_out = None
@@ -4469,18 +4469,18 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
 
-        aux: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+        child: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
 
-        child: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(aux);  child = None
+        child_1: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(child);  child_1 = None
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
-        sin: "f32[5]" = aux.sin()
+        sin: "f32[5]" = child.sin()
         primals_out: "f32[]" = sin.sum();  sin = None
 
-        aux_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = aux_1 = None
+        aux: "f32[5]" = torch._C._functorch._unwrap_for_grad(child, 1);  child = aux = None
         results: "f32[]" = torch._C._functorch._unwrap_for_grad(primals_out, 1);  primals_out = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
