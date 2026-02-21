@@ -201,7 +201,7 @@ def register_pytree_node(
             category=FutureWarning,
             stacklevel=2,
         )
-        assert unflatten_fn is not None  # type narrowing
+        assert unflatten_fn is not None  # noqa: S101 # type narrowing
         (
             (flatten_func, unflatten_func),
             (flatten_fn, unflatten_fn),
