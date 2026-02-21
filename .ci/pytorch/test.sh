@@ -311,12 +311,6 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-if [[ "${TEST_CONFIG}" == "legacy_nvidia_driver" ]]; then
-  # Make sure that CUDA can be initialized
-  (cd test && python -c "import torch; torch.rand(2, 2, device='cuda')")
-  export USE_LEGACY_DRIVER=1
-fi
-
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
@@ -1937,12 +1931,6 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
-  TIMM_PIN="$(< .ci/docker/ci_commit_pins/timm.txt)"
-  export HF_HOME="${HF_HOME}/timm_${TIMM_PIN}"
-  if [[ "${TRANSFORMERS_OFFLINE:-1}" == "0" ]]; then
-    python benchmarks/dynamo/timm_models.py --download-only \
-      && touch "${HF_HOME}/.timm_cache_complete"
-  fi
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
