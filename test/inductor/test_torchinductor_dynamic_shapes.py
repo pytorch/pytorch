@@ -1365,15 +1365,7 @@ class TestInductorDynamic(TestCase):
         out_compiled.sum().backward()
 
     def test_combinations_dynamic_shapes(self, device):
-        """
-        Test that torch.combinations works correctly with dynamic shapes.
-        Regression test for https://github.com/pytorch/pytorch/issues/163759
-
-        Previously, torch.combinations would fail with dynamic shapes because
-        it called numel() which doesn't work with symbolic sizes/strides.
-        The fix uses sym_size(0) instead of numel().
-        """
-
+        # https://github.com/pytorch/pytorch/issues/163759
         def fn(x):
             return torch.combinations(x.flatten(), r=2)
 
@@ -1392,11 +1384,7 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(actual2, expected2)
 
     def test_combinations_dynamic_shapes_with_replacement(self, device):
-        """
-        Test torch.combinations with replacement and dynamic shapes.
-        Regression test for https://github.com/pytorch/pytorch/issues/163759
-        """
-
+        # https://github.com/pytorch/pytorch/issues/163759
         def fn(x):
             return torch.combinations(x, r=2, with_replacement=True)
 
@@ -1414,11 +1402,7 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(actual2, expected2)
 
     def test_combinations_dynamic_shapes_r1(self, device):
-        """
-        Test torch.combinations with r=1 (edge case) and dynamic shapes.
-        Regression test for https://github.com/pytorch/pytorch/issues/163759
-        """
-
+        # https://github.com/pytorch/pytorch/issues/163759
         def fn(x):
             return torch.combinations(x, r=1)
 
@@ -1436,11 +1420,7 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(actual2, expected2)
 
     def test_combinations_dynamic_shapes_r3(self, device):
-        """
-        Test torch.combinations with r=3 (higher combinations) and dynamic shapes.
-        Regression test for https://github.com/pytorch/pytorch/issues/163759
-        """
-
+        # https://github.com/pytorch/pytorch/issues/163759
         def fn(x):
             return torch.combinations(x, r=3)
 
@@ -1456,6 +1436,18 @@ class TestInductorDynamic(TestCase):
         expected2 = fn(x2)
         actual2 = compiled_fn(x2)
         self.assertEqual(actual2, expected2)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_combinations_unbacked_symint(self, device):
+        # https://github.com/pytorch/pytorch/issues/163759
+        def fn(x):
+            nz = torch.nonzero(x).squeeze(1)
+            return torch.combinations(nz, r=2)
+
+        x = torch.tensor([1, 0, 2, 0, 3, 4], device=device)
+        opt_fn = torch.compile(fn, dynamic=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
