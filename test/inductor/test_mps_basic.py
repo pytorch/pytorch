@@ -194,15 +194,14 @@ class MPSBasicTests(TestCase):
     def test_sdpa_split_qkv(self):
         # regression test for metal compiler bug where fused (x / A) % B
         # produces wrong results, causing incorrect reads from non-contiguous
-        # tensors whose shape involves a non-power-of-2 dimension (i.e.. n_head=6)
-        batch, n_head, seq_len, head_dim = 2, 6, 32, 64
-        n_embd = n_head * head_dim
-
-        qkv = torch.randn(batch, seq_len, 3 * n_embd)
+        n_head, n_embd, seq_len = 6, 384, 1024
+        x = torch.randn(16, seq_len, n_embd, device="mps")
+        c_attn = torch.nn.Linear(n_embd, 3 * n_embd).to("mps").eval()
+        qkv = c_attn(x)
         q, k, v = qkv.split(n_embd, dim=2)
-        q = q.view(batch, seq_len, n_head, head_dim).transpose(1, 2)
-        k = k.view(batch, seq_len, n_head, head_dim).transpose(1, 2)
-        v = v.view(batch, seq_len, n_head, head_dim).transpose(1, 2)
+        q = q.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        k = k.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        v = v.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
 
         def fn(q, k, v):
             return torch.nn.functional.scaled_dot_product_attention(
