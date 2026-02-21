@@ -177,8 +177,7 @@ const std::string jit_common_types = R"ESCAPE(
   #define __forceinline__ inline __attribute__((always_inline))
   #endif
   #else
-  //TODO use _assert_fail, because assert is disabled in non-debug builds
-  #define ERROR_UNSUPPORTED_CAST assert(false);
+  #define ERROR_UNSUPPORTED_CAST __trap();
   #define CUDA_OR_ROCM_NUM_THREADS 128
   #define MAX_DIMS 25
   #endif
@@ -192,6 +191,8 @@ const std::string jit_common_types = R"ESCAPE(
   typedef signed char int8_t;
   typedef unsigned char uint8_t;  // NOTE: this MUST be "unsigned char"! "char" is equivalent to "signed char"
   typedef short int16_t;
+  typedef unsigned short uint16_t;
+  typedef unsigned long long uint64_t;
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
@@ -222,6 +223,20 @@ const std::string jit_common_types = R"ESCAPE(
   _(void, QUInt8) /* 13 */                        \
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
+  _(void, QUInt4x2) /* 16 */                             \
+  _(void, QUInt2x4) /* 17 */                             \
+  _(void, Bits1x8) /* 18 */                              \
+  _(void, Bits2x4) /* 19 */                              \
+  _(void, Bits4x2) /* 20 */                              \
+  _(void, Bits8) /* 21 */                                \
+  _(void, Bits16) /* 22 */                               \
+  _(void, Float8_e5m2) /* 23 */                          \
+  _(void, Float8_e4m3fn) /* 24 */                        \
+  _(void, Float8_e5m2fnuz) /* 25 */                      \
+  _(void, Float8_e4m3fnuz) /* 26 */                      \
+  _(uint16_t, UInt16) /* 27 */                           \
+  _(uint32_t, UInt32) /* 28 */                           \
+  _(uint64_t, UInt64) /* 29 */
 
   #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(_)       \
   _(uint8_t, Byte)                                                 \
@@ -236,7 +251,10 @@ const std::string jit_common_types = R"ESCAPE(
   _(std::complex<float>, ComplexFloat)                             \
   _(std::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
-  _(at::BFloat16, BFloat16)
+  _(at::BFloat16, BFloat16)                                        \
+  _(uint16_t, UInt16)                                              \
+  _(uint32_t, UInt32)                                              \
+  _(uint64_t, UInt64)
 
 
   enum class ScalarType : int8_t {

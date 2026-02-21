@@ -143,7 +143,7 @@ from .utils import (
 from .variables.base import typestr, ValueMutationNew, VariableTracker
 from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
-from .variables.constant import ConstantVariable
+from .variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from .variables.ctx_manager import (
     ContextWrappingVariable,
     GenericContextWrappingVariable,
@@ -648,7 +648,7 @@ def _detect_and_normalize_assert_statement(
                 ].argval
             else:
                 error_msg = "assertion error"
-            self.push(ConstantVariable.create(error_msg))
+            self.push(VariableTracker.build(self, error_msg))
             return True
 
     return False
@@ -763,6 +763,7 @@ def generic_jump(
         value: VariableTracker = self.pop()
         if (
             config.rewrite_assert_with_torch_assert
+            and sys.flags.optimize == 0
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
         ):
             error_msg: VariableTracker = self.pop()
@@ -877,8 +878,9 @@ def generic_jump(
                 if result.is_python_constant():
                     result_value = result.as_python_constant()
                     if method_name == "__bool__" and not isinstance(result_value, bool):
-                        msg = variables.ConstantVariable.create(
-                            f"__bool__ should return bool, returned {type(result_value).__name__}"
+                        msg = VariableTracker.build(
+                            self,
+                            f"__bool__ should return bool, returned {type(result_value).__name__}",
                         )
                         exc.raise_observed_exception(TypeError, self, args=[msg])
                     if isinstance(result_value, (bool, int)) and truth_fn(result_value):
@@ -1130,7 +1132,6 @@ class BytecodeDispatchTableMeta(type):
             op: getattr(cls, opname, functools.partial(_missing, opname))
             for opname, op in dis.opmap.items()
         }
-        # pyrefly: ignore [missing-attribute]
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
@@ -1194,7 +1195,7 @@ class ExceptionStack:
                 break
 
             if context is val:
-                o.set_context(ConstantVariable(None))  # type: ignore[union-attr, arg-type]
+                o.set_context(CONSTANT_VARIABLE_NONE)  # type: ignore[union-attr, arg-type]
                 break
 
             o = context  # type: ignore[assignment]
@@ -2168,7 +2169,7 @@ class InstructionTranslatorBase(
             return VariableTracker.build(self, val, var_source)
         else:
             assert is_builtin_constant(val)
-            return ConstantVariable.create(value=val)
+            return VariableTracker.build(self, val)
 
     def load_builtin(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval(inst.argval))
@@ -2219,7 +2220,7 @@ class InstructionTranslatorBase(
         assert exc is None
         self.push(exc)
 
-        self.push(exit.call_function(self, [ConstantVariable.create(None)] * 3, {}))
+        self.push(exit.call_function(self, [CONSTANT_VARIABLE_NONE] * 3, {}))
 
     def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
         self.popn(2)
@@ -2240,7 +2241,7 @@ class InstructionTranslatorBase(
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(ConstantVariable.create(None))
+                self.push(CONSTANT_VARIABLE_NONE)
             else:
                 # pop the iterator in Python < 3.12
                 self.pop()
@@ -2271,7 +2272,7 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__setattr__",
-            [ConstantVariable("__traceback__"), new_tb],
+            [VariableTracker.build(self, "__traceback__"), new_tb],
             {},
         )
 
@@ -2290,7 +2291,7 @@ class InstructionTranslatorBase(
             and isinstance(val, variables.ExceptionVariable)
             and val.exc_type is StopIteration
         ):
-            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            val = VariableTracker.build(self, RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
 
         # Capture the python_stack when the exception is first raised.
         # This preserves the original exception location even if the exception
@@ -2325,7 +2326,7 @@ class InstructionTranslatorBase(
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
             if not len(self.exn_vt_stack):
-                msg = ConstantVariable("No active exception to reraise")
+                msg = VariableTracker.build(self, "No active exception to reraise")
                 exc.raise_observed_exception(RuntimeError, self, args=[msg])
 
             # re-raise the previous exception. Here CPython refers to the exception
@@ -2354,7 +2355,12 @@ class InstructionTranslatorBase(
                 curr_exc = self.exn_vt_stack.get_current_exception()
                 self._attach_traceback_to_exception(curr_exc)
                 cause = self._create_exception_type(from_vt)
-                curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
+                curr_exc.call_method(
+                    self,  # pyrefly: ignore [bad-argument-type]
+                    "__setattr__",
+                    [VariableTracker.build(self, "__cause__"), cause],
+                    {},
+                )  # type: ignore[arg-type, union-attr, assignment]
 
     def CLEANUP_THROW(self, inst: Instruction) -> None:
         # https://github.com/python/cpython/pull/96010
@@ -2469,7 +2475,7 @@ class InstructionTranslatorBase(
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
                     self.push(
-                        variables.ConstantVariable(self.current_instruction.offset)
+                        VariableTracker.build(self, self.current_instruction.offset)
                     )
 
                 # 3) push the exception to the stack
@@ -2544,9 +2550,9 @@ class InstructionTranslatorBase(
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
-                    self.push(variables.ConstantVariable(None))
-                    self.push(variables.ConstantVariable(None))
-                    self.push(variables.ConstantVariable(None))
+                    self.push(variables.CONSTANT_VARIABLE_NONE)
+                    self.push(variables.CONSTANT_VARIABLE_NONE)
+                    self.push(variables.CONSTANT_VARIABLE_NONE)
 
                 # Push new exception - tb, val, type
                 # Traceback is currently mapped to UnknownVariable
@@ -2587,7 +2593,7 @@ class InstructionTranslatorBase(
 
         val = self.pop()
         if len(self.exn_vt_stack) == 0:
-            prev_exc: VariableTracker = ConstantVariable(None)
+            prev_exc: VariableTracker = CONSTANT_VARIABLE_NONE
         else:
             prev_exc = self.exn_vt_stack[-1]
         self.push(prev_exc)
@@ -2691,7 +2697,7 @@ class InstructionTranslatorBase(
                 return True
             elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
                 exc_instance.fn,
-                # pyrefly: ignore [invalid-argument, missing-attribute]
+                # pyrefly: ignore [invalid-argument]
                 expected_type.fn,
             ):
                 return True
@@ -2699,7 +2705,7 @@ class InstructionTranslatorBase(
         return False
 
     def CHECK_EXC_MATCH(self, inst: Instruction) -> None:
-        self.push(variables.ConstantVariable(self.check_if_exc_matches()))
+        self.push(VariableTracker.build(self, self.check_if_exc_matches()))
 
     def JUMP_IF_NOT_EXC_MATCH(self, inst: Instruction) -> None:
         if not self.check_if_exc_matches():
@@ -2712,7 +2718,7 @@ class InstructionTranslatorBase(
             self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst: Instruction) -> None:
-        self.call_function(BuiltinVariable(iter), [self.pop()], {})
+        self.call_function(VariableTracker.build(self, iter), [self.pop()], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -2758,16 +2764,12 @@ class InstructionTranslatorBase(
             assert isinstance(null, NullVariable)
 
         if not isinstance(
-            # pyrefly: ignore [unbound-name]
             argsvars,
             BaseListVariable,
-            # pyrefly: ignore [unbound-name]
         ) and argsvars.has_force_unpack_var_sequence(self):
-            # pyrefly: ignore [unbound-name]
             argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
 
         # Unpack for cases like fn(**obj) where obj is a map
-        # pyrefly: ignore [unbound-name]
         if isinstance(kwargsvars, UserDefinedObjectVariable):
             kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
@@ -2786,9 +2788,9 @@ class InstructionTranslatorBase(
             )
 
         # Map to a dictionary of str -> VariableTracker
-        # pyrefly: ignore [bad-assignment, missing-attribute, unbound-name]
+        # pyrefly: ignore [bad-assignment, unbound-name]
         kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore [bad-argument-type, missing-attribute, unbound-name]
+        # pyrefly: ignore [bad-argument-type, unbound-name]
         self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(
@@ -2847,9 +2849,9 @@ class InstructionTranslatorBase(
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
-        result = BuiltinVariable(getattr).call_function(
+        result = VariableTracker.build(self, getattr).call_function(
             self,  # type: ignore[arg-type]
-            [obj, ConstantVariable.create(attr)],
+            [obj, VariableTracker.build(self, attr)],
             {},
         )
         self.push(result)
@@ -2868,17 +2870,17 @@ class InstructionTranslatorBase(
     )
     def STORE_ATTR(self, inst: Instruction) -> None:
         val, obj = self.popn(2)
-        BuiltinVariable(setattr).call_function(
+        VariableTracker.build(self, setattr).call_function(
             self,  # type: ignore[arg-type]
-            [obj, ConstantVariable.create(inst.argval), val],
+            [obj, VariableTracker.build(self, inst.argval), val],
             {},
         )
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
         obj = self.pop()
-        BuiltinVariable(delattr).call_function(
+        VariableTracker.build(self, delattr).call_function(
             self,  # type: ignore[arg-type]
-            [obj, ConstantVariable.create(inst.argval)],
+            [obj, VariableTracker.build(self, inst.argval)],
             {},
         )
 
@@ -3480,7 +3482,7 @@ class InstructionTranslatorBase(
             return
 
         items = self.popn(inst.argval)
-        self.push(ListVariable(items, mutation_type=ValueMutationNew()))
+        self.push(VariableTracker.build(self, items))
 
     def BUILD_SET(self, inst: Instruction) -> None:
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
@@ -3521,20 +3523,23 @@ class InstructionTranslatorBase(
 
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
-        self.push(ConstDictVariable(d, mutation_type=ValueMutationNew()))
+        self.push(VariableTracker.build(self, d))
 
     def BUILD_MAP_UNPACK(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
         # ensure everything is a dict
-        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]  # type: ignore[arg-type]
+        items = [
+            VariableTracker.build(self, dict).call_function(self, [x], {})
+            for x in items
+        ]  # type: ignore[arg-type]
         result: dict[Any, Any] = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
             result.update(x.items)
         self.push(
-            ConstDictVariable(
+            VariableTracker.build(
+                self,
                 result,
-                mutation_type=ValueMutationNew(),
             )
         )
 
@@ -3550,9 +3555,9 @@ class InstructionTranslatorBase(
         assert len(keys) == len(values)
 
         self.push(
-            ConstDictVariable(
+            VariableTracker.build(
+                self,
                 dict(zip(keys, values)),
-                mutation_type=ValueMutationNew(),
             )
         )
 
@@ -3601,7 +3606,7 @@ class InstructionTranslatorBase(
             # MAKE_FUNCTION behavior actually changed in 3.11, see
             # https://github.com/python/cpython/pull/93189/
             assert hasattr(code.value, "co_qualname")  # type: ignore[attr-defined]
-            fn_name = ConstantVariable.create(value=code.value.co_qualname)  # type: ignore[attr-defined]
+            fn_name = VariableTracker.build(self, code.value.co_qualname)  # type: ignore[attr-defined]
         defaults = None
         closure = None
         annotations = None
@@ -3649,17 +3654,14 @@ class InstructionTranslatorBase(
                 "(i.e. `a, b, c = d`).",
                 hints=[*graph_break_hints.USER_ERROR],
             )
-        # pyrefly: ignore [unbound-name]
         if len(val) != inst.argval:
             unimplemented(
                 gb_type="Length mismatch when unpacking object for UNPACK_SEQUENCE",
-                # pyrefly: ignore [unbound-name]
                 context=f"expected length: {inst.argval}, actual: {len(val)}",
                 explanation=f"{seq} unpacked to a list for the UNPACK_SEQUENCE bytecode "
                 "(i.e. `a, b, c = d`) with unexpected length.",
                 hints=[*graph_break_hints.DYNAMO_BUG],
             )
-        # pyrefly: ignore [unbound-name]
         for i in reversed(val):
             self.push(i)
 
@@ -3749,11 +3751,11 @@ class InstructionTranslatorBase(
 
     def _convert_value(self, value: VariableTracker, flag: int) -> VariableTracker:
         if flag == 1:
-            return BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 2:
-            return BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, repr).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 3:
-            return BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+            return VariableTracker.build(self, ascii).call_function(self, [value], {})  # type: ignore[arg-type]
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
@@ -3772,7 +3774,9 @@ class InstructionTranslatorBase(
 
         value = self._convert_value(value, flags & 0x03)
 
-        fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
+        fmt_var = VariableTracker.build(
+            self, "{:" + fmt_spec.as_python_constant() + "}"
+        )
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
@@ -3782,8 +3786,7 @@ class InstructionTranslatorBase(
         if (flags & 0x04) == 0x04:
             fmt_spec = self.pop()
         else:
-            fmt_spec = ConstantVariable.create("")
-
+            fmt_spec = VariableTracker.build(self, "")
         return self._format_value(fmt_spec, flags)
 
     def BUILD_STRING(self, inst: Instruction) -> None:
@@ -3867,7 +3870,9 @@ class InstructionTranslatorBase(
         obj.call_method(self, "extend", [v], {})  # type: ignore[arg-type]
 
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
-        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
+        self.push(
+            VariableTracker.build(self, tuple).call_function(self, [self.pop()], {})
+        )  # type: ignore[arg-type]
 
     def STOPITERATION_ERROR(self, inst: Instruction) -> None:
         # wrap the generator body in a try: ... except StopIteration: ... which
@@ -3878,13 +3883,13 @@ class InstructionTranslatorBase(
         val = self.stack[-1]
         assert self._isinstance_exception(val)
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
-            new_val = variables.BuiltinVariable(RuntimeError).call_function(
+            new_val = VariableTracker.build(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
-                [ConstantVariable("generator raised StopIteration")],
+                [VariableTracker.build(self, "generator raised StopIteration")],
                 {},
             )
-            new_val.call_setattr(self, ConstantVariable("__context__"), val)  # type: ignore[attr-defined]
-            new_val.call_setattr(self, ConstantVariable("__cause__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, VariableTracker.build(self, "__context__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(self, VariableTracker.build(self, "__cause__"), val)  # type: ignore[attr-defined]
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst: Instruction) -> None:
@@ -3904,7 +3909,7 @@ class InstructionTranslatorBase(
     def GET_LEN(self, inst: Instruction) -> None:
         tos = self.stack[-1]
         if tos.is_python_constant():
-            self.push(ConstantVariable.create(len(tos.as_python_constant())))
+            self.push(VariableTracker.build(self, len(tos.as_python_constant())))
         else:
             self.push(tos.call_method(self, "__len__", [], {}))
 
@@ -3934,7 +3939,7 @@ class InstructionTranslatorBase(
 
     def MATCH_CLASS(self, inst: Instruction) -> None:
         subject, cls, names = self.popn(3)
-        arg = ConstantVariable.create(inst.arg)
+        arg = VariableTracker.build(self, inst.arg)
         self.push(
             self.inline_user_function_return(
                 VariableTracker.build(self, impl_MATCH_CLASS),
@@ -3946,7 +3951,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 11):
             # for versions < 3.11, also push the boolean result
             tos = self.stack[-1]
-            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
+            self.push(VariableTracker.build(self, not istype(tos, ConstantVariable)))
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
         keys = self.stack[-1]
@@ -3963,7 +3968,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 11):
             # for versions < 3.11, also push the boolean result
             tos = self.stack[-1]
-            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
+            self.push(VariableTracker.build(self, not istype(tos, ConstantVariable)))
 
     def LOAD_ASSERTION_ERROR(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval("AssertionError"))
@@ -4302,7 +4307,7 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
-            attr = attr.call_function(self, [ConstantVariable.create(1)], {})
+            attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
             fn.annotations = attr
         elif flags & 0x08:
             fn.closure = attr
@@ -4327,7 +4332,7 @@ class InstructionTranslatorBase(
         self.push(self._convert_value(self.pop(), inst.argval))
 
     def FORMAT_SIMPLE(self, inst: Instruction) -> None:
-        self._format_value(ConstantVariable.create(""), 0)
+        self._format_value(VariableTracker.build(self, ""), 0)
 
     def FORMAT_WITH_SPEC(self, inst: Instruction) -> None:
         self._format_value(self.pop(), 0)
@@ -4376,7 +4381,7 @@ class InstructionTranslatorBase(
             self.PUSH_NULL(inst)
 
     def LOAD_SMALL_INT(self, inst: Instruction) -> None:
-        self.push(ConstantVariable.create(inst.argval))
+        self.push(VariableTracker.build(self, inst.argval))
 
     # See
     # https://github.com/python/cpython/blob/7519ac294fc5c4fd7fb9cb8dc0edc960688cf887/Python/pylifecycle.c#L814
@@ -4618,7 +4623,6 @@ class InstructionTranslatorBase(
         return ComprehensionAnalysis(
             end_ip=scan_ip,
             result_var=result_var,
-            # pyrefly: ignore [unbound-name]
             result_on_stack=result_on_stack,
             iterator_vars=iterator_vars,
             walrus_vars=walrus_vars,
@@ -4626,18 +4630,13 @@ class InstructionTranslatorBase(
         )
 
     def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
-        """Handle graph break for a comprehension by skipping the comprehension bytecode.
+        """Handle list/dict comprehension graph break.
 
-        Steps:
-        1. Compile the graph up to the comprehension
-        2. Load captured variables from frame_list to local slots
-        3. Add the comprehension bytecode (runs eagerly at runtime)
-        4. Generate code to pass comprehension-created variables to the resume function
-        5. Create the resume function for code after the comprehension
+        Builds a synthetic function wrapping the comprehension bytecode,
+        calls it via codegen_call_resume, then chains into the resume
+        function for the post-comprehension code.
         """
         assert sys.version_info >= (3, 12)
-
-        from .variables.tensor import TensorVariable
 
         analysis = self._analyze_comprehension()
 
@@ -4675,135 +4674,190 @@ class InstructionTranslatorBase(
 
         self.popn(stack_pops)
         meta = all_stack_locals_metadata[0]
+        cg = PyCodegen(self.output.root_tx)
 
-        if self.parent is not None:
-            self._handle_comprehension_graph_break_nested(
-                analysis,
-                start_ip,
-                stack_pops,
-                all_stack_locals_metadata,
-                stack_pops_null_mask,
+        # Runtime stack after compile_subgraph:
+        #   cells, [frame_values], *(non-popped items), *(stack_pops items w/ NULLs)
+        # frame_values[0] = [frame N locals] (no stack items yet)
+
+        nonnull_count = sum(1 for m in stack_pops_null_mask if not m)
+
+        # live_stack_depth: stack items above cells/frame_values excluding NULLs
+        # that compile_subgraph didn't codegen (tracked in stack_null_idxes).
+        live_stack_depth = len(self.stack) - len(meta.stack_null_idxes)
+
+        # --- Step 2: Pop stack_pops items and append non-nulls to frame_values[0] ---
+        # SWAP each item to TOS then LIST_APPEND or pop_null; fv_list stays at
+        # TOS throughout. Items append in TOS-first (reversed) order;
+        # _build_comprehension_fn compensates by loading in reverse.
+        cg.extend_output(
+            [
+                # frame_values[0] to TOS
+                *create_copy(live_stack_depth + stack_pops + 1),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+            ]
+        )
+        for i in reversed(range(stack_pops)):
+            cg.extend_output(create_swap(2))
+            if stack_pops_null_mask[i]:
+                cg.extend_output(cg.pop_null())
+            else:
+                cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
+        cg.extend_output([create_instruction("POP_TOP")])
+
+        # Stack: cells, [frame_values], *(non-popped items)
+
+        # --- Step 3: Build comprehension function ---
+        new_code, fn_name = self._build_comprehension_fn(
+            analysis,
+            start_ip,
+            stack_pops,
+            stack_pops_null_mask,
+            nonnull_count,
+            meta,
+        )
+
+        # --- Step 4: Extract [cells[0]] and [frame_values[0]] for codegen_call_resume ---
+        cg.extend_output(
+            [
+                *create_copy(live_stack_depth + 2),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                create_instruction("BUILD_LIST", arg=1),
+                *create_copy(live_stack_depth + 2),
+                cg.create_load_const(0),
+                cg.create_binary_subscr(),
+                create_instruction("BUILD_LIST", arg=1),
+            ]
+        )
+
+        # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
+
+        # --- Step 5: Call comprehension function via codegen_call_resume ---
+        self.codegen_call_resume([new_code], [fn_name], cg)
+
+        # Stack: ..., *(non-popped), comp_result
+
+        # --- Step 6: Remove appended stack_pops items from frame_values[0] ---
+        if nonnull_count > 0:
+            frame_values_pos = live_stack_depth + 1 + 1  # +1 result, +1 frame_values
+            cg.extend_output(
+                [
+                    *create_copy(frame_values_pos),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                    # frame_values[0] on TOS
+                    create_dup_top(),
+                    # frame_values[0], frame_values[0]
+                    cg.create_load_const(-nonnull_count),
+                    cg.create_load_const(None),
+                    create_instruction("BUILD_SLICE", arg=2),
+                    create_instruction("DELETE_SUBSCR"),
+                    # del frame_values[0][-nonnull_count:]
+                    create_instruction("POP_TOP"),
+                ]
             )
-            return
 
-        # --- Step 2: Load captured variables from frame_list to local slots ---
-        # The comprehension bytecode uses LOAD_FAST to load captured variables.
-        # compile_subgraph put them in frame_list[0], so we load from there
-        # and STORE_FAST to ensure they're in the correct local slots.
+        # --- Step 7: Pass comprehension outputs to frame_values[0] ---
+        # Walrus vars first, then result_var.
+        vars_to_pass = analysis.walrus_vars + (
+            [analysis.result_var] if analysis.result_var else []
+        )
 
-        captured_vars_to_store: list[str] = []
-        for var_name in analysis.captured_vars:
-            if var_name not in self.symbolic_locals:
-                continue
-            if var_name not in meta.locals_names:
-                continue
+        existing_vars: dict[str, int] = {}
+        for var_name in vars_to_pass:
+            self.symbolic_locals[var_name] = UnknownVariable()
+            if var_name in meta.locals_names:
+                existing_vars[var_name] = meta.locals_names[var_name]
+            else:
+                meta.locals_names[var_name] = len(meta.locals_names)
 
-            var = self.symbolic_locals[var_name]
-            in_correct_slot = (
-                isinstance(var.source, LocalSource)
-                and var.source.local_name == var_name
+        fv_depth = live_stack_depth + 2  # comp_result + frame_values
+
+        # --- Walrus vars: extract from comp_result tuple ---
+        if analysis.walrus_vars:
+            # comp_result is (result, *walrus_vars).
+            cg.extend_output(
+                [
+                    *create_copy(fv_depth),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                ]
             )
-            # Tensors/symnodes must already be in their correct slot
-            if isinstance(var, (TensorVariable, SymNodeVariable)):
-                if not in_correct_slot:
-                    unimplemented(
-                        gb_type="Comprehension with captured tensor not in local slot",
-                        context="",
-                        explanation="Cannot use comprehension optimization when a "
-                        "captured tensor variable is not stored in its expected "
-                        "local slot.",
-                        hints=[],
-                    )
-                continue
-
-            if not in_correct_slot:
-                captured_vars_to_store.append(var_name)
-
-        if captured_vars_to_store:
-            # Stack layout: [cells], [frame_list], *(all stack values including stack_pops)
-            # At this point, popn(stack_pops) reduced symbolic stack but runtime stack
-            # still has all values. We need to add stack_pops back.
-            frame_list_pos = (
-                len(self.stack) + stack_pops - len(meta.stack_null_idxes) + 1
-            )
-            cg = PyCodegen(self)
-            for var_name in captured_vars_to_store:
-                var_idx = meta.locals_names[var_name]
+            # Stack: ..., comp_tuple, fv0
+            for j, walrus_var in enumerate(analysis.walrus_vars):
                 cg.extend_output(
                     [
-                        *create_copy(frame_list_pos),
-                        cg.create_load_const(0),
+                        *create_copy(2),
+                        cg.create_load_const(j + 1),
                         cg.create_binary_subscr(),
-                        cg.create_load_const(var_idx),
-                        cg.create_binary_subscr(),
-                        create_instruction("STORE_FAST", argval=var_name),
                     ]
                 )
-            self.output.add_output_instructions(cg.get_instructions())
+                # Stack: ..., comp_tuple, fv0, walrus_value
+                if walrus_var in existing_vars:
+                    # fv0[idx] = walrus_value
+                    cg.extend_output(
+                        [
+                            *create_copy(2),  # copy fv0
+                            cg.create_load_const(existing_vars[walrus_var]),
+                            create_instruction("STORE_SUBSCR"),
+                        ]
+                    )
+                else:
+                    cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
+                # Stack: ..., comp_tuple, fv0
+            cg.extend_output(
+                [
+                    create_instruction("POP_TOP"),  # pop fv0
+                    # Extract the result from the tuple.
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                ]
+            )
+            # Stack: ..., result
 
-        # --- Step 3: Add the comprehension bytecode ---
-
-        copied_insts = self._copy_comprehension_bytecode(start_ip, analysis.end_ip)
-        self.output.add_output_instructions(copied_insts)
-
+        # --- Result: keep on stack, overwrite/append to fv[0], or discard ---
         if analysis.result_on_stack:
             self.push(UnknownVariable())
+        elif analysis.result_var:
+            cg.extend_output(
+                [
+                    *create_copy(fv_depth),
+                    cg.create_load_const(0),
+                    cg.create_binary_subscr(),
+                    # Stack: ..., result, fv0
+                ]
+            )
+            if analysis.result_var in existing_vars:
+                cg.extend_output(
+                    [
+                        cg.create_load_const(existing_vars[analysis.result_var]),
+                        create_instruction("STORE_SUBSCR"),
+                        # fv0[idx] = result
+                    ]
+                )
+            else:
+                cg.extend_output(
+                    [
+                        *create_swap(2),
+                        create_instruction("LIST_APPEND", arg=1),
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+        else:
+            cg.extend_output([create_instruction("POP_TOP")])
 
-        # --- Step 4: Generate code to pass variables to resume function ---
+        # Stack: cells, [frame_values], *(non-popped stack)
+        self.output.add_output_instructions(cg.get_instructions())
 
-        # Variables the comprehension creates that need to be passed to resume:
-        # - result_var: variable the comprehension result is assigned to
-        # - walrus_vars: variables created by walrus operator (:=)
-        vars_to_pass = (
-            [analysis.result_var] if analysis.result_var else []
-        ) + analysis.walrus_vars
-
-        for var_name in vars_to_pass:
-            meta.locals_names[var_name] = len(meta.locals_names)
-            self.symbolic_locals[var_name] = UnknownVariable()
-
-        if vars_to_pass:
-            # Stack layout: [cells], [frame_list], *(extra values), (result if on stack)
-            frame_list_pos = len(self.stack) - len(meta.stack_null_idxes) + 1
-            resume_cg = PyCodegen(self)
-            self._emit_extend_frame_values(resume_cg, frame_list_pos, vars_to_pass)
-            self.output.add_output_instructions(resume_cg.get_instructions())
-
-        # --- Step 5: Create the resume function ---
-
+        # --- Step 8: Create resume function chain ---
         resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
             self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
         )
 
         self.instruction_pointer = None
-
-    def _emit_extend_frame_values(
-        self,
-        cg: PyCodegen,
-        frame_values_depth: int,
-        var_names: list[str],
-    ) -> None:
-        """Emit bytecode to append local vars to frame_values[0].
-
-        frame_values_depth is how deep frame_values sits below TOS
-        (i.e., the arg to COPY to reach it).
-        """
-        cg.extend_output(
-            [
-                *create_copy(frame_values_depth),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-            ]
-        )
-        for var_name in var_names:
-            cg.extend_output(
-                [
-                    create_instruction("LOAD_FAST", argval=var_name),
-                    create_instruction("LIST_APPEND", arg=1),
-                ]
-            )
-        cg.extend_output([create_instruction("POP_TOP")])
 
     def _build_comprehension_fn(
         self,
@@ -4932,207 +4986,6 @@ class InstructionTranslatorBase(
             )
 
         return new_code, fn_name
-
-    def _handle_comprehension_graph_break_nested(
-        self,
-        analysis: ComprehensionAnalysis,
-        start_ip: int,
-        stack_pops: int,
-        all_stack_locals_metadata: list[StackLocalsMetadata],
-        stack_pops_null_mask: list[bool],
-    ) -> None:
-        """Handle comprehension graph break in a nested (inlined) context.
-
-        Builds a synthetic function wrapping the comprehension bytecode,
-        calls it via codegen_call_resume, then chains into the resume
-        function for the post-comprehension code.
-        """
-        assert config.nested_graph_breaks
-        meta = all_stack_locals_metadata[0]
-        cg = PyCodegen(self.output.root_tx)
-
-        # Runtime stack after compile_subgraph:
-        #   cells, [frame_values], *(non-popped items), *(stack_pops items w/ NULLs)
-        # frame_values[0] = [frame N locals] (no stack items yet)
-
-        nonnull_count = sum(1 for m in stack_pops_null_mask if not m)
-
-        # live_stack_depth: stack items above cells/frame_values excluding NULLs
-        # that compile_subgraph didn't codegen (tracked in stack_null_idxes).
-        live_stack_depth = len(self.stack) - len(meta.stack_null_idxes)
-
-        # --- Step 1: Pop stack_pops items and append non-nulls to frame_values[0] ---
-        # SWAP each item to TOS then LIST_APPEND or pop_null; fv_list stays at
-        # TOS throughout. Items append in TOS-first (reversed) order;
-        # _build_comprehension_fn compensates by loading in reverse.
-        cg.extend_output(
-            [
-                # frame_values[0] to TOS
-                *create_copy(live_stack_depth + stack_pops + 1),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-            ]
-        )
-        for i in reversed(range(stack_pops)):
-            cg.extend_output(create_swap(2))
-            if stack_pops_null_mask[i]:
-                cg.extend_output(cg.pop_null())
-            else:
-                cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
-        cg.extend_output([create_instruction("POP_TOP")])
-
-        # Stack: cells, [frame_values], *(non-popped items)
-
-        # --- Step 2: Build comprehension function ---
-        new_code, fn_name = self._build_comprehension_fn(
-            analysis,
-            start_ip,
-            stack_pops,
-            stack_pops_null_mask,
-            nonnull_count,
-            meta,
-        )
-
-        # --- Step 3: Extract [cells[0]] and [frame_values[0]] for codegen_call_resume ---
-        cg.extend_output(
-            [
-                *create_copy(live_stack_depth + 2),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-                create_instruction("BUILD_LIST", arg=1),
-                *create_copy(live_stack_depth + 2),
-                cg.create_load_const(0),
-                cg.create_binary_subscr(),
-                create_instruction("BUILD_LIST", arg=1),
-            ]
-        )
-
-        # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
-
-        # --- Step 4: Call comprehension function via codegen_call_resume ---
-        self.codegen_call_resume([new_code], [fn_name], cg)
-
-        # Stack: ..., *(non-popped), comp_result
-
-        # --- Step 5: Remove appended stack_pops items from frame_values[0] ---
-        if nonnull_count > 0:
-            frame_values_pos = live_stack_depth + 1 + 1  # +1 result, +1 frame_values
-            cg.extend_output(
-                [
-                    *create_copy(frame_values_pos),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    # frame_values[0] on TOS
-                    create_dup_top(),
-                    # frame_values[0], frame_values[0]
-                    cg.create_load_const(-nonnull_count),
-                    cg.create_load_const(None),
-                    create_instruction("BUILD_SLICE", arg=2),
-                    create_instruction("DELETE_SUBSCR"),
-                    # del frame_values[0][-nonnull_count:]
-                    create_instruction("POP_TOP"),
-                ]
-            )
-
-        # --- Step 6: Pass comprehension outputs to frame_values[0] ---
-        # Walrus vars first, then result_var.
-        vars_to_pass = analysis.walrus_vars + (
-            [analysis.result_var] if analysis.result_var else []
-        )
-
-        existing_vars: dict[str, int] = {}
-        for var_name in vars_to_pass:
-            self.symbolic_locals[var_name] = UnknownVariable()
-            if var_name in meta.locals_names:
-                existing_vars[var_name] = meta.locals_names[var_name]
-            else:
-                meta.locals_names[var_name] = len(meta.locals_names)
-
-        fv_depth = live_stack_depth + 2  # comp_result + frame_values
-
-        # --- Walrus vars: extract from comp_result tuple ---
-        if analysis.walrus_vars:
-            # comp_result is (result, *walrus_vars).
-            cg.extend_output(
-                [
-                    *create_copy(fv_depth),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                ]
-            )
-            # Stack: ..., comp_tuple, fv0
-            for j, walrus_var in enumerate(analysis.walrus_vars):
-                cg.extend_output(
-                    [
-                        *create_copy(2),
-                        cg.create_load_const(j + 1),
-                        cg.create_binary_subscr(),
-                    ]
-                )
-                # Stack: ..., comp_tuple, fv0, walrus_value
-                if walrus_var in existing_vars:
-                    # fv0[idx] = walrus_value
-                    cg.extend_output(
-                        [
-                            *create_copy(2),  # copy fv0
-                            cg.create_load_const(existing_vars[walrus_var]),
-                            create_instruction("STORE_SUBSCR"),
-                        ]
-                    )
-                else:
-                    cg.extend_output([create_instruction("LIST_APPEND", arg=1)])
-                # Stack: ..., comp_tuple, fv0
-            cg.extend_output(
-                [
-                    create_instruction("POP_TOP"),  # pop fv0
-                    # Extract the result from the tuple.
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                ]
-            )
-            # Stack: ..., result
-
-        # --- Result: keep on stack, overwrite/append to fv[0], or discard ---
-        if analysis.result_on_stack:
-            self.push(UnknownVariable())
-        elif analysis.result_var:
-            cg.extend_output(
-                [
-                    *create_copy(fv_depth),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    # Stack: ..., result, fv0
-                ]
-            )
-            if analysis.result_var in existing_vars:
-                cg.extend_output(
-                    [
-                        cg.create_load_const(existing_vars[analysis.result_var]),
-                        create_instruction("STORE_SUBSCR"),
-                        # fv0[idx] = result
-                    ]
-                )
-            else:
-                cg.extend_output(
-                    [
-                        *create_swap(2),
-                        create_instruction("LIST_APPEND", arg=1),
-                        create_instruction("POP_TOP"),
-                    ]
-                )
-        else:
-            cg.extend_output([create_instruction("POP_TOP")])
-
-        # Stack: cells, [frame_values], *(non-popped stack)
-        self.output.add_output_instructions(cg.get_instructions())
-
-        # --- Step 7: Create resume function chain ---
-        resume_inst = self.instructions[analysis.end_ip]
-        self.output.add_output_instructions(
-            self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
-        )
-
-        self.instruction_pointer = None
 
     def _copy_comprehension_bytecode(
         self, start_ip: int, end_ip: int
@@ -6053,7 +5906,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if self.output.should_exit:
             # graph break
-            return ConstantVariable.create(None)  # return dummy variable
+            return CONSTANT_VARIABLE_NONE  # return dummy variable
 
         assert self.symbolic_result is not None
 
@@ -6312,7 +6165,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
             raise exc.InfiniteGeneratorError
-        self.push(ConstantVariable.create(None))
+        self.push(CONSTANT_VARIABLE_NONE)
         if (
             config.enable_faithful_generator_behavior
             or self.is_generator_from_ctx_manager
@@ -6325,7 +6178,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if not isinstance(tos, ListIteratorVariable):
             self.pop()
-            res = BuiltinVariable(iter).call_function(self, [tos], {})  # type: ignore[arg-type]
+            res = VariableTracker.build(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
 
     def RETURN_VALUE(self, inst: Instruction) -> None:

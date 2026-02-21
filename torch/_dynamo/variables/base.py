@@ -702,6 +702,87 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             tree_map_kwargs,
         )
 
+    def call_tree_map_with_path(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+        keypath: tuple[Any, ...],
+    ) -> "VariableTracker":
+        """Performance optimization to implement tree_map_with_path faster than tracing it"""
+        is_leaf_var = tree_map_kwargs.get("is_leaf")
+        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
+            pred_result = is_leaf_var.call_function(tx, [self], {})
+            try:
+                leaf_decision = pred_result.as_python_constant()
+            except NotImplementedError:
+                return self._tree_map_with_path_fallback(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                    keypath,
+                )
+            if leaf_decision:
+                keypath_var = variables.TupleVariable(
+                    [VariableTracker.build(tx, k) for k in keypath]
+                )
+                return map_fn.call_function(tx, [keypath_var, self, *rest], {})
+
+        return self.call_tree_map_with_path_branch(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+            keypath,
+        )
+
+    def call_tree_map_with_path_branch(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+        keypath: tuple[Any, ...],
+    ) -> "VariableTracker":
+        """Handle tree_map_with_path for leaf nodes (default behavior)"""
+        keypath_var = variables.TupleVariable(
+            [VariableTracker.build(tx, k) for k in keypath]
+        )
+        return map_fn.call_function(tx, [keypath_var, self, *rest], {})
+
+    def _tree_map_with_path_fallback(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+        keypath: tuple[Any, ...],
+    ) -> "VariableTracker":
+        tree_map_fn_copy = tree_map_fn.clone()
+        tree_map_fn_copy._maybe_call_tree_map_fastpath = lambda *args, **kwargs: None  # type: ignore[missing-attribute]
+        log.debug(
+            "tree_map_with_path fastpath fallback triggered for %s (rest=%s, kwargs=%s, keypath=%s)",
+            self,
+            rest,
+            tree_map_kwargs,
+            keypath,
+        )
+        # For fallback, we need to reconstruct the subtree rooted at this node
+        # and call tree_map_with_path on it. Since we're in the middle of the tree,
+        # we fall back to tracing the tree_map_with_path function.
+        return tree_map_fn_copy.call_function(
+            tx,
+            [map_fn, self, *rest],
+            tree_map_kwargs,
+        )
+
     def set_name_hint(self, name: str) -> None:
         pass
 

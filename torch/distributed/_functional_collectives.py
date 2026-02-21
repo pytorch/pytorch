@@ -100,6 +100,9 @@ RANK_TYPES = Union[
 ]
 
 
+from torch._utils import _chunk_or_narrow_cat  # noqa: F401
+
+
 """
 User facing APIs for functional collectives
 -------------------------------------------
@@ -278,8 +281,7 @@ def reduce_scatter_tensor(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
     tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
         self,
@@ -318,8 +320,7 @@ def reduce_scatter_tensor_autograd(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
     tensor = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
         self,
@@ -1219,7 +1220,6 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
                 FutureWarning,
                 stacklevel=3,
             )
-        # pyrefly: ignore [redundant-cast]
         return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
@@ -1795,17 +1795,65 @@ from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecate
 )
 
 
+# Dynamo remaps dist.* collectives to these wrappers via traceable_collective_remaps.
+# Each wrapper calls the in-place functional collective and returns None,
+# matching the return type of the original dist.* APIs when async_op=False.
+# async_op=True already graph-breaks in CollectiveFunctionRewriteVariable.
+# These must be module-level def statements (not closures from a decorator factory)
+# because _traceable_collectives_source resolves Dynamo guard sources by looking up
+# fn.__name__ as a module attribute — a def's __name__ matches its variable name
+# automatically, whereas a closure's would not.
+def _remapped_allgather(*args, **kwargs):
+    assert _are_we_tracing()
+    all_gather_tensor_inplace(*args, **kwargs)
+
+
+def _remapped_reducescatter(*args, **kwargs):
+    assert _are_we_tracing()
+    reduce_scatter_tensor_inplace(*args, **kwargs)
+
+
+def _remapped_allreduce(*args, **kwargs):
+    assert _are_we_tracing()
+    all_reduce_inplace(*args, **kwargs)
+
+
+def _remapped_all_to_all_single(*args, **kwargs):
+    assert _are_we_tracing()
+    all_to_all_inplace(*args, **kwargs)
+
+
+def _remapped_all_gather(*args, **kwargs):
+    assert _are_we_tracing()
+    all_gather_inplace(*args, **kwargs)
+
+
+def _remapped_isend(*args, **kwargs):
+    assert _are_we_tracing()
+    isend_inplace(*args, **kwargs)
+
+
+def _remapped_irecv(*args, **kwargs):
+    assert _are_we_tracing()
+    irecv_inplace(*args, **kwargs)
+
+
+def _remapped_batch_p2p_ops(*args, **kwargs):
+    assert _are_we_tracing()
+    batch_p2p_ops_inplace(*args, **kwargs)
+
+
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.
 traceable_collective_remaps = {
-    legacy_allgather: all_gather_tensor_inplace,  # type: ignore[has-type]
-    legacy_reducescatter: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
-    legacy_allreduce: all_reduce_inplace,  # type: ignore[has-type]
-    legacy_all_to_all_single: all_to_all_inplace,  # type: ignore[has-type]
-    legacy_all_gather: all_gather_inplace,  # type: ignore[has-type]
-    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,  # type: ignore[has-type]
-    legacy_all_gather_base: all_gather_tensor_inplace,  # type: ignore[has-type]
-    legacy_isend: isend_inplace,  # type: ignore[has-type]
-    legacy_irecv: irecv_inplace,  # type: ignore[has-type]
-    legacy_batch_p2p_ops: batch_p2p_ops_inplace,  # type: ignore[has-type]
+    legacy_allgather: _remapped_allgather,
+    legacy_reducescatter: _remapped_reducescatter,
+    legacy_allreduce: _remapped_allreduce,
+    legacy_all_to_all_single: _remapped_all_to_all_single,
+    legacy_all_gather: _remapped_all_gather,
+    legacy_reduce_scatter_base: _remapped_reducescatter,
+    legacy_all_gather_base: _remapped_allgather,
+    legacy_isend: _remapped_isend,
+    legacy_irecv: _remapped_irecv,
+    legacy_batch_p2p_ops: _remapped_batch_p2p_ops,
 }

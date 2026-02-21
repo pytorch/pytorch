@@ -299,6 +299,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
     "test_privateuseone_python_backend",
+    "functorch/test_control_flow_cuda_initialization",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -415,6 +416,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
+CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
@@ -1320,6 +1322,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
     "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
+    "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
@@ -1356,6 +1359,12 @@ def parse_args():
         "--distributed-tests",
         action="store_true",
         help="Run all distributed tests",
+    )
+    parser.add_argument(
+        "--include-cpython-tests",
+        "--include-cpython-tests",
+        action="store_true",
+        help="If this flag is present, we will only run cpython tests.",
     )
     parser.add_argument(
         "--include-dynamo-core-tests",
@@ -1652,6 +1661,11 @@ def get_selected_tests(options) -> list[str]:
     if options.core:
         selected_tests = list(
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
+        )
+
+    if options.include_cpython_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in CPYTHON_TESTS, selected_tests)
         )
 
     # Filter to only run dynamo tests when --include-dynamo-core-tests option is specified
