@@ -73,7 +73,7 @@ class OutputData:
     result2: Tensor
 
 
-torch.utils.pytree.python.register_dataclass(OutputData)
+pytree.register_dataclass(OutputData)
 
 
 @dataclass
