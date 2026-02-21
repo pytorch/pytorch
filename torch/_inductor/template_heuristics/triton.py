@@ -2025,7 +2025,16 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 m, n, k, dtype_size=dtype.itemsize, op_name=op_name
             )
             selector = origami.OrigamiMatmulSelector(
-                allcfgs, m, n, k, dtype, dtype, dtype, device. a_stride, b_stride, c_stride
+                allcfgs,
+                m,
+                n,
+                k,
+                dtype,
+                dtype,
+                dtype,
+                device.a_stride,
+                b_stride,
+                c_stride,
             )
             origami_config_kwargs = {
                 "EVEN_K": selector.even_k,
