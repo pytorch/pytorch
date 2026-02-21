@@ -26,7 +26,14 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_utils import (
+    NAVI_ARCH,
+    parametrize,
+    skipIfRocm,
+    skipIfRocmArch,
+    skipIfWindows,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
@@ -325,6 +332,7 @@ def forward(self, x_1, output_1):
             )
 
     @requires_gpu
+    @skipIfRocm  # Temporary skip due to regression in triton 3.7 - codegen def error
     def test_triton_kernel_clone_wekdeps(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._inductor.choices import InductorChoices
@@ -2724,6 +2732,9 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     @inductor_config.patch("emulate_precision_casts", True)
+    @skipIfRocmArch(
+        NAVI_ARCH
+    )  # Temporary skip due to regression in triton 3.7 - slow test only on NAVI
     def test_triton_kernel_emulate_precision_unaffected(self):
         @triton.jit
         def triton_(in_ptr, out_ptr, numel, add_amount, BLOCK_SIZE: tl.constexpr):
@@ -2767,6 +2778,49 @@ def forward(self, arg0_1, arg1_1):
                     "where inductor has no triton mm kernels available, this test is meaningless"
                 ) from e
             raise
+
+    @requires_gpu
+    def test_constexpr_handling(self):
+        @triton.jit
+        def copy_kernel(
+            src_ptr,
+            dst_ptr,
+            n_elements,
+            stride,
+            maybe_param,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(src_ptr + offs * stride, mask=mask)
+            scale = tl.where(maybe_param != 0, 0.5, 1.0)
+            x = x * scale
+
+            tl.store(dst_ptr + offs * stride, x, mask=mask)
+
+        t = torch.randn(1024, device=GPU_TYPE)
+        out = torch.empty(1024, device=GPU_TYPE)
+
+        kwargs = {
+            "src_ptr": t,
+            "dst_ptr": out,
+            "n_elements": 1024,
+            "stride": 1,
+            "maybe_param": None,  # semantically wrong, but testing frontend specialization
+            "BLOCK_SIZE": 256,
+        }
+
+        ttir_module, _ = generate_ttir(copy_kernel, kwargs, tma_descriptor_metadata={})
+        ttir_str = str(ttir_module)
+
+        # `constexpr` and None values get inlined, and do not appear as function parameters.
+        self.assertIn("src_ptr", ttir_str)
+        self.assertIn("dst_ptr", ttir_str)
+        self.assertIn("n_elements", ttir_str)
+        self.assertIn("stride", ttir_str)
+        self.assertNotIn("BLOCK_SIZE", ttir_str)
+        self.assertNotIn("maybe_param", ttir_str)
 
 
 def make_mutation_test(fn):
@@ -3151,7 +3205,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements,
+            n_elements: "tl.constexpr",
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -3221,7 +3275,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements,
+            n_elements: "tl.constexpr",
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -3257,7 +3311,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements,
+            n_elements: "tl.constexpr",
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)

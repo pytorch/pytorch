@@ -15,6 +15,7 @@ from torch._inductor.fx_passes.pad_mm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, is_big_gpu, run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import NAVI_ARCH, skipIfRocmArch
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -27,6 +28,9 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
+    @skipIfRocmArch(
+        NAVI_ARCH
+    )  # Temporary skip due to regression in triton 3.7 - slow test only on NAVI
     def test_pad_mm_dyn_m(self):
         M = 40
         K1 = 581
@@ -226,6 +230,9 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
+    @skipIfRocmArch(
+        NAVI_ARCH
+    )  # Temporary skip due to regression in triton 3.7 - slow test only on NAVI
     def test_pad_bmm_dyn_k(self):
         B = 10
         M = 128
