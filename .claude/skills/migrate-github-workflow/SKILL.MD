@@ -23,6 +23,15 @@ steps, and the custom image is replaced by a standard base image
 - **Windows or macOS workflows** — leave intact
 - **Jobs on GitHub-hosted runners** (`ubuntu-latest`, `linux.24_04.*`) — leave intact
 - **Anything outside the `jobs:` block** (name, triggers, permissions) — do not modify
+- **Partner self-hosted runners using Docker-in-Docker** (e.g., IBM
+  `linux.s390x`) — these are not migrating to ARC. Extract their code
+  paths into separate dedicated workflows (e.g., `_s390x-build.yml`,
+  `_s390x-test.yml`) so the main `_linux-build.yml` / `_linux-test.yml`
+  can be cleanly migrated without s390x conditionals. The extracted
+  workflows keep the original Docker-in-Docker pattern, runner labels,
+  and artifact upload method (`actions/upload-artifact` instead of S3).
+  This applies to any partner-provided runner that still relies on
+  Docker-in-Docker and is not part of the ARC migration.
 
 ## Prerequisites
 
