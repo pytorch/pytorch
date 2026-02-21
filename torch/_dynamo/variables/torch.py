@@ -2740,6 +2740,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl, fake_impl, captured_out_spec
         )
 
+        hook_fn = getattr(decorated_fn, "_torchdynamo_leaf_hook_fn", None)
+        if hook_fn is not None:
+            hook_fake_fn = getattr(decorated_fn, "_torchdynamo_leaf_hook_fake_fn", None)
+            wrapped_real_impl._leaf_hook_real_fn = hook_fn  # type: ignore[attr-defined]
+            wrapped_real_impl._leaf_hook_fake_fn = hook_fake_fn  # type: ignore[attr-defined]
+
         _, real_impl_spec = func_to_graphable(wrapped_real_impl)
         _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
 
