@@ -6311,6 +6311,7 @@ class Scheduler:
                 input_deallocation,
                 skip_cudagraph,
                 constant_names,
+                hoisted_alloc_buffers=(),
             )
 
             signatures.append(partition_signature)
@@ -6607,6 +6608,13 @@ class Scheduler:
             )
             self._codegen(partition)
 
+            for buffer in signature.hoisted_alloc_buffers:
+                name = buffer.get_name()
+                if name not in V.graph.removed_buffers:
+                    line = V.graph.wrapper_code.make_buffer_allocation(buffer)
+                    V.graph.wrapper_code.writeline(line)
+                    V.graph.wrapper_code.allocated.add(name)
+
             # Note: [Removed Graph Partition Arguments]
             # Graph partition relies on node.read_writes to analyze the partition
             # inputs and outputs. However, during codegen, we may decide some buffers
@@ -6704,6 +6712,65 @@ class Scheduler:
 
         self.default_device_context = cudagraph_partition_device
 
+    def _hoist_allocs_to_prior_cudagraph_partition(
+        self,
+        partitions: list[PartitionType],
+        signatures: list[GraphPartitionSignature],
+    ) -> list[GraphPartitionSignature]:
+        """
+        Hoist ExternKernelOut output buffer allocations from non-cudagraph
+        partitions into the prior cudagraph partition so they are captured
+        once during CG recording and replayed with a fixed pointer.
+
+        Targets regular CUDA ExternKernelOut buffers (not CommBufferLayout
+        P2P buffers, which are handled by _copy_input_to_comm_buffer).
+        """
+        from . import ir
+
+        new_signatures = list(signatures)
+        any_hoisted = False
+
+        for i, (partition, sig) in enumerate(zip(partitions, new_signatures)):
+            if not sig.skip_cudagraph:
+                continue
+            if i == 0:
+                continue
+            prior_sig = new_signatures[i - 1]
+            if prior_sig.skip_cudagraph:
+                continue
+
+            hoisted: list[ir.Buffer] = []
+            for snode in partition:
+                node = snode.node
+                if (
+                    isinstance(node, ir.ExternKernelOut)
+                    and node.should_allocate()
+                    and not isinstance(node.get_output_spec(), ir.CommBufferLayout)
+                    and node.get_device()
+                    and node.get_device().type == "cuda"
+                ):
+                    hoisted.append(node)
+
+            if not hoisted:
+                continue
+
+            any_hoisted = True
+            new_output_nodes = list(prior_sig.output_nodes) + hoisted
+            new_signatures[i - 1] = GraphPartitionSignature(
+                prior_sig.symbol_inputs,
+                prior_sig.input_nodes,
+                new_output_nodes,
+                prior_sig.input_deallocation,
+                prior_sig.skip_cudagraph,
+                prior_sig.constant_names,
+                hoisted_alloc_buffers=tuple(hoisted),
+            )
+
+        if any_hoisted:
+            self.compute_graph_partition_maps(new_signatures)
+
+        return new_signatures
+
     def _codegen_partitions(self) -> None:
         """
         Split nodes into partitions and codegen each partition into separate functions.
@@ -6711,6 +6778,10 @@ class Scheduler:
         each function.
         """
         partitions, signatures = self.graph_partition()
+
+        signatures = self._hoist_allocs_to_prior_cudagraph_partition(
+            partitions, signatures
+        )
 
         if len(partitions) > 1:
             counters["inductor"]["cudagraph_partitions"] += len(partitions)
