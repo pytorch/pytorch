@@ -6998,8 +6998,14 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA is only available for floating-point types on non-AMD GPUs
-    use_fma = dtype.is_floating_point and not torch.version.hip
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    device = self.get_device()
+    use_fma = (
+        dtype.is_floating_point
+        and not torch.version.hip
+        and device is not None
+        and device.type == "cuda"
+    )
 
     def inner_fn(idx):
         self_val = self_loader(idx)
@@ -7067,8 +7073,14 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA is only available for floating-point types on non-AMD GPUs
-    use_fma = dtype.is_floating_point and not torch.version.hip
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    device = self.get_device()
+    use_fma = (
+        dtype.is_floating_point
+        and not torch.version.hip
+        and device is not None
+        and device.type == "cuda"
+    )
 
     def inner_fn(idx):
         self_val = self_loader(idx)
@@ -7076,8 +7088,11 @@ def addcdiv(self, tensor1, tensor2, *, value=1):
         t2_val = t2_loader(idx)
 
         # Compute tensor1 / tensor2 first
-        # Always use div_rn for round-to-nearest division to match eager CUDA behavior
-        t1_div_t2 = ops.div_rn(t1_val, t2_val)
+        # Use div_rn for round-to-nearest division on CUDA to match eager behavior
+        if use_fma:
+            t1_div_t2 = ops.div_rn(t1_val, t2_val)
+        else:
+            t1_div_t2 = ops.truediv(t1_val, t2_val)
 
         if value == 1:
             # For value=1, just add the division result (no FMA needed)
@@ -7169,12 +7184,25 @@ def lerp_scalar(start, end, weight):
     start_loader = start.make_loader()
     end_loader = end.make_loader()
 
-    use_fma = dtype.is_floating_point and not torch.version.hip
+    # FMA is only available for floating-point types on CUDA (non-AMD)
+    device = start.get_device()
+    use_fma = (
+        dtype.is_floating_point
+        and not torch.version.hip
+        and device is not None
+        and device.type == "cuda"
+    )
     # Determine which formula to use based on weight value
     # Convert to float for comparison in case weight is a sympy expression
     weight_float = float(weight)
     # Use -weight_float if negative to get absolute value (avoid shadowed abs)
     use_high_formula = (weight_float if weight_float >= 0 else -weight_float) >= 0.5
+
+    # Pre-compute 1 - weight in target dtype to match CUDA's precision.
+    # This avoids constant folding in Python float64 precision.
+    if use_high_formula:
+        # Compute subtraction in target dtype to match CUDA's rounding behavior
+        one_minus_weight_value = (1.0 - torch.tensor(weight_float, dtype=dtype)).item()
 
     def inner_fn(idx):
         start_val = start_loader(idx)
@@ -7182,7 +7210,7 @@ def lerp_scalar(start, end, weight):
         diff = ops.sub(end_val, start_val)
 
         if use_high_formula:
-            one_minus_weight = ops.constant(1.0 - weight_float, dtype)
+            one_minus_weight = ops.constant(one_minus_weight_value, dtype)
             return _lerp_high_formula(one_minus_weight, diff, end_val, use_fma)
         else:
             weight_val = ops.constant(weight_float, dtype)
@@ -7218,7 +7246,14 @@ def lerp_tensor(start, end, weight):
     end_loader = end.make_loader()
     weight_loader = weight.make_loader()
 
-    use_fma = dtype.is_floating_point and not torch.version.hip
+    # FMA is only available for floating-point types on CUDA (non-AMD)
+    device = start.get_device()
+    use_fma = (
+        dtype.is_floating_point
+        and not torch.version.hip
+        and device is not None
+        and device.type == "cuda"
+    )
 
     def inner_fn(idx):
         start_val = start_loader(idx)
@@ -7247,6 +7282,29 @@ def lerp_tensor(start, end, weight):
 
 
 register_foreach_pointwise(aten._foreach_lerp.Scalar, lerp_scalar)
+
+
+def _foreach_lerp_scalarlist(start, end, weight):
+    """
+    Foreach version of lerp with per-tensor scalar weights.
+    Uses foreach_group_loop for consistent grouping behavior.
+    """
+    realize_outputs = (
+        len(V.graph.current_node.users) == 0
+        or V.graph.current_node.target in inplace_foreach_ops
+        or cur_node_has_non_foreach_users()
+    )
+
+    # Pair each (start, end, weight) together
+    groups = group_foreach_args(zip(start, end, weight))
+
+    def apply_fn(args):
+        return lerp_scalar(*args)
+
+    return foreach_group_loop(groups, len(start), apply_fn, realize_outputs)
+
+
+_register_foreach_lowering(aten._foreach_lerp.ScalarList, _foreach_lerp_scalarlist)
 
 
 register_pointwise_numeric_ldf64(aten.cos)
