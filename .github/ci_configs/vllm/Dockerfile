@@ -169,8 +169,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && export SCCACHE_IDLE_TIMEOUT=0 \
         && export CMAKE_BUILD_TYPE=Release \
         && export VLLM_DOCKER_BUILD_CONTEXT=1 \
-        && rm -rf .deps \
-        && mkdir -p .deps \
         && sccache --show-stats \
         && python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38 \
         && sccache --show-stats; \
