@@ -221,6 +221,23 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
+bool safeEventQuery(const std::shared_ptr<at::cuda::CUDAEvent>& event) {
+#ifdef USE_ROCM
+  try {
+    return event->query();
+  } catch (const c10::Error& e) {
+    const std::string msg = e.what_without_backtrace();
+    if (msg.find("hipErrorCapturedEvent") != std::string::npos ||
+        msg.find("hipErrorStreamCaptureUnsupported") != std::string::npos) {
+      return false;
+    }
+    throw;
+  }
+#else
+  return event->query();
+#endif
+}
+
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
   // parentheses avoid some compiler warnings
   static const uint64_t min_version =
@@ -644,7 +661,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
     return false;
   }
   // Checking the work's corresponding CUDA event's status
-  if (!ncclStartEvent_->query()) {
+  if (!safeEventQuery(ncclStartEvent_)) {
     return false;
   }
   return true;
@@ -657,7 +674,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // hang if another thread is holding the CUDA global context lock. For
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
-  if (!ncclEndEvent_->query()) {
+  if (!safeEventQuery(ncclEndEvent_)) {
     return false;
   }
   return true;
@@ -922,6 +939,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
   globalStore_ =
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
+  debugInfoPipeFile_ = getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
   auto desyncDebug = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -1778,7 +1796,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
     // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(pg_->globalRank());
+    dumpPipe.emplace(
+        pg_->globalRank(), pg_->debugInfoPipeFile_, pg_->traceBufferSize_);
   }
   while (true) {
     // This won't have any lock since this lock is only used here.
@@ -3742,8 +3761,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
 
   if (nanCheck) {
+    at::cuda::CUDAStreamGuard guard(ncclStream);
     for (const auto& input : inputs) {
-      checkForNan(input, ncclStream);
+      checkForNan(input);
     }
   }
 
@@ -4220,7 +4240,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
   if (enableNanCheck_ && opType == OpType::SEND) {
-    checkForNan(tensor, ncclStream);
+    at::cuda::CUDAStreamGuard guard(ncclStream);
+    checkForNan(tensor);
   }
 
   if (!coalescing_state_) {

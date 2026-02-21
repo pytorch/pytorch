@@ -131,13 +131,13 @@ def clean_nn_module_stack_and_source_fn(
                 name, cls = item
                 if isinstance(name, str):
                     clean_name = clean_export_root_string(name)
-                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append((clean_name, cls))
                 else:
-                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append(item)
             else:
+                # pyrefly: ignore [bad-argument-type]
                 cleaned_stack.append(item)
+        # pyrefly: ignore [bad-return]
         return cleaned_stack
 
     for node in graph_module.graph.nodes:
@@ -381,16 +381,14 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
                 # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore [bad-index, index-error]
-                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index]
                     "dynamo_flat_name_to_original_fqn"
                 ]
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
                 # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore [bad-index, index-error]
-                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index]
                     "dynamo_compile_id"
                 ]
 
@@ -494,6 +492,7 @@ class InputProcessor:
         self, inputs: tuple[object, ...]
     ) -> tuple[tuple[object, ...], dict[str, object]]:
         args = inputs
+        # pyrefly: ignore [implicit-any]
         kwargs = {}
         if len(args) > self.num_args:
             kwargs = dict(zip(self.kwarg_names, args[self.num_args :]))
@@ -632,7 +631,9 @@ def create_fx_graph_from_captured_output(
 
                 try:
                     self.forward = types.MethodType(patched_forward, self)
+                    # pyrefly: ignore [implicit-any]
                     self._forward_hooks = {}
+                    # pyrefly: ignore [implicit-any]
                     self._forward_pre_hooks = {}
                     # pyrefly: ignore [invalid-argument]
                     return super(type(self), self).__call__(*args, **kwargs)
@@ -641,6 +642,7 @@ def create_fx_graph_from_captured_output(
                     self._forward_hooks = fwd_hooks
                     self._forward_pre_hooks = fwd_pre_hooks
 
+            # pyrefly: ignore [bad-assignment]
             graph_module._wrapped_call.cls_call = dynamo_wrapped_call
 
     root = graph_module if isinstance(root, torch.nn.Module) else root
@@ -678,7 +680,9 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     def __init__(
         self,
         orig_arg_names: list[str],
+        # pyrefly: ignore [implicit-any]
         dynamo_bytecode_flatten: Callable,
+        # pyrefly: ignore [implicit-any]
         dynamo_bytecode_unflatten: Callable,
     ) -> None:
         super().__init__()
