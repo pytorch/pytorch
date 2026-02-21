@@ -526,6 +526,79 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @expectedFailureDynamicWrapper
+    @patches
+    def test_convolution1d(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x + 1,
+                w,
+                b,
+                stride=(2,),
+                padding=(4,),
+                dilation=(1,),
+                transposed=False,
+                output_padding=(0,),
+                groups=1,
+            )
+
+        foo(
+            torch.randn(2, 33, 34, device=GPU_TYPE),
+            torch.randn(34, 33, 3, device=GPU_TYPE),
+            torch.randn(34, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_convolution1d_1x1(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x,
+                w,
+                b,
+                stride=(1,),
+                padding=(0,),
+                dilation=(1,),
+                transposed=False,
+                output_padding=(0,),
+                groups=1,
+            )
+
+        foo(
+            torch.randn(1, 33, 16, device=GPU_TYPE),
+            torch.randn(34, 33, 1, device=GPU_TYPE),
+            torch.randn(34, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_convolution1d_group(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x,
+                w,
+                b,
+                stride=(1,),
+                padding=(1,),
+                dilation=(1,),
+                transposed=False,
+                output_padding=(0,),
+                groups=32,
+            )
+
+        foo(
+            torch.randn(1, 32, 16, device=GPU_TYPE),
+            torch.randn(32, 1, 3, device=GPU_TYPE),
+            torch.randn(32, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
     def test_TritonTemplateCaller_str(self):
         """
         Make sure str(TritonTemplateCaller) does not raise exceptions.
