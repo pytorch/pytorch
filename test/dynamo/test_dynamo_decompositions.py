@@ -368,7 +368,7 @@ class GraphModule(torch.nn.Module):
         copy_: "f32[4]" = l_tensors_0_.copy_(b);  l_tensors_0_ = b = copy_ = None
         copy__1: "f32[4]" = l_tensors_1_.copy_(b_1);  l_tensors_1_ = b_1 = copy__1 = None
         return ()
-""",
+""",  # noqa: B950
         )
 
     @skipIfCrossRef
@@ -412,7 +412,7 @@ class GraphModule(torch.nn.Module):
         copy__1: "f32[4]" = l_tensors_1_.copy_(l_end_tensors_1_);  l_end_tensors_1_ = copy__1 = None
         _foreach_addcmul_ = torch._foreach_addcmul_([l_tensors_0_, l_tensors_1_], [neg_omw, neg_omw], (getitem, getitem_1));  l_tensors_0_ = l_tensors_1_ = neg_omw = getitem = getitem_1 = _foreach_addcmul_ = None
         return ()
-""",
+""",  # noqa: B950
         )
 
     def test_foreach_lerp_inplace_decomposition_disabled_capture_scalar(self):
@@ -455,7 +455,7 @@ class GraphModule(torch.nn.Module):
         copy__1: "f32[4]" = l_tensors_1_.copy_(l_end_tensors_1_);  l_end_tensors_1_ = copy__1 = None
         _foreach_addcmul_ = torch._foreach_addcmul_([l_tensors_0_, l_tensors_1_], [neg_omw, neg_omw], (getitem, getitem_1));  l_tensors_0_ = l_tensors_1_ = neg_omw = getitem = getitem_1 = _foreach_addcmul_ = None
         return ()
-""",
+""",  # noqa: B950
         )
 
     def test_foreach_pow_scalar_decomposition_enabled(self):
