@@ -1536,6 +1536,9 @@ class LoweringTest(MultiProcContinuousTest):
 
         This tests the fix for the "disconnected P2P buffer" bug where the
         triton kernel would read from an uninitialized P2P buffer.
+
+        CUDAGraph replay correctness is tested separately in
+        test_symm_mem_upstream_propagation_cudagraph (PR #175450).
         """
         self._init_process()
 
@@ -1553,17 +1556,10 @@ class LoweringTest(MultiProcContinuousTest):
             z = y_back + 1
             return torch.ops.symm_mem.one_shot_all_reduce(z, "sum", "0")
 
-        with torch._inductor.config.patch(
-            {
-                "graph_partition": True,
-                "triton.cudagraphs": True,
-            }
-        ):
-            compiled = torch.compile(func, fullgraph=True)
-            code = run_and_get_triton_code(compiled, x, w)
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, x, w)
 
-        # Verify the triton add kernel has separate in/out pointers
-        # (NOT in_out_ptr which would indicate the disconnected P2P bug)
+        # Verify upstream propagation generated correct P2P allocation
         self.assertIn(
             "empty_strided_p2p",
             code,
@@ -1575,17 +1571,8 @@ class LoweringTest(MultiProcContinuousTest):
             "Expected out-variant allreduce in generated code",
         )
 
-        # Verify correctness across multiple iterations (catches stale-data bugs)
-        with torch._inductor.config.patch(
-            {
-                "graph_partition": True,
-                "triton.cudagraphs": True,
-            }
-        ):
-            for _ in range(3):
-                torch.compiler.cudagraph_mark_step_begin()
-                result = compiled(x, w)
-
+        # Single-run correctness (no CUDAGraph replay)
+        result = compiled(x, w)
         eager_y = torch.mm(x, w)
         eager_z = eager_y.cpu().cuda() + 1
         eager_result = eager_z.clone()
