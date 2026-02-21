@@ -1579,7 +1579,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
         flatten_with_keys_func=default_flatten_func_with_keys,
     )
 
-    def default_flatten_fn_spec(obj, spec) -> list[Any]:
+    def default_flatten_func_spec(obj, spec) -> list[Any]:
         flats, context = flatten_func(obj)
         if context != spec.context:
             raise AssertionError(f"context mismatch: {context} != {spec.context}")
@@ -1587,7 +1587,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
     register_pytree_flatten_spec(
         cls,
-        default_flatten_fn_spec,
+        default_flatten_func_spec,
     )
 
 
