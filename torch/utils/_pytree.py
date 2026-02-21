@@ -299,8 +299,9 @@ def register_pytree_node(
             "Use `flatten_func` and `unflatten_func` instead. "
             "Please consider passing `flatten_func` and `unflatten_func` via positional arguments",
             category=FutureWarning,
-            statcklevel=2,
+            stacklevel=2,
         )
+        assert unflatten_fn is not None  # type narrowing
         (
             (flatten_func, unflatten_func),
             (flatten_fn, unflatten_fn),

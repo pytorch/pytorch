@@ -199,8 +199,9 @@ def register_pytree_node(
             "The `flatten_fn` and `unflatten_fn` arguments are deprecated. "
             "Use `flatten_func` and `unflatten_func` instead.",
             category=FutureWarning,
-            statcklevel=2,
+            stacklevel=2,
         )
+        assert unflatten_fn is not None  # type narrowing
         (
             (flatten_func, unflatten_func),
             (flatten_fn, unflatten_fn),
