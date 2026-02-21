@@ -133,6 +133,8 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.baddbmm,  # upcasts to fp32, perf issue
     # FMA ops - we have lowerings that use FMA to match eager CUDA behavior
     aten.lerp,
+    aten._foreach_lerp.Scalar,
+    aten._foreach_lerp.ScalarList,
     aten.addcmul,
     aten._foreach_addcmul.Scalar,
 ]
@@ -855,6 +857,34 @@ def _foreach_addcdiv_scalar(
 ) -> list[torch.Tensor]:
     return aten._foreach_add.List(
         self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
+    )
+
+
+@register_decomposition(aten._foreach_lerp.Scalar)
+def _foreach_lerp_scalar(
+    start_tensors: list[torch.Tensor],
+    end_tensors: list[torch.Tensor],
+    weight: torch.types.Number,
+) -> list[torch.Tensor]:
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.Scalar(
+            aten._foreach_sub.List(end_tensors, start_tensors), weight
+        ),
+    )
+
+
+@register_decomposition(aten._foreach_lerp.ScalarList)
+def _foreach_lerp_scalarlist(
+    start_tensors: list[torch.Tensor],
+    end_tensors: list[torch.Tensor],
+    scalars: list[torch.types.Number],
+) -> list[torch.Tensor]:
+    return aten._foreach_add.List(
+        start_tensors,
+        aten._foreach_mul.ScalarList(
+            aten._foreach_sub.List(end_tensors, start_tensors), scalars
+        ),
     )
 
 
