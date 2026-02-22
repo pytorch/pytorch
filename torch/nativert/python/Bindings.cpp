@@ -34,6 +34,7 @@ void initModelRunnerPybind(py::module& m) {
               args.push_back(std::move(ivalue));
             }
             std::unordered_map<std::string, c10::IValue> kwargs;
+            kwargs.reserve(pykwargs.size());
             for (const auto& [key, pyarg] : pykwargs) {
               auto ivalue = torch::jit::toIValue(pyarg, c10::AnyType::get());
               kwargs[py::str(key)] = std::move(ivalue);
@@ -54,6 +55,7 @@ void initModelRunnerPybind(py::module& m) {
               args.push_back(std::move(ivalue));
             }
             std::unordered_map<std::string, c10::IValue> kwargs;
+            kwargs.reserve(pykwargs.size());
             for (const auto& [key, pyarg] : pykwargs) {
               auto ivalue = torch::jit::toIValue(pyarg, c10::AnyType::get());
               kwargs[py::str(key)] = std::move(ivalue);
