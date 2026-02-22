@@ -609,7 +609,10 @@ if TEST_WITH_TSAN:
     TIMEOUT_DEFAULT = 500
 else:
     TIMEOUT_DEFAULT = int(os.getenv("DISTRIBUTED_TESTS_DEFAULT_TIMEOUT", "300"))
-TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
+TIMEOUT_OVERRIDE = {
+    "test_ddp_uneven_inputs": 400,
+    "test_DistributedDataParallel": 500,
+}
 
 
 # https://github.com/pytorch/pytorch/issues/75665
@@ -735,6 +738,30 @@ def initialize_temp_directories(init_method: Optional[str] = None) -> None:
 def cleanup_temp_dir() -> None:
     if tmp_dir is not None:
         tmp_dir.cleanup()
+
+
+def retrieve_result_from_process_queue(
+    process: torch.multiprocessing.Process,
+    completion_queue: torch.multiprocessing.Queue,
+    timeout: Optional[int] = None,
+) -> Any:
+    """Get result from queue associated with process.
+
+    When the process finished without putting a result or the timeout expired an exception instance will be returned"""
+    queue_timeout = 120 if timeout is None else max(10, min(120, timeout // 4))
+    start_time = time.time()
+    # Periodically check the process for liveness
+    while True:
+        try:
+            return completion_queue.get(timeout=queue_timeout)
+        except queue.Empty:
+            # If not alive do a last check because the timeout might have happened just before completion
+            if not process.is_alive() and completion_queue.empty():
+                return RuntimeError(f"Exited with {process.exitcode}")
+        if timeout is not None:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                return RuntimeError(f"Process timeout out after {elapsed}s")
 
 
 # Most tests operate with this worldsize
@@ -2010,8 +2037,12 @@ class MultiProcContinuousTest(TestCase):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
                 # Wait for the workers to finish the test
-                for i, completion_queue in enumerate(self.completion_queues):
-                    rv = completion_queue.get()
+                for i, (p, completion_queue) in enumerate(
+                    zip(self.processes, self.completion_queues)
+                ):
+                    rv = retrieve_result_from_process_queue(
+                        p, completion_queue, timeout=get_timeout(self.id())
+                    )
                     if isinstance(rv, unittest.SkipTest):
                         raise rv
                     if isinstance(rv, BaseException):
