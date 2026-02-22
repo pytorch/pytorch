@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 # 'TypedDict' is a new accepted type that represents a dictionary with a fixed set of allowed keys.
-# It is standards-track but not in `typing` yet. We leave this hear to be uncommented once the feature
+# It is standards-track but not in `typing` yet. We leave this here to be uncommented once the feature
 # is wide-spread.
 
 # from mypy_extensions import TypedDict
