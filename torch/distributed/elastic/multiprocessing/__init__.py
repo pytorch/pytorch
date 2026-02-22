@@ -18,7 +18,7 @@ Usage 1: Launching two trainers as a function
 
 ::
 
- from torch.distributed.elastic.multiprocessing import Std, start_processes
+ from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, Std, start_processes
 
 
  def trainer(a, b, c):
@@ -33,9 +33,11 @@ Usage 1: Launching two trainers as a function
      entrypoint=trainer,
      args={0: (1, 2, 3), 1: (4, 5, 6)},
      envs={0: {"LOCAL_RANK": 0}, 1: {"LOCAL_RANK": 1}},
-     log_dir="/tmp/foobar",
-     redirects=Std.ALL,  # write all worker stdout/stderr to a log file
-     tee={0: Std.ERR},  # tee only local rank 0's stderr to console
+     logs_specs=DefaultLogsSpecs(
+         log_dir="/tmp/foobar",
+         redirects=Std.ALL,  # write all worker stdout/stderr to log files
+         tee={0: Std.ERR},  # tee only local rank 0's stderr to console
+     ),
  )
 
  # waits for all copies of trainer to finish
@@ -49,12 +51,15 @@ Usage 2: Launching 2 echo workers as a binary
  # echo hello
  # echo world > stdout.log
  ctx = start_processes(
-         name="echo"
-         entrypoint="echo",
+     name="echo",
+     entrypoint="echo",
+     args={0: ("hello",), 1: ("world",)},
+     envs={0: {}, 1: {}},
+     logs_specs=DefaultLogsSpecs(
          log_dir="/tmp/foobar",
-         args={0: "hello", 1: "world"},
          redirects={1: Std.OUT},
-        )
+     ),
+ )
 
 Just like ``torch.multiprocessing``, the return value of the function
 :func:`start_processes` is a process context (:class:`api.PContext`). If a function
@@ -133,8 +138,8 @@ def start_processes(
               with the ``@record`` annotation.
 
     Inside ``logs_specs``, ``redirects`` and ``tee`` are bitmasks specifying which std
-    stream(s) to redirect to a log file in the ``log_dir``. Valid mask values are defined
-    in ``Std``.  To redirect/tee only certain local ranks, pass ``redirects`` as a map
+    stream(s) to redirect to a log file under ``logs_specs``'s ``log_dir``. Valid mask values
+    are defined in ``Std``. To redirect/tee only certain local ranks, pass ``redirects`` as a map
     with the key as the local rank to specify the redirect behavior for.
     Any missing local ranks will default to ``Std.NONE``.
 
@@ -144,7 +149,7 @@ def start_processes(
     file is aggregated across all ranks selected by ``tee``.
 
     ``tee`` acts like the unix "tee" command in that it redirects + prints to console.
-    To avoid worker stdout/stderr from printing to console, use the ``redirects`` parameter.
+    To avoid worker stdout/stderr from printing to console, set ``tee=Std.NONE`` in ``logs_specs``.
 
     For each process, the ``log_dir`` will contain:
 
@@ -159,33 +164,33 @@ def start_processes(
     Example:
     ::
 
-     log_dir = "/tmp/test"
+     logs_specs = DefaultLogsSpecs(log_dir="/tmp/test")
 
      # ok; two copies of foo: foo("bar0"), foo("bar1")
      start_processes(
         name="trainer",
         entrypoint=foo,
-        args:{0:("bar0",), 1:("bar1",),
-        envs:{0:{}, 1:{}},
-        log_dir=log_dir
+        args={0: ("bar0",), 1: ("bar1",)},
+        envs={0: {}, 1: {}},
+        logs_specs=logs_specs,
      )
 
      # invalid; envs missing for local rank 1
      start_processes(
         name="trainer",
         entrypoint=foo,
-        args:{0:("bar0",), 1:("bar1",),
-        envs:{0:{}},
-        log_dir=log_dir
+        args={0: ("bar0",), 1: ("bar1",)},
+        envs={0: {}},
+        logs_specs=logs_specs,
      )
 
      # ok; two copies of /usr/bin/touch: touch file1, touch file2
      start_processes(
         name="trainer",
         entrypoint="/usr/bin/touch",
-        args:{0:("file1",), 1:("file2",),
-        envs:{0:{}, 1:{}},
-        log_dir=log_dir
+        args={0: ("file1",), 1: ("file2",)},
+        envs={0: {}, 1: {}},
+        logs_specs=logs_specs,
       )
 
      # caution; arguments casted to string, runs:
@@ -193,9 +198,9 @@ def start_processes(
      start_processes(
         name="trainer",
         entrypoint="/usr/bin/echo",
-        args:{0:(1,2,3), 1:([1,2,3],),
-        envs:{0:{}, 1:{}},
-        log_dir=log_dir
+        args={0: (1, 2, 3), 1: ([1, 2, 3],)},
+        envs={0: {}, 1: {}},
+        logs_specs=logs_specs,
       )
 
     Args:
@@ -204,14 +209,11 @@ def start_processes(
         entrypoint: either a ``Callable`` (function) or ``cmd`` (binary)
         args: arguments to each replica
         envs: env vars to each replica
-        log_dir: directory used to write log files
+        logs_specs: defines logging destinations and behavior (e.g. ``log_dir``, ``redirects``, ``tee``)
+        log_line_prefixes: optional per-rank prefix to prepend to each log line
         start_method: multiprocessing start method (spawn, fork, forkserver)
                       ignored for binaries
-        logs_specs: defines ``log_dir``, ``redirects``, and ``tee``.
-                    inside ``logs_specs``:
-                    - redirects: which std streams to redirect to a log file
-                    - tee: which std streams to redirect + print to console
-        local_ranks_filter: which ranks' logs to print to console
+        numa_options: optional NUMA binding configuration
         duplicate_stdout_filters: filters for the duplicated stdout logs
         duplicate_stderr_filters: filters for the duplicated stderr logs
 
