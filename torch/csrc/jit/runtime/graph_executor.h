@@ -3,7 +3,6 @@
 #include <atomic>
 #include <memory>
 
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/update_graph_executor_opt.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -14,6 +13,10 @@ TORCH_DECLARE_bool(torch_jit_enable_new_executor);
 TORCH_DECLARE_bool(torch_jit_execution_plan_reuse_code_graph);
 
 namespace torch::jit {
+template <typename T>
+using ArrayRef = at::ArrayRef<T>;
+struct Block;
+struct Value;
 struct GraphExecutorState;
 struct Code;
 
@@ -24,12 +27,7 @@ enum ExecutorExecutionMode {
 
 struct ExecutionPlan {
   ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name)
-      : code(graph, std::move(function_name)),
-        graph(
-            FLAGS_torch_jit_execution_plan_reuse_code_graph
-                ? code.graph()
-                : std::move(graph)) {}
+  ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name);
 
   operator bool() const {
     return static_cast<bool>(graph);
