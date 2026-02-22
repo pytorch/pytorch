@@ -15,7 +15,6 @@ from typing import Any, cast, Optional, overload, Union
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
-from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 import torch.utils._pytree as pytree
 from torch import sym_float, sym_int, sym_max, sym_min
 from torch._prims_common import (
@@ -51,6 +50,7 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
+from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 
 
 # Experimental module containing prototype Python references for existing
@@ -435,7 +435,11 @@ def _broadcast_shapes(*_shapes):
                 #           specialize(s0) to be 1.
                 #      s0:4, s1:1 ==>
                 #           specialize(s1) to be 1.
-                if backed_so and has_guarding_hint(shape[idx]) and has_guarding_hint(common_shape[idx]):
+                if (
+                    backed_so
+                    and has_guarding_hint(shape[idx])
+                    and has_guarding_hint(common_shape[idx])
+                ):
                     a = guarding_hint_or_throw(shape[idx])
                     b = guarding_hint_or_throw(common_shape[idx])
                     if a == 1 and b != 1:
@@ -3169,7 +3173,11 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
             #            The non-broadcast path is picked
             #      x:1, requested_length:4 ==>
             #           specialize(x) to be 1.
-            if backed_so and has_guarding_hint(x) and has_guarding_hint(requested_length):
+            if (
+                backed_so
+                and has_guarding_hint(x)
+                and has_guarding_hint(requested_length)
+            ):
                 x_hint = size_hint(x)
                 requested_hint = size_hint(requested_length)
                 if x_hint == 1 and requested_hint != 1:

@@ -2682,7 +2682,8 @@ def cast_symbool_to_symint_guardless(
         return 1 if symbool else 0
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     return symbool.node.shape_env.create_symintnode(
-        int_sym, hint=int(symbool.node.require_hint()) if has_guarding_hint(symbool) else None
+        int_sym,
+        hint=int(symbool.node.require_hint()) if has_guarding_hint(symbool) else None,
     )
 
 
@@ -6863,6 +6864,7 @@ class ShapeEnv:
                     expr = new_expr
         return expr
 
+    @lru_cache(256)
     def guarding_hint_or_throw(self, expr: Union[sympy.Expr, int]) -> int:
         return self._guarding_hint_or_throw_base(expr, {})
 
@@ -7217,12 +7219,12 @@ class ShapeEnv:
         return final_result
 
     @lru_cache(256)
-    def has_hint(self, expr: sympy.Expr) -> bool:
-        result_expr = safe_expand(expr).xreplace(self.backed_var_to_val)
-        return (
-            result_expr.is_number
-            or self._maybe_evaluate_static(result_expr) is not None
-        )
+    def has_guarding_hint(self, expr: sympy.Expr) -> bool:
+        try:
+            self.guarding_hint_or_throw(expr)
+        except GuardOnDataDependentSymNode:
+            return False
+        return True
 
     def _make_data_dependent_error(
         self,

@@ -1319,7 +1319,6 @@ def conv(
         k = new_kwargs["weight"].ndim
 
         # Avoid importing sympy at a module level
-        from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 
         all_hinted = all(has_hint(s) for s in new_kwargs["input"].shape) and all(
             has_hint(s) for s in new_kwargs["weight"].shape

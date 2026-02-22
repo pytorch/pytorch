@@ -4323,8 +4323,13 @@ def defake(x: Any) -> Any:
         # optimization_hint is appropriate here because defake only needs a
         # plausible concrete shape to allocate a real tensor; it does not need
         # to install guards. For unbacked symbols the heuristic fallback is fine.
-        size = [torch.fx.experimental.symbolic_shapes.optimization_hint(s) for s in x.size()]
-        stride = [torch.fx.experimental.symbolic_shapes.optimization_hint(s) for s in x.stride()]
+        size = [
+            torch.fx.experimental.symbolic_shapes.optimization_hint(s) for s in x.size()
+        ]
+        stride = [
+            torch.fx.experimental.symbolic_shapes.optimization_hint(s)
+            for s in x.stride()
+        ]
     else:
         size = x.size()
         stride = x.stride()
