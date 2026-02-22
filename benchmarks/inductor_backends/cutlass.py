@@ -77,7 +77,7 @@ CUTLASS_INSTANTIATION_LEVELS = [
     "0",
     # "1111",
     # "2222",
-    "3332",
+    "3332" if torch.cuda.get_device_capability() != (10, 0) else "3432",
     # "9992",
 ]
 
