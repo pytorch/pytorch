@@ -406,6 +406,10 @@ class _ShapeEnvPickleData:
             raise AssertionError("unpickle_state.fake_mode.shape_env is not set")
 
         for k, v in self.data.items():
+            if k == "var_to_val":
+                k = "backed_var_to_val"
+            elif k == "unbacked_var_to_val":
+                k = "real_tensor_prop_unbacked_vals"
             setattr(unpickle_state.fake_mode.shape_env, k, v)
 
         return unpickle_state.fake_mode.shape_env
