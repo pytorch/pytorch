@@ -355,6 +355,7 @@ CORE_TEST_LIST = [
     "test_ops_fwd_gradients",
     "test_ops_jit",
     "test_torch",
+    "test_attn",
 ]
 
 
