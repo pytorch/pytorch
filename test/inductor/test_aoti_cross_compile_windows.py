@@ -80,7 +80,10 @@ class WindowsCrossCompilationTestFramework:
 
             if is_fbcode():
                 raise unittest.SkipTest("requires x86_64-w64-mingw32-gcc")
-
+            if "WINDOWS_CUDA_HOME" not in os.environ:
+                raise unittest.SkipTest(
+                    "Skip Windows cross-compilation test because WINDOWS_CUDA_HOME is not set"
+                )            
             self.assertTrue("WINDOWS_CUDA_HOME" in os.environ)
 
             with torch.no_grad():
