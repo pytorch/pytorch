@@ -19,6 +19,7 @@ A tensor can be constructed from a Python :class:`list` or sequence using the
     >>> torch.tensor([[1., -1.], [1., -1.]])
     tensor([[ 1.0000, -1.0000],
             [ 1.0000, -1.0000]])
+    >>> import numpy as np
     >>> torch.tensor(np.array([[1, 2, 3], [4, 5, 6]]))
     tensor([[ 1,  2,  3],
             [ 4,  5,  6]])
