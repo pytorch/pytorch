@@ -2681,6 +2681,72 @@ class TestLRScheduler(TestCase):
         )
 
 
+    def test_sequentiallr_resume_reproducibility(self):
+        # SequentialLR switches between multiple schedulers at milestone
+        # boundaries. If we save and restore both the optimizer and the
+        # scheduler state partway through training, continuing from that
+        # checkpoint should produce exactly the same LR sequence as if the
+        # training had never been interrupted.
+        #
+        # This test makes that expectation explicit by comparing a continuous
+        # run against a resumed run starting from an intermediate step.
+
+        base_lr = 0.1
+        milestone = 5
+        total_steps = 8
+        resume_step = 3
+
+        def make_scheduler(optim):
+            return SequentialLR(
+                optim,
+                [
+                    LinearLR(optim, start_factor=0.5, total_iters=milestone),
+                    ExponentialLR(optim, gamma=0.5),
+                ],
+                milestones=[milestone],
+            )
+
+        # run the full schedule and record the LR.
+        model = torch.nn.Linear(1, 1)
+        optim = torch.optim.SGD(model.parameters(), lr=base_lr)
+        sched = make_scheduler(optim)
+
+        reference_lrs = []
+        for _ in range(total_steps):
+            optim.step()
+            sched.step()
+            reference_lrs.append(sched.get_last_lr()[0])
+
+        # run a fresh optimizer/scheduler pair up to an intermediate step
+        model2 = torch.nn.Linear(1, 1)
+        optim2 = torch.optim.SGD(model2.parameters(), lr=base_lr)
+        sched2 = make_scheduler(optim2)
+
+        for _ in range(resume_step):
+            optim2.step()
+            sched2.step()
+
+        # save state to simulate checkpointing.
+        optim_state = optim2.state_dict()
+        sched_state = sched2.state_dict()
+
+        # restore into a new optimizer/scheduler pair
+        model3 = torch.nn.Linear(1, 1)
+        optim3 = torch.optim.SGD(model3.parameters(), lr=base_lr)
+        optim3.load_state_dict(optim_state)
+
+        sched3 = make_scheduler(optim3)
+        sched3.load_state_dict(sched_state)
+
+        # Continue stepping and check LR with reference 
+        for i in range(resume_step, total_steps):
+            optim3.step()
+            sched3.step()
+            self.assertEqual(
+                sched3.get_last_lr()[0],
+                reference_lrs[i],
+            )
+
 instantiate_parametrized_tests(TestLRScheduler)
 
 
