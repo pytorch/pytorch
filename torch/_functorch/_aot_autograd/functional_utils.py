@@ -345,7 +345,7 @@ def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MetadataKey:
     """
     This should be equal whenever has_same_metadata would return True
