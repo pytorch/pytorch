@@ -12,6 +12,7 @@ import unittest
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import create_rdzv_handler
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
+from torch.testing._internal.common_utils import run_tests
 
 
 if os.getenv("CIRCLECI"):
@@ -58,3 +59,7 @@ class EtcdServerTest(unittest.TestCase):
             self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()
+
+
+if __name__ == "__main__":
+    run_tests()
