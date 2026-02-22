@@ -464,6 +464,9 @@ class _MaskModWrapper:
             and _closure_contents(self.fn) == _closure_contents(other.fn)
         ):
             return True
+        # For callable objects (not plain functions), delegate to their __eq__
+        if not inspect.isfunction(self.fn) and not inspect.isfunction(other.fn):
+            return self.fn == other.fn
         return False
 
     def __hash__(self) -> int:
