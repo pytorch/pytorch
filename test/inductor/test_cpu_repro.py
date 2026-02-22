@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
-    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
@@ -145,7 +144,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
-    @skipIfRocm
+    @torch._inductor.config.patch({"layout_optimization": True})
+    @patch("torch.cuda.is_available", lambda: False)
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason

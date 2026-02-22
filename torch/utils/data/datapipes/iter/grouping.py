@@ -219,14 +219,12 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         if group_size is not None and buffer_size is not None:
             if not (0 < group_size <= buffer_size):
                 raise AssertionError("group_size must be > 0 and <= buffer_size")
-            # pyrefly: ignore [bad-assignment]
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
             if group_size is None or not (0 < guaranteed_group_size <= group_size):
                 raise AssertionError(
                     "guaranteed_group_size must be > 0 and <= group_size and group_size must be set"
                 )
-            # pyrefly: ignore [bad-assignment]
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk
