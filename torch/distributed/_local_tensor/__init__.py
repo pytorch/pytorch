@@ -989,7 +989,6 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
-            # pyrefly: ignore [bad-argument-type]
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -1734,6 +1733,40 @@ def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
         return ret
 
     return wrapper
+
+
+def rank_map(cb: Callable[[int], Tensor]) -> Tensor:
+    """
+    Creates a tensor by mapping a callback over the current rank.
+
+    Under LocalTensorMode, calls cb(rank) for each simulated rank and returns
+    a LocalTensor. In real distributed (no LocalTensorMode), calls
+    cb(dist.get_rank()) and returns a plain Tensor.
+    """
+    lm = enabled_local_tensor_mode()
+    if lm is not None:
+        return lm.rank_map(cb)
+    else:
+        return cb(dist.get_rank())
+
+
+def tensor_map(tensor: Tensor, cb: Callable[[int, Tensor], Tensor | None]) -> Tensor:
+    """
+    Transforms a tensor by mapping a callback over the current rank and its
+    local shard.
+
+    Under LocalTensorMode, calls cb(rank, shard) for each simulated rank and
+    returns a LocalTensor. In real distributed (no LocalTensorMode), calls
+    cb(dist.get_rank(), tensor) and returns the result directly.
+    """
+    lm = enabled_local_tensor_mode()
+    if lm is not None:
+        assert isinstance(tensor, LocalTensor)
+        return lm.tensor_map(tensor, cb)
+    else:
+        r = cb(dist.get_rank(), tensor)
+        assert r is not None
+        return r
 
 
 def maybe_disable_local_tensor_mode() -> contextlib.AbstractContextManager:
