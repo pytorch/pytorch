@@ -1828,7 +1828,7 @@ ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
 
 Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
   const auto ndim = self.dim();
-  TORCH_CHECK_INDEX(ndim, "index_select() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK_INDEX(ndim > 0, "index_select() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK_INDEX(
       index.dim() == 1 && index.dtype() == at::kLong && index.options().layout() == at::kStrided,
       "index_select() argument index must be 1-D strided (non-sparse) long-tensor.");

@@ -1252,7 +1252,7 @@ Tensor index_select_sparse_mps(const Tensor& self_, int64_t dim, const Tensor& i
       "index_select() argument index must be 1-D strided (non-sparse) long-tensor.");
 
   const auto ndim = self_.dim();
-  TORCH_CHECK_INDEX(ndim, "index_select() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK_INDEX(ndim > 0, "index_select() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, ndim);
 
   std::vector<int64_t> out_sizes = self_.sizes().vec();
