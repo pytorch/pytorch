@@ -59,6 +59,21 @@ class TestFormatUtils(DTensorTestBase):
         self.assertEqual(loaded_sd, {"model": model.state_dict()})
 
     @with_temp_dir
+    def test_dcp_with_optimizer_to_torch_save_without_optimizer(self) -> None:
+        model = SimpleModelUneven()
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        sd = {"app": {"model": model.state_dict(), "optimizer": optimizer.state_dict()}}
+        dcp.save(sd, checkpoint_id=self.temp_dir)
+
+        torch_path = self.temp_dir + "/model.pt"
+        dcp_to_torch_save(
+            self.temp_dir, torch_path, keys=["app.model"], sub_dictionary_path=["app"]
+        )
+
+        loaded_sd = torch.load(torch_path)
+        self.assertEqual(loaded_sd, {"model": model.state_dict()})
+
+    @with_temp_dir
     def test_torch_save_to_dcp(self) -> None:
         model = SimpleModelUneven()
         sd = {"model": model.state_dict()}
