@@ -188,7 +188,7 @@ void gemm(
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-#ifndef armpl_doublecomplex_t
+#if !defined(_ARMPL_H)
 #define COMPLEX_DBL(a) a
 #define COMPLEX_DBL_CONST(a) a
 #define COMPLEX_FLOAT(a) a
