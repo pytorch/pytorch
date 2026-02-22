@@ -283,7 +283,7 @@ def _adapt_user_input_gen_fns(
         """Create internal input generator that converts IR buffer to user's fake tensor."""
 
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-            fake_tensor = ir_node_to_tensor(ir_buffer, replace_symbols_with_hints=True)
+            fake_tensor = ir_node_to_tensor(ir_buffer, guard_shape=False)
             assert fake_tensor is not None, "ir_node_to_tensor returned None"
             return user_function(fake_tensor)
 
@@ -422,6 +422,8 @@ def autotune_custom_op(
         dict[str, Callable[[torch.Tensor], torch.Tensor]]
     ] = None,
     return_choice: bool = False,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> Union[TensorBox, Any, tuple[Any, Any]]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
@@ -531,6 +533,8 @@ def autotune_custom_op(
         input_gen_fns=input_gen_fns,
         return_choice=True,
         is_collective=is_collective,
+        min_speedup_threshold=min_speedup_threshold,
+        benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
@@ -645,6 +649,8 @@ def _standard_lowering_fn(
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     ] = None,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> Any:
     """Standard autotuning lowering function."""
     decompositions, non_tensor_args = _prepare_configs_and_decompositions(
@@ -663,6 +669,8 @@ def _standard_lowering_fn(
         non_tensor_args=non_tensor_args,
         op_overload=op_overload,
         user_input_gen_fns=input_gen_fns,
+        min_speedup_threshold=min_speedup_threshold,
+        benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
     validate_ir(result)
@@ -717,6 +725,8 @@ def _range_based_lowering_fn(
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     ] = None,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> Any:
     """Range-based autotuning lowering function."""
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
@@ -761,6 +771,8 @@ def _range_based_lowering_fn(
             op_overload=op_overload,
             user_input_gen_fns=range_input_gen_fns,
             return_choice=True,
+            min_speedup_threshold=min_speedup_threshold,
+            benchmark_with_cudagraphs=benchmark_with_cudagraphs,
         )
 
         if (
@@ -910,6 +922,8 @@ def _create_autotuning_lowering(
     ] = None,
     dispatch_on: Optional[tuple[str, int]] = None,
     split_points: Optional[list[int]] = None,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> Callable[..., Any]:
     """Create the lowering function for autotuning."""
     if not is_range_based:
@@ -928,6 +942,8 @@ def _create_autotuning_lowering(
                 tensor_inputs=tensor_inputs,
                 runtime_kwargs=runtime_kwargs,
                 config_generator=config_generator,
+                min_speedup_threshold=min_speedup_threshold,
+                benchmark_with_cudagraphs=benchmark_with_cudagraphs,
             )
 
         return standard_lowering_wrapper
@@ -956,6 +972,8 @@ def _create_autotuning_lowering(
             runtime_kwargs=runtime_kwargs,
             range_upper_bound=range_upper_bound,
             config_generator=config_generator,
+            min_speedup_threshold=min_speedup_threshold,
+            benchmark_with_cudagraphs=benchmark_with_cudagraphs,
         )
 
     return range_based_lowering_wrapper
@@ -971,6 +989,8 @@ def register_custom_op_autotuning(
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
     dispatch_on: Optional[dict[str, Any]] = None,
     split_points: Optional[list[int]] = None,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> None:
     """Register custom op for autotuning with custom_op configs where each config
     specifies a decomposition implementation function with its parameter values.
@@ -992,6 +1012,11 @@ def register_custom_op_autotuning(
                 as [2048, inf] -> [2048, unbounded_size]. Set based on your expected workload size.
                 Default is DEFAULT_RANGE_UPPER_BOUND=65536.
         split_points: List of range endpoints in ascending order for range-based autotuning
+        min_speedup_threshold: Only pick a non-fallback choice if it beats the fallback
+            by at least this ratio. Default is 1.0 (any speedup wins). Set to e.g. 1.1
+            to require 10% speedup over fallback.
+        benchmark_with_cudagraphs: If True, benchmark the fallback kernel using CUDA graph
+            capture and replay for fair comparison with compiled kernels. Default is False.
 
     Examples:
         # Static configs
@@ -1141,6 +1166,8 @@ def register_custom_op_autotuning(
         dispatch_on=dispatch_on_tuple,
         split_points=split_points,
         range_upper_bound=range_upper_bound,
+        min_speedup_threshold=min_speedup_threshold,
+        benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
     lowerings[op_overload] = lowering_fn
