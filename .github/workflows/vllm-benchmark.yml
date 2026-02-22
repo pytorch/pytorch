@@ -41,7 +41,7 @@ jobs:
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      torch_cuda_arch_list: '8.0 8.9 9.0 10.0'
+      torch_cuda_arch_list: '8.0 8.9 9.0 10.0 12.0'
       build_environment: linux-jammy-cuda13.0-py3.12-gcc11
     steps:
       - uses: pytorch/test-infra/.github/actions/setup-uv@main
