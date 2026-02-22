@@ -173,11 +173,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
+
+        def fn() -> Any:
+            return bm_func([*sym_inputs, *args])
+
+        if self._benchmark_with_cudagraphs:
+            return benchmarker.benchmark_gpu_with_cuda_graph(fn)
+
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
+            return do_bench_using_profiling(fn)
         return benchmarker.benchmark(
-            # Shallow clone args since bm_func may clear args
-            lambda: bm_func([*sym_inputs, *args]),
+            fn,
             device=benchmarker.infer_device(*sym_inputs, *args),
         )
 
