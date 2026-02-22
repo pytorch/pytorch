@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     gradgradcheck,
     IS_FBCODE,
+    NATIVE_DEVICES,
     numpy_to_torch_dtype_dict,
     run_tests,
     skipIfTorchDynamo,
@@ -131,7 +132,7 @@ class TestViewOps(TestCase):
             return False
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
-        if base.device.type in ["cpu", "cuda", "xpu"]:
+        if base.device.type in NATIVE_DEVICES:
             if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
