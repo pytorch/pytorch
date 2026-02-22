@@ -94,7 +94,7 @@ dtensor_dispatch_detach,instruction_count,56080,0.1
 
 
 
-dtensor_dispatch_to_from_local,instruction_count,200600,0.1
+dtensor_dispatch_to_from_local,instruction_count,220000,0.1
 
 
 

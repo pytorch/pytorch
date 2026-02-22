@@ -107,6 +107,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    xfailIf,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -847,9 +848,17 @@ class SweepInputs2:
     def kernel(a, b):
         return (a + b,)
 
+    # Input gen types unsupported by specific backends. Subclasses or wrapper
+    # test classes can set this to skip tests that use these input types.
+    _unsupported_input_gen_types: set[str] = set()
+
     @classmethod
     def gen_template(cls, name1, name2):
         def test(self):
+            unsupported = type(self)._unsupported_input_gen_types
+            for name in (name1, name2):
+                if name in unsupported:
+                    self.skipTest(f"{name} inputs not supported by this backend")
             check_model(
                 self,
                 cls.kernel,
@@ -10710,6 +10719,30 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
+    @requires_cuda
+    def test_max_min_bool(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/174069
+        # max/min on boolean tensors returned incorrect indices in Triton
+        def fn(x):
+            return (
+                x.max(0),
+                x.min(0),
+                x.max(1),
+                x.min(1),
+            )
+
+        # Unrolled reduction
+        t1 = torch.randint(2, size=(6, 6), dtype=torch.bool)
+        self.common(fn, (t1,))
+
+        # Persistent reduction
+        t1 = torch.randint(2, size=(32, 32), dtype=torch.bool)
+        self.common(fn, (t1,))
+
+        # Non-persistent reduction
+        t1 = torch.randint(2, size=(1028, 1028), dtype=torch.bool)
+        self.common(fn, (t1,))
+
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
             out1 = aten.convolution_backward(
@@ -15564,6 +15597,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "coordinate_descent_tuning": True,
         }
     )
+    @xfailIf(not IS_BIG_GPU)  # templates require big gpu
     def test_pdl_template_and_delay(self):
         def fn(a, b):
             a = (a / (a**2).sum(-1, keepdim=True)) ** 2  # first kernel

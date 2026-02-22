@@ -25,9 +25,10 @@ __all__ = [
     "dropwhile",
     "filterfalse",
     "islice",
+    "pairwise",
+    "takewhile",
     "tee",
     "zip_longest",
-    "pairwise",
 ]
 
 
@@ -123,6 +124,19 @@ def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[
             break
 
     yield from iterator
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.takewhile
+@substitute_in_graph(itertools.takewhile, is_embedded_type=True)  # type: ignore[arg-type]
+def takewhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
+    # takewhile(lambda x: x<5, [1,4,6,3,8]) → 1 4
+    if not callable(predicate):
+        raise TypeError(f"'{type(predicate).__name__}' object is not callable")
+
+    for x in iterable:
+        if not predicate(x):
+            break
+        yield x
 
 
 @substitute_in_graph(itertools.filterfalse, is_embedded_type=True)  # type: ignore[arg-type]

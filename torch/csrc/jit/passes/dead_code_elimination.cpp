@@ -9,10 +9,6 @@
 
 namespace torch::jit {
 
-namespace prim {
-using namespace ::c10::prim;
-}
-
 class DeadCodeEliminator {
  public:
   explicit DeadCodeEliminator(
