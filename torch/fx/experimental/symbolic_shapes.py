@@ -119,6 +119,86 @@ DimList = list
 log = logging.getLogger(__name__)
 
 
+def _sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.Expr:
+    """
+    When the passed replacement symbol v is a string, it is converted to a symbol with name v that
+    have the same replaced expression integer and nonnegative properties.
+    """
+
+    def to_symbol(
+        replaced: sympy.Expr, replacement: Union[sympy.Expr, str]
+    ) -> sympy.Symbol:
+        if isinstance(replacement, str):
+            return sympy.Symbol(
+                replacement,
+                integer=replaced.is_integer,  # type: ignore[attr-defined]
+                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
+            )
+        else:
+            return replacement
+
+    # xreplace is faster than subs, but is way more picky
+    return sympy.sympify(expr).xreplace(
+        {k: to_symbol(k, v) for k, v in replacements.items()}
+    )
+
+
+def _maybe_realize_expr(expr: sympy.Expr, nan_fallback: Optional[int]) -> Optional[int]:
+    """
+    Handle special sympy values in hinting APIs.
+
+    Returns:
+        - Raises ValueError for complex numbers
+        - sys.maxsize for positive infinity
+        - -sys.maxsize for negative infinity
+        - fallback for NaN
+        - None if no special handling needed
+    """
+    try:
+        return int(expr)
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(expr, sympy.Expr):
+        if expr.has(sympy.I):
+            raise ValueError(
+                f"_maybe_realize_expr received a complex expression: {expr}. "
+                "Tensor dimensions cannot be complex numbers."
+            )
+        if expr in (int_oo, sympy.oo):
+            return sys.maxsize
+        if expr in (-int_oo, -sympy.oo):
+            return -sys.maxsize
+        if nan_fallback is not None and (expr is sympy.nan or expr.has(sympy.nan)):
+            return nan_fallback
+
+    return None
+
+
+def guarding_hint_or_throw(a: Union[torch.SymInt, int]) -> int:
+    if isinstance(a, torch.SymInt):
+        if a.node._hint is not None:
+            return a.node._hint
+        hint = a.node.shape_env.guarding_hint_or_throw(a.node.expr)
+        a.node._hint = hint
+        return hint
+    if type(a) is not int:
+        raise AssertionError(f"Expected int, got {type(a)}")
+    return a
+
+
+def optimization_hint(
+    a: Union[torch.SymInt, int], fallback: Optional[int] = None
+) -> int:
+    if isinstance(a, torch.SymInt):
+        if a.node._hint is not None:
+            return a.node._hint
+        return a.node.shape_env.optimization_hint(a.node.expr, fallback=fallback)
+    if type(a) is not int:
+        raise AssertionError(f"Expected int, got {type(a)}")
+    return a
+
+
 class GuardOnDataDependentSymNode(RuntimeError):
     cond: sympy.Basic
 
@@ -134,7 +214,8 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
-    "size_hint",
+    "optimization_hint",
+    "guarding_hint_or_throw",
     "guard_or_false",
     "guard_or_true",
     "has_symbolic_sizes_strides",
@@ -148,7 +229,6 @@ __all__ = [
     "guard_float",
     "guard_scalar",
     "canonicalize_bool_expr",
-    "hint_int",
     "SYMPY_INTERP",
     "free_symbols",
     "is_symbol_binding_fx_node",
@@ -366,29 +446,10 @@ def create_contiguous(shape: Sequence[Int]) -> list[Int]:
     return list(reversed(strides))
 
 
-@deprecated("used size_hint instead of hint_int", category=FutureWarning)
-def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
-    return size_hint(a, fallback)
-
-
-def size_hint(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
-    """
-    Retrieve the hint for an int (based on the underlying real values as observed
-    at runtime).  If no hint is available (e.g., because data dependent shapes),
-    if fallback is not None, use that instead to hint each unbacked symbol individually
-    (otherwise raise an error).
-    """
-    if isinstance(a, torch.SymInt):
-        return a.node.require_hint(fallback)
-    if type(a) is not int:
-        raise AssertionError(f"Expected int, got {type(a)}")
-    return a
-
-
 Scalar: TypeAlias = Union[torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool]
 
 
-def has_hint(a: Scalar) -> bool:
+def has_guarding_hint(a: Scalar) -> bool:
     if isinstance(a, SymTypes):
         return a.node.has_hint()
     return True
@@ -2621,7 +2682,7 @@ def cast_symbool_to_symint_guardless(
         return 1 if symbool else 0
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     return symbool.node.shape_env.create_symintnode(
-        int_sym, hint=int(symbool.node.require_hint()) if has_hint(symbool) else None
+        int_sym, hint=int(symbool.node.require_hint()) if has_guarding_hint(symbool) else None
     )
 
 
@@ -4022,6 +4083,11 @@ class ShapeEnv:
 
         self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
 
+        # Used by _get_unbacked_replacements / _sub_unbacked_exprs for
+        # optimization_hint canonicalization of unbacked expressions.
+        self._equality_graph: Optional[dict[sympy.Expr, OrderedSet[sympy.Expr]]] = None
+        self._unbacked_replacements: Optional[dict[sympy.Expr, sympy.Expr]] = None
+
         self.trace_asserts = trace_asserts
 
         self.specializations: OrderedSet[Specialization] = OrderedSet()
@@ -4154,6 +4220,9 @@ class ShapeEnv:
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
+            # Cached state for optimization_hint unbacked canonicalization
+            "equality_graph",
+            "unbacked_replacements",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -6794,54 +6863,359 @@ class ShapeEnv:
                     expr = new_expr
         return expr
 
-    # TODO: overload for allow_none literal
-    @lru_cache(256)
-    def size_hint(
-        self, expr: sympy.Basic, *, allow_none: bool = False
-    ) -> Optional[sympy.Basic]:
+    def guarding_hint_or_throw(self, expr: Union[sympy.Expr, int]) -> int:
+        return self._guarding_hint_or_throw_base(expr, {})
+
+    def _guarding_hint_or_throw_base(
+        self,
+        expr: Union[sympy.Expr, int],
+        precomputed_replacements: dict[sympy.Expr, sympy.Symbol],
+    ) -> int:
         """
-        Gets a size hint for a given expression from the underlying shapes we had.
-        Does not introduce a guard, so only use this when you can guarantee that
-        your code is still valid for arbitrary shapes (such as optimization decisions)
+        Return a concrete integer hint for an expression that is safe to use for guarding.
+
+        This method evaluates the expression using only backed-symbols hints. Unlike
+        optimization_hint(), this method does NOT use heuristics or fallback values
+        for unbacked symbols.
+
+        Use this method when you need a hint value that will be used for guarding decision.
+
+        Args:
+            expr: A sympy expression or integer to evaluate.
+
+        Returns:
+            The concrete integer value of the expression based on backed symbol hints.
+
+        Raises:
+            GuardOnDataDependentSymNode: If the expression contains unbacked symbols
+            (data-dependent values) that cannot be resolved to concrete values.
+
+        See Also:
+            optimization_hint: For cases where fallback/heuristic values are acceptable
+                for unbacked symbols.
         """
-        result_expr = safe_expand(expr).xreplace(self.backed_var_to_val)
-        if not result_expr.is_number:
-            from torch.utils._sympy.singleton_int import SingletonInt
+        expr = sympy.expand(expr).xreplace(self.replacements)
 
-            if isinstance(result_expr, SingletonInt):
-                return None
-            r = self._maybe_evaluate_static(result_expr, compute_hint=True)
-            if r is not None:
-                return r
-            if allow_none:
-                return None
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
 
-            if self.real_tensor_prop_unbacked_vals:
-                unsound_expr = result_expr.xreplace(self.real_tensor_prop_unbacked_vals)
-                if not unsound_expr.free_symbols:
-                    log.warning(
-                        "propagate_real_tensors size_hint(%s) -> %s", expr, unsound_expr
-                    )
-                    trace_structured(
-                        "propagate_real_tensors",
-                        metadata_fn=lambda: {
-                            "expr": repr(expr),
-                            "result": repr(unsound_expr),
-                            "stack": structured.from_traceback(
-                                CapturedTraceback.extract(skip=1).summary()
-                            ),
-                        },
-                    )
-                    self.guard_or_defer_runtime_assert(
-                        sympy.Eq(result_expr, unsound_expr),
-                        f"propagate_real_tensors: {result_expr} == {unsound_expr}",
-                    )
-                    return unsound_expr
+        # Replace backed symbols with their hints, leaving unbacked symbols alone.
+        result = _maybe_realize_expr(expr, None)
+        if result is not None:
+            return result
 
-            raise self._make_data_dependent_error(result_expr, expr)
-        return result_expr
+        if not isinstance(expr, sympy.Expr):
+            raise RuntimeError("isinstance(expr, sympy.Expr)", expr)
 
-    # NB: keep in sync with size_hint
+        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
+            expr = _sympy_subs(expr, precomputed_replacements)  # type: ignore[arg-type]
+
+        # TODO do we need sympy_subs, or just xreplace
+        expr = _sympy_subs(expr, self.backed_var_to_val)
+        expr = expr.expand(identity=True)
+
+        if has_free_unbacked_symbols(expr):
+            raise GuardOnDataDependentSymNode(expr)
+
+        result = _maybe_realize_expr(expr, None)
+        if result is None:
+            raise RuntimeError("unexpected None!", expr)
+        return result
+
+    def _get_unbacked_replacements(self) -> dict[sympy.Expr, sympy.Expr]:
+        """Helper for _sub_unbacked_exprs. Builds a mapping from unbacked expressions
+        to canonical equivalents using a union-find algorithm over deferred runtime asserts.
+        Used by optimization_hint to resolve unbacked symbols to consistent values."""
+        if self.unbacked_replacements is not None:
+            return self.unbacked_replacements
+
+        class CanonicalExprFinder:
+            """
+            Purpose:
+            A disjoint-set/union-find data structure that can return the
+            "canonical" expression for a group of equivalent expressions.
+            - The canonical expression must come from the input eq_graph.
+            - The heuristics used to choose a leader determines which
+            expression becomes the canonical expression.
+
+            Problem:
+            Given any unbacked expression, we should be able to find a size_hint
+            for the unbacked expression, that adheres to the ShapeEnv's deferred
+            runtime assertions. Otherwise, we may generate conflicting size hints.
+            In other words, even though we know u0 + s0 == u2, we may generate
+            size hints, such that, size_hint(u0 + s0) != size_hint(u2).
+            NOTE: At this time, only deferred runtime asserts that are equalities
+            (i.e. Eq(lhs, rhs)) are considered in this data structure.
+
+            Examples:
+            - u0 + u1 == 9000, then find_expr(u0 + u1) == find_expr(9000)
+            - u0 + u1 == s9, then find_expr(u0 + u1) == find_expr(s9)
+            - u0 + s0 == u10, then find_expr(u0 + s0) == find_expr(u10)
+
+            Inputs:
+            - equality_graph: An adjacency set of expressions where the edge
+            connects two expressions that are found equal to each other. The
+            edges are sourced from ShapeEnv's deferred_runtime_asserts.
+
+            Usage:
+            - Call union_expr(a, b) to merge a & b into a single set which
+            shares the same canonical expression.
+            - Call find_expr(x) to find the canonical expression for x.
+            """
+
+            def __init__(self, eq_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]]):
+                self.eq_graph = eq_graph
+                self.expressions = list(eq_graph.keys())
+                self.reverse_expressions = {
+                    expr: i for i, expr in enumerate(self.expressions)
+                }
+                # Each node is its own leader/parent initially
+                self.leader = list(range(len(self.expressions)))
+                # Track size for union-by-size
+                self.size = [1] * len(self.expressions)
+
+                # Takes each edge from the undirected graph and starts merging them.
+                self._build_canonical_expr_mapping()
+
+            def _build_canonical_expr_mapping(self):
+                for expr, edges in self.eq_graph.items():
+                    for adj in edges:
+                        self.union_expr(expr, adj)
+
+            def union_expr(self, a: sympy.Expr, b: sympy.Expr):
+                return self.union(
+                    self.reverse_expressions[a], self.reverse_expressions[b]
+                )
+
+            def union(self, a: int, b: int):
+                rootA = self.find(a)
+                rootB = self.find(b)
+                if rootA == rootB:
+                    return False  # already connected
+                leader, other = self.choose_leader(rootA, rootB)
+                self.leader[other] = leader
+                self.size[leader] += self.size[other]
+                return True
+
+            def find_expr(self, expr: sympy.Expr):
+                parent = self.find(self.reverse_expressions[expr])
+                return self.expressions[parent]
+
+            def find(self, x: int):
+                # Path compression
+                if self.leader[x] != x:
+                    self.leader[x] = self.find(self.leader[x])
+                return self.leader[x]
+
+            def choose_leader(self, a: int, b: int):
+                """
+                The leader will become the canonical expression.
+                Returns a (leader, follower) tuple.
+
+                Here are the heuristics used for choosing a leader:
+                1. Backed expression or constants preferred over unbacked expr
+                2. Simpler sub-expr when one contains the other
+                3. Higher frequency across equalities from deferred runtime assertions
+                4. Size of the set
+                5. Fallback to sympy.Basic.compare
+                """
+
+                def _choose(x: int, y: int) -> bool:
+                    lhs, rhs = self.expressions[x], self.expressions[y]
+
+                    # Prefer replacing unbacked exprs with backed expressions/constants.
+                    # Examples:
+                    # u0 + s3 ==> s0 + s1, then leader is s0 + s1
+                    # u2 ==> 300, then leader is 300
+                    any_unbacked_lhs = has_free_unbacked_symbols(lhs)
+                    any_unbacked_rhs = has_free_unbacked_symbols(rhs)
+                    if any_unbacked_lhs != any_unbacked_rhs:
+                        return bool(any_unbacked_rhs)
+
+                    # Handles cases where LHS contains the RHS. In other words,
+                    # RHS is a sub-expression of LHS. For example:
+                    # s1 * Max(2, u0) ==> Max(2, u0), then leader is Max(2, u0)
+                    if lhs.has(rhs):
+                        return False
+                    elif rhs.has(lhs):
+                        return True
+
+                    # Prefer expressions that come up more often.
+                    degrees_lhs = len(self.eq_graph[lhs])
+                    degrees_rhs = len(self.eq_graph[rhs])
+                    if degrees_lhs != degrees_rhs:
+                        return degrees_lhs > degrees_rhs
+
+                    # Try to apply union-by-size optimization to flatten the
+                    # leader trees.
+                    if self.size[x] != self.size[y]:
+                        return self.size[x] > self.size[y]
+
+                    # Fallback to sympy.Basic.compare for a deterministic ordering.
+                    return lhs.compare(rhs) == -1
+
+                if _choose(a, b):
+                    return a, b
+                return b, a
+
+        # Build an undirected graph using ShapeEnv's deferred runtime assertions.
+        self.equality_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]] = defaultdict(
+            OrderedSet
+        )
+        for assertions in self.deferred_runtime_asserts.values():
+            for assertion in assertions:
+                if not isinstance(assertion.expr, sympy.Equality):
+                    # We're ignoring other relationals for now. If you need to
+                    # account for relationals, then you may need a solver solution.
+                    continue
+                lhs = sympy.sympify(assertion.expr.lhs)  # sympify helps with ints
+                rhs = sympy.sympify(assertion.expr.rhs)
+                self.equality_graph[lhs].add(rhs)
+                self.equality_graph[rhs].add(lhs)
+
+        # Use the undirected graph to create a DSU data structure, so we can
+        # query for a "canonical" expression.
+        uf = CanonicalExprFinder(self.equality_graph)
+
+        # Start building the unbacked replacements mapping using CanonicalExprFinder
+        # The mapping is from Expr to its "canonical" Expr.
+        self.unbacked_replacements = {}
+        for expr in self.equality_graph:
+            canonical_expr = uf.find_expr(expr)
+            if expr != canonical_expr:
+                self.unbacked_replacements[expr] = canonical_expr
+
+        return self.unbacked_replacements
+
+    @functools.lru_cache  # noqa: B019
+    def _sub_unbacked_exprs(self, expr: sympy.Expr) -> sympy.Expr:
+        """Substitute unbacked expressions with canonical equivalents.
+        Used by optimization_hint to maximize consistency when hinting unbacked symbols."""
+        # it's fine to cache this fn since self is a singleton
+        replacements = self._get_unbacked_replacements()
+
+        # consider making this threshold configurable
+        sub_cnt_limit = 30
+        sub_cnt = 0
+        while sub_cnt < sub_cnt_limit:
+            new_expr = expr.subs(replacements)
+            if new_expr == expr:
+                break
+            expr = sympy.factor(new_expr)
+            sub_cnt += 1
+        else:
+            log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
+
+        expr = _sympy_subs(expr, self.backed_var_to_val)
+        expr = _sympy_subs(expr, self.var_to_hint_override)
+        return expr
+
+    def optimization_hint(
+        self, expr: Union[sympy.Expr, int], fallback: Optional[int] = None
+    ) -> int:
+        """
+        Return a concrete integer hint for an expression.
+
+        This function should be used for non-guarding based optimizations. If you
+        want a hint that you can guard on, use the guarding_hint API instead.
+
+        This function will hint unbacked symbols using user provided optimization
+        hints. If not provided, fallback will be used along with some heuristics
+        that try to maximize consistency with the shape environment.
+
+        Special cases:
+        - Complex numbers (containing sympy.I): raises an error since tensor
+          dimensions cannot be complex.
+        - Infinity (int_oo, sympy.oo): returns sys.maxsize.
+        - NaN (sympy.nan): returns the fallback value.
+        """
+        return self._optimization_hint_base(
+            expr, precomputed_replacements={}, fallback=fallback
+        )
+
+    def _optimization_hint_base(
+        self,
+        expr: Union[sympy.Expr, int],
+        precomputed_replacements: dict[sympy.Expr, sympy.Symbol],
+        fallback: Optional[int] = None,
+    ) -> int:
+        # Read config at call time to respect runtime patches (e.g., in tests)
+        if fallback is None:
+            from torch._inductor.config import unbacked_symint_fallback
+
+            fallback = unbacked_symint_fallback
+
+        original = expr
+        expr = sympy.expand(expr).xreplace(self.replacements)
+
+        result = _maybe_realize_expr(expr, fallback)
+        if result is not None:
+            return result
+
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
+
+        # Replace backed symbols with their hints, leaving unbacked symbols alone.
+        result = _maybe_realize_expr(expr, None)
+        if result is not None:
+            return result
+
+        if not isinstance(expr, sympy.Expr):
+            raise RuntimeError("isinstance(expr, sympy.Expr)", expr)
+
+        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
+            expr = _sympy_subs(expr, precomputed_replacements)  # type: ignore[arg-type]
+
+        expr = _sympy_subs(expr, self.backed_var_to_val)
+        expr = expr.expand(identity=True)
+
+        result = _maybe_realize_expr(expr, fallback)
+        if result is not None:
+            return result
+
+        expr = _sympy_subs(expr, self.var_to_hint_override)
+
+        result = _maybe_realize_expr(expr, fallback)
+        if result is not None:
+            return result
+
+        # If unbacked symbols remain, try to substitute them using heuristics
+        # that maximize consistency with the shape environment.
+        if has_free_unbacked_symbols(expr):
+            # Make sure to substitute with the factored version
+            # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
+            # TODO optimize _sub_unbacked_exprs
+            expr = self._sub_unbacked_exprs(sympy.factor(original))
+
+        # For multiple expressions that depend on an unbacked symint,
+        # we want to compute them consistently for a size hint we have chosen.
+        # So, recursively compute expressions via size hints of contained symbols.
+        # For example: u1 * u2 - 10 ==> fallback * fallback - 10
+
+        if not isinstance(expr, sympy.Expr):
+            raise RuntimeError(f"Expected sympy Expr, got {type(expr)}: {expr}")
+        free_symbols = expr.free_symbols
+
+        # Constrain fallback per-symbol based on var_to_range bounds
+        size_dict = {}
+        for s in free_symbols:
+            sym_fallback = fallback
+            vr = self.var_to_range.get(s, None)
+            if vr is not None:
+                if isinstance(vr.lower, (int, sympy.Integer)):
+                    sym_fallback = max(sym_fallback, int(vr.lower))
+                if isinstance(vr.upper, (int, sympy.Integer)):
+                    sym_fallback = min(sym_fallback, int(vr.upper))
+            size_dict[s] = sym_fallback
+
+        final_result = expr.subs(size_dict)
+
+        final_result = _maybe_realize_expr(final_result, fallback)
+        if final_result is None:
+            raise RuntimeError(f"Failed to realize expression to int: {expr}")
+
+        return final_result
+
     @lru_cache(256)
     def has_hint(self, expr: sympy.Expr) -> bool:
         result_expr = safe_expand(expr).xreplace(self.backed_var_to_val)
@@ -7713,7 +8087,7 @@ class ShapeEnv:
             if hint is None:
                 # This is only ever called for expressions WITHOUT unbacked
                 # symbols
-                r = self.size_hint(orig_expr)
+                r = self.guarding_hint_or_throw(orig_expr)
                 if r is None:
                     raise AssertionError("r must not be None")
                 return r

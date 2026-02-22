@@ -1272,7 +1272,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "has_hint",
           [](const c10::SymNode& a) {
-            return a->has_hint();
+            return a->has_guarding_hint();
           })
       .def(
           "wrap_int",

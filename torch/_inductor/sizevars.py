@@ -2,8 +2,6 @@
 import functools
 import itertools
 import logging
-import sys
-from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, cast, Optional, Union
 
@@ -12,16 +10,15 @@ from sympy import Expr
 
 from torch import SymInt
 from torch.fx.experimental.symbolic_shapes import (
+    _maybe_realize_expr,
     free_symbols,
     free_unbacked_symbols,
-    GuardOnDataDependentSymNode,
-    has_free_unbacked_symbols,
     IterateExprs,
     ShapeEnv,
+    SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
-from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
 
@@ -670,52 +667,14 @@ class SizeVarAllocator:
             optimization_hint: For cases where fallback/heuristic values are acceptable
                 for unbacked symbols.
         """
-        expr = self.simplify(expr)
-        if isinstance(expr, sympy.Expr):
-            expr = expr.expand(identity=True)
-
-        # Replace backed symbols with their hints, leaving unbacked symbols alone.
-        expr = self.replace_backed_symbols_with_hints(expr)
-
-        if has_free_unbacked_symbols(expr):
-            raise GuardOnDataDependentSymNode(expr)
-
-        result = self._maybe_realize_expr(expr, None)
-        assert result is not None, expr
-        return result
-
-    def _maybe_realize_expr(
-        self, expr: Expr, nan_fallback: Optional[int]
-    ) -> Optional[int]:
-        """
-        Handle special sympy values in optimization hints.
-
-        Returns:
-            - Raises ValueError for complex numbers
-            - sys.maxsize for positive infinity
-            - -sys.maxsize for negative infinity
-            - fallback for NaN
-            - None if no special handling needed
-        """
-        try:
-            return int(expr)
-        except (TypeError, ValueError):
-            pass
-
-        if isinstance(expr, Expr):
-            if expr.has(sympy.I):
-                raise ValueError(
-                    f"_maybe_realize_expr received a complex expression: {expr}. "
-                    "Tensor dimensions cannot be complex numbers."
-                )
-            if expr in (int_oo, sympy.oo):
-                return sys.maxsize
-            if expr in (-int_oo, -sympy.oo):
-                return -sys.maxsize
-            if nan_fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
-                return nan_fallback
-
-        return None
+        if isinstance(expr, SymNode):
+            raise TypeError(
+                f"guarding_hint_or_throw expects a sympy Expr or int, not {type(expr)}. "
+                "Use expr.expr to extract the sympy expression from a SymNode."
+            )
+        return self.shape_env._guarding_hint_or_throw_base(
+            expr, self.precomputed_replacements
+        )
 
     def optimization_hint(
         self, expr: Union[Expr, int], fallback: Optional[int] = None
@@ -736,6 +695,7 @@ class SizeVarAllocator:
         - Infinity (int_oo, sympy.oo): returns sys.maxsize.
         - NaN (sympy.nan): returns the fallback value.
         """
+<<<<<<< HEAD
         # Read config at call time to respect runtime patches (e.g., in tests)
         if fallback is None:
             fallback = config.unbacked_symint_fallback
@@ -804,6 +764,11 @@ class SizeVarAllocator:
         assert final_result is not None, final_result
 
         return final_result
+=======
+        return self.shape_env._optimization_hint_base(
+            expr, self.precomputed_replacements, fallback
+        )
+>>>>>>> b8670fcdf9b (symbolic shapes guarding_hint_or_throw)
 
     def optimization_hints(
         self,
@@ -851,7 +816,7 @@ class SizeVarAllocator:
         Returns:
             int: A concrete integer hint for the expression.
         """
-        simplified = self._maybe_realize_expr(self.simplify(expr), None)
+        simplified = _maybe_realize_expr(self.simplify(expr), None)
 
         if simplified is not None:
             return simplified
@@ -954,6 +919,7 @@ class SizeVarAllocator:
                 )
         return strides
 
+<<<<<<< HEAD
     def _get_unbacked_replacements(self) -> dict[Expr, Expr]:
         if self.unbacked_replacements is not None:
             return self.unbacked_replacements
@@ -1140,6 +1106,8 @@ class SizeVarAllocator:
         expr = sympy_subs(expr, self.var_to_hint_override)
         return expr
 
+=======
+>>>>>>> b8670fcdf9b (symbolic shapes guarding_hint_or_throw)
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)

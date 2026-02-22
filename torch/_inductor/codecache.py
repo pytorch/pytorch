@@ -110,7 +110,7 @@ from torch.compiler._cache import (
 )
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
-from torch.fx.experimental.symbolic_shapes import has_hint, ShapeEnv, size_hint
+from torch.fx.experimental.symbolic_shapes import has_guarding_hint, ShapeEnv
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
@@ -1178,7 +1178,7 @@ class GuardedCache(Generic[T]):
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
         """
-        return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
+        return [s for s in inputs if isinstance(s, torch.SymInt) and has_guarding_hint(s)]
 
     @classmethod
     def _get_shape_env(cls: type[GuardedCache[T]]) -> ShapeEnv | None:
