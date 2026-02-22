@@ -7,8 +7,6 @@ import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs, InductorAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
-
-
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -19,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 if torch.distributed.is_available():
     from torch.distributed.tensor import DTensor, Replicate, Shard
     from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -27,7 +26,7 @@ if torch.distributed.is_available():
     )
 else:
     DTensorTestBase = TestCase  # type: ignore[assignment, misc]
-    with_comms = lambda fn: fn  # type: ignore[assignment]
+    with_comms = lambda fn: fn  # type: ignore[assignment]  # noqa: E731
 
 
 @instantiate_parametrized_tests
