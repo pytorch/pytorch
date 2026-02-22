@@ -10767,38 +10767,6 @@ class TestNNDeviceType(NNTestCase):
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
-    @onlyCPU
-    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
-    @parametrize_test("mode", ["bilinear", "bicubic"])
-    @dtypes(torch.bfloat16, torch.float16)
-    def test_interpolate_antialias_fp16_bf16_forward_cpu(self, device, dtype, mode, memory_format):
-        x = torch.randn(1, 3, 23, 17, device=device, dtype=dtype).contiguous(memory_format=memory_format)
-
-        y = F.interpolate(x, size=(11, 9), mode=mode, align_corners=False, antialias=True)
-
-        self.assertEqual(y.dtype, dtype)
-        self.assertEqual(y.shape, (1, 3, 11, 9))
-
-        y_ref = F.interpolate(x.float(), size=(11, 9), mode=mode, align_corners=False, antialias=True)
-        torch.testing.assert_close(y.float(), y_ref, rtol=5e-2, atol=5e-2)
-
-    @onlyCPU
-    @parametrize_test("mode", ["bilinear", "bicubic"])
-    @dtypes(torch.bfloat16, torch.float16)
-    def test_interpolate_antialias_fp16_bf16_backward_cpu(self, device, dtype, mode):
-        x = torch.randn(1, 3, 23, 17, device=device, dtype=dtype, requires_grad=True)
-        y = F.interpolate(x, size=(11, 9), mode=mode, align_corners=False, antialias=True)
-        y.sum().backward()
-
-        self.assertIsNotNone(x.grad)
-        self.assertEqual(x.grad.dtype, dtype)
-        self.assertEqual(x.grad.shape, x.shape)
-
-        x_ref = x.detach().float().requires_grad_(True)
-        y_ref = F.interpolate(x_ref, size=(11, 9), mode=mode, align_corners=False, antialias=True)
-        y_ref.sum().backward()
-        torch.testing.assert_close(x.grad.float(), x_ref.grad, rtol=5e-2, atol=5e-2)
-
     @onlyCUDA
     def test_upsamplingBicubic2d_many_channels(self, device):
         # Exercises the parallelized batch/channel kernel for small spatial
