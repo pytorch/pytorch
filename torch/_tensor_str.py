@@ -372,8 +372,14 @@ def _tensor_str(self, indent):
             self, indent, summarize, real_formatter, imag_formatter
         )
     else:
-        formatter = _Formatter(get_summarized_data(self) if summarize else self)
-        return _tensor_str_with_formatter(self, indent, summarize, formatter)
+        self_view = self
+        if self.dtype == torch.float8_e8m0fnu_x4:
+            # torch.float8_e8m0fnu_x4 is special and does not support the casts necessary
+            # to print it. We display the packed float8_e8m0fnu representation for convenience of
+            # reading the separate exponent values.
+            self_view = self.unsqueeze(-1).view(torch.float8_e8m0fnu)
+        formatter = _Formatter(get_summarized_data(self_view) if summarize else self_view)
+        return _tensor_str_with_formatter(self_view, indent, summarize, formatter)
 
 
 def _add_suffixes(tensor_str, suffixes, indent, force_newline):

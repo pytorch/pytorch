@@ -33,6 +33,9 @@ Float8_e5m2fnuz
 # torch/headeronly/util/Float8_e8m0fnu.h
 Float8_e8m0fnu
 
+# torch/headeronly/util/Float8_e8m0fnu_x4.h
+Float8_e8m0fnu_x4
+
 # torch/headeronly/util/Half.h
 Half
 fp16_ieee_from_fp32_value

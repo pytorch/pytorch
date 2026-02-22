@@ -626,7 +626,7 @@ void eq_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_V2(iter.common_dtype(), "eq_cpu", AT_WRAP([&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> bool { return a == b; });
-    }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
+    }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2, kFloat8_e8m0fnu_x4);
   } else {
     AT_DISPATCH_V2(iter.common_dtype(), "eq_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
@@ -636,7 +636,7 @@ void eq_kernel(TensorIteratorBase& iter) {
           },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
               -> Vectorized<scalar_t> { return a.eq(b); });
-    }), kComplexHalf, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
+    }), kComplexHalf, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2, kFloat8_e8m0fnu_x4);
   }
 }
 
@@ -645,7 +645,7 @@ void ne_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_V2(iter.common_dtype(), "ne_cpu", AT_WRAP([&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> bool { return a != b; });
-    }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
+    }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2, kFloat8_e8m0fnu_x4);
   } else {
     AT_DISPATCH_V2(iter.common_dtype(), "ne_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
@@ -655,7 +655,7 @@ void ne_kernel(TensorIteratorBase& iter) {
           },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
               -> Vectorized<scalar_t> { return a.ne(b); });
-    }), kComplexHalf, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2);
+    }), kComplexHalf, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kFloat4_e2m1fn_x2, kFloat8_e8m0fnu_x4);
   }
 }
 
