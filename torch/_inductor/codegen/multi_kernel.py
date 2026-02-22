@@ -259,9 +259,13 @@ class MultiKernel:
                     continue
                 seen.add(arg)
                 if isinstance(precompile_arg, TensorArg):
-                    line = f"assert not {arg}.isnan().any().item()"
+                    # FP8 dtypes do not support isnan/isinf directly; upcast to float first
+                    from .wrapper import _nan_check_expr
+
+                    fp8_check = _nan_check_expr(arg)
+                    line = f"assert not ({fp8_check}).isnan().any().item()"
                     wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
+                    line = f"assert not ({fp8_check}).isinf().any().item()"
                     wrapper.writeline(line)
 
     @property
