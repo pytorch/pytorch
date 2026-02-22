@@ -8280,6 +8280,17 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
                           kwargs={'sparse': True, 'scale_grad_by_freq': True,
                                   'padding_idx': 0, 'max_norm': 1.})
 
+def error_inputs_embedding_bag(op_info, device, **kwargs):
+    # test for non-empty indices with empty offsets
+    weight = torch.zeros((1, 10), device=device, dtype=torch.float32)
+    indices = torch.zeros(6, device=device, dtype=torch.int64)
+    offsets = torch.zeros(0, device=device, dtype=torch.int64)
+
+    yield ErrorInput(
+        SampleInput(weight, args=(indices,), kwargs={'offsets': offsets, 'mode': 'sum'}),
+        error_type=RuntimeError,
+        error_regex="offsets tensor can not be empty if indices tensor is not empty"
+    )
 
 def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape, *, low, high):
@@ -22212,6 +22223,7 @@ op_db: list[OpInfo] = [
         # backward is not supported for mode `max` and dtype `bfloat16`
         backward_dtypesIfCUDA=floating_types_and(torch.float16),
         sample_inputs_func=sample_inputs_embedding_bag,
+        error_inputs_func=error_inputs_embedding_bag,
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
