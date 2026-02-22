@@ -27,6 +27,7 @@ void initModelRunnerPybind(py::module& m) {
              py::args pyargs,
              const py::kwargs& pykwargs) {
             std::vector<c10::IValue> args;
+            args.reserve(pyargs.size());
             for (const auto i : c10::irange(pyargs.size())) {
               auto ivalue =
                   torch::jit::toIValue(pyargs[i], c10::AnyType::get());
@@ -46,6 +47,7 @@ void initModelRunnerPybind(py::module& m) {
              py::args pyargs,
              const py::kwargs& pykwargs) {
             std::vector<c10::IValue> args;
+            args.reserve(pyargs.size());
             for (const auto i : c10::irange(pyargs.size())) {
               auto ivalue =
                   torch::jit::toIValue(pyargs[i], c10::AnyType::get());
@@ -63,6 +65,7 @@ void initModelRunnerPybind(py::module& m) {
           "run_with_flat_inputs_and_outputs",
           [](torch::nativert::ModelRunner& self, py::args pyargs) {
             std::vector<c10::IValue> args;
+            args.reserve(pyargs.size());
             for (const auto i : c10::irange(pyargs.size())) {
               auto ivalue =
                   torch::jit::toIValue(pyargs[i], c10::AnyType::get());

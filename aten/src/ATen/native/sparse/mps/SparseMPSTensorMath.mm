@@ -1150,6 +1150,8 @@ Tensor _sparse_sum_backward_mps(const Tensor& grad_, const SparseTensor& input_,
   int64_t sparse_dims_to_sum_size = 0;
   std::vector<int64_t> sparse_dims_to_keep_v;
   std::vector<int64_t> dense_dims_to_sum_v;
+  sparse_dims_to_keep_v.reserve(input_sparse_dim);
+  dense_dims_to_sum_v.reserve(input_dense_dim);
 
   for (auto d = 0; d < input_dim; d++) {
     if (dims_to_sum_b[static_cast<size_t>(d)]) {

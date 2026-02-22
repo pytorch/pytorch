@@ -428,6 +428,7 @@ static std::vector<Frame> symbolize_fast(
   auto& frame_map = frame_maps[mode == Mode::fast ? 0 : 1];
 
   std::vector<uint32_t> indices_to_lookup;
+  indices_to_lookup.reserve(frames.size());
   std::vector<Frame> results;
   results.reserve(frames.size());
   {

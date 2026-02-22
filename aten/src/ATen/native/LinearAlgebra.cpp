@@ -2623,6 +2623,7 @@ Tensor compute_T18_scale_square(
   // 3. Multiply remain matrices by 3 times and slice to acc[1:]
   // All processed matrices will be stored in `output_pieces`.
   std::vector<Tensor> output_pieces;
+  output_pieces.reserve(section_numel);
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
   for (int64_t i = 0; i < section_numel; ++i) {
     for (int64_t j = 0; j < pts[i]; j++) {

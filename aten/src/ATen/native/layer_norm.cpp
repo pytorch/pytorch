@@ -250,6 +250,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
     out = out.add(bias);
   }
   std::vector<int64_t> stat_shape;
+  stat_shape.reserve(input.dim());
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
@@ -268,6 +269,7 @@ std::tuple<Tensor, Tensor> rms_norm_composite(
     std::optional<double> eps) {
 
   std::vector<int64_t> dims_to_reduce;
+  dims_to_reduce.reserve(normalized_shape.size());
   for (const auto i : c10::irange(normalized_shape.size())) {
     dims_to_reduce.push_back(input.dim() - i - 1);
   }
