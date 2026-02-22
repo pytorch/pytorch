@@ -319,7 +319,7 @@ class TestVarlenAttention(NNTestCase):
         ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_custom_op_registration(self, device, dtype, sdpa_backend = None):
+    def test_custom_op_registration(self, device, dtype, sdpa_backend=None):
         if TEST_WITH_ROCM:
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
         torch.manual_seed(42)
@@ -391,7 +391,7 @@ class TestVarlenAttention(NNTestCase):
             (1025, 1025),
         ],
     )
-    def test_varlen_vs_sdpa(self, device, dtype, scale, window_size, sdpa_backend = None):
+    def test_varlen_vs_sdpa(self, device, dtype, scale, window_size, sdpa_backend=None):
         if TEST_WITH_ROCM:
             torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
 
