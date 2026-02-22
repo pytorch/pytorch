@@ -1228,6 +1228,66 @@ class TestOptimRenewed(TestCase):
             param_device.grad = torch.rand_like(param_device)
             optimizer_device.step()
 
+    @parametrize("impl", ["fused", "capturable"])
+    @optims(
+        [optim for optim in optim_db if "fused" in optim.supported_impls],
+        dtypes=[torch.float32],
+    )
+    def test_load_state_dict_preserves_step_dtype_fp64(
+        self, device, dtype, impl, optim_info
+    ):
+        """Test that float64 step tensors are preserved even when params are float32."""
+        optim_cls = optim_info.optim_cls
+        opt_name = optim_cls.__name__
+        if opt_name in ("SGD", "Adagrad") and impl == "capturable":
+            self.skipTest(f"{opt_name} does not currently support capturable")
+        if _get_device_type(device) == "cpu":
+            self.skipTest("Test is only for non-cpu devices")
+        elif (
+            impl == "fused"
+            and _get_device_type(device) not in optim_info.supports_fused_on
+        ):
+            self.skipTest(f"{device} is not supported for fused on {opt_name}")
+        elif _get_device_type(device) == "mps":
+            self.skipTest("MPS does not support float64 tensors")
+
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        for optim_input in optim_inputs:
+            optim_input.kwargs[impl] = True
+            param = torch.tensor([0.1, 0.2], dtype=dtype, device=device)
+            optimizer = optim_cls([param], **optim_input.kwargs)
+            param.grad = torch.rand_like(param)
+            optimizer.step()
+
+            # Manually convert step tensors to float64.
+            # This is only for testing purpose. Since users may use fp64 step for
+            # some reasons and load_state_dict should respect user's choice on dtype.
+            for p in optimizer.state:
+                state = optimizer.state[p]
+                if "step" in state and isinstance(state["step"], torch.Tensor):
+                    state["step"] = state["step"].to(dtype=torch.float64)
+
+            # Save state dict with float64 step
+            state_dict = optimizer.state_dict()
+            for state in state_dict["state"].values():
+                if "step" in state:
+                    self.assertEqual(state["step"].dtype, torch.float64)
+
+            # Create new optimizer and load state dict
+            param2 = torch.tensor([0.1, 0.2], dtype=dtype, device=device)
+            optimizer2 = optim_cls([param2], **optim_input.kwargs)
+            optimizer2.load_state_dict(state_dict)
+
+            # Verify step tensors remain float64 after loading
+            for p in optimizer2.state:
+                state = optimizer2.state[p]
+                if "step" in state:
+                    self.assertEqual(
+                        state["step"].dtype,
+                        torch.float64,
+                        f"Step tensor should remain float64 for {impl} optimizer with float32 params",
+                    )
+
     @optims(optim_db, dtypes=[torch.float32])
     def test_param_groups_weight_decay(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls

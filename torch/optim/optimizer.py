@@ -801,7 +801,7 @@ class Optimizer:
                 break
         if key == "step":
             if capturable or fused:
-                return value.to(dtype=torch.float32, device=param.device)
+                return value.to(device=param.device)
             else:
                 return value
         else:
