@@ -5219,6 +5219,19 @@ class TemplateBuffer(OperationBuffer):
             None,
         )
 
+    def is_multi_outputs_template(self) -> bool:
+        """Whether this template produces multiple outputs via MultiOutputLayout."""
+        return isinstance(self.layout, MultiOutputLayout)
+
+    def can_fuse_multi_output_epilogue(self, snode: object) -> bool:
+        """Whether scheduler node can be fused as an epilogue of this multi-output template.
+
+        Returns ``False`` by default.  Subclasses may override to support
+        additional fusion patterns (e.g. epilogue fusion with multi-output
+        extraction and pointwise operations).
+        """
+        return False
+
 
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
@@ -5318,6 +5331,8 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
         self.failed: bool = False
+        # When True, benchmark using CUDA graph capture/replay
+        self._benchmark_with_cudagraphs: bool = False
         # A place to store annotations that can be read post benchmarking
         # Use this to shuttle information between ChoieCaller generation
         # and the end of benchmarking
@@ -5325,6 +5340,8 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
+        if self._benchmark_with_cudagraphs:
+            return benchmarker.benchmark_gpu_with_cuda_graph(lambda: algo(*args))
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: algo(*args))  # type: ignore[arg-type]
         return benchmarker.benchmark(algo, args, {"out": out}, device=None)
@@ -9173,6 +9190,28 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
+
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_outputs,
+        )
+
+        (_, _, _, true_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
+        )
+        (_, _, _, false_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
+        )
+
+        mutated_operand_indices = OrderedSet(true_mutated_inputs) | OrderedSet(
+            false_mutated_inputs
+        )
+
+        # Create MutationOutput for each mutated operand (for scheduler dependencies)
+        conditional.mutation_outputs = [
+            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
+            for idx in sorted(mutated_operand_indices)
+        ]
+
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
