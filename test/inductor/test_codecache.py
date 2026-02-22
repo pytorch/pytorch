@@ -20,6 +20,7 @@ from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
+from torch._functorch.aot_autograd import register_extra_cache_key_data
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
@@ -471,6 +472,248 @@ class TestFxGraphCache(TestCase):
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
                         grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    def test_extra_cache_key_data_affects_fxgraph_cache(self):
+        """
+        Changing extra_cache_key_data should invalidate the Inductor FxGraphCache key.
+        We inject the extra_cache_key_data via the register_extra_cache_key_data() hook
+        and use runtime-controlled cache_key_value as our extra data.
+        """
+        cache_key_value = "A"
+        def extra_key_cache_data_producer(gm, aot_config, real_inputs, fake_inputs):
+            return {"cache_key_tag": cache_key_value}
+
+        handle = register_extra_cache_key_data(extra_key_cache_data_producer)
+        self.addCleanup(handle.remove)
+
+        def fn(x):
+            return x.sin() * 2 + 1
+
+        compiled = torch.compile(fn, fullgraph=True)
+        x = torch.randn(16)
+
+        def assert_fxgraph_cache_miss():
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        def assert_fxgraph_cache_hit():
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        with fresh_cache():
+            # 1) first compilation should miss regardless of our extra tag
+            counters.clear()
+            out1 = compiled(x)
+            self.assertEqual(fn(x), out1)
+            assert_fxgraph_cache_miss()
+
+            # 2) new run with same tag should hit
+            self.reset()
+            counters.clear()
+            out2 = compiled(x)
+            self.assertEqual(fn(x), out2)
+            assert_fxgraph_cache_hit()
+
+            # 3) extra cache key data changed, different tag should trigger miss
+            cache_key_value = "B"
+            self.reset()
+            counters.clear()
+            out3 = compiled(x)
+            self.assertEqual(fn(x), out3)
+            assert_fxgraph_cache_miss()
+
+            # 4) going back to previous tag should hit
+            cache_key_value = "A"
+            self.reset()
+            counters.clear()
+            out4 = compiled(x)
+            self.assertEqual(fn(x), out4)
+            assert_fxgraph_cache_hit()
+
+            # 5) unregistering the extra data producer, no extra tag should trigger miss
+            handle.remove()
+            self.reset()
+            counters.clear()
+            out5 = compiled(x)
+            self.assertEqual(fn(x), out5)
+            assert_fxgraph_cache_miss()
+
+            # 6) changing tag with unregistered producer should not trigger miss
+            cache_key_value = "C"
+            self.reset()
+            counters.clear()
+            out6 = compiled(x)
+            self.assertEqual(fn(x), out6)
+            assert_fxgraph_cache_hit()
+
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @torch._functorch.config.patch({"enable_autograd_cache": True})
+    def test_extra_cache_key_data_affects_aot_autograd_cache(self):
+        """
+        Changing extra_cache_key_data should invalidate the AOTAutograd cache key.
+        """
+        cache_key_value = "A"
+        def extra_key_cache_data_producer(gm, aot_config, real_inputs, fake_inputs):
+            return {"cache_key_tag": cache_key_value}
+
+        handle = register_extra_cache_key_data(extra_key_cache_data_producer)
+        self.addCleanup(handle.remove)
+
+        def fn(x):
+            return (x.sin() * 3).sum()
+        compiled = torch.compile(fn, fullgraph=True)
+
+        x = torch.randn(32, requires_grad=True)
+        x2 = x.detach().clone().requires_grad_(True)
+        x3 = x.detach().clone().requires_grad_(True)
+        x4 = x.detach().clone().requires_grad_(True)
+        x5 = x.detach().clone().requires_grad_(True)
+        x6 = x.detach().clone().requires_grad_(True)
+
+        def assert_aot_autograd_cache_miss():
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+        def assert_aot_autograd_cache_hit():
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        with fresh_cache():
+            # 1) first compilation should miss regardless of our extra tag
+            counters.clear()
+            y1 = compiled(x)
+            y1.backward()
+            self.assertEqual(fn(x), y1)
+            assert_aot_autograd_cache_miss()
+
+            # 2) new run with same tag should hit
+            torch._dynamo.reset()
+            counters.clear()
+            y2 = compiled(x2)
+            y2.backward()
+            self.assertEqual(fn(x2), y2)
+            assert_aot_autograd_cache_hit()
+
+            # 3) extra cache key data changed, different tag should trigger miss
+            torch._dynamo.reset()
+            cache_key_value = "B"
+            counters.clear()
+            y3 = compiled(x3)
+            y3.backward()
+            self.assertEqual(fn(x3), y3)
+            assert_aot_autograd_cache_miss()
+
+            # 4) going back to previous tag should hit
+            cache_key_value = "A"
+            torch._dynamo.reset()
+            counters.clear()
+            y4 = compiled(x4)
+            y4.backward()
+            self.assertEqual(fn(x4), y4)
+            assert_aot_autograd_cache_hit()
+
+            # 5) unregistering the extra data producer, no extra tag should trigger miss
+            handle.remove()
+            torch._dynamo.reset()
+            counters.clear()
+            y5 = compiled(x5)
+            y5.backward()
+            self.assertEqual(fn(x5), y5)
+            assert_aot_autograd_cache_miss()
+
+            # 6) changing tag with unregistered producer should not trigger miss
+            torch._dynamo.reset()
+            cache_key_value = "C"
+            counters.clear()
+            y6 = compiled(x6)
+            y6.backward()
+            self.assertEqual(fn(x6), y6)
+            assert_aot_autograd_cache_hit()
+
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    def test_extra_cache_key_data_producer_can_access_context(self):
+        """
+        Check that we have proper access to all data exposed for the extra key cache
+        data producer.
+        """
+
+        def fn(x):
+            a = x.sin()
+            b = a + 1
+            c = torch.relu(b)
+            return c
+
+        input_shape = (2, 4)
+        x = torch.ones(input_shape)
+
+        exception_object = None  # capture exception from the producer if raised
+
+        def extra_key_cache_data_producer(gm, aot_config, real_inputs, fake_inputs):
+            try:
+                # assert we have access to proper gm
+                expected_nodes = [
+                    ('placeholder', 'x'),
+                    ('call_method', 'sin'),
+                    ('call_function', 'add'),
+                    ('call_function', 'relu'),
+                    ('output', 'output'),
+                ]
+                expected_nodes_count = len(expected_nodes)
+                graph_nodes = [n for n in gm.graph.nodes]
+                self.assertEqual(len(graph_nodes), expected_nodes_count)
+                for i in range(0, expected_nodes_count):
+                    self.assertEqual(graph_nodes[i].op, expected_nodes[i][0])
+                    self.assertIn(expected_nodes[i][1], str(graph_nodes[i].target))
+
+                # assert we have access to proper aot_config
+                self.assertEqual(len(aot_config.aot_autograd_arg_pos_to_source), 1)
+                self.assertEqual(aot_config.aot_autograd_arg_pos_to_source[0].local_name, 'x')
+                self.assertEqual(aot_config.aot_autograd_arg_pos_to_source[0].is_input, True)
+
+                # assert we have access to proper real_inputs
+                self.assertEqual(len(real_inputs), 1)
+                first_real_input = real_inputs[0]
+                self.assertIsInstance(first_real_input, torch.Tensor)
+                self.assertNotIsInstance(first_real_input, torch._subclasses.FakeTensor)
+                self.assertEqual(first_real_input.shape, input_shape)
+                self.assertEqual(first_real_input[0][0], 1)
+
+                # assert we have access to proper fake_inputs
+                self.assertEqual(len(fake_inputs), 1)
+                first_fake_input = fake_inputs[0]
+                self.assertIsInstance(first_fake_input, torch._subclasses.FakeTensor)
+                self.assertEqual(first_fake_input.shape, first_real_input.shape)
+                self.assertEqual(first_fake_input.dtype, first_real_input.dtype)
+
+            except Exception as e:
+                nonlocal exception_object
+                exception_object = e
+
+            return {}
+
+        handle = register_extra_cache_key_data(extra_key_cache_data_producer)
+        self.addCleanup(handle.remove)
+
+        compiled = torch.compile(fn, fullgraph=True)
+
+        with fresh_cache():
+            self.reset()
+            counters.clear()
+            out1 = compiled(x)
+            self.assertEqual(fn(x), out1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.assertIs(exception_object, None)
+
 
     @requires_triton()
     @config.patch({"fx_graph_remote_cache": True})
