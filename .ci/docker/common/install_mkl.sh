@@ -2,7 +2,7 @@
 set -ex
 
 # MKL
-MKL_VERSION=2024.2.0
+MKL_VERSION=2025.3.0
 
 MKLROOT=/opt/intel
 mkdir -p ${MKLROOT}
