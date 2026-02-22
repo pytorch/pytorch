@@ -7628,10 +7628,10 @@ class TestAOTModuleSimplified(AOTTestCase):
         y2 = fn_comp(x2)
         with self.assertRaisesRegex(
             RuntimeError,
-            """
+            r"""
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
-""",  # noqa: F541
+Expected a .* tangent but got a plain Tensor.""",
         ):
             y2.backward(gradient=torch.randn(2, 3))
 
@@ -8551,7 +8551,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
-    xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),
