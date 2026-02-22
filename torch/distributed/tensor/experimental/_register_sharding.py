@@ -93,7 +93,19 @@ def register_sharding(op: OpOverload | list[OpOverload]):
         for output_specs, input_specs in acceptable_shardings:
             single_mesh_dim_strategies.append(output_specs + input_specs)
 
-        # TODO: handle out variant ops
+        filtered_kwargs_schema = {
+            k: v
+            for k, v in op_schema.kwargs_schema.items()
+            if not isinstance(v, TupleStrategy)
+        }
+        if len(filtered_kwargs_schema) < len(op_schema.kwargs_schema):
+            op_schema = OpSchema(
+                op=op_schema.op,
+                args_schema=op_schema.args_schema,
+                kwargs_schema=filtered_kwargs_schema,
+                schema_info=op_schema.schema_info,
+            )
+
         return expand_to_full_mesh_op_strategy(
             mesh,
             op_schema,

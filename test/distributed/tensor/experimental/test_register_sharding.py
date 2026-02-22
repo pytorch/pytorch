@@ -158,6 +158,56 @@ class TestRegisterSharding(DTensorTestBase):
         self.assertEqual(result[1].full_tensor(), expected_indices)
 
     @with_comms
+    def test_register_sharding_for_flip(self):
+        @register_sharding(aten.flip.default)
+        def flip_sharding(x, dims):
+            acceptable_shardings = []
+
+            all_replicate = ([Replicate()], [Replicate(), None])
+            acceptable_shardings.append(all_replicate)
+
+            for shard_dim in range(x.ndim):
+                if shard_dim not in dims:
+                    sharded = ([Shard(shard_dim)], [Shard(shard_dim), None])
+                    acceptable_shardings.append(sharded)
+
+            return acceptable_shardings
+
+        mesh = self.build_device_mesh()
+        x = torch.randn(4, 8, device=self.device_type)
+
+        dist_x = distribute_tensor(x, mesh, [Shard(0)])
+        result = torch.flip(dist_x, dims=[1])
+        expected = torch.flip(x, dims=[1])
+
+        self.assertIsInstance(result, DTensor)
+        self.assertTrue(result.placements[0].is_shard(dim=0))
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    def test_register_sharding_for_tensorlist_kwargs(self):
+        from torch.library import _scoped_library
+
+        with _scoped_library("test_tlist", "DEF") as lib:
+            lib.define("op(Tensor x, *, Tensor[] out) -> Tensor")
+            lib.impl("op", lambda x, *, out: torch.empty_like(x), "Meta")
+            lib.impl("op", lambda x, *, out: (out[0].copy_(x), out[0])[1], "CPU")
+            lib.impl("op", lambda x, *, out: (out[0].copy_(x), out[0])[1], "CUDA")
+
+            @register_sharding(torch.ops.test_tlist.op.default)
+            def op_sharding(x, *, out):
+                return [([Replicate()], [Replicate()])]
+
+            mesh = self.build_device_mesh()
+            x = torch.randn(4, 4, device=self.device_type)
+            x_dt = distribute_tensor(x, mesh, [Replicate()])
+            out_dt = distribute_tensor(torch.empty_like(x), mesh, [Replicate()])
+
+            result = torch.ops.test_tlist.op(x_dt, out=[out_dt])
+            self.assertIsInstance(result, DTensor)
+            self.assertEqual(result.full_tensor(), x)
+
+    @with_comms
     def test_register_sharding_non_tensor_first_arg(self):
         # Test that get_mesh_from_args works when the first arg is not a DTensor
         # Regression test for https://github.com/pytorch/pytorch/issues/167915
