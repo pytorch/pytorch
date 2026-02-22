@@ -1202,7 +1202,7 @@ static inline void _to_sparse_check_arguments(
     }
   } else {
     if ((layout_to == kSparseBsr || layout_to == kSparseBsc) &&
-        !(layout_from == kSparseBsr && layout_from == kSparseBsc)) {
+        !(layout_from == kSparseBsr || layout_from == kSparseBsc)) {
       TORCH_CHECK(
           false,
           funcname,
