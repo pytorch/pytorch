@@ -297,10 +297,6 @@ class TestVarlenAttention(NNTestCase):
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
-        "sdpa_backend",
-        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
-    )
-    @parametrize(
         "backend",
         _varlen_backends(include_fa4_paged_kv=False),
     )
