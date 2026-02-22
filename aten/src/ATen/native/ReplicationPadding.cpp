@@ -5,6 +5,7 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/native/Padding.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_numerics.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -44,11 +45,28 @@ TORCH_META_FUNC(replication_pad1d) (
   /* sizes */
   int64_t nslices = input.size(dimslices);
   int64_t iwidth = input.size(dimw);
-  int64_t owidth = iwidth + pad_l + pad_r;
 
-  TORCH_CHECK(owidth >= 1,
-      "input (W: ", iwidth, ") is too small."
-      " Calculated output W: ", owidth);
+  // Check for overflow when computing output width
+  int64_t owidth;
+  int64_t pad_sum;
+  TORCH_CHECK(
+      !c10::add_overflows(pad_l, pad_r, &pad_sum) &&
+          !c10::add_overflows(iwidth, pad_sum, &owidth),
+      "Padding size is too large: padding (",
+      pad_l,
+      ", ",
+      pad_r,
+      ") with input width ",
+      iwidth,
+      " would overflow");
+
+  TORCH_CHECK(
+      owidth >= 1,
+      "input (W: ",
+      iwidth,
+      ") is too small."
+      " Calculated output W: ",
+      owidth);
 
   if (input.ndimension() == 2) {
     set_output_raw_strided(0, {nslices, owidth}, {}, input.options());
@@ -108,12 +126,42 @@ TORCH_META_FUNC(replication_pad2d) (
   int64_t nslices = input.size(dimslices);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
-  int64_t oheight = iheight + pad_t + pad_b;
-  int64_t owidth  = iwidth + pad_l + pad_r;
 
-  TORCH_CHECK(owidth >= 1 || oheight >= 1,
-      "input (H: ", iheight, ", W: ", iwidth, " ) is too small."
-      " Calculated output H: ", oheight, " W: ", owidth);
+  // Check for overflow when computing output dimensions
+  int64_t oheight, owidth;
+  int64_t pad_sum_h, pad_sum_w;
+  TORCH_CHECK(
+      !c10::add_overflows(pad_t, pad_b, &pad_sum_h) &&
+          !c10::add_overflows(iheight, pad_sum_h, &oheight),
+      "Padding size is too large: padding (top=",
+      pad_t,
+      ", bottom=",
+      pad_b,
+      ") with input height ",
+      iheight,
+      " would overflow");
+  TORCH_CHECK(
+      !c10::add_overflows(pad_l, pad_r, &pad_sum_w) &&
+          !c10::add_overflows(iwidth, pad_sum_w, &owidth),
+      "Padding size is too large: padding (left=",
+      pad_l,
+      ", right=",
+      pad_r,
+      ") with input width ",
+      iwidth,
+      " would overflow");
+
+  TORCH_CHECK(
+      owidth >= 1 || oheight >= 1,
+      "input (H: ",
+      iheight,
+      ", W: ",
+      iwidth,
+      " ) is too small."
+      " Calculated output H: ",
+      oheight,
+      " W: ",
+      owidth);
 
   if (input.dim() == 3) {
     set_output_raw_strided(0, {nslices, oheight, owidth}, {}, input.options());
@@ -153,14 +201,56 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t idepth = input.size(dimd);
   int64_t iheight = input.size(dimh);
   int64_t iwidth = input.size(dimw);
-  int64_t odepth = idepth + pfront + pback;
-  int64_t oheight = iheight + ptop + pbottom;
-  int64_t owidth  = iwidth + pleft + pright;
 
-  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
-      "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
+  // Check for overflow when computing output dimensions
+  int64_t odepth, oheight, owidth;
+  int64_t pad_sum_d, pad_sum_h, pad_sum_w;
+  TORCH_CHECK(
+      !c10::add_overflows(pfront, pback, &pad_sum_d) &&
+          !c10::add_overflows(idepth, pad_sum_d, &odepth),
+      "Padding size is too large: padding (front=",
+      pfront,
+      ", back=",
+      pback,
+      ") with input depth ",
+      idepth,
+      " would overflow");
+  TORCH_CHECK(
+      !c10::add_overflows(ptop, pbottom, &pad_sum_h) &&
+          !c10::add_overflows(iheight, pad_sum_h, &oheight),
+      "Padding size is too large: padding (top=",
+      ptop,
+      ", bottom=",
+      pbottom,
+      ") with input height ",
+      iheight,
+      " would overflow");
+  TORCH_CHECK(
+      !c10::add_overflows(pleft, pright, &pad_sum_w) &&
+          !c10::add_overflows(iwidth, pad_sum_w, &owidth),
+      "Padding size is too large: padding (left=",
+      pleft,
+      ", right=",
+      pright,
+      ") with input width ",
+      iwidth,
+      " would overflow");
+
+  TORCH_CHECK(
+      owidth >= 1 || oheight >= 1 || odepth >= 1,
+      "input (D: ",
+      idepth,
+      " H: ",
+      iheight,
+      ", W: ",
+      iwidth,
       ") is too small."
-      " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
+      " Calculated output D: ",
+      odepth,
+      " H: ",
+      oheight,
+      " W: ",
+      owidth);
 
   /* resize output */
   if (input.dim() == 4) {
