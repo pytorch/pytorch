@@ -1092,6 +1092,90 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
   }
 }
 
+template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor, typename func_t>
+__global__ void indexFuncLargeIndex_Cache(cuda::detail::TensorInfo<T, IndexType> dst,
+                                    cuda::detail::TensorInfo<const T, IndexType> src,
+                                    cuda::detail::TensorInfo<const IndicesType, IndexType> indices,
+                                    int dstAddDim,
+                                    int srcAddDim,
+                                    IndexType totalSize,
+                                    IndexType innerSize,
+                                    int64_t dstAddDimSize,
+                                    int64_t dstNumel,
+                                    const func_t& op,
+                                    T alpha) {
+
+  constexpr int LIMIT = 4;
+  IndexType dstCache[LIMIT];
+  T dstAcc[LIMIT];
+  int head = 0, cnt = 0;
+  // We stride over the output including the indexed dimension
+  // (totalSize), and calculate the destination index point based on that
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalSize;
+       linearIndex += gridDim.x * blockDim.x) {
+    IndexType srcIndex, elementInSlice;
+    if (IndexIsMajor) {
+      srcIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      srcIndex = linearIndex % innerSize;
+    }
+
+    // Lua indices begin at 1
+    IndexType dstIndex =
+        indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
+    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
+
+    IndexType dstOffset =
+      cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstAddDim];
+
+    IndexType srcOffset =
+      cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcAddDim];
+
+
+    bool found = false;
+    for (int i = 0; i < cnt; i++) {
+        int idx = (head + i) % LIMIT;
+        if (dstCache[idx] == dstOffset) {
+           dstAcc[idx] += src.data[srcOffset];
+           found = true;
+           break;
+        }
+    }
+
+    if (!found) {
+       if (cnt == LIMIT) {
+          T val = dstAcc[head] * alpha;
+          IndexType flushOffset = dstCache[head];
+          dstCache[head] = dstOffset;
+          dstAcc[head] = src.data[srcOffset];
+          head = (head + 1) % LIMIT;
+          op(dst.data, flushOffset, dstNumel, &val);
+       }
+       else {
+          int idx = (head + cnt) % LIMIT;
+          dstCache[idx] = dstOffset;
+          dstAcc[idx] = src.data[srcOffset];
+          cnt++;
+       }
+    }
+    //T val = src.data[srcOffset] * alpha;
+    //op(dst.data, dstOffset, dstNumel, &val);
+  }
+
+  for (int i = 0; i < cnt; i++) {
+    int idx = (head + i) % LIMIT;
+    T val = dstAcc[idx] * alpha;
+    op(dst.data, dstCache[idx], dstNumel, &val);
+  }
+}
+
 // Compare the stride between adjacent slices (sliceStride) with strides in the
 // other dimensions (i.e., strides *inside* each slice).
 //
@@ -1180,6 +1264,16 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
+  if (IS_CACHE) {                                                           \
+  indexFuncLargeIndex_Cache<TENSOR_TYPE, INDICES_TYPE, TYPE,                \
+                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>          \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
+      selfInfo, sourceInfo, indexInfo,                                      \
+      selfAddDim, sourceAddDim, sourceTotalSize,                            \
+      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
+      selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();                                           \
+  } else {                                                                  \
   indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                      \
                       SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>          \
     <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
@@ -1187,7 +1281,8 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfAddDim, sourceAddDim, sourceTotalSize,                            \
       (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
       selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();                                           \
+  }
 
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
   const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
@@ -1196,6 +1291,12 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   const dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (uint64_t)128), (uint64_t)(mpc * 8)));
   //On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
   dim3 largeIndexBlock( (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads );
+
+#ifdef USE_ROCM
+  bool IS_CACHE = true;
+#else
+  bool IS_CACHE = false;
+#endif
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
