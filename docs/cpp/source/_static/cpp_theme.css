@@ -1,0 +1,61 @@
+/* Custom CSS for PyTorch C++ Documentation */
+
+/*
+ * Collapsible "Subclassed by" section
+ * Shows first line with a "See All" button to expand the full list.
+ */
+
+/* Container for the subclassed-by list */
+.subclassed-by-list {
+    position: relative;
+}
+
+/* Initially collapsed state - show only 1 line */
+.subclassed-by-list.collapsed {
+    max-height: 1.6em;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    padding-right: 140px; /* Space for the button */
+}
+
+/* The "See All" / "Hide" toggle button */
+.subclassed-by-toggle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 2px 10px;
+    color: #333;
+    cursor: pointer;
+    font-size: 0.85em;
+    text-decoration: none;
+    font-family: inherit;
+    font-weight: 500;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.subclassed-by-toggle:hover {
+    background-color: #e0e0e0;
+    border-color: #999;
+    text-decoration: none;
+}
+
+/* Expanded state */
+.subclassed-by-list.expanded {
+    max-height: none;
+    overflow: visible;
+    white-space: normal;
+    padding-right: 0;
+    padding-bottom: 2em; /* Space for the button at the bottom */
+}
+
+/* Position toggle at end when expanded */
+.subclassed-by-list.expanded .subclassed-by-toggle {
+    position: absolute;
+    top: auto;
+    bottom: 0;
+    right: 0;
+}

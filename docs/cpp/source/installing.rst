@@ -161,10 +161,12 @@ To ensure smooth installation and usage of LibTorch, please ensure your system
 meets the following requirements:
 
 1. **GLIBC Version**:
-  - GLIBC 2.29 or newer for cxx11 ABI version
+
+   - GLIBC 2.29 or newer for cxx11 ABI version
 
 2. **GCC Version**:
-  - GCC 9 or newer for cxx11
+
+   - GCC 9 or newer for cxx11
 
 Visual Studio Extension
 -----------------------
