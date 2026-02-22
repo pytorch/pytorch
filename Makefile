@@ -8,8 +8,6 @@ NIGHTLY_TOOL_OPTS := pull
 
 .PHONY: all
 all:
-	@cmake -S . -B build $(shell $(PYTHON) ./scripts/get_python_cmake_flags.py) && \
-		cmake --build build --parallel --
 
 .PHONY: triton
 triton:
