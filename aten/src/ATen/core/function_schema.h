@@ -435,7 +435,7 @@ struct TORCH_API FunctionSchema {
   std::optional<int> argumentIndexWithName(std::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
-        return i;
+        return static_cast<int>(i);
     }
     return std::nullopt;
   }
