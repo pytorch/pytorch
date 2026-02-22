@@ -45,7 +45,9 @@ inline torch::headeronly::ScalarType scalar_type(
             at_dispatch_name,                                               \
             "\" not implemented for '",                                     \
             torch::headeronly::toString(_st),                               \
-            "'");                                                           \
+            "' (",                                                          \
+            torch::headeronly::toDtypeString(_st),                          \
+            ")");                                                           \
     }                                                                       \
     C10_DIAGNOSTIC_POP()                                                    \
   }()
