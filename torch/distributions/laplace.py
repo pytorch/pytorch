@@ -14,7 +14,8 @@ __all__ = ["Laplace"]
 class Laplace(Distribution):
     r"""
     Creates a Laplace distribution parameterized by :attr:`loc` and :attr:`scale`.
-
+    .. math::
+        f(x|\mu, b) = \frac{1}{2b} \exp\left(-\frac{|x-\mu|}{b}\right)
     Example::
 
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
