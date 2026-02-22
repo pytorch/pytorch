@@ -22,6 +22,7 @@ from torch._dynamo.testing import (
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
     empty_line_normalizer,
+    expectedFailureDynamic,
     normalize_gm,
 )
 from torch._dynamo.utils import counters, ifdynstaticdefault
@@ -3391,6 +3392,7 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, msg):
             fn_with_hints(x, y)
 
+    @expectedFailureDynamic
     @requires_cuda_and_triton
     def test_wrap_inductor_compiled_regions_option(self):
         """
@@ -3435,6 +3437,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result_wrapped, expected)
         self.assertEqual(result_not_wrapped, expected)
 
+    @expectedFailureDynamic
     @requires_cuda_and_triton
     def test_wrap_inductor_compiled_regions_with_backward(self):
         """

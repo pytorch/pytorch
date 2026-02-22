@@ -753,7 +753,6 @@ class SizeVarAllocator:
             fallback = config.unbacked_symint_fallback
         assert fallback is not None
 
-        original = expr
         expr = self.simplify(expr)
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
@@ -761,6 +760,8 @@ class SizeVarAllocator:
 
         if isinstance(expr, sympy.Expr):
             expr = expr.expand(identity=True)
+
+        original = expr
 
         expr = self.replace_backed_symbols_with_hints(expr)
 
@@ -780,8 +781,14 @@ class SizeVarAllocator:
         if has_free_unbacked_symbols(expr):
             # Make sure to substitute with the factored version
             # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-            # TODO optimize _sub_unbacked_exprs
-            expr = self._sub_unbacked_exprs(sympy.factor(original))
+
+            # Limit sympy.factor() to expressions with <= 200 free symbols,
+            # as factoring polynomials with many variables is expensive.
+            if isinstance(original, sympy.Expr) and len(original.free_symbols) <= 200:
+                expr = self._sub_unbacked_exprs(sympy.factor(original))
+            else:
+                # TODO optimize _sub_unbacked_exprs
+                expr = self._sub_unbacked_exprs(original)
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
@@ -1126,7 +1133,12 @@ class SizeVarAllocator:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
                 break
-            expr = sympy.factor(new_expr)
+            # Skip sympy.factor() for expressions with many free symbols,
+            # as factoring polynomials with many variables is expensive.
+            if len(new_expr.free_symbols) <= 200:
+                expr = sympy.factor(new_expr)
+            else:
+                expr = new_expr
             sub_cnt += 1
         else:
             log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
