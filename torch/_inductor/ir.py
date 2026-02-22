@@ -3771,6 +3771,7 @@ class Layout(OutputSpec):
         stride: Optional[Sequence[Expr]] = None,
         offset: Expr = Integer(0),
         is_pinned: bool = False,
+        allocator: "AllocatorType" = None,  # type: ignore[assignment]
     ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -3783,6 +3784,9 @@ class Layout(OutputSpec):
         self._stride = stride
         self._offset = offset
         self.is_pinned = is_pinned
+        if allocator is None:
+            allocator = AllocatorType.DEFAULT
+        self.allocator = allocator
         # is_pinned implies cpu
         assert (not self.is_pinned) or (self.device.type == "cpu"), (
             "Only CPU tensors can be pinned"
@@ -4316,6 +4320,22 @@ class CommBufferType(Enum):
     SYMM_MEM = "symm_mem"
 
 
+class AllocatorType(Enum):
+    """
+    Allocator type for buffer allocation.
+
+    This is the allocator dimension of Layout, following the direction
+    proposed in https://github.com/pytorch/pytorch/issues/138280 which
+    separates Layout into orthogonal stride and allocator dimensions.
+
+    DEFAULT: CUDA caching allocator (empty_strided_cuda)
+    SYMM_MEM: P2P symmetric memory (empty_strided_p2p)
+    """
+
+    DEFAULT = "default"
+    SYMM_MEM = "symm_mem"
+
+
 class CommBufferLayout(FixedLayout):
     """
     A layout that signifies the buffer is a comm buffer.
@@ -4323,6 +4343,11 @@ class CommBufferLayout(FixedLayout):
 
     Buffers with this layout do not participate in in-place reuse - it can be
     neither the source nor the target for in-place reuse.
+
+    The allocator field is set to the corresponding AllocatorType so that new
+    code can check layout.allocator instead of isinstance(layout, CommBufferLayout).
+    See https://github.com/pytorch/pytorch/issues/138280 for the long-term
+    Layout refactor direction.
 
     For detailed motivation and usage of this layout, see
     NOTE [lowering-time collective optimization].
@@ -4348,6 +4373,8 @@ class CommBufferLayout(FixedLayout):
         )
         self.comm_buffer_type = comm_buffer_type
         self.group_name = group_name
+        if comm_buffer_type == CommBufferType.SYMM_MEM:
+            self.allocator = AllocatorType.SYMM_MEM
 
 
 @ir_dataclass

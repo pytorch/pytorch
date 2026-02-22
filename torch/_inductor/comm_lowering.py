@@ -518,18 +518,48 @@ def register_symm_mem_lowerings():
         """
         Helper to realize an input as symmetric memory buffer if possible.
 
-        When the input cannot be directly realized (e.g., it is a graph
-        placeholder whose allocation Inductor does not control), a pointwise
-        identity copy is inserted so that the *copy* is allocated in P2P
-        memory via CommBufferLayout.
+        Three paths, in priority order:
+        1. We control allocation (ComputedBuffer, etc.) → change layout to
+           CommBufferLayout directly. Zero-copy.
+        2. Graph placeholder (InputBuffer) whose allocation we don't control
+           → mark layout.allocator = SYMM_MEM as a constraint. The caller
+           (CUDAGraph tree or compiled wrapper) is responsible for providing
+           P2P memory. This avoids the Triton identity copy kernel.
+        3. Fallback: insert a Pointwise identity copy allocated in P2P
+           memory via CommBufferLayout.
 
         Returns the (possibly replaced) input TensorBox.
         """
         if can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM):
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
             return inp
-        else:
-            return _copy_input_to_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
+
+        data = _get_data(inp)
+        if isinstance(data, ir.InputBuffer):
+            # Layout approach: mark allocator constraint on InputBuffer.
+            # The CG tree / wrapper will allocate P2P and copy at call time,
+            # avoiding an extra Triton identity kernel inside the graph.
+            #
+            # This requires static shapes because the persistent P2P buffer
+            # is allocated at module level (import time). If any dimension
+            # is symbolic, fall back to the identity copy (Path 3).
+            layout = data.get_output_spec()
+            has_symbolic = any(
+                is_symbolic(s) for s in layout.size
+            ) or any(is_symbolic(s) for s in layout.stride)
+            if not has_symbolic:
+                data.layout = ir.FixedLayout(
+                    device=layout.device,
+                    dtype=layout.dtype,
+                    size=layout.size,
+                    stride=layout.stride,
+                    offset=layout.offset,
+                    allocator=ir.AllocatorType.SYMM_MEM,
+                )
+                data.layout.group_name = group_name  # type: ignore[attr-defined]
+                return inp
+
+        return _copy_input_to_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
 
     def _create_out_variant_node(
         out_op: torch._ops.OpOverload,

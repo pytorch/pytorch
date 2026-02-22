@@ -1499,8 +1499,12 @@ class LoweringTest(MultiProcContinuousTest):
     def test_symm_mem_placeholder_auto_copy(self):
         """
         Verify that when a symm_mem collective's input is a graph placeholder
-        (Inductor does not control its allocation), a pointwise identity copy
-        to P2P memory is automatically inserted.
+        (Inductor does not control its allocation), the Layout approach
+        annotates the InputBuffer with AllocatorType.SYMM_MEM and generates
+        a .copy_() from the caller's input to a persistent P2P buffer.
+
+        This replaces the old Triton identity-copy kernel with a DMA .copy_()
+        that runs on the copy engine (not compute SMs).
         """
         self._init_process()
 
@@ -1513,13 +1517,20 @@ class LoweringTest(MultiProcContinuousTest):
         compiled = torch.compile(func, fullgraph=True)
         code = run_and_get_triton_code(compiled, x)
 
-        # The codegen should contain a P2P allocation (for the auto-copy)
+        # The codegen should contain a persistent P2P allocation at module level
         self.assertIn(
             "empty_strided_p2p",
             code,
-            "Expected empty_strided_p2p for auto-inserted copy from placeholder to P2P",
+            "Expected empty_strided_p2p for persistent P2P buffer allocation",
         )
-        # The codegen should have a triton copy kernel (pointwise identity)
+        # The codegen should use the Layout approach (.copy_()) rather than
+        # a Triton identity-copy kernel
+        self.assertIn(
+            ".copy_(",
+            code,
+            "Expected .copy_() for DMA copy to P2P buffer (Layout approach)",
+        )
+        # The codegen should have the out-variant allreduce
         self.assertIn(
             "one_shot_all_reduce_out",
             code,
@@ -1536,6 +1547,50 @@ class LoweringTest(MultiProcContinuousTest):
             rtol=1e-5,
             atol=1e-5,
             msg="Compiled (auto-copy to P2P) and eager all_reduce do not match",
+        )
+
+        # --- Path 3 variant: identity copy fallback ---
+        # When the allreduce input is NOT a graph placeholder (InputBuffer)
+        # but an ExternKernel output (e.g., cpu→cuda DeviceCopy), Path 2
+        # (Layout approach) does not apply. The fallback Path 3 inserts a
+        # Triton identity copy with CommBufferLayout instead.
+        torch._dynamo.reset()
+
+        def func_path3(x_cpu):
+            x_cuda = x_cpu.cuda()
+            return torch.ops.symm_mem.one_shot_all_reduce(x_cuda, "sum", "0")
+
+        x_cpu = torch.rand(N, N, device="cpu")
+        compiled_path3 = torch.compile(func_path3, fullgraph=True)
+        code_path3 = run_and_get_triton_code(compiled_path3, x_cpu)
+
+        # Path 3: P2P allocation happens inside call() (not module-level)
+        self.assertIn(
+            "empty_strided_p2p",
+            code_path3,
+            "Expected empty_strided_p2p for Path 3 identity copy",
+        )
+        # Path 3 should NOT have the module-level _p2p_buf_ pattern
+        self.assertNotIn(
+            "_p2p_buf_",
+            code_path3,
+            "Path 3 should not use module-level persistent P2P buffer",
+        )
+        self.assertIn(
+            "one_shot_all_reduce_out",
+            code_path3,
+            "Expected out-variant allreduce in Path 3 generated code",
+        )
+        # Verify Path 3 correctness
+        compiled_result_path3 = compiled_path3(x_cpu)
+        eager_result_path3 = x_cpu.cuda().clone()
+        dist.all_reduce(eager_result_path3, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            compiled_result_path3,
+            eager_result_path3,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled (Path 3 identity copy) and eager do not match",
         )
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support

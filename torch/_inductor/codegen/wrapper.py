@@ -1484,6 +1484,82 @@ class PythonWrapperCodegen(CodeGen):
     def get_graph_input_names(self) -> list[str]:
         return V.graph.graph_input_names
 
+    def _get_symm_mem_input_info(
+        self,
+    ) -> list[tuple[int, str, ir.InputBuffer]]:
+        """
+        Collect graph inputs whose layout carries AllocatorType.SYMM_MEM.
+
+        Returns a list of (index, name, InputBuffer) for each P2P-constrained
+        input.  These are inputs where _maybe_realize_symm_mem took Path 2
+        (InputBuffer layout annotation) instead of the identity-copy fallback.
+        """
+        result: list[tuple[int, str, ir.InputBuffer]] = []
+        for idx, (name, buf) in enumerate(V.graph.graph_inputs.items()):
+            if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
+                continue
+            original = V.graph.graph_inputs_original.get(name)
+            if original is None:
+                continue
+            layout = original.get_output_spec()
+            if (
+                hasattr(layout, "allocator")
+                and layout.allocator == ir.AllocatorType.SYMM_MEM
+            ):
+                result.append((idx, name, original))
+        return result
+
+    def codegen_p2p_input_copies(self) -> None:
+        """
+        For graph inputs annotated with AllocatorType.SYMM_MEM, generate:
+        1. A persistent P2P buffer allocation at module level (allocated once).
+        2. A .copy_() inside call() from the caller's arg to the P2P buffer.
+        3. Variable reassignment so downstream kernels use the P2P buffer.
+
+        This replaces the Triton identity-copy kernel with a DMA .copy_(),
+        which runs on the copy engine and doesn't consume compute SMs.
+
+        Under CUDAGraph, the CG tree handles P2P allocation directly
+        (via p2p_input_idxs metadata), so this path is for the non-CG case.
+        """
+        symm_mem_inputs = self._get_symm_mem_input_info()
+        if not symm_mem_inputs:
+            return
+
+        # Store indices on the graph for later metadata pass-through to CG tree.
+        V.graph.p2p_input_idxs = [idx for idx, _, _ in symm_mem_inputs]
+
+        for idx, name, original in symm_mem_inputs:
+            layout = original.get_output_spec()
+            device = layout.device
+            assert device is not None and device.index is not None
+            dtype = layout.dtype
+            shape = tuple(layout.size)
+            stride = tuple(layout.stride)
+            group_name = getattr(layout, "group_name", "0")
+
+            p2p_buf_name = f"_p2p_buf_{name}"
+
+            # Module-level: allocate persistent P2P buffer (runs once at import).
+            self.header.writeline(
+                f"{p2p_buf_name} = empty_strided_p2p("
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"{self.codegen_shape_tuple(stride)}, "
+                f"{dtype}, "
+                f'torch.device("cuda:{device.index}"), '
+                f'group_name="{group_name}", '
+                f"alloc_id={random.randint(0, 2**64 - 1)})"
+            )
+
+            # Inside call(): copy from caller's input to P2P buffer, then
+            # reassign the variable name so downstream kernels use P2P memory.
+            self.prefix.writeline(
+                "# Layout approach: DMA copy to P2P buffer "
+                "(avoids Triton identity kernel)"
+            )
+            self.prefix.writeline(f"{p2p_buf_name}.copy_({name})")
+            self.prefix.writeline(f"{name} = {p2p_buf_name}")
+
     def write_prefix(self) -> None:
         assert self.launcher_fn_name is not None
         self.write_async_compile_wait()
@@ -1502,6 +1578,10 @@ class PythonWrapperCodegen(CodeGen):
                 self.write_args(graph_input_names)
 
             self.codegen_inputs()
+
+            # For inputs annotated with AllocatorType.SYMM_MEM (Layout
+            # approach Path 2), generate .copy_() from caller arg to P2P buf.
+            self.codegen_p2p_input_copies()
 
             # avoid duplicating asserts for both partition functions and
             # the call function when using cudagraph partition
