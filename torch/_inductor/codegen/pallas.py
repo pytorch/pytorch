@@ -2494,11 +2494,10 @@ class PallasKernel(SIMDKernel):
                 reduction_expr = f"jnp.bitwise_xor.reduce({value})"
         elif reduction_type in ("argmax", "argmin"):
             # For argmax/argmin, the result is indices into the reduction dimension.
-            # Unlike sum/max/min, we can't just reshape because the indices depend
-            # on which axis we reduce over. We need to determine the correct axis.
+            # Use the same pallas_partial_reduce helper as other reductions
+            # to correctly handle 3D+ tensors with multiple pointwise dimensions.
+            # See https://github.com/pytorch/pytorch/issues/174719
             reduction_op = reduction_ops[reduction_type]
-            # Check if this is a true partial reduction (pointwise numel > 1)
-            # When pointwise_numel == 1, it's effectively a full reduction to scalar
             is_partial_reduction = (
                 has_pointwise
                 and pointwise_numel
@@ -2506,42 +2505,36 @@ class PallasKernel(SIMDKernel):
                 and reduction_numel
             )
             if is_partial_reduction and n_reduction_dims > 0:
-                # Partial reduction: determine the reduction axis from load index
-                # The reduction variable's coefficient in the index expression tells us its stride
-                # Higher stride = outer axis (lower axis number in row-major order)
-                reduction_axis = -1  # Default to last axis
-                if self.load_index_exprs:
-                    # Get the first load index expression
+                reduction_axis = None
+                if n_reduction_dims == 1 and self.load_index_exprs:
                     load_index = next(iter(self.load_index_exprs.values()))
-                    # Find the reduction variable (starts with 'r')
-                    reduction_vars = [
-                        var
-                        for var, entry in self.range_tree_nodes.items()
-                        if entry.is_reduction
-                    ]
-                    if reduction_vars:
-                        r_var = reduction_vars[0]
-                        # Get the coefficient (stride) of the reduction variable
-                        r_coeff = load_index.coeff(r_var)
-                        r_stride = self._safe_int(r_coeff) if r_coeff != 0 else 1
-                        if r_stride is None:
-                            r_stride = 1
-                        # Get pointwise variable
-                        pw_vars = [
-                            var
-                            for var, entry in self.range_tree_nodes.items()
-                            if not entry.is_reduction
-                        ]
-                        if pw_vars:
-                            pw_var = pw_vars[0]
-                            pw_coeff = load_index.coeff(pw_var)
-                            pw_stride = self._safe_int(pw_coeff) if pw_coeff != 0 else 1
-                            if pw_stride is None:
-                                pw_stride = 1
-                            # Higher stride = earlier (outer) axis
-                            # For 2D: axis 0 has stride = dim1_size, axis 1 has stride = 1
-                            reduction_axis = 0 if r_stride > pw_stride else -1
-                reduction_expr = f"{reduction_op}({value}, axis={reduction_axis})"
+                    # Sort loop vars by stride (outer to inner) and use the
+                    # reduction var position as axis when disambiguation is needed.
+                    var_strides = []
+                    for var, entry in self.range_tree_nodes.items():
+                        coeff = load_index.coeff(var)
+                        if coeff == 0:
+                            continue
+                        stride = self._safe_int(coeff)
+                        if stride is None:
+                            continue
+                        var_strides.append((var, abs(stride), entry.is_reduction))
+                    var_strides.sort(key=lambda x: -x[1])
+                    # Only disambiguate the axis for the simple 2D case
+                    # (one pointwise dim + one reduction dim). For 3D+ cases,
+                    # pallas_partial_reduce already handles reshaping/layout.
+                    if len(var_strides) == 2 and sum(v[2] for v in var_strides) == 1:
+                        for axis, (_, _, is_reduction) in enumerate(var_strides):
+                            if is_reduction:
+                                reduction_axis = axis
+                                break
+                if reduction_axis is not None:
+                    reduction_expr = (
+                        f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, "
+                        f"{reduction_numel}, reduction_axis={reduction_axis})"
+                    )
+                else:
+                    reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_op}({value})"
