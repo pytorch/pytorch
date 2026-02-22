@@ -215,16 +215,6 @@ struct C10_API NamedTensorMetaInterface {
   }
 };
 
-// For ease of copy pasting
-#if 0
-is_contiguous
-is_channels_last_contiguous
-is_channels_last_3d_contiguous
-is_channels_last
-is_channels_last_3d
-is_non_overlapping_and_dense
-#endif
-
 /**
  * This structure is intended to hold additional metadata of the specific device
  * backend.
