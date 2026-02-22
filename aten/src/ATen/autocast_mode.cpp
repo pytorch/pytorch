@@ -100,8 +100,12 @@ int decrement_nesting() {
 }
 
 at::ScalarType get_autocast_dtype(at::DeviceType device_type) {
+  if (device_type == at::DeviceType::CUDA) {
+    return at::kHalf;  // FORCE FP16, ignore BF16
+  }
   return autocast_dtype[static_cast<int>(device_type)];
 }
+
 
 void set_autocast_dtype(at::DeviceType device_type, at::ScalarType dtype) {
   autocast_dtype[static_cast<int>(device_type)] = dtype;
