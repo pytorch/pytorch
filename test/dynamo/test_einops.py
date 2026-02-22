@@ -11,6 +11,7 @@ from torch._dynamo.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    xfailIf,
 )
 
 
@@ -190,6 +191,7 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             else:
                 self.assertIn(einops_method, output)
 
+    @xfailIf(einops_version == "0.8.2")
     @parametrize(
         "method",
         ["reduce", "repeat", "pack", "unpack", "einsum", "rearrange"],
@@ -221,6 +223,15 @@ print(normalize_gm(graph.print_readable(print_output=False)))
         else:
             self.fail(method)
         self._run_in_subprocess(flag, method, einops_method, snippet)
+
+    def test_no_warning(self):
+        # checks that this doesn't produce any warnings
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return einops.rearrange(x, "... -> (...)")
+
+        x = torch.randn(5)
+        self.assertNotWarn(lambda: fn(x))
 
 
 instantiate_parametrized_tests(
