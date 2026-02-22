@@ -1516,6 +1516,16 @@ TEST_F(FunctionalTest, EmbeddingBag) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, EmbeddingBagEmptyOffsetsWithNonEmptyIndices) {
+  auto weight = torch::randn({10, 3});
+  auto indices = torch::tensor({1, 2, 4}, torch::kLong);
+  auto offsets = torch::empty({0}, torch::TensorOptions().dtype(torch::kLong));
+  ASSERT_THROWS_WITH(
+      torch::embedding_bag(
+          weight, indices, offsets, false, 0, false, torch::Tensor(), false, -1),
+      "embedding_bag: offsets tensor can not be empty if indices tensor is not empty");
+}
+
 TEST_F(FunctionalTest, Bilinear) {
   auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
   auto input2 = torch::tensor({{7, 4}, {8, 9}});

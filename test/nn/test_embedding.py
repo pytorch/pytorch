@@ -1009,6 +1009,16 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
+    def test_embedding_bag_empty_offsets_with_non_empty_indices(self, device):
+        weight = torch.randn(10, 3, device=device)
+        indices = torch.tensor([1, 2, 4], device=device, dtype=torch.long)
+        offsets = torch.tensor([], device=device, dtype=torch.long)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "embedding_bag: offsets tensor can not be empty if indices tensor is not empty",
+        ):
+            torch.nn.functional.embedding_bag(indices, weight, offsets)
+
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_empty_input(self, device, dtypes):
         m = 4
