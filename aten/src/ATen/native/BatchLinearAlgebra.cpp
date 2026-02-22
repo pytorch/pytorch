@@ -1704,8 +1704,8 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos
   char uplo = upper ? 'U' : 'L';
 
   auto A_data = A.const_data_ptr<scalar_t>();
-  auto b_data = b.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<int>();
+  auto b_data = b.mutable_data_ptr<scalar_t>();
+  auto infos_data = infos.mutable_data_ptr<int>();
   auto A_mat_stride = matrixStride(A);
   auto b_mat_stride = matrixStride(b);
   auto batch_size = batchCount(A);
