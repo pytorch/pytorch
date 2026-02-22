@@ -385,16 +385,24 @@ def conv_layout(
     groups: int,
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
+    # We use guard_int_seq rather than size_hints because the output shape
+    # depends on these values — if they ever contained symbols, size_hints
+    # would silently substitute a hint that could be wrong, producing an
+    # incorrect layout. guard_int_seq will install a proper guard instead.
+    # Note: stride and padding are already guarded via guard_int_seq in
+    # convolution() above, but we guard all four here so conv_layout is
+    # self-contained and doesn't rely on callers.
+    guard = V.graph.sizevars.guard_int_seq
     with V.graph.fake_mode:
         output = torch.ops.aten.convolution(
             ir.ir_node_to_tensor(x),
             ir.ir_node_to_tensor(weight),
             ir.ir_node_to_tensor(bias),
-            V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
+            guard(stride),
+            guard(padding),
+            guard(dilation),
             transposed,
-            V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
+            guard(output_padding),
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -518,8 +526,10 @@ def convolution(
             return True
 
         layout = conv_layout(x, weight, None, **kwargs)
+        # TODO: This does not guard on the stride order decision,
+        # shall we use optimization_hint to handle unbacked?
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.guarding_hints_or_throw(layout.stride)
         )
         return req_stride_order == ir.NHWC_STRIDE_ORDER
 
@@ -560,8 +570,10 @@ def convolution(
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
+        # TODO: This does not guard on the stride order decision,
+        # shall we use optimization_hint to handle unbacked?
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.guarding_hints_or_throw(layout.stride)
         )
         x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
