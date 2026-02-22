@@ -9,13 +9,6 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
 
 
-if torch.distributed.is_available():
-    from torch.distributed.tensor import DTensor, Replicate, Shard
-    from torch.testing._internal.distributed._tensor.common_dtensor import (
-        DTensorTestBase,
-        with_comms,
-    )
-
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -25,6 +18,16 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
+
+if torch.distributed.is_available():
+    from torch.distributed.tensor import DTensor, Replicate, Shard
+    from torch.testing._internal.distributed._tensor.common_dtensor import (
+        DTensorTestBase,
+        with_comms,
+    )
+else:
+    DTensorTestBase = TestCase  # type: ignore[assignment, misc]
+    with_comms = lambda fn: fn  # type: ignore[assignment]
 
 
 @instantiate_parametrized_tests
@@ -685,9 +688,7 @@ def forward(self, arg1_1):
 @unittest.skipIf(
     not torch.distributed.is_available(), "torch.distributed not available"
 )
-class TestHopPrintDTensor(
-    DTensorTestBase if torch.distributed.is_available() else TestCase
-):
+class TestHopPrintDTensor(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 4
