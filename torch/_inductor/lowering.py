@@ -578,6 +578,15 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
 
+    def round_pyfloat_to_dtype(value, dtype):
+        # To match eager semantics, Python float literals should be first rounded to
+        # dtype before pointwise computation. Low-precision dtypes compute in higher
+        # precision via op math. This ensures the scalar is the widened low-precision
+        # value.
+        if isinstance(value, float) and dtype in (torch.float16, torch.bfloat16):
+            return torch.tensor(value, dtype=dtype).item()
+        return value
+
     if override_return_dtype is None and type_promotion_kind is None:
         type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 
@@ -603,11 +612,11 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
+            dt = ex.get_dtype()
+            x = round_pyfloat_to_dtype(x, dt)
             out.append(
                 ExpandView.create(
-                    ir.Constant(
-                        value=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
-                    ),
+                    ir.Constant(value=x, dtype=dt, device=ex.get_device_or_error()),
                     list(ex.get_size()),
                 )
             )
