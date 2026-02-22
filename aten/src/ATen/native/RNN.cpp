@@ -1436,10 +1436,14 @@ DEFINE_DISPATCH(lstm_packed_cudnn_stub);
 DEFINE_DISPATCH(lstm_miopen_stub);
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
 DEFINE_DISPATCH(lstm_mkldnn_stub);
+DEFINE_DISPATCH(lstm_privateuse1_stub);
+DEFINE_DISPATCH(lstm_packed_privateuse1_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub)
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub)
+REGISTER_NO_CPU_DISPATCH(lstm_privateuse1_stub)
+REGISTER_NO_CPU_DISPATCH(lstm_packed_privateuse1_stub)
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -1491,6 +1495,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     }
   }
 
+  if (_input.is_privateuseone()) {
+    Tensor output, hy, cy;
+    lstm_privateuse1_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+            num_layers, dropout_p, train, bidirectional, batch_first);
+    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+  }
+
   check_attributes(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto params = gather_params(_params, has_biases, has_projections);
@@ -1525,6 +1536,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TORCH_WARN_ONCE(
           "LSTM with projections is not supported with MIOpen. Using default implementation.");
     }
+  }
+
+  if (data.is_privateuseone()) {
+    Tensor output, hy, cy;
+    lstm_packed_privateuse1_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
+            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
   PackedSequence input { data, batch_sizes };
