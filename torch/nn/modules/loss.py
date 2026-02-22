@@ -82,8 +82,6 @@ class L1Loss(_Loss):
     :math:`x` and :math:`y` are tensors of arbitrary shapes with a total
     of :math:`N` elements each.
 
-    The sum operation still operates over all the elements, and divides by :math:`N`.
-
     The division by :math:`N` can be avoided if one sets ``reduction = 'sum'``.
 
     Supports real-valued and complex-valued inputs.
