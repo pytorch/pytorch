@@ -12617,6 +12617,14 @@ above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 
 .. note::
     If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+
+.. warning::
+    **Usage with STFT/ISTFT:** When generating a window to be used with :func:`torch.stft`
+    or :func:`torch.istft`, :attr:`window_length` should generally be set equal to ``n_fft``.
+    If :attr:`window_length` is strictly smaller than ``n_fft``, PyTorch will pad the window
+    with zeros. Using an excessively small window (such as :attr:`window_length` :math:`=1`)
+    violates the Non-Zero Overlap Add (NOLA) constraint, which will cause :func:`torch.istft`
+    to fail with a division-by-zero or empty reduction error during signal reconstruction.
 """
     + r"""
 Arguments:
