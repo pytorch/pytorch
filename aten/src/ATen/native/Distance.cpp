@@ -30,7 +30,7 @@
 #include <ATen/ops/pairwise_distance_native.h>
 #include <ATen/ops/pdist_native.h>
 #include <ATen/ops/pow.h>
-#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/zeros.h>
@@ -303,7 +303,7 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
    *
    */
 
-  auto commonDtype = at::result_type(x1_, x2_);
+  auto commonDtype = at::native::result_type(x1_, x2_);
   TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
   TORCH_CHECK(eps >= 0, "eps must be non-negative, got: ", eps);
 

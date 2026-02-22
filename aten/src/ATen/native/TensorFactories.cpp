@@ -77,7 +77,7 @@
 #include <ATen/ops/ones_native.h>
 #include <ATen/ops/polar.h>
 #include <ATen/ops/polar_native.h>
-#include <ATen/ops/promote_types.h>
+#include <ATen/ops/promote_types_native.h>
 #include <ATen/ops/rand_like_native.h>
 #include <ATen/ops/rand_native.h>
 #include <ATen/ops/randint_like_native.h>
@@ -2190,7 +2190,7 @@ Tensor vander(const Tensor& x, std::optional<int64_t> N, bool increasing) {
   auto result = at::empty(
       {x.size(0), n},
       x.options().dtype(
-          at::promote_types(x.scalar_type(), c10::ScalarType::Long)));
+          at::native::promote_types(x.scalar_type(), c10::ScalarType::Long)));
 
   if (n > 0) {
     result.select(1, 0).fill_(1);

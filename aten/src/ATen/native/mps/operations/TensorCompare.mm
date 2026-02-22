@@ -16,7 +16,7 @@
 #include <ATen/ops/isin_native.h>
 #include <ATen/ops/nan_to_num_native.h>
 #include <ATen/ops/ones_like_native.h>
-#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #include <ATen/ops/where_native.h>
 #endif
 
@@ -56,7 +56,7 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
     return;
   }
 
-  const auto common_type = at::result_type(elements, test_elements);
+  const auto common_type = at::native::result_type(elements, test_elements);
   TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
 
   @autoreleasepool {
