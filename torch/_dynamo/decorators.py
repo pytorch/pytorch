@@ -104,7 +104,6 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
                 nonrecursive_disable_wrapper
             )
             nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
-            # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
 
         if fn is None:
@@ -321,8 +320,8 @@ def _invoke_leaf_function_python(
     This enables @leaf_function to work with make_fx
     without relying on Dynamo to intercept the call.
     """
-    from torch._higher_order_ops.flat_apply import func_to_graphable
     from torch._higher_order_ops.invoke_leaf_function import (
+        _LeafCallable,
         convert_modules_to_states,
         invoke_leaf_function,
         make_leaf_function_wrappers,
@@ -353,9 +352,11 @@ def _invoke_leaf_function_python(
         real_impl, fake_impl, captured_out_spec
     )
 
-    _, real_fn_spec = func_to_graphable(wrapped_real)
-    _, fake_fn_spec = func_to_graphable(wrapped_fake)
-    flat_out = invoke_leaf_function(real_fn_spec, fake_fn_spec, input_spec, *flat_args)
+    real_fn_callable = _LeafCallable(wrapped_real)
+    fake_fn_callable = _LeafCallable(wrapped_fake)
+    flat_out = invoke_leaf_function(
+        real_fn_callable, fake_fn_callable, input_spec, *flat_args
+    )
 
     assert captured_out_spec[0] is not None
     return pytree.tree_unflatten(flat_out, captured_out_spec[0])
@@ -631,7 +632,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             )
         # This wrapper call enables @leaf_function to work with make_fx tracing
 
-        # pyrefly: ignore [bad-argument-type]
         return _invoke_leaf_function_python(
             fn,
             # pyrefly: ignore [bad-argument-type]
@@ -1270,14 +1270,15 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
 def _allow_in_graph_einops() -> None:
     import einops
 
-    if einops.__version__ >= "0.8.2":
-        if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
-            # trigger backend registration up front to avoid a later guard failure
-            # that would otherwise cause a recompilation
-            einops.rearrange(torch.randn(1), "i -> i")
-
-        # einops 0.8.2+ don't need explicit allow_in_graph calls
-        return
+    # There is a lru_cache logspam issue with einops when allow_in_graph is not
+    # used. Disabling this for now until the lru_cache issue is resolved.
+    # if einops.__version__ >= "0.8.2":
+    #     if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+    #         # trigger backend registration up front to avoid a later guard failure
+    #         # that would otherwise cause a recompilation
+    #         einops.rearrange(torch.randn(1), "i -> i")
+    #     # einops 0.8.2+ don't need explicit allow_in_graph calls
+    #     return
 
     try:
         # requires einops > 0.6.1, torch >= 2.0

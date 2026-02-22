@@ -921,11 +921,6 @@ if torch.backends.mps.is_available():
             "grid_sampler_3d": None,
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
-            "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
-            "linalg.solve_ex": [
-                torch.float16,
-                torch.float32,
-            ],  # missing `aten::lu_solve`.
             "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
