@@ -1317,12 +1317,15 @@ def conv(
     with fake_mode:
         # if the input is unsqueezed is done in Convolution.cpp we get segfault
         k = new_kwargs["weight"].ndim
-        batch = new_kwargs["input"].shape[0]
 
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import has_hint
 
-        if not has_hint(batch):
+        all_hinted = all(has_hint(s) for s in new_kwargs["input"].shape) and all(
+            has_hint(s) for s in new_kwargs["weight"].shape
+        )
+
+        if not all_hinted:
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
