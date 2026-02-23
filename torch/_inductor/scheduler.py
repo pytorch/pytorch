@@ -4186,6 +4186,13 @@ class Scheduler:
                     choice_timings = multi_node.choice_timings()
                     min_choice, ms1 = multi_node.get_min_choice()
 
+                    # Some choices can fail to benchmark, inf timing
+                    future_choices = [
+                        fut_choice
+                        for fut_choice in future_choices
+                        if fut_choice[0] in choice_timings
+                    ]
+
                     future_choices = sorted(
                         future_choices,
                         key=lambda x: choice_timings[x[0]],
@@ -6747,7 +6754,7 @@ class Scheduler:
                     and node.should_allocate()
                     and not isinstance(node.get_output_spec(), ir.CommBufferLayout)
                     and node.get_device()
-                    and node.get_device().type == "cuda"
+                    and node.get_device().type == "cuda"  # type: ignore[union-attr]
                 ):
                     hoisted.append(node)
 
@@ -7092,7 +7099,17 @@ class BaseScheduling:  # noqa: docstring_linter
         In this context, we verify whether node1 represents the Multi-Output Template
         and node2 corresponds to one of its outputs. If so, we further check if
         backend supports this fusion.
+
+        Delegates to ``TemplateBuffer.can_fuse_multi_output_epilogue`` which
+        TemplateBuffer subclasses may override to allow fusion of additional node types.
         """
+        template_buf = node1.get_template_node()
+        if not isinstance(template_buf, ir.TemplateBuffer):
+            return False
+        if not template_buf.is_multi_outputs_template():
+            return False
+        if template_buf.can_fuse_multi_output_epilogue(node2):
+            return True
         return False
 
     def fuse(
