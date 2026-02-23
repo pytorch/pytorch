@@ -362,6 +362,12 @@ class FrameStateSizeEntry:
         return tuple(cls._merge_atom(x, y) for x, y in zip(xs, ys))
 
     def __ior__(self, other: Self) -> Self:
+        # Before merging sizes (which may promote a dim to auto_dynamic),
+        # record the first static size that will be lost.  For example, if
+        # self.size = (3, 4) and other.size = (5, 4), dim 0 is about to
+        # become dynamic.  We save 3 into excluded_sizes so a guard on the
+        # dynamic graph can reject inputs with size(0)==3, letting them
+        # fall through to the earlier static graph in the cache.
         if isinstance(self.size, tuple) and isinstance(other.size, tuple):
             if len(self.size) == len(other.size):
                 excluded = list(self.excluded_sizes or (None,) * len(self.size))

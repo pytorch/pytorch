@@ -159,10 +159,9 @@ automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 # that rejects inputs matching the original static graph's sizes, so those
 # inputs fall through to the static graph. This prevents the dynamic graph
 # from shadowing the static graph in the cache (important for activation
-# checkpointing correctness). In distributed mode with compiler collectives,
-# this can cause guard divergence if ranks have different input shapes.
-# Set to False to disable if you hit hangs in distributed compilation.
-guard_exclusion_for_automatic_dynamic = False
+# checkpointing correctness). The exclusion is best-effort: if no static
+# fallback exists in the cache, the dynamic graph is used anyway.
+guard_exclusion_for_automatic_dynamic = True
 
 # log graph in/out metadata
 # This is only turned on for export today since we

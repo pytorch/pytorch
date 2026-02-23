@@ -3057,6 +3057,7 @@ class GuardBuilder(GuardBuilderBase):
                     excluded_sizes
                     and any(v is not None for v in excluded_sizes)
                     and config.guard_exclusion_for_automatic_dynamic
+                    and not config.enable_compiler_collectives
                 ):
                     # Only exclude on dimensions that are dynamic in this
                     # graph (size[i] is None). Static dimensions are already
