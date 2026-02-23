@@ -524,6 +524,7 @@ def foreach_lerp_inplace(
             # Low formula: start + w * diff  →  fma(w, diff, start)
             weights = [torch.full_like(d, weight) for d in diff]
             torch._foreach_addcmul_(self, weights, diff)
+    return self
 
 
 def foreach_pow_scalar(
