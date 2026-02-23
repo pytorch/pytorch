@@ -1502,10 +1502,7 @@ class PythonWrapperCodegen(CodeGen):
             if original is None:
                 continue
             layout = original.get_output_spec()
-            if (
-                hasattr(layout, "allocator")
-                and layout.allocator == ir.AllocatorType.SYMM_MEM
-            ):
+            if layout.allocator == ir.AllocatorType.SYMM_MEM:
                 result.append((idx, name, original))
         return result
 
@@ -1519,15 +1516,15 @@ class PythonWrapperCodegen(CodeGen):
         This replaces the Triton identity-copy kernel with a DMA .copy_(),
         which runs on the copy engine and doesn't consume compute SMs.
 
-        Under CUDAGraph, the CG tree handles P2P allocation directly
-        (via p2p_input_idxs metadata), so this path is for the non-CG case.
+        Under CUDAGraph partition mode, this code runs in Runner.call()
+        which is outside the CG-recorded partition. The persistent P2P
+        buffer is passed to the partition as an arg; the CG tree detects
+        it as a P2P input via _has_Standard_Deleter and treats it as
+        static (no managed-buffer copy needed).
         """
         symm_mem_inputs = self._get_symm_mem_input_info()
         if not symm_mem_inputs:
             return
-
-        # Store indices on the graph for later metadata pass-through to CG tree.
-        V.graph.p2p_input_idxs = [idx for idx, _, _ in symm_mem_inputs]
 
         for idx, name, original in symm_mem_inputs:
             layout = original.get_output_spec()

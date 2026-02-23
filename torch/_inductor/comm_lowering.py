@@ -88,20 +88,16 @@ def _propagate_comm_layout_to_upstream(
     group_name: "torch.distributed.distributed_c10d.GroupName",
 ) -> "Optional[ir.Buffer]":
     """
-    Propagate CommBufferLayout to upstream allocating buffers.
+    Propagate CommBufferLayout to the upstream buffer that feeds *buffer*.
 
-    When a pointwise op (e.g., relu) is optimized to run in-place on its
-    input, the input and output share the same storage via buffer reuse.
-    Comm buffers use a separate reuse pool from regular CUDA buffers, so
-    if only the pointwise output gets CommBufferLayout, the in-place reuse
-    with its upstream regular CUDA input will fail — leaving the comm
-    buffer uninitialized (the "disconnected P2P buffer" bug).
+    Example: mm -> add(residual) -> allreduce.  The add is a ComputedBuffer
+    that Inductor may run in-place on mm's output.  P2P and regular CUDA use
+    separate reuse pools, so if only the add output gets CommBufferLayout the
+    in-place reuse breaks — the P2P buffer is allocated but never written
+    ("disconnected P2P buffer" bug).  Propagating CommBufferLayout to mm's
+    output and letting add mutate it via MutationLayout fixes this.
 
-    By marking the upstream buffer as a comm buffer and then making the
-    downstream ComputedBuffer mutate the upstream via MutationLayout,
-    we avoid allocating a separate comm buffer for the downstream op.
-
-    Returns the upstream buffer that was converted, or None.
+    Returns the converted upstream buffer, or None.
     """
     if not isinstance(buffer, ir.ComputedBuffer):
         return None
@@ -148,11 +144,12 @@ def realize_as_comm_buffer(
     Specifically, this realizes the underlying buffer if it's still unrealized
     and changes the layout of the buffer to `ir.CommBufferLayout`.
 
-    When the buffer is a ComputedBuffer (e.g., relu) whose upstream input can
-    be converted to a comm buffer, we use MutationLayout so the ComputedBuffer
-    writes directly into the upstream's comm buffer instead of allocating a
-    separate one.  This avoids the "disconnected P2P buffer" bug where the
-    in-place triton kernel would read from an uninitialized comm buffer.
+    When the buffer is a ComputedBuffer (e.g., add in residual connection)
+    whose upstream input can be converted to a comm buffer, we use
+    MutationLayout so the ComputedBuffer writes directly into the upstream's
+    comm buffer instead of allocating a separate one.  This avoids the
+    "disconnected P2P buffer" bug where the in-place triton kernel would
+    read from an uninitialized comm buffer.
     """
     x.realize()
     buffer = _get_data(x)
@@ -493,12 +490,10 @@ def register_symm_mem_lowerings():
         group_name: "torch.distributed.distributed_c10d.GroupName",
     ) -> ir.TensorBox:
         """
-        Fallback for inputs that cannot be directly realized as comm buffers
-        (e.g., graph placeholders whose allocation Inductor does not control).
-
-        Creates a pointwise identity copy so that the *copy* is allocated in
-        P2P memory via CommBufferLayout, and returns a new TensorBox pointing
-        to the P2P copy.
+        Fallback: insert a Pointwise identity copy allocated in P2P via
+        CommBufferLayout.  Used when we don't control the input's allocation.
+        # TODO: For InputBuffer with static shapes, PR #175486 (Layout allocator)
+        # replaces this with a DMA .copy_() outside the graph.
         """
         inp.realize()
         copy = ir.Pointwise.create(
@@ -519,16 +514,13 @@ def register_symm_mem_lowerings():
         Helper to realize an input as symmetric memory buffer if possible.
 
         Three paths, in priority order:
-        1. We control allocation (ComputedBuffer, etc.) → change layout to
-           CommBufferLayout directly. Zero-copy.
-        2. Graph placeholder (InputBuffer) whose allocation we don't control
-           → mark layout.allocator = SYMM_MEM as a constraint. The caller
-           (CUDAGraph tree or compiled wrapper) is responsible for providing
-           P2P memory. This avoids the Triton identity copy kernel.
-        3. Fallback: insert a Pointwise identity copy allocated in P2P
-           memory via CommBufferLayout.
+        1. We control allocation (ComputedBuffer, etc.): CommBufferLayout. Zero-copy.
+        2. Graph placeholder (InputBuffer, static shapes): mark layout.allocator =
+           SYMM_MEM; wrapper generates persistent P2P buffer + DMA .copy_().
+        3. Fallback: insert Pointwise identity copy in P2P via CommBufferLayout.
 
-        Returns the (possibly replaced) input TensorBox.
+        Returns the (possibly replaced) TensorBox. Callers must use
+        the return value since a new identity-copy buffer may be created.
         """
         if can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM):
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
@@ -544,9 +536,9 @@ def register_symm_mem_lowerings():
             # is allocated at module level (import time). If any dimension
             # is symbolic, fall back to the identity copy (Path 3).
             layout = data.get_output_spec()
-            has_symbolic = any(
-                is_symbolic(s) for s in layout.size
-            ) or any(is_symbolic(s) for s in layout.stride)
+            has_symbolic = any(is_symbolic(s) for s in layout.size) or any(
+                is_symbolic(s) for s in layout.stride
+            )
             if not has_symbolic:
                 data.layout = ir.FixedLayout(
                     device=layout.device,
@@ -556,6 +548,9 @@ def register_symm_mem_lowerings():
                     offset=layout.offset,
                     allocator=ir.AllocatorType.SYMM_MEM,
                 )
+                # TODO(#138280): group_name is attached as an ad-hoc
+                # attribute. The long-term Layout refactor should make this
+                # a proper field (or embed it in AllocatorType).
                 data.layout.group_name = group_name  # type: ignore[attr-defined]
                 return inp
 
