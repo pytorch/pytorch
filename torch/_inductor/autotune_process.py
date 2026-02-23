@@ -456,6 +456,7 @@ class BenchmarkRequest:
             self.output_tensor_meta: TensorMeta = output_tensor_meta
 
         self.extra_args = extra_args
+        self.benchmark_with_cudagraphs = False
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
@@ -505,7 +506,10 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        res = self.do_bench(fn, *input_tensors, out)
+        if self.benchmark_with_cudagraphs:
+            res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
+        else:
+            res = self.do_bench(fn, *input_tensors, out)
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -776,6 +780,10 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
                     out_new, tuple(out.size()), tuple(out.stride())
                 )
                 out.copy_(out_new)  # for correctness checking
+            if self.benchmark_with_cudagraphs:
+                return benchmarker.benchmark_gpu_with_cuda_graph(
+                    lambda: algo(*input_tensors)
+                )
             if config.profile_bandwidth_with_do_bench_using_profiling:
                 return do_bench_using_profiling(lambda: algo(*input_tensors))
             return benchmarker.benchmark(algo, input_tensors, {})
