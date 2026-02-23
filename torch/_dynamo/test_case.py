@@ -217,11 +217,11 @@ class CPythonTestCase(TestCase):
         # Skip test if python versions doesn't match
         search_path = inspect.getfile(cls)
 
-        new_pattern = (
+        cpython_test_regex = (
             re.escape(os.path.join("cpython") + os.path.sep) + r"v(\d)_(\d{2})"
         )
 
-        m = re.search(new_pattern, search_path)
+        m = re.search(cpython_test_regex, search_path)
         if m:
             test_py_ver = tuple(map(int, m.groups()))
             py_ver = sys.version_info[:2]
