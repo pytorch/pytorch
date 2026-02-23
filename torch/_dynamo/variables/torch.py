@@ -58,7 +58,7 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -2721,6 +2721,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         decorated_fn = self.value
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
         fake_impl = decorated_fn._torchdynamo_leaf_fake_fn
+        mutates_args = decorated_fn._torchdynamo_leaf_mutates_args
 
         if fake_impl is None:
             raise ValueError(
@@ -2732,6 +2733,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
+
         flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
             VariableTracker.build(tx, (args_with_states, kwargs_with_states))
         ).unpack_var_sequence(tx)
@@ -2739,6 +2741,19 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
         ]
         input_spec = input_spec_var.as_python_constant()
+
+        mutated_flat_indices = ""
+        if mutates_args:
+            from torch._higher_order_ops.invoke_leaf_function import (
+                _resolve_mutated_flat_indices,
+            )
+
+            try:
+                mutated_flat_indices = _resolve_mutated_flat_indices(
+                    real_impl, mutates_args, len(flat_arg_proxies), input_spec
+                )
+            except ValueError as e:
+                raise UserError(UserErrorType.INVALID_INPUT, str(e)) from e
 
         # Single-element mutable list so the wrappers can write back the output
         # TreeSpec. Read captured_out_spec[0] after the wrappers have been called.
@@ -2763,6 +2778,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl_proxy,
             fake_impl_proxy,
             input_spec_proxy,
+            mutated_flat_indices,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
