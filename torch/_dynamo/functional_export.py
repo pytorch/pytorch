@@ -131,10 +131,8 @@ def clean_nn_module_stack_and_source_fn(
                 name, cls = item
                 if isinstance(name, str):
                     clean_name = clean_export_root_string(name)
-                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append((clean_name, cls))
                 else:
-                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append(item)
             else:
                 # pyrefly: ignore [bad-argument-type]
@@ -383,16 +381,14 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
                 # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore [bad-index, index-error]
-                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index]
                     "dynamo_flat_name_to_original_fqn"
                 ]
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
                 # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore [bad-index, index-error]
-                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index]
                     "dynamo_compile_id"
                 ]
 
