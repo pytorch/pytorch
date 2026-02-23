@@ -1414,9 +1414,6 @@ if(NOT INTERN_BUILD_MOBILE)
   # Suppress cusparse warnings
   string(APPEND CMAKE_CUDA_FLAGS " -DDISABLE_CUSPARSE_DEPRECATED")
 
-  # Suppress warnings about deprecated GPU targets warnings
-  string(APPEND CMAKE_CUDA_FLAGS "-Wno-deprecated-gpu-targets")
-
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
                                  " -D__CUDA_NO_HALF_OPERATORS__"
