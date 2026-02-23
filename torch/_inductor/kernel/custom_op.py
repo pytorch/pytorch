@@ -54,6 +54,9 @@ class ImplConfig:
     impl_name: str
     impl_func: Callable[..., Any] = field(compare=False, hash=False, repr=False)
     kwargs: dict[str, Any] = field(default_factory=dict)
+    config_patches: dict[str, Any] = field(
+        default_factory=dict, compare=False, hash=False, repr=False
+    )
 
     def __hash__(self) -> int:
         return hash((self.impl_name, tuple(sorted(self.kwargs.items()))))
@@ -97,6 +100,10 @@ class RangeImplGroup:
     def impl_kwargs(self) -> dict[str, Any]:
         return self.impl_config.kwargs
 
+    @property
+    def config_patches(self) -> dict[str, Any]:
+        return self.impl_config.config_patches
+
 
 def _detect_collective_ops(choices: list) -> bool:
     """
@@ -128,16 +135,20 @@ class CustomOpConfig:
 
     Args:
         decomposition: Optional functions to autotune. If not provided, default will be used.
+        config_patches: Optional dict of config patches to apply during kernel codegen
+            (e.g., {"coordinate_descent_tuning": True})
         **params: Parameters passed to the function
 
     Examples:
         CustomOpConfig(attention_impl, head_dim=32, method='chunked')
         CustomOpConfig(head_dim=32, method='chunked')
+        CustomOpConfig(decomposition, config_patches={"coordinate_descent_tuning": True})
     """
 
     def __init__(
         self,
         decomposition: Optional[Callable[..., Any]] = None,
+        config_patches: Optional[dict[str, Any]] = None,
         **params: Any,
     ):
         if decomposition is not None and not callable(decomposition):
@@ -146,6 +157,7 @@ class CustomOpConfig:
             )
 
         self.decomposition = decomposition
+        self.config_patches = config_patches or {}
         self.params = params
 
     def get_decomposition(
@@ -260,9 +272,7 @@ def _adapt_user_input_gen_fns(
     user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]],
 ) -> dict[int, Callable[[Any], torch.Tensor]]:
     """Convert user input generators from name-based to index-based format.
-       Inductor autotune's input_gen_fns expects index of arg_names as key.
-
-    Uses V.graph.sizevars.size_hints() to guess best for dynamic shapes.
+    Inductor autotune's input_gen_fns expects index of arg_names as key.
     """
 
     name_to_index = {name: i for i, name in enumerate(arg_names)}
@@ -423,7 +433,10 @@ def autotune_custom_op(
     user_input_gen_fns: Optional[
         dict[str, Callable[[torch.Tensor], torch.Tensor]]
     ] = None,
+    config_patches_list: Optional[list[dict[str, Any]]] = None,
     return_choice: bool = False,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> Union[TensorBox, Any, tuple[Any, Any]]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
@@ -485,6 +498,7 @@ def autotune_custom_op(
         input_nodes=list(inputs),
         non_tensor_args=non_tensor_args,
         input_gen_fns=input_gen_fns if input_gen_fns else None,
+        config_patches_list=config_patches_list,
     )
 
     # Add default implementation as fallback
@@ -533,6 +547,8 @@ def autotune_custom_op(
         input_gen_fns=input_gen_fns,
         return_choice=True,
         is_collective=is_collective,
+        min_speedup_threshold=min_speedup_threshold,
+        benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
@@ -554,7 +570,15 @@ def autotune_custom_op(
         )
         from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
 
+        ops_before = len(V.graph.operations)
         result = inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
+
+        # Tag inlined operations with config_patches from the winning choice
+        config_patches = getattr(winning_choice, "config_patches", None)
+        if config_patches:
+            for op in V.graph.operations[ops_before:]:
+                op.set_config_patches(config_patches.copy())
+
         return result
 
     log.debug(
@@ -606,7 +630,7 @@ def _prepare_configs_and_decompositions(
     default_impl: Callable[..., Any],
     runtime_kwargs: dict[str, Any],
     name: str,
-) -> tuple[list[Callable], list[dict[str, Any]]]:
+) -> tuple[list[Callable], list[dict[str, Any]], list[dict[str, Any]]]:
     """Prepare decompositions and merged kwargs from configs.
 
     Handles both static configs and dynamic config generation.
@@ -624,6 +648,7 @@ def _prepare_configs_and_decompositions(
     # Prepare decompositions and kwargs for autotuning
     decompositions = []
     non_tensor_args = []
+    config_patches_list = []
 
     for cfg in configs_to_use:
         decomp = cfg.get_decomposition(default_impl=default_impl)
@@ -633,7 +658,10 @@ def _prepare_configs_and_decompositions(
         merged_kwargs = _merge_config_and_runtime_kwargs(cfg.params, runtime_kwargs)
         non_tensor_args.append(merged_kwargs)
 
-    return decompositions, non_tensor_args
+        # Collect config_patches for each config
+        config_patches_list.append(cfg.config_patches)
+
+    return decompositions, non_tensor_args, config_patches_list
 
 
 def _standard_lowering_fn(
@@ -647,15 +675,19 @@ def _standard_lowering_fn(
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     ] = None,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> Any:
     """Standard autotuning lowering function."""
-    decompositions, non_tensor_args = _prepare_configs_and_decompositions(
-        processed_configs,
-        config_generator,
-        tensor_inputs,
-        default_impl,
-        runtime_kwargs,
-        name,
+    decompositions, non_tensor_args, config_patches_list = (
+        _prepare_configs_and_decompositions(
+            processed_configs,
+            config_generator,
+            tensor_inputs,
+            default_impl,
+            runtime_kwargs,
+            name,
+        )
     )
 
     result = autotune_custom_op(
@@ -663,12 +695,32 @@ def _standard_lowering_fn(
         decompositions=decompositions,
         inputs=tensor_inputs,
         non_tensor_args=non_tensor_args,
+        config_patches_list=config_patches_list,
         op_overload=op_overload,
         user_input_gen_fns=input_gen_fns,
+        min_speedup_threshold=min_speedup_threshold,
+        benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
     validate_ir(result)
     return result
+
+
+def _apply_config_patches_recursive(
+    operations: list,
+    config_patches: dict[str, Any],
+) -> None:
+    """Apply config_patches to operations, including those inside subgraphs."""
+    for op in operations:
+        if hasattr(op, "set_config_patches"):
+            op.set_config_patches(config_patches.copy())
+
+        # Recurse into any subgraphs (Conditional, WhileLoop, InvokeSubgraph, etc.)
+        for subgraph in op.get_subgraphs():
+            if subgraph.graph:
+                _apply_config_patches_recursive(
+                    subgraph.graph.operations, config_patches
+                )
 
 
 def _lower_single_impl(
@@ -677,6 +729,7 @@ def _lower_single_impl(
     runtime_kwargs: dict[str, Any],
     tensor_inputs: list[Any],
     name: str,
+    config_patches: Optional[dict[str, Any]] = None,
 ) -> Any:
     """Lower a single implementation by tracing and inlining it."""
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
@@ -699,7 +752,12 @@ def _lower_single_impl(
         )(*fake_inputs)
 
     log.info("Inlining implementation: %s", impl.__name__)
+    ops_before = len(V.graph.operations)
     result = inline_subgraph_to_ir_nodes(impl_gm, tensor_inputs, name)
+
+    if config_patches:
+        _apply_config_patches_recursive(V.graph.operations[ops_before:], config_patches)
+
     validate_ir(result)
     return result
 
@@ -719,6 +777,8 @@ def _range_based_lowering_fn(
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     ] = None,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> Any:
     """Range-based autotuning lowering function."""
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
@@ -729,13 +789,15 @@ def _range_based_lowering_fn(
     log.info("=== Range-based Autotuning for %s ===", name)
     log.info("Dispatch on: %s[%d], Ranges: %s", tensor_name, dim_index, ranges)
 
-    decompositions, non_tensor_args = _prepare_configs_and_decompositions(
-        processed_configs,
-        config_generator,
-        tensor_inputs,
-        default_impl,
-        runtime_kwargs,
-        name,
+    decompositions, non_tensor_args, config_patches_list = (
+        _prepare_configs_and_decompositions(
+            processed_configs,
+            config_generator,
+            tensor_inputs,
+            default_impl,
+            runtime_kwargs,
+            name,
+        )
     )
 
     range_to_best_impl_map: dict[RangeBounds, ImplConfig] = {}
@@ -763,6 +825,9 @@ def _range_based_lowering_fn(
             op_overload=op_overload,
             user_input_gen_fns=range_input_gen_fns,
             return_choice=True,
+            min_speedup_threshold=min_speedup_threshold,
+            benchmark_with_cudagraphs=benchmark_with_cudagraphs,
+            config_patches_list=config_patches_list,
         )
 
         if (
@@ -781,12 +846,15 @@ def _range_based_lowering_fn(
                 range_end if range_end != float("inf") else "inf",
             )
 
+        winning_config_patches = getattr(winning_choice, "config_patches", None) or {}
+
         # Create dataclass instances for cleaner code
         range_bounds = RangeBounds(range_start, range_end)
         impl_config = ImplConfig(
             impl_name=winning_impl.__name__,
             impl_func=winning_impl,
             kwargs=winning_kwargs,
+            config_patches=winning_config_patches,
         )
         range_to_best_impl_map[range_bounds] = impl_config
 
@@ -808,7 +876,12 @@ def _range_based_lowering_fn(
         group = impl_groups[0]
         log.info("Only one implementation after grouping, directly inlining")
         return _lower_single_impl(
-            group.impl_func, group.impl_kwargs, runtime_kwargs, tensor_inputs, name
+            group.impl_func,
+            group.impl_kwargs,
+            runtime_kwargs,
+            tensor_inputs,
+            name,
+            config_patches=group.config_patches,
         )
 
     def dispatch_fn(*fake_tensors):
@@ -889,7 +962,16 @@ def _range_based_lowering_fn(
             log.exception("make_fx tracing FAILED")
             raise
 
+    ops_before = len(V.graph.operations)
     result = inline_subgraph_to_ir_nodes(dispatch_gm, tensor_inputs, f"{name}_dispatch")
+
+    # Apply config_patches from all impl groups to inlined operations
+    # TODO - consider conflicting patches
+    merged_patches: dict[str, Any] = {}
+    for group in impl_groups:
+        merged_patches.update(group.config_patches)
+    if merged_patches:
+        _apply_config_patches_recursive(V.graph.operations[ops_before:], merged_patches)
 
     log.info(
         "Successfully created torch.cond dispatch for %d impl groups", len(impl_groups)
@@ -912,6 +994,8 @@ def _create_autotuning_lowering(
     ] = None,
     dispatch_on: Optional[tuple[str, int]] = None,
     split_points: Optional[list[int]] = None,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> Callable[..., Any]:
     """Create the lowering function for autotuning."""
     if not is_range_based:
@@ -930,6 +1014,8 @@ def _create_autotuning_lowering(
                 tensor_inputs=tensor_inputs,
                 runtime_kwargs=runtime_kwargs,
                 config_generator=config_generator,
+                min_speedup_threshold=min_speedup_threshold,
+                benchmark_with_cudagraphs=benchmark_with_cudagraphs,
             )
 
         return standard_lowering_wrapper
@@ -958,6 +1044,8 @@ def _create_autotuning_lowering(
             runtime_kwargs=runtime_kwargs,
             range_upper_bound=range_upper_bound,
             config_generator=config_generator,
+            min_speedup_threshold=min_speedup_threshold,
+            benchmark_with_cudagraphs=benchmark_with_cudagraphs,
         )
 
     return range_based_lowering_wrapper
@@ -973,6 +1061,8 @@ def register_custom_op_autotuning(
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
     dispatch_on: Optional[dict[str, Any]] = None,
     split_points: Optional[list[int]] = None,
+    min_speedup_threshold: float = 1.0,
+    benchmark_with_cudagraphs: bool = False,
 ) -> None:
     """Register custom op for autotuning with custom_op configs where each config
     specifies a decomposition implementation function with its parameter values.
@@ -994,6 +1084,11 @@ def register_custom_op_autotuning(
                 as [2048, inf] -> [2048, unbounded_size]. Set based on your expected workload size.
                 Default is DEFAULT_RANGE_UPPER_BOUND=65536.
         split_points: List of range endpoints in ascending order for range-based autotuning
+        min_speedup_threshold: Only pick a non-fallback choice if it beats the fallback
+            by at least this ratio. Default is 1.0 (any speedup wins). Set to e.g. 1.1
+            to require 10% speedup over fallback.
+        benchmark_with_cudagraphs: If True, benchmark the fallback kernel using CUDA graph
+            capture and replay for fair comparison with compiled kernels. Default is False.
 
     Examples:
         # Static configs
@@ -1143,6 +1238,8 @@ def register_custom_op_autotuning(
         dispatch_on=dispatch_on_tuple,
         split_points=split_points,
         range_upper_bound=range_upper_bound,
+        min_speedup_threshold=min_speedup_threshold,
+        benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
     lowerings[op_overload] = lowering_fn

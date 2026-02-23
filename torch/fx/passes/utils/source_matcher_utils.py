@@ -92,6 +92,26 @@ def get_source_partitions(
                 partition = diff_modules.setdefault(node_fqn, [])
                 partition.append(node)
 
+        # Fallback: when source_fn_stack is not populated (e.g. strict=False export),
+        # use nn_module_stack to resolve the originating module type.
+        if (source_fn_st := node.meta.get("source_fn_stack", None)) is None:
+            nn_module_stack = node.meta.get("nn_module_stack", None)
+            if nn_module_stack is not None:
+                # Get the innermost module (last entry in the ordered dict)
+                innermost_fqn, innermost_cls = list(nn_module_stack.values())[-1]
+                for src in wanted_sources:
+                    # nn_module_stack stores class as a qualified string
+                    src_str = (
+                        src.__module__ + "." + src.__qualname__
+                        if isinstance(src, type)
+                        else src
+                    )
+                    if innermost_cls == src_str:
+                        diff_modules = modules.setdefault(src, {})
+                        partition = diff_modules.setdefault(innermost_fqn, [])
+                        partition.append(node)
+                        break
+
         if (source_fn_st := node.meta.get("source_fn_stack", None)) is not None:
             source_fn = source_fn_st[-1]
             if source_fn[1] in wanted_sources:
