@@ -216,6 +216,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             torch.Event,
             torch.cuda.Stream,
             torch.cuda.Event,
+            torch.cuda.MemPool,
             torch.xpu.Stream,
             torch.xpu.Event,
         }
@@ -659,6 +660,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     tx, "torch.cuda.device() requires a constant argument"
                 )
             return variables.CUDADeviceVariable.create(tx, args[0].as_python_constant())
+        elif self.value is torch.cuda.use_mem_pool:
+            pool = args[0]
+            device = args[1] if len(args) > 1 else kwargs.get("device", None)
+
+            return variables.CUDAMemPoolContextVariable.create(tx, pool, device)
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -876,6 +882,43 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     ),
                 )
                 args = [stacked]
+            if issubclass(self.value, torch.cuda.MemPool):
+                from .constant import ConstantVariable
+                from .lists import TupleVariable
+
+                var_kwargs = ConstDictVariable(
+                    {ConstantVariable(k): v for k, v in kwargs.items()}
+                )
+                var_args = TupleVariable(list(args))
+
+                # Instantiate the real object
+                mempool = self.value(
+                    *(var_args.as_python_constant()),
+                    **(var_kwargs.as_python_constant()),
+                )
+
+                from ..graph_bytecode_inputs import register_graph_created_object
+                from .memory import CUDAMemPoolVariable
+
+                # Register it so it persists for execution
+                ind = register_graph_created_object(
+                    mempool,
+                    CUDAMemPoolVariable.make_construct_in_graph_mempool_fn(
+                        var_args, var_kwargs
+                    ),
+                )
+
+                # Return the Variable representing the created object
+                return CUDAMemPoolVariable(
+                    proxy=wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_function", get_external_object_by_index, (ind,), {}
+                        ),
+                    ),
+                    value=mempool,
+                    user_object_index=ind,
+                )
 
             if issubclass(self.value, torch.Stream):
                 from .lists import TupleVariable

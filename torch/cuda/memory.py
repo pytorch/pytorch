@@ -1292,8 +1292,7 @@ class MemPool(_MemPool):
         return snapshot
 
 
-@contextlib.contextmanager
-def use_mem_pool(pool: MemPool, device: "Device" = None):
+class use_mem_pool:
     r"""A context manager that routes allocations to a given pool.
 
     Args:
@@ -1309,12 +1308,17 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         (e.g. by calling backward) the allocations in that thread will not
         route to the given pool.
     """
-    device_index = (
-        torch.cuda.current_device() if device is None else _get_device_index(device)
-    )
-    _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
-    try:
-        yield
-    finally:
-        _cuda_endAllocateToPool(device_index, pool.id)
-        _cuda_releasePool(device_index, pool.id)
+
+    def __init__(self, pool: MemPool, device: "Device" = None):
+        self.pool = pool
+        self.device_index = (
+            torch.cuda.current_device() if device is None else _get_device_index(device)
+        )
+
+    def __enter__(self):
+        _cuda_beginAllocateCurrentThreadToPool(self.device_index, self.pool.id)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _cuda_endAllocateToPool(self.device_index, self.pool.id)
+        _cuda_releasePool(self.device_index, self.pool.id)
+        return False

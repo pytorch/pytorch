@@ -5065,6 +5065,10 @@ def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
     return torch._C.Event(*args, **kwargs)
 
 
+def build_cuda_mempool(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.cuda.MemPool:
+    return torch.cuda.memory.MemPool(*args, **kwargs)
+
+
 class CompileTimeInstructionCounter:
     _counter: int = 0
     _id: int = -1
