@@ -33,14 +33,9 @@ if which sccache > /dev/null; then
   export PATH="${tmp_dir}:$PATH"
 fi
 
-
-# NS: Ugly hack to be remove by Feb 15 2026
-# Mac runners reuse previous checkouts, and actions/checkout does not clean untracked submodules
-# Which results in build failures, when we validate all the included licenses, which reference some
-# no longer used opentelemetry submodules
-if [[ -d third_party/opentelemetry-cpp ]]; then
-  rm -rf third_party/opentelemetry-cpp
-fi
+# Install build-system requirements before running setup.py commands
+# We need to manage the build environment manually because we are not using build isolation
+python -m pip install -r requirements-build.txt
 
 if [[ ${BUILD_ENVIRONMENT} == *"distributed"* ]]; then
   # Needed for inductor benchmarks, as lots of HF networks make `torch.distribtued` calls
