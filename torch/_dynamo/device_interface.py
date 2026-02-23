@@ -241,7 +241,6 @@ class CudaInterface(DeviceInterface):
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
     stream = staticmethod(torch.cuda.stream)  # type: ignore[assignment]
-    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
@@ -338,7 +337,6 @@ class MtiaInterface(DeviceInterface):
     set_device = staticmethod(torch.mtia.set_device)  # type: ignore[assignment]
     device_count = staticmethod(torch.mtia.device_count)
     stream = staticmethod(torch.mtia.stream)  # type: ignore[assignment]
-    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.mtia.current_stream)
     set_stream = staticmethod(torch.mtia.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.mtia._set_stream_by_id)  # type: ignore[assignment]
@@ -421,7 +419,6 @@ class XpuInterface(DeviceInterface):
     set_device = staticmethod(torch.xpu.set_device)
     device_count = staticmethod(torch.xpu.device_count)  # type: ignore[has-type]
     stream = staticmethod(torch.xpu.stream)  # type: ignore[assignment]
-    # pyrefly: ignore [bad-override]
     current_stream = staticmethod(torch.xpu.current_stream)
     set_stream = staticmethod(torch.xpu.set_stream)  # type: ignore[assignment]
     _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)  # type: ignore[assignment]

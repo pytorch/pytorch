@@ -234,7 +234,6 @@ class FSDPParam:
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
-        # pyrefly: ignore [read-only]
         self.device = device
         self.mp_policy = mp_policy
         self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
@@ -548,8 +547,10 @@ class FSDPParam:
                 torch.no_grad(),
                 torch.autograd._unsafe_preserve_version_counter(self._unsharded_param),
             ):
-                # NOTE: resize_(full) -> copy_ -> resize_(0) pattern for
-                # the unsharded param storage.
+                # NOTE: Under compile, if an unsharded param goes through
+                # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
+                # resize_ and copy_ ops in a compiler graph pass
+                # `remove_fsdp2_unsharded_param_graph_input_usage` to recover performance.
                 self._unsharded_param.untyped_storage().resize_(
                     self._unsharded_param.numel() * self._unsharded_param.itemsize
                 )
@@ -591,7 +592,6 @@ class FSDPParam:
                 f"world size ({shard_world_size})"
             )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
-        # pyrefly: ignore [unbound-name]
         sharded_numel = numel // shard_world_size
         self._sharded_post_forward_param_data = (
             self.all_gather_outputs[0].narrow(

@@ -579,31 +579,23 @@ class _RemoteModule(nn.Module):
 
         remote_module = object.__new__(RemoteModule)
 
-        # pyrefly: ignore [missing-attribute]
         enable_moving_cpu_tensors_to_cuda = remote_module._prepare_init(remote_device)
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
-            # pyrefly: ignore [missing-attribute]
             remote_module.is_scriptable = True
 
-            # pyrefly: ignore [missing-attribute]
             remote_module._init_template(
                 _module_interface_cls, enable_moving_cpu_tensors_to_cuda
             )
         else:
-            # pyrefly: ignore [missing-attribute]
             remote_module.is_scriptable = False
-            # pyrefly: ignore [missing-attribute]
             remote_module.generated_methods = (
                 _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
             )
-        # pyrefly: ignore [missing-attribute]
         remote_module.module_rref = module_rref
 
-        # pyrefly: ignore [missing-attribute]
         remote_module._install_generated_methods()
-        # pyrefly: ignore [missing-attribute]
         remote_module._check_attribute_picklability()
 
         return remote_module
@@ -706,11 +698,9 @@ def _remote_module_receiver(
     m.__dict__.update(serialized_remote_module._asdict())
 
     # Unpickling the attribute `module_rref` must invoke RRef's `_deserialize()` method.
-    # pyrefly: ignore [missing-attribute]
     m.module_rref = rpc.PyRRef._deserialize(m.module_rref)
 
     # Install generated methods when unpickled.
-    # pyrefly: ignore [missing-attribute]
     for method in m.generated_methods:
         method_name = method.__name__
         method = torch.jit.export(method)
