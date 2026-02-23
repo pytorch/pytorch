@@ -56,6 +56,7 @@ class _ComputationType(str, Enum):
     FULL_BACKWARD = "B"
     OVERLAP_F_B = "OVERLAP_F_B"
     REDUCE_GRAD = "REDUCE_GRAD"
+    BATCH_P2P = "BATCH_P2P"
 
     @staticmethod
     def from_str(action: str) -> "_ComputationType":
@@ -77,6 +78,7 @@ RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
+BATCH_P2P = _ComputationType.BATCH_P2P
 
 # Convenience shorthand for compute actions only since they are used in 'simple schedule format'
 F = FORWARD
@@ -86,7 +88,7 @@ B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
+    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|BATCH_P2P|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
 )
 
 
@@ -1321,6 +1323,47 @@ def _add_send_recv(
     return comm_actions
 
 
+_P2P_OPS = frozenset({SEND_F, RECV_F, SEND_B, RECV_B})
+
+
+def _batch_p2p_ops(
+    pipeline_order_with_comms: dict[int, list[_Action]],
+) -> dict[int, list[_Action]]:
+    """
+    Group runs of adjacent P2P actions into single BATCH_P2P composite actions.
+
+    This pass does NOT reorder anything — it preserves the exact order produced
+    by `_add_send_recv`, which avoids cross-rank ordering mismatches that cause
+    deadlocks.
+    """
+    result: dict[int, list[_Action]] = {}
+
+    for rank, actions in pipeline_order_with_comms.items():
+        new_actions: list[_Action] = []
+        p2p_group: list[_Action] = []
+
+        def _flush():
+            if len(p2p_group) == 1:
+                new_actions.append(p2p_group[0])
+            elif len(p2p_group) > 1:
+                new_actions.append(
+                    _Action(-1, BATCH_P2P, None, sub_actions=tuple(p2p_group))
+                )
+            p2p_group.clear()
+
+        for action in actions:
+            if action.computation_type in _P2P_OPS:
+                p2p_group.append(action)
+            else:
+                _flush()
+                new_actions.append(action)
+
+        _flush()
+        result[rank] = new_actions
+
+    return result
+
+
 def _validate_schedule(
     actions: dict[int, list[_Action | None]],
     pp_group_size: int,
@@ -1965,6 +2008,11 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
                 num_stages=self._num_stages,
             )
+
+            # Group adjacent P2P ops into batched operations
+            self.pipeline_order_with_comms = _batch_p2p_ops(
+                self.pipeline_order_with_comms
+            )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
 
@@ -2247,6 +2295,61 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         self._comp_type_to_function_map[action.computation_type](
                             action, ctx
                         )
+                    elif action.computation_type == BATCH_P2P:
+                        if action.sub_actions is None:
+                            raise AssertionError("sub_actions must be set")
+                        # Collect all P2POp objects from sub-actions into a
+                        # single list so we issue one batch_isend_irecv call.
+                        all_ops: list[dist.P2POp] = []
+                        for sub_a in action.sub_actions:
+                            s_idx = sub_a.stage_index
+                            s = stage_index_to_stage[s_idx]
+                            mb = (
+                                sub_a.microbatch_index
+                                if sub_a.microbatch_index is not None
+                                else -1
+                            )
+                            if sub_a.computation_type == SEND_F:
+                                all_ops.extend(s.get_fwd_send_ops(mb))
+                            elif sub_a.computation_type == SEND_B:
+                                all_ops.extend(s.get_bwd_send_ops(mb))
+                            elif sub_a.computation_type == RECV_F:
+                                all_ops.extend(s.get_fwd_recv_ops(mb))
+                            elif sub_a.computation_type == RECV_B:
+                                all_ops.extend(s.get_bwd_recv_ops(mb))
+                            else:
+                                raise ValueError(
+                                    f"Unexpected sub_action in BATCH_P2P: {sub_a}"
+                                )
+                        # Single batched NCCL call.  On NCCL this returns a
+                        # single coalesced Work for the whole group.
+                        batch_work = _batch_p2p(all_ops)
+                        # Assign the same Work handle to every sub-action so
+                        # that any later _wait_batch_p2p waits for the whole
+                        # group to complete.
+                        for sub_a in action.sub_actions:
+                            s_idx = sub_a.stage_index
+                            mb = (
+                                sub_a.microbatch_index
+                                if sub_a.microbatch_index is not None
+                                else -1
+                            )
+                            if sub_a.computation_type in (SEND_F, SEND_B):
+                                send_ops.append(batch_work)
+                            elif sub_a.computation_type == RECV_F:
+                                if (s_idx, mb) in self.fwd_recv_ops:
+                                    raise AssertionError(
+                                        f"Recv twice for {s_idx=} {mb=} "
+                                        "without executing forward"
+                                    )
+                                self.fwd_recv_ops[(s_idx, mb)] = batch_work
+                            elif sub_a.computation_type == RECV_B:
+                                if (s_idx, mb) in self.bwd_recv_ops:
+                                    raise AssertionError(
+                                        f"Recv twice for {s_idx=} {mb=} "
+                                        "without executing backward"
+                                    )
+                                self.bwd_recv_ops[(s_idx, mb)] = batch_work
                     elif action.computation_type == OVERLAP_F_B:
                         if action.sub_actions is None:
                             raise AssertionError("sub_actions must be set")
@@ -3278,10 +3381,18 @@ def _simulate_comms_compute(
         _schedule[rank].append(action)
         if action is not None:
             _prev_ops_rank[rank].add(action)
+            if action.computation_type == BATCH_P2P and action.sub_actions:
+                for sub in action.sub_actions:
+                    _prev_ops_rank[rank].add(sub)
 
     def _ready_to_schedule(action: _Action | None) -> bool:
         if action is None:
             return True
+
+        if action.computation_type == BATCH_P2P:
+            if not action.sub_actions:
+                return True
+            return all(_ready_to_schedule(sub) for sub in action.sub_actions)
 
         stage_idx = action.stage_index
         prev_ops = _prev_ops_rank[stage_to_rank(stage_idx)]
@@ -3370,6 +3481,9 @@ def _simulate_comms_compute(
                 if action is not None:
                     _schedule[rank][-1] = action
                     _prev_ops_rank[rank].add(action)
+                    if action.computation_type == BATCH_P2P and action.sub_actions:
+                        for sub in action.sub_actions:
+                            _prev_ops_rank[rank].add(sub)
                 pipeline_order[rank].pop(0)
 
         for i in sorted(pipeline_order, reverse=True):
