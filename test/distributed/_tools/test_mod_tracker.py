@@ -198,5 +198,170 @@ class TestModTracker(TestCase):
         self.assertEqual(test_op, expected_op)
 
 
+class TestCompileSafeHooks(TestCase):
+    """Tests for ModTracker.register_compile_safe_hooks."""
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        torch._dynamo.reset()
+        super().tearDown()
+
+    def _make_model(self):
+        class TinyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(4, 8)
+                self.act = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(8, 2)
+
+            def forward(self, x):
+                return self.linear2(self.act(self.linear1(x)))
+
+        return TinyModel()
+
+    def test_all_hooks_eager(self):
+        model = self._make_model()
+        x = torch.randn(3, 4, requires_grad=True)
+        log = []
+
+        with ModTracker() as tracker:
+            tracker.register_compile_safe_hooks(
+                model,
+                pre_fw_hook=lambda fqn, t: log.append(("pre_fw", fqn)),
+                post_fw_hook=lambda fqn, inp, out: log.append(("post_fw", fqn)),
+                pre_bw_hook=lambda fqn, t: log.append(("pre_bw", fqn)),
+                post_bw_hook=lambda fqn, t: log.append(("post_bw", fqn)),
+            )
+            model(x).sum().backward()
+
+        fw = [(k, f) for k, f in log if k.endswith("fw")]
+        self.assertEqual(
+            fw,
+            [
+                ("pre_fw", "linear1"),
+                ("post_fw", "linear1"),
+                ("pre_fw", "act"),
+                ("post_fw", "act"),
+                ("pre_fw", "linear2"),
+                ("post_fw", "linear2"),
+            ],
+        )
+        bw = [(k, f) for k, f in log if k.endswith("bw")]
+        self.assertEqual(
+            bw,
+            [
+                ("pre_bw", "linear2"),
+                ("post_bw", "linear2"),
+                ("pre_bw", "act"),
+                ("post_bw", "act"),
+                ("pre_bw", "linear1"),
+                ("post_bw", "linear1"),
+            ],
+        )
+
+    def test_all_hooks_compiled(self):
+        model = self._make_model()
+        x = torch.randn(3, 4, requires_grad=True)
+        log = []
+
+        with ModTracker() as tracker:
+            tracker.register_compile_safe_hooks(
+                model,
+                pre_fw_hook=lambda fqn, t: log.append(("pre_fw", fqn)),
+                post_fw_hook=lambda fqn, inp, out: log.append(("post_fw", fqn)),
+                pre_bw_hook=lambda fqn, t: log.append(("pre_bw", fqn)),
+                post_bw_hook=lambda fqn, t: log.append(("post_bw", fqn)),
+            )
+            compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+            compiled(x).sum().backward()
+
+        fw_count = sum(1 for k, _ in log if k.endswith("fw"))
+        bw_count = sum(1 for k, _ in log if k.endswith("bw"))
+        self.assertEqual(fw_count, 6)
+        self.assertEqual(bw_count, 6)
+
+    def test_root_module_skipped(self):
+        model = self._make_model()
+        x = torch.randn(3, 4)
+        fqns = set()
+
+        with ModTracker() as tracker:
+            tracker.register_compile_safe_hooks(
+                model,
+                post_fw_hook=lambda fqn, inp, out: fqns.add(fqn),
+            )
+            torch.compile(model, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertNotIn("", fqns)
+        self.assertIn("linear1", fqns)
+        self.assertIn("linear2", fqns)
+
+    def test_gradient_correctness(self):
+        model = self._make_model()
+        x1 = torch.randn(3, 4, requires_grad=True)
+        model(x1).sum().backward()
+        grad_baseline = x1.grad.clone()
+
+        model.zero_grad()
+        x2 = x1.detach().clone().requires_grad_(True)
+
+        with ModTracker() as tracker:
+            tracker.register_compile_safe_hooks(
+                model,
+                pre_fw_hook=lambda fqn, t: None,
+                post_fw_hook=lambda fqn, inp, out: None,
+                pre_bw_hook=lambda fqn, t: None,
+                post_bw_hook=lambda fqn, t: None,
+            )
+            compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+            compiled(x2).sum().backward()
+
+        self.assertTrue(torch.allclose(grad_baseline, x2.grad))
+
+    def test_post_fw_receives_inputs_and_outputs(self):
+        model = self._make_model()
+        x = torch.randn(3, 4, requires_grad=True)
+        shapes = {}
+
+        def record_post_fw(fqn, inputs, outputs):
+            shapes[fqn] = (
+                [t.shape for t in inputs],
+                [t.shape for t in outputs],
+            )
+
+        with ModTracker() as tracker:
+            tracker.register_compile_safe_hooks(
+                model,
+                post_fw_hook=record_post_fw,
+            )
+            compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+            compiled(x).sum().backward()
+
+        # linear1: (3,4) -> (3,8)
+        self.assertEqual(shapes["linear1"][0], [torch.Size([3, 4])])
+        self.assertEqual(shapes["linear1"][1], [torch.Size([3, 8])])
+        # linear2: (3,8) -> (3,2)
+        self.assertEqual(shapes["linear2"][0], [torch.Size([3, 8])])
+        self.assertEqual(shapes["linear2"][1], [torch.Size([3, 2])])
+
+    def test_module_filter(self):
+        model = self._make_model()
+        x = torch.randn(3, 4)
+        fqns = []
+
+        with ModTracker() as tracker:
+            tracker.register_compile_safe_hooks(
+                model,
+                post_fw_hook=lambda fqn, inp, out: fqns.append(fqn),
+                module_filter=lambda fqn, mod: isinstance(mod, torch.nn.Linear),
+            )
+            torch.compile(model, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(set(fqns), {"linear1", "linear2"})
+
+
 if __name__ == "__main__":
     run_tests()

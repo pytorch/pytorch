@@ -2,6 +2,7 @@
 import warnings
 import weakref
 from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -9,10 +10,103 @@ from torch.nn.modules.module import (
     register_module_forward_hook,
     register_module_forward_pre_hook,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 __all__ = ["ModTracker"]
+
+
+# --- Compile-safe hook helpers (used by register_compile_safe_hooks) ---
+
+# Hook types for compile-safe hooks
+# pre_fw, pre_bw, post_bw: (fqn, tensors) -> None
+_CompileSafeHookFn = Callable[[str, tuple[torch.Tensor, ...]], None]
+# post_fw: (fqn, inputs, outputs) -> None
+_CompileSafePostFwHookFn = Callable[
+    [str, tuple[torch.Tensor, ...], tuple[torch.Tensor, ...]], None
+]
+
+
+def _make_compile_safe_leaf(
+    fqn: str,
+    fw_hook: "_CompileSafeHookFn | None",
+    bw_hook: "_CompileSafeHookFn | None",
+):
+    """Create a @leaf_function that calls fw_hook in forward and bw_hook in backward.
+
+    The fqn and hook callables are captured in the closure of the real function.
+    The fake function is a pure tensor pass-through (no closures needed).
+
+    A per-module ``torch.autograd.Function`` (GradHook) is ALWAYS inserted for
+    tensors with ``requires_grad``. This is required to maintain autograd edges
+    under ``torch.compile`` — without it, gradient flow through the leaf is
+    broken. The GradHook optionally calls ``bw_hook`` if one is provided.
+    """
+    from torch._dynamo.decorators import leaf_function
+
+    class _GradHook(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx: Any, *tensors: torch.Tensor):  # pyrefly: ignore[bad-override]
+            return tensors
+
+        @staticmethod
+        def backward(ctx: Any, *grads: torch.Tensor):
+            if bw_hook is not None:
+                bw_hook(fqn, grads)
+            return grads
+
+    @leaf_function
+    def _leaf(*tensors: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        if fw_hook is not None:
+            fw_hook(fqn, tensors)
+
+        if any(t.requires_grad for t in tensors):
+            result = _GradHook.apply(*tensors)
+            if not isinstance(result, tuple):
+                result = (result,)
+            tensors = result
+
+        return tensors
+
+    @_leaf.register_fake  # pyrefly: ignore[missing-attribute]
+    def _fake(*tensors: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        return tensors
+
+    return _leaf
+
+
+def _make_compile_safe_forward_hook(leaf_fn):
+    """Module forward hook that routes output tensors through a leaf function."""
+
+    def hook(module, input, output):
+        flat, spec = tree_flatten(output)
+        tensor_indices = [i for i, v in enumerate(flat) if isinstance(v, torch.Tensor)]
+        if not tensor_indices:
+            return output
+        tensors = tuple(flat[i] for i in tensor_indices)
+        new_tensors = leaf_fn(*tensors)
+        for idx, new_t in zip(tensor_indices, new_tensors):
+            flat[idx] = new_t
+        return tree_unflatten(flat, spec)
+
+    return hook
+
+
+def _make_compile_safe_pre_forward_hook(leaf_fn):
+    """Module forward pre-hook that routes input tensors through a leaf function."""
+
+    def hook(module, args):
+        flat, spec = tree_flatten(args)
+        tensor_indices = [i for i, v in enumerate(flat) if isinstance(v, torch.Tensor)]
+        if not tensor_indices:
+            return args
+        tensors = tuple(flat[i] for i in tensor_indices)
+        new_tensors = leaf_fn(*tensors)
+        for idx, new_t in zip(tensor_indices, new_tensors):
+            flat[idx] = new_t
+        return tree_unflatten(flat, spec)
+
+    return hook
 
 
 class ModTracker:
@@ -65,6 +159,9 @@ class ModTracker:
         self._user_post_fw_hook = None
         self._user_pre_bw_hook = None
         self._user_post_bw_hook = None
+        # Compile-safe hooks state
+        self._compile_safe_handles: list = []
+        self._compile_safe_leaf_fns: list = []
 
     def _maybe_set_engine_callback(self):
         # This assumes no concurrent calls to backward
@@ -156,6 +253,180 @@ class ModTracker:
         self._user_post_fw_hook = None
         self._user_pre_bw_hook = None
         self._user_post_bw_hook = None
+
+    def register_compile_safe_hooks(
+        self,
+        model: torch.nn.Module,
+        pre_fw_hook: "_CompileSafeHookFn | None" = None,
+        post_fw_hook: "_CompileSafePostFwHookFn | None" = None,
+        pre_bw_hook: "_CompileSafeHookFn | None" = None,
+        post_bw_hook: "_CompileSafeHookFn | None" = None,
+        module_filter: "Callable[[str, torch.nn.Module], bool] | None" = None,
+    ):
+        """
+        Registers compile-safe hooks at nn.Module boundaries using ``@leaf_function``.
+
+        Unlike ``register_user_hooks``, these hooks work under
+        ``torch.compile(backend="aot_eager", fullgraph=True)`` without graph breaks.
+        Each hook callback is wrapped in a ``@leaf_function``, making it opaque to
+        dynamo. The callback body runs eagerly at runtime and can do arbitrary Python
+        (logging, assertions, hash computation, external library calls, etc.).
+
+        Requires a ``model`` argument because per-module hooks are registered (unlike
+        the global hooks used by ``register_user_hooks``). These hooks are independent
+        of ``register_user_hooks`` and can be used alongside the ``ModTracker`` context
+        manager.
+
+        The four hooks correspond to these execution points::
+
+            Forward:   pre_fw(inputs) -> module.forward -> post_fw(inputs, outputs)
+            Backward:  pre_bw(grad_outputs) -> module.backward -> post_bw(grad_inputs)
+
+        Args:
+            model: The model to register hooks on.
+            pre_fw_hook: Called before each module's forward.
+                Signature: ``(fqn: str, input_tensors: tuple[Tensor, ...]) -> None``
+            post_fw_hook: Called after each module's forward with both inputs and outputs.
+                Signature: ``(fqn: str, input_tensors: tuple[Tensor, ...], output_tensors: tuple[Tensor, ...]) -> None``
+            pre_bw_hook: Called before each module's backward (receives grad_outputs).
+                Signature: ``(fqn: str, grad_output_tensors: tuple[Tensor, ...]) -> None``
+            post_bw_hook: Called after each module's backward (receives grad_inputs).
+                Signature: ``(fqn: str, grad_input_tensors: tuple[Tensor, ...]) -> None``
+            module_filter: Optional ``(fqn, module) -> bool`` filter. Only modules
+                where this returns ``True`` get hooks. Default: all modules.
+
+        Note:
+            - Only supports ``aot_eager`` backend (inductor not yet supported by
+              ``leaf_function``).
+            - The root module (fqn ``""``) is automatically skipped. When
+              ``torch.compile`` wraps a model, the root module's hooks fire at the
+              ``OptimizedModule`` wrapper level outside the compiled region, which
+              causes dynamo to fail with "unsupported HigherOrderOperator". Submodule
+              hooks work correctly because they fire inside the compiled region.
+            - These hooks are independent of ``register_user_hooks``. In eager mode,
+              both can fire if both are registered. Prefer using one or the other.
+            - Backward hooks use ``torch.autograd.Function`` inside the leaf function
+              to intercept gradients. This adds identity autograd nodes but does not
+              alter gradient values.
+
+        Example::
+
+            with ModTracker() as tracker:
+                tracker.register_compile_safe_hooks(
+                    model,
+                    post_fw_hook=lambda fqn, inp, out: print(
+                        f"[FW] {fqn}: {[x.shape for x in inp]} -> {[x.shape for x in out]}"
+                    ),
+                    pre_bw_hook=lambda fqn, g: print(
+                        f"[BW] {fqn}: {[x.shape for x in g]}"
+                    ),
+                )
+                compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+                out = compiled(x)
+                out.sum().backward()
+        """
+        need_pre = pre_fw_hook is not None or post_bw_hook is not None
+        need_post = post_fw_hook is not None or pre_bw_hook is not None
+
+        for fqn, module in model.named_modules():
+            # Skip root module: under torch.compile, its hooks fire outside the
+            # compiled region (at OptimizedModule level), causing dynamo errors.
+            if fqn == "":
+                continue
+            if module_filter is not None and not module_filter(fqn, module):
+                continue
+
+            # --- Input capture for post_fw ---
+            # post_fw_hook receives (fqn, inputs, outputs). Inputs are
+            # captured via a pre-hook leaf. When need_pre is True, we
+            # piggyback on the pre_fw leaf; otherwise a dedicated capture
+            # pre-hook is created. The capture leaf MUST include a GradHook
+            # (even a no-op one) to maintain autograd edges under compile.
+            captured_inputs_ref: list | None = None
+            if post_fw_hook is not None:
+                captured_inputs_ref = [()]
+
+            # Pre-forward leaf handles: pre_fw callback + post_bw GradHook
+            # (GradHook on inputs fires AFTER module backward = post_bw)
+            if need_pre:
+                if captured_inputs_ref is not None:
+                    # Piggyback input capture onto the pre_fw leaf
+                    _orig_pre_fw = pre_fw_hook
+
+                    def _pre_fw_with_capture(
+                        _fqn, tensors, _ref=captured_inputs_ref, _orig=_orig_pre_fw
+                    ):
+                        _ref[0] = tensors
+                        if _orig is not None:
+                            _orig(_fqn, tensors)
+
+                    pre_leaf_fw = _pre_fw_with_capture
+                else:
+                    pre_leaf_fw = pre_fw_hook
+
+                pre_leaf = _make_compile_safe_leaf(
+                    fqn, fw_hook=pre_leaf_fw, bw_hook=post_bw_hook
+                )
+                self._compile_safe_leaf_fns.append(pre_leaf)
+                handle = module.register_forward_pre_hook(
+                    _make_compile_safe_pre_forward_hook(pre_leaf)
+                )
+                self._compile_safe_handles.append(handle)
+
+            elif captured_inputs_ref is not None:
+                # No pre_fw/post_bw but post_fw needs inputs. Create a
+                # dedicated capture pre-hook. The GradHook inside the leaf
+                # (always present) maintains autograd edges under compile.
+                capture_leaf = _make_compile_safe_leaf(
+                    fqn,
+                    # pyrefly: ignore[bad-argument-type]
+                    fw_hook=lambda _fqn,
+                    tensors,
+                    _ref=captured_inputs_ref: _ref.__setitem__(0, tensors),
+                    bw_hook=None,
+                )
+                self._compile_safe_leaf_fns.append(capture_leaf)
+                handle = module.register_forward_pre_hook(
+                    _make_compile_safe_pre_forward_hook(capture_leaf)
+                )
+                self._compile_safe_handles.append(handle)
+
+            # Post-forward leaf handles: post_fw callback + pre_bw GradHook
+            # (GradHook on outputs fires BEFORE module backward = pre_bw)
+            if need_post:
+                if post_fw_hook is not None:
+                    assert captured_inputs_ref is not None
+                    _user_post_fw = post_fw_hook
+
+                    def _combined_post_fw(
+                        _fqn,
+                        output_tensors,
+                        _ref=captured_inputs_ref,
+                        _hook=_user_post_fw,
+                    ):
+                        _hook(_fqn, _ref[0], output_tensors)
+
+                    leaf_fw_hook = _combined_post_fw
+                else:
+                    leaf_fw_hook = None
+
+                post_leaf = _make_compile_safe_leaf(
+                    fqn, fw_hook=leaf_fw_hook, bw_hook=pre_bw_hook
+                )
+                self._compile_safe_leaf_fns.append(post_leaf)
+                handle = module.register_forward_hook(
+                    _make_compile_safe_forward_hook(post_leaf)
+                )
+                self._compile_safe_handles.append(handle)
+
+    def clear_compile_safe_hooks(self):
+        """
+        Removes all compile-safe hooks registered with ``register_compile_safe_hooks``.
+        """
+        for h in self._compile_safe_handles:
+            h.remove()
+        self._compile_safe_handles.clear()
+        self._compile_safe_leaf_fns.clear()
 
     def _get_mod_name(self, mod):
         if mod not in self._known_modules:
@@ -257,3 +528,4 @@ class ModTracker:
     def __exit__(self, *args):
         self._fw_pre_handle.remove()
         self._fw_post_handle.remove()
+        self.clear_compile_safe_hooks()
