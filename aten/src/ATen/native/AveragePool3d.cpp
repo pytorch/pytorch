@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
@@ -175,6 +176,7 @@ void avg_pool3d_out_frame(
           bool count_include_pad,
           std::optional<int64_t> divisor_override)
 {
+  using accscalar_t = at::opmath_type<scalar_t>;
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (const auto k : c10::irange(start, end)) {
       /* local pointers. */
@@ -222,7 +224,7 @@ void avg_pool3d_out_frame(
             }
 
             /* compute local sum: */
-            scalar_t sum = 0.0;
+            accscalar_t sum = 0.0;
             for (int64_t z = tstart; z < tend; z++)
             {
               for (int64_t y = hstart; y < hend; y++)
@@ -235,7 +237,7 @@ void avg_pool3d_out_frame(
             }
 
             /* set output to local max */
-            *op++ += sum / divide_factor;
+            *op++ += static_cast<scalar_t>(sum / divide_factor);
           }
         }
       }
@@ -283,7 +285,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
 
   if (input.ndimension() == 4) /* non-batch mode */
   {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(),
       "avg_pool3d_out_frame",
       [&] {
         const scalar_t *input_data = input.const_data_ptr<scalar_t>();
@@ -306,7 +308,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
     const int64_t istride = nslices * itime * iwidth * iheight;
     const int64_t ostride = nslices * otime * owidth * oheight;
 
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(),
       "avg_pool3d_out_frame",
       [&] {
         const scalar_t *input_data = input.const_data_ptr<scalar_t>();
@@ -355,6 +357,7 @@ void avg_pool3d_backward_out_frame(
           bool count_include_pad,
           std::optional<int64_t> divisor_override)
 {
+  using accscalar_t = at::opmath_type<scalar_t>;
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
     for (const auto k : c10::irange(start, end)) {
       /* local pointers */
@@ -396,7 +399,8 @@ void avg_pool3d_backward_out_frame(
             }
 
             /* scatter gradients out to footprint: */
-            scalar_t val  = *op++;
+            accscalar_t val  = static_cast<accscalar_t>(*op++);
+            accscalar_t val_scaled = val / divide_factor;
 
             for (auto z = tstart; z < tend; z++)
             {
@@ -404,7 +408,7 @@ void avg_pool3d_backward_out_frame(
               {
                 for (auto x = wstart; x < wend; x++)
                 {
-                  *(ip + z * iheight * iwidth + y * iwidth + x) += val / divide_factor;
+                  *(ip + z * iheight * iwidth + y * iwidth + x) += static_cast<scalar_t>(val_scaled);
                 }
               }
             }
@@ -459,7 +463,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
   /* backprop */
   if (input.ndimension() == 4) /* non-batch mode*/
   {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
@@ -483,7 +487,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
     const int64_t istride = nslices * itime * iwidth * iheight;
     const int64_t ostride = nslices * otime * owidth * oheight;
 
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND3(kLong, kBFloat16, kHalf, input.scalar_type(),
       "avg_pool3d_backward_out_frame",
       [&] {
         scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();

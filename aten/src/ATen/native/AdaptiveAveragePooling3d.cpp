@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
@@ -38,6 +39,7 @@ void adaptive_avg_pool3d_out_frame(
     int64_t istrideT,
     int64_t istrideH,
     int64_t istrideW) {
+  using accscalar_t = at::opmath_type<scalar_t>;
   at::parallel_for(0, sizeD, 1, [&](int64_t start, int64_t end) {
     for (const auto d : c10::irange(start, end)) {
       /* loop over output */
@@ -63,19 +65,20 @@ void adaptive_avg_pool3d_out_frame(
                 ot * osizeH * osizeW + oh * osizeW + ow;
 
             /* compute local average: */
-            scalar_t sum = 0;
+            accscalar_t sum = accscalar_t(0);
             for (const auto it : c10::irange(kT)) {
               for (const auto ih : c10::irange(kH)) {
                 for (const auto iw : c10::irange(kW)) {
                   scalar_t val =
                       *(ip + it * istrideT + ih * istrideH + iw * istrideW);
-                  sum += val;
+                  sum += accscalar_t(val);
                 }
               }
             }
 
             /* set output to local average */
-            *op = sum / kT / kH / kW;
+            const accscalar_t divide_factor = accscalar_t(kT * kH * kW);
+            *op = scalar_t(sum / divide_factor);
           }
         }
       }
