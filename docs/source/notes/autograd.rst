@@ -196,7 +196,7 @@ Non-leaf tensors (tensors that do have ``grad_fn``) are tensors that have a
 backward graph associated with them. Thus their gradients will be needed
 as an intermediary result to compute the gradient for a leaf tensor that
 requires grad. From this definition, it is clear that all non-leaf tensors
-will automatically have ``require_grad=True``.
+will automatically have ``requires_grad=True``.
 
 Setting ``requires_grad`` should be the main way you control which parts
 of the model are part of the gradient computation, for example, if you need to
@@ -230,9 +230,9 @@ decorators.
    * - Mode
      - Excludes operations from being recorded in backward graph
      - Skips additional autograd tracking overhead
-     - Tensors created while the mode is enabled can be used in grad-mode later
+     - Tensors created while the mode is enabled can be used in grad mode later
      - Examples
-   * - default
+   * - default (grad)
      -
      -
      - ✓
@@ -264,7 +264,7 @@ No-grad Mode
 
 Computations in no-grad mode behave as if none of the inputs require grad.
 In other words, computations in no-grad mode are never recorded in the backward graph
-even if there are inputs that have ``require_grad=True``.
+even if there are inputs that have ``requires_grad=True``.
 
 Enable no-grad mode when you need to perform operations that should not be
 recorded by autograd, but you'd still like to use the outputs of these
@@ -351,7 +351,7 @@ There are two main reasons that limit the applicability of in-place operations:
 
 2. Every in-place operation requires the implementation to rewrite the
    computational graph. Out-of-place versions simply allocate new objects and
-   keep references to the old graph, while in-place operations, require
+   keep references to the old graph, while in-place operations require
    changing the creator of all inputs to the :class:`Function` representing
    this operation. This can be tricky, especially if there are many Tensors
    that reference the same storage (e.g. created by indexing or transposing),
@@ -375,7 +375,7 @@ Multithreaded Autograd
 The autograd engine is responsible for running all the backward operations
 necessary to compute the backward pass. This section will describe all the details
 that can help you make the best use of it in a multithreaded environment. (This is
-relevant only for PyTorch 1.6+ as the behavior in previous version was different.)
+relevant only for PyTorch 1.6+ as the behavior in previous versions was different.)
 
 User could train their model with multithreading code (e.g. Hogwild training), and
 does not block on the concurrent backward computations, example code could be:
