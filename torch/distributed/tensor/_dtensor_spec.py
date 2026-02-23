@@ -16,6 +16,7 @@ from torch.distributed.tensor.placement_types import (
 )
 from torch.utils._debug_mode import _stringify_shape
 from torch.utils._dtype_abbrs import dtype_abbrs
+from torch.utils._pytree import register_constant
 
 
 class ShardOrderEntry(NamedTuple):
@@ -733,3 +734,6 @@ class DTensorSpec:
             self.placements,
             tensor_meta=tensor_meta,
         )
+
+
+register_constant(DTensorSpec)
