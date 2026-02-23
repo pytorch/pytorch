@@ -10,27 +10,29 @@ namespace at::native {
 
 namespace {
 
-template <typename scalar_t, int depth>
+constexpr uint8_t kParamIdx = 0;
+constexpr uint8_t kGradIdx = 1;
+constexpr uint8_t kMomentumBufferIdx = 2;
+
+template <typename scalar_t, typename opmath_t, int depth>
 C10_DEVICE __forceinline__ void sgd_math(
     scalar_t r_args[depth][kILP],
-    const double weight_decay,
-    const double momentum,
-    const float* lr_ptr,
-    const double lr,
-    const double dampening,
+    const opmath_t weight_decay,
+    const opmath_t momentum,
+    const opmath_t lr,
+    const opmath_t dampening,
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
     const float* grad_scale_ptr) {
-  using opmath_t = at::opmath_type<scalar_t>;
-  const double double_lr = lr_ptr != nullptr ? *lr_ptr : lr;
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
-    auto p = static_cast<opmath_t>(r_args[0][ii]);
-    auto g = static_cast<opmath_t>(r_args[1][ii]);
+    auto p = static_cast<opmath_t>(r_args[kParamIdx][ii]);
+    auto g = static_cast<opmath_t>(r_args[kGradIdx][ii]);
+
     if (grad_scale_ptr) {
-      g /= static_cast<double>(*grad_scale_ptr);
-      r_args[1][ii] = g;
+      g /= static_cast<opmath_t>(*grad_scale_ptr);
+      r_args[kGradIdx][ii] = g;
     }
     if (maximize) {
       g *= -1.0;
@@ -38,12 +40,12 @@ C10_DEVICE __forceinline__ void sgd_math(
     if (weight_decay != 0) {
       g += weight_decay * p;
     }
-    if (depth > 2) {
+    if constexpr (depth > 2) {
       const auto momentum_buffer = is_first_step
           ? g
-          : (momentum * static_cast<opmath_t>(r_args[2][ii]) +
+          : (momentum * static_cast<opmath_t>(r_args[kMomentumBufferIdx][ii]) +
              (1 - dampening) * g);
-      r_args[2][ii] = momentum_buffer;
+      r_args[kMomentumBufferIdx][ii] = momentum_buffer;
 
       if (nesterov) {
         g = g + momentum * momentum_buffer;
@@ -51,8 +53,8 @@ C10_DEVICE __forceinline__ void sgd_math(
         g = momentum_buffer;
       }
     }
-    p -= double_lr * g;
-    r_args[0][ii] = p;
+    p -= lr * g;
+    r_args[kParamIdx][ii] = p;
   }
 }
 
@@ -61,6 +63,8 @@ struct FusedSgdMathFunctor {
   static_assert(
       depth == 2 || depth == 3,
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
+  using opmath_t = at::opmath_type<scalar_t>;
+
   C10_DEVICE __forceinline__ void operator()(
       const int64_t chunk_size,
       TensorListMetadata<depth>& tl,
@@ -80,11 +84,17 @@ struct FusedSgdMathFunctor {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
 
+    const auto weight_decay_opmath = static_cast<opmath_t>(weight_decay);
+    const auto momentum_opmath = static_cast<opmath_t>(momentum);
+    const auto lr_opmath =
+        lr_ptr ? static_cast<opmath_t>(*lr_ptr) : static_cast<opmath_t>(lr);
+    const auto dampening_opmath = static_cast<opmath_t>(dampening);
     scalar_t* args[depth];
     scalar_t r_args[depth][kILP];
+    const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
+
     const auto all_aligned{
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
-    const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;
 
     const auto use_faster_load_store =
         (n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned;
@@ -96,13 +106,12 @@ struct FusedSgdMathFunctor {
         for (auto i = 0; i < depth; i++) {
           load_store(r_args[i], args[i], 0, i_start);
         }
-        sgd_math<scalar_t, depth>(
+        sgd_math<scalar_t, opmath_t, depth>(
             r_args,
-            weight_decay,
-            momentum,
-            lr_ptr,
-            lr,
-            dampening,
+            weight_decay_opmath,
+            momentum_opmath,
+            lr_opmath,
+            dampening_opmath,
             nesterov,
             maximize,
             is_first_step,
@@ -119,13 +128,12 @@ struct FusedSgdMathFunctor {
       for (auto i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<depth>(r_args, args, i_start, chunk_size, n);
-        sgd_math<scalar_t, depth>(
+        sgd_math<scalar_t, opmath_t, depth>(
             r_args,
-            weight_decay,
-            momentum,
-            lr_ptr,
-            lr,
-            dampening,
+            weight_decay_opmath,
+            momentum_opmath,
+            lr_opmath,
+            dampening_opmath,
             nesterov,
             maximize,
             is_first_step,

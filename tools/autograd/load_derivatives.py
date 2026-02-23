@@ -98,7 +98,8 @@ def add_view_copy_derivatives(
         # pyrefly: ignore [unbound-name]
         if len(view_copy_differentiability_infos) > 0 and fn_schema not in infos:
             # pyrefly: ignore [unbound-name]
-            assert fn_schema is not None
+            if fn_schema is None:
+                raise AssertionError("Expected fn_schema to be non-None")
             # pyrefly: ignore [unbound-name]
             view_infos[fn_schema] = view_copy_differentiability_infos
 
@@ -141,7 +142,8 @@ def load_derivatives(
         functions_by_schema: dict[str, NativeFunction] = {}
         for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)
-            assert str(function.func) not in functions_by_schema
+            if str(function.func) in functions_by_schema:
+                raise AssertionError(f"Duplicate function schema: {str(function.func)}")
             functions_by_schema[str(function.func)] = function
 
         # Keep track of how many of which ops we've seen so we can
@@ -253,7 +255,10 @@ def create_forward_derivative(
     # Handle default return names
     if var_types is None:
         if var_names == ("result",):
-            assert len(f.func.returns) == 1
+            if len(f.func.returns) != 1:
+                raise AssertionError(
+                    f"Expected 1 return for 'result', got {len(f.func.returns)}"
+                )
             var_types = (f.func.returns[0].type,)
         else:
             for var_name in var_names:
@@ -264,7 +269,8 @@ def create_forward_derivative(
                     arg_idx = int(res[0])
                     var_types = var_types + (f.func.returns[arg_idx].type,)
 
-    assert var_types is not None, "No matching output for forward derivative definition"
+    if var_types is None:
+        raise AssertionError("No matching output for forward derivative definition")
     return ForwardDerivative(
         formula=formula,
         var_names=var_names,
@@ -316,9 +322,10 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
-            assert f.func.kind() != SchemaKind.inplace, (
-                f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
-            )
+            if f.func.kind() == SchemaKind.inplace:
+                raise AssertionError(
+                    f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
+                )
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1
@@ -394,7 +401,8 @@ def postprocess_forward_derivatives(
             # the vector where all the differentiable inputs are stacked.
 
             diff_arg_names = [arg.name for arg in args_with_derivatives]
-            assert len(diff_arg_names) > 0
+            if len(diff_arg_names) == 0:
+                raise AssertionError("Expected at least one differentiable argument")
 
             # Do replacement of input variables
             new_args = []
@@ -412,7 +420,10 @@ def postprocess_forward_derivatives(
             if Variant.function in f.variants:
                 fw_formula = f"at::{defn_name}({', '.join(new_args)})"
             else:
-                assert Variant.method in f.variants
+                if Variant.method not in f.variants:
+                    raise AssertionError(
+                        f"Expected Variant.method in variants for {f.func.name}"
+                    )
                 fw_formula = f"{new_args[0]}.{defn_name}({', '.join(new_args[1:])})"
 
             # All of the input tangents are always used so all of them are required here.
@@ -468,7 +479,10 @@ def create_differentiability_info(
             ):
                 return f
         # some functions only have in-place variants
-        assert name + "_" == cpp.name(functions[0].func)
+        if name + "_" != cpp.name(functions[0].func):
+            raise AssertionError(
+                f"Expected inplace function name '{name}_', got '{cpp.name(functions[0].func)}'"
+            )
         return functions[0]
 
     def split_names(raw_names: str) -> tuple[str, ...]:
@@ -498,7 +512,10 @@ def create_differentiability_info(
         # "grads" should be no fewer than the number of indices we see
         # inside "grads". They may not be equal because we may use
         # "grads" without an index.
-        assert num_grads_uses >= len(used_grads_indices)
+        if num_grads_uses < len(used_grads_indices):
+            raise AssertionError(
+                f"num_grads_uses ({num_grads_uses}) < len(used_grads_indices) ({len(used_grads_indices)})"
+            )
         # Thus if the number is equal, every use of grads is also
         # indexed.
         only_used_grads_indices = num_grads_uses == len(used_grads_indices)
@@ -573,10 +590,11 @@ def create_differentiability_info(
             names = split_names(raw_names)
 
             for name in names:
-                assert not (name in all_arg_names and name in all_ret_names), (
-                    f"While processing the derivative formula for '{f.func.name}' wrt '{name}', "
-                    f"expected '{name}' to not be both an input arg and named return. "
-                )
+                if name in all_arg_names and name in all_ret_names:
+                    raise AssertionError(
+                        f"While processing the derivative formula for '{f.func.name}' wrt '{name}', "
+                        f"expected '{name}' to not be both an input arg and named return."
+                    )
 
             if is_forward_derivative_definition(all_arg_names, names):
                 forward_derivatives.append(create_forward_derivative(f, formula, names))
@@ -762,10 +780,11 @@ def saved_variables(
     var_names: tuple[str, ...],
 ) -> tuple[str, tuple[SavedAttribute, ...]]:
     def stride_expr(name: str) -> str:
-        assert var_names == (name,), (
-            'Replacement for ".strides()" is currently only supported for single derivatives of the same tensor '
-            'that ".strides()" is being called on.'
-        )
+        if var_names != (name,):
+            raise AssertionError(
+                'Replacement for ".strides()" is currently only supported for single derivatives of the same tensor '
+                'that ".strides()" is being called on.'
+            )
         return f'strides_or_error({name}, "{name}")'
 
     REPLACEMENTS: list[tuple[str, dict[str, Any]]] = [

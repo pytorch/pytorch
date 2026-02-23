@@ -13,6 +13,9 @@ struct ExecutorConfig {
   bool runConstFolding = false;
   bool doExecutionFrameCleanup = true;
   bool tryFreeUnmanagedValuesAfterUse = true;
+  // When enabled, emit RECORD_FUNCTION for each op during execution
+  // to enable profiling with Kineto/PyTorch profiler
+  bool enableOpProfiling = false;
   // allows up to max number of concurrent threads.
   int64_t maxNumConcurrentThreads = 8;
   // allows up to max number of parallel ops.

@@ -58,8 +58,8 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
-#   USE_FBGEMM_GENAI=0
-#     disables the FBGEMM GenAI build
+#   USE_MSLK=0
+#     disables the MSLK build
 #
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
@@ -1703,7 +1703,7 @@ def main() -> None:
     install_requires = [
         "filelock",
         "typing-extensions>=4.10.0",
-        'setuptools ; python_version >= "3.12"',
+        'setuptools<82 ; python_version >= "3.12"',
         "sympy>=1.13.3",
         "networkx>=2.5.1",
         "jinja2",

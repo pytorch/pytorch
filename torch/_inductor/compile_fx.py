@@ -44,6 +44,7 @@ from torch._dynamo.utils import (
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
+    get_inputs_devices,
     get_metrics_context,
     lazy_format_graph_code,
     set_feature_use,
@@ -315,7 +316,7 @@ def _step_logger() -> Callable[..., None]:
 def _warn_tf32_disabled() -> None:
     if (
         torch.cuda.is_available()
-        and not torch.backends.cuda.matmul.allow_tf32
+        and torch.backends.cuda.matmul.fp32_precision != "tf32"
         and torch.cuda.get_device_capability() >= (8, 0)
     ):
         warnings.warn(
@@ -526,11 +527,15 @@ def _recursive_pre_grad_passes(
 
 
 def _recursive_joint_graph_passes(
-    gm: GraphModule, skip_invoke_subgraph: bool = False
+    gm: GraphModule,
+    skip_invoke_subgraph: bool = False,
+    input_device: Optional[torch.device] = None,
 ) -> GraphModule:
     def _run_on_sub_graph_module(subgraph_name: str) -> None:
         subgraph = getattr(gm, subgraph_name)
-        new_subgraph = _recursive_joint_graph_passes(subgraph, skip_invoke_subgraph)
+        new_subgraph = _recursive_joint_graph_passes(
+            subgraph, skip_invoke_subgraph, input_device
+        )
         setattr(gm, subgraph_name, new_subgraph)
 
     with dynamo_timed(
@@ -551,7 +556,7 @@ def _recursive_joint_graph_passes(
         for subgraph_name in old_subgraph_names:
             _run_on_sub_graph_module(subgraph_name)
 
-        out_gm = joint_graph_passes(gm)
+        out_gm = joint_graph_passes(gm, input_device)
 
         # Some joint graph passes may create new sub graph module. Run one round
         # for the newly created graph modules.
@@ -839,7 +844,9 @@ def _compile_fx_inner(
     """
     aot_mode: bool = V.aot_compilation
 
-    if config.pipeline_max_autotune_gemm:
+    from torch._inductor.autotune_process import use_pipelined_autotuning
+
+    if use_pipelined_autotuning():
         # Warm up max-autotune process pool asap
         from torch._inductor.autotune_process import AutotuneProcessPool
 
@@ -850,7 +857,11 @@ def _compile_fx_inner(
     # may not be valid for use after they are run/autotuned
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
-    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
+    if (
+        dynamo_utils.count_calls(gm.graph) == 0
+        and not aot_mode
+        and not torch._functorch.config.bundled_autograd_cache
+    ):
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
         from torch._dynamo.utils import CompileEventLogLevel
@@ -864,6 +875,7 @@ def _compile_fx_inner(
             log_level=CompileEventLogLevel.PT2_COMPILE,
         )
 
+        # pyrefly: ignore[bad-return]
         return make_boxed_func(gm.forward)
 
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
@@ -2064,7 +2076,10 @@ def fw_compiler_freezing(
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
-    aot_autograd_model = _recursive_joint_graph_passes(aot_autograd_model)
+    inputs_devices = get_inputs_devices(aot_example_inputs, aot_autograd_model)
+    aot_autograd_model = _recursive_joint_graph_passes(
+        aot_autograd_model, input_device=next(iter(inputs_devices))
+    )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -2200,7 +2215,10 @@ def partition_fn(
         # We can skip the invoke_subgraph because the
         # entire_partition_fn is called recursively for invoke_subgraph
         # in partitioning.
-        gm = _recursive_joint_graph_passes(gm, skip_invoke_subgraph=True)
+        inputs_devices = get_inputs_devices(joint_inputs, gm)
+        gm = _recursive_joint_graph_passes(
+            gm, skip_invoke_subgraph=True, input_device=next(iter(inputs_devices))
+        )
 
     static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
         "static_lifetime_input_indices", None
@@ -2215,6 +2233,7 @@ def partition_fn(
                 joint_inputs,
                 compiler="inductor",
                 static_lifetime_input_indices=static_lifetime_input_indices,
+                # pyrefly: ignore[bad-argument-type]
                 **kwargs,
             )
     else:
@@ -2303,7 +2322,8 @@ def compile_fx_forward(
             ),
         )
 
-        gm = _recursive_joint_graph_passes(gm)
+        inputs_devices = get_inputs_devices(example_inputs, gm)
+        gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
 
         trace_structured(
             "artifact",
@@ -2766,7 +2786,7 @@ def _compile_fx_main(
                     trace_joint=False,
                     decompositions=decompositions,
                 )
-
+                assert isinstance(gm, GraphModule)
                 from torch._export.utils import _detect_fake_mode_from_gm
 
                 fake_mode = _detect_fake_mode_from_gm(gm)  # type: ignore[assignment]

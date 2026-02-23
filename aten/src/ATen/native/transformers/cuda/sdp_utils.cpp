@@ -502,10 +502,19 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     return false;
   }
   auto head_dim_limit = 128;
+  // Hopper: head_dim<=256 support with cuDNN >= 9.10.0
   if (cudnn_version >= 91000) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     if (dprops->major == 9 && !dprops->minor) {
       head_dim_limit = 256;
+    }
+  }
+  // Blackwell GPUs: B200, GB200 (SM 10.0), B300, GB300 (SM 10.3)
+  // Special case allowed by cuDNN frontend to support DeepSeek dimensions
+  if (cudnn_version >= 91100) {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if (dprops->major == 10 && d_qk == 192 && d_v == 128) {
+      head_dim_limit = 192;
     }
   }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
@@ -678,6 +687,17 @@ bool check_dtypes_low_precision(sdp_params const& params, bool debug) {
   }
 }
 
+bool check_dtypes_flash_attention(sdp_params const& params, bool debug) {
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major >= 9 and at::globalContext().userEnabledFA3SDP()) {
+    constexpr auto fa3_dtypes =
+        c10::array_of<at::ScalarType>(at::kFloat8_e4m3fn, at::kHalf, at::kBFloat16);
+    return check_tensor_dtype(params, fa3_dtypes, debug);
+  } else {
+    return check_dtypes_low_precision(params, debug);
+  }
+}
+
 bool check_runtime_disabled_cudnn(sdp_params const& params, bool debug) {
   // We check the global context to see if user has explicitly turned of cudnn
   // sdp kernels
@@ -789,7 +809,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89_or_120,
       check_flash_causal_non_square_seqlens,
-      check_dtypes_low_precision);
+      check_dtypes_flash_attention);
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;

@@ -58,6 +58,10 @@ from torch import Tensor
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
+from torch._higher_order_ops.cudagraph_conditional_nodes import (
+    ControlFlowOpWarmupDispatchMode,
+    CUDAGraphCaptureControlFlowOpDispatchMode,
+)
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -116,6 +120,31 @@ else:
 
 
 log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
+
+
+def format_inputs_log(inputs: list[Any]) -> str:
+    def format_item(i: int, inp: Any) -> str:
+        if isinstance(inp, torch.Tensor):
+            return (
+                f"[{i}]: Tensor(size={list(inp.size())}, stride={inp.stride()}, "
+                f"dtype={inp.dtype}, data_ptr=0x{inp.data_ptr():X})"
+            )
+        elif inp is None:
+            return f"[{i}]: None"
+        else:
+            return f"[{i}]: {type(inp).__name__}({inp})"
+
+    n = len(inputs)
+    if n == 0:
+        return "[]"
+
+    # Only display the first 10 inputs if the input list is too long
+    max_items = 10
+    parts = [format_item(i, inp) for i, inp in enumerate(inputs[:max_items])]
+    if n > max_items:
+        parts.append(f"... ({n - max_items} more items)")
+
+    return ", ".join(parts)
 
 
 from . import config
@@ -395,9 +424,9 @@ def cudagraphify_impl(
             return fn(inputs)
 
         if int_key is None:
-            log.info("recording cudagraph tree for graph without symints")
+            log.info("Recording cudagraph tree for graph without symints")
         else:
-            log.info("recording cudagraph tree for symint key %s", int_key)
+            log.info("Recording cudagraph tree for symint key %s", int_key)
 
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
@@ -694,6 +723,7 @@ class CUDAWarmupNode:
             _use_cuda_memory_pool_manager(
                 self.device_index, self.cuda_graphs_pool, self.stream
             ),
+            ControlFlowOpWarmupDispatchMode(),
             get_history_recording(),
         ):
             out = self.wrapped_function.model(new_inputs)
@@ -1286,6 +1316,7 @@ class CUDAGraphNode:
                 pool=self.cuda_graphs_pool,
                 capture_error_mode="thread_local",
             ),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
             get_history_recording(),
         ):
             static_outputs = model(inputs)
@@ -2216,8 +2247,9 @@ class CUDAGraphTreeManager:
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
                         log.debug(
-                            "function %d re-recording due to %s",
-                            function_id.id,
+                            "[%s] Re-recording function=%s, reason=%s",
+                            self.compile_id,
+                            self.get_func_name(function_id),
                             unexpected_rerecord_reason,
                         )
                     else:
@@ -2306,9 +2338,11 @@ class CUDAGraphTreeManager:
         ):
             graph_id = self.new_graph_id()
             log.debug(
-                "Recording function %d of graph recording id %d",
-                function_id.id,
+                "[%s] Recording function=%s, cuda_graph_id=%d, inputs: %s",
+                self.compile_id,
+                self.get_func_name(function_id),
                 graph_id.id,
+                format_inputs_log(new_inputs),
             )
             torch.cuda.synchronize()
             node = CUDAGraphNode(
@@ -2347,12 +2381,18 @@ class CUDAGraphTreeManager:
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
         already_warm = function_id in self.warmed_up_functions
+        func_name = self.get_func_name(function_id)
         if not already_warm:
-            log.debug("Running warmup of function %d", function_id.id)
+            log.debug(
+                "[%s] Running warmup function=%s",
+                self.compile_id,
+                func_name,
+            )
         else:
             log.debug(
-                "Running eager of function %d because ancestor needed to warm up",
-                function_id.id,
+                "[%s] Running eager function=%s",
+                self.compile_id,
+                func_name,
             )
         self.warmed_up_functions.add(function_id)
         node = CUDAWarmupNode(
@@ -2376,6 +2416,9 @@ class CUDAGraphTreeManager:
 
     def new_func_id(self) -> FunctionID:
         return FunctionID(next(self.func_counter))
+
+    def get_func_name(self, function_id: FunctionID) -> str:
+        return getattr(self.ids_to_funcs[function_id].model, "__name__", "unknown")
 
     def add_function(
         self,

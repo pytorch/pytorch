@@ -144,6 +144,8 @@ class CooperativeReductionTests(TestCase):
             self.assertIn("cooperative_reduction_grid", source_code)
         else:
             self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
+        if GPU_TYPE == "cuda":
+            self.assertIn("'launch_cooperative_grid': True", source_code)
         if "async_compile.multi_kernel" not in source_code:
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count, expect_kernel_count

@@ -30,7 +30,7 @@ class TestBlackwellGPUGemmConfig(TestCase):
         self.assertEqual(config.num_warps, 8)
 
         # Verify new BlackwellGPUGemmConfig-specific fields with default values
-        self.assertFalse(config.epilogue_subtile)  # default=False
+        self.assertEqual(config.epilogue_subtile, 1)  # default=1
         self.assertTrue(config.warp_specialize)  # default=True
         self.assertTrue(config.flatten)  # default=True
 
@@ -42,12 +42,12 @@ class TestBlackwellGPUGemmConfig(TestCase):
             block_k=32,
             num_stages=2,
             num_warps=4,
-            epilogue_subtile=True,
+            epilogue_subtile=2,
             warp_specialize=False,
             flatten=False,
         )
         # Verify custom values are set correctly
-        self.assertTrue(config.epilogue_subtile)
+        self.assertEqual(config.epilogue_subtile, 2)
         self.assertFalse(config.warp_specialize)
         self.assertFalse(config.flatten)
 
