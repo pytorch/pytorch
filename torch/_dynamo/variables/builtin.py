@@ -2671,7 +2671,10 @@ class BuiltinVariable(VariableTracker):
                 pass
 
         if isinstance(obj, variables.NNModuleVariable):
-            return obj.var_getattr(tx, name)
+            try:
+                return obj.var_getattr(tx, name)
+            except AttributeError as e:
+                tx.raise_observed_exception(e)
         elif isinstance(
             obj,
             (
@@ -2726,6 +2729,8 @@ class BuiltinVariable(VariableTracker):
                 # dont fallback on as_python_constant error because this leads
                 # to a failure later on, and leads to a wrong stacktrace
                 raise
+            except AttributeError as e:
+                tx.raise_observed_exception(e)
             except NotImplementedError:
                 return variables.GetAttrVariable(obj, name, source=source)
         elif isinstance(obj, variables.TorchInGraphFunctionVariable):
@@ -2758,6 +2763,8 @@ class BuiltinVariable(VariableTracker):
         else:
             try:
                 return obj.var_getattr(tx, name)
+            except AttributeError as e:
+                tx.raise_observed_exception(e)
             except NotImplementedError:
                 return variables.GetAttrVariable(obj, name, source=source)
 
