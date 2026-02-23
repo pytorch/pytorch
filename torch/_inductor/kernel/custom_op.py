@@ -24,7 +24,6 @@ from torch._inductor.select_algorithm import (
 )
 from torch._inductor.utils import convert_symint_to_expr
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -244,45 +243,31 @@ def _merge_config_and_runtime_kwargs(
     config_params: dict[str, Any],
     runtime_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge config parameters with runtime kwargs. Runtime kwargs take precedence.
-       If there are conflicts, log a warning and use runtime value.
+    """Merge config parameters with runtime kwargs. Config params take precedence,
+    since they represent the values being autotuned.
 
     Args:
-        config_params: Parameters from CustomOpConfig
+        config_params: Parameters from CustomOpConfig (autotuning knobs)
         runtime_kwargs: Runtime non-tensor kwargs from _extract_tensor_inputs
 
     Returns:
-        Merged kwargs dictionary with runtime values taking precedence
+        Merged kwargs dictionary with config values taking precedence
     """
-    merged_kwargs = config_params.copy()
-
-    # Check for conflicts and let runtime kwargs dominate
-    conflicts = OrderedSet(config_params.keys()).intersection(runtime_kwargs.keys())
-
-    for key in conflicts:
-        log.warning(
-            "Parameter '%s' specified both in CustomOpConfig (%s) "
-            "and at runtime (%s). Using runtime value.",
-            key,
-            config_params[key],
-            runtime_kwargs[key],
-        )
-
-    # Runtime kwargs override config params
-    merged_kwargs.update(runtime_kwargs)
-
+    merged_kwargs = runtime_kwargs.copy()
+    merged_kwargs.update(config_params)
     return merged_kwargs
 
 
 def _adapt_user_input_gen_fns(
     inputs: list[Any],
-    arg_names: list[str],
+    op_overload: torch._ops.OpOverload,
     user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]],
 ) -> dict[int, Callable[[Any], torch.Tensor]]:
     """Convert user input generators from name-based to index-based format.
     Inductor autotune's input_gen_fns expects index of arg_names as key.
     """
 
+    arg_names = [arg.name for arg in op_overload._schema.arguments]
     name_to_index = {name: i for i, name in enumerate(arg_names)}
     index_based_fns = {}
 
@@ -290,11 +275,9 @@ def _adapt_user_input_gen_fns(
         if name in name_to_index:
             index_based_fns[name_to_index[name]] = gen_fn
         else:
-            log.warning(
-                "Unknown argument name '%s' in input_gen_fns. "
-                "Available argument names: %s",
-                name,
-                list(name_to_index.keys()),
+            raise ValueError(
+                f"Unknown argument name '{name}' in input_gen_fns. "
+                f"Available argument names: {list(name_to_index.keys())}"
             )
 
     def create_internal_input_gen_fn(
@@ -509,14 +492,9 @@ def autotune_custom_op(
     # Convert user input generation functions BEFORE creating choices
     input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] = {}
     if user_input_gen_fns:
-        import inspect
-
-        arg_names = (
-            list(inspect.signature(decompositions[0]).parameters.keys())
-            if decompositions
-            else []
+        input_gen_fns = _adapt_user_input_gen_fns(
+            inputs, op_overload, user_input_gen_fns
         )
-        input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
