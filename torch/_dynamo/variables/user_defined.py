@@ -1687,10 +1687,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return subobj
 
     def _lookup_type_attr(self, name: str) -> object:
-        """Single MRO walk on the type to find *name*. Cached in _subobj_from_class."""
+        """Walk type(obj).__mro__ only (not the metaclass chain) to find *name*."""
         if name in self._subobj_from_class:
             return self._subobj_from_class[name]
-        result = inspect.getattr_static(self.value.__class__, name, NO_SUCH_SUBOBJ)
+        result = NO_SUCH_SUBOBJ
+        for base in self.value.__class__.__mro__:
+            if name in base.__dict__:
+                result = base.__dict__[name]
+                break
         self._subobj_from_class[name] = result
         return result
 
