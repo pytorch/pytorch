@@ -2642,7 +2642,21 @@ class SIMDScheduling(BaseScheduling):
         Returns a list of tilings ranked by dimensionality.
         """
 
-        def tile_var_ranges(var_ranges, ranges_to_tile) -> tuple[sympy.Expr]:
+        def collapse_dims(
+            dims: Sequence[sympy.Expr], fallback_numel: sympy.Expr
+        ) -> tuple[sympy.Expr, ...]:
+            """
+            Collapse dimensions to the maximum allowed number of tiles.
+            """
+            if not dims:
+                return (fallback_numel,)
+            max_tiles = get_max_tiles(2)
+            num_leading_dims = max(0, len(dims) - max_tiles)
+            first_trailing_dim = num_leading_dims + 1
+            collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])
+            return (collapsed_leading_dim,) + tuple(dims[first_trailing_dim:])
+
+        def tile_var_ranges(var_ranges, ranges_to_tile) -> tuple[sympy.Expr, ...]:
             # Pattern match the subexpression pertaining to each index variable.
             tiling = []
             for var, numel in var_ranges:
@@ -2670,13 +2684,7 @@ class SIMDScheduling(BaseScheduling):
                 if not V.graph.sizevars.statically_known_equals(dim, sympy.S.One)
             ]
 
-            # Flatten leading dimensions, respecting the max tiling degree.
-            num_leading_dims = max(0, len(tiling) - get_max_tiles(2))
-            first_trailing_dim = num_leading_dims + 1
-            collapsed_leading_dim = sympy_product(tiling[:first_trailing_dim])
-            tiling = [collapsed_leading_dim] + tiling[first_trailing_dim:]
-
-            return tuple(tiling)
+            return collapse_dims(tiling, sympy_product(r for _, r in var_ranges))
 
         is_pointwise = reduction_numel == 1
         tilings = OrderedSet[immutable_dict[str, sympy.Expr]]()
@@ -2691,7 +2699,9 @@ class SIMDScheduling(BaseScheduling):
                 continue
 
             # Use the node ranges as the default tiling candidate.
-            node_tilings = [node_ranges]
+            default_pointwise_tiling = collapse_dims(node_ranges[0], pointwise_numel)
+            default_reduction_tiling = collapse_dims(node_ranges[1], reduction_numel)
+            node_tilings = [(default_pointwise_tiling, default_reduction_tiling)]
 
             # Search the indexing expressions for more candidates.
             # If we see modular indexing, try to subdivide ranges into their implied
@@ -2731,7 +2741,7 @@ class SIMDScheduling(BaseScheduling):
                 )
                 pointwise_tiling = tile_var_ranges(pointwise_var_ranges, node_ranges[0])
                 reduction_tiling = (
-                    [sympy.S.One]
+                    (sympy.S.One,)
                     if is_pointwise
                     else tile_var_ranges(reduction_var_ranges, node_ranges[1])
                 )
