@@ -1550,8 +1550,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for kpack in [2]
         ]
 
-        # Exhaustive search for mm configs
-
         self.default_flex_config = {
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4),
@@ -2016,7 +2014,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # Generate and process configs
         if (torch.version.hip is not None) and config.origami:
             try:
-                import origami  # type: ignore
+                import origami
             except ImportError:
                 raise ImportError("Origami not imported")
 

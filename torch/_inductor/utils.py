@@ -2417,7 +2417,7 @@ def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
 def use_origami_gemm_template(layout: Layout) -> bool:
     if (torch.version.hip is not None) and (config.origami):
         try:
-            import origami  # type: ignore
+            import origami
         except ImportError:
             print("Origami not imported")
             return False
