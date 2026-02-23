@@ -9104,16 +9104,8 @@ class Conditional(ExternKernel):
         fx_operands: Argument = V.graph.current_node.args[-1]
 
         assert isinstance(fx_operands, Sequence), type(fx_operands)
-        # Build fake_operands from FX nodes' metadata
-        # For FX Nodes, get the fake tensor from meta["val"]
-        # For non-Nodes (e.g., symbolic integers from sym_size lowering), pass directly
-        fake_operands: list[Any] = []
-        for fx_op in fx_operands:
-            if isinstance(fx_op, Node):
-                fake_operands.append(fx_op.meta["val"])
-            else:
-                # Symbolic integer or constant - pass directly
-                fake_operands.append(fx_op)
+        assert all(isinstance(n, Node) for n in fx_operands)
+        fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
         fake_outputs = V.graph.current_node.meta["val"]
 
         def _require_exact_strides(
