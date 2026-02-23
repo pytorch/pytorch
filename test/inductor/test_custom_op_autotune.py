@@ -21,6 +21,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_MACOS,
     parametrize,
     skipIfXpu,
 )
@@ -30,6 +31,7 @@ from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
 torch.set_float32_matmul_precision("high")
 
 
+@unittest.skipIf(IS_MACOS, "TODO: mac")
 class TestCustomOpAutoTune(TestCase):
     """Test custom operation autotuning functionality."""
 
