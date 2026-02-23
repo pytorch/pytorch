@@ -1787,7 +1787,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     new_source = AttrSource(self.source, "__getattr__")
                 out = variables.UserMethodVariable(
                     getattr_fn, self, source=new_source
-                ).call_function(tx, [ConstantVariable.create(name)], {})
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
 
             if self.source and getattr_fn is torch.nn.Module.__getattr__:
                 if isinstance(
