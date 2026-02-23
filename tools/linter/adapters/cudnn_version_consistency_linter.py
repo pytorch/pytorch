@@ -23,7 +23,9 @@ from typing import NamedTuple
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 LINUX_SCRIPT = REPO_ROOT / ".ci" / "docker" / "common" / "install_cuda.sh"
-WINDOWS_SCRIPT = REPO_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+WINDOWS_SCRIPT = (
+    REPO_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+)
 
 
 class LintSeverity(str, Enum):
