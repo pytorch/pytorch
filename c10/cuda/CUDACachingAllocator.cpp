@@ -4286,6 +4286,11 @@ class NativeCachingAllocator : public CUDAAllocator {
       TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, size, stream.id());
     }
 
+    if (CUDAAllocatorConfig::has_memset_value()) {
+      C10_CUDA_CHECK(cudaMemsetAsync(
+          devPtr, CUDAAllocatorConfig::memset_value(), size, stream));
+    }
+
     return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
@@ -4383,6 +4388,15 @@ class NativeCachingAllocator : public CUDAAllocator {
       C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
       malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     }
+    if (CUDAAllocatorConfig::has_memset_value()) {
+      c10::DeviceIndex device = 0;
+      C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+      C10_CUDA_CHECK(cudaMemsetAsync(
+          r,
+          CUDAAllocatorConfig::memset_value(),
+          nbytes,
+          cuda::getCurrentCUDAStream(device)));
+    }
     return r;
   }
 
@@ -4397,6 +4411,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       c10::DeviceIndex device = 0;
       C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
       malloc(&r, device, nbytes, stream);
+    }
+    if (CUDAAllocatorConfig::has_memset_value()) {
+      C10_CUDA_CHECK(cudaMemsetAsync(
+          r, CUDAAllocatorConfig::memset_value(), nbytes, stream));
     }
     return r;
   }
