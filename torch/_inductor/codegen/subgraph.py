@@ -91,6 +91,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         # Cached decomposition info for range-based dispatch (set via cache_decomposition)
         self.decomposition: Callable[..., Any] | None = None
         self.decomposition_kwargs: dict[str, Any] = {}
+        # Config patches to apply during kernel codegen (e.g., coordinate_descent_tuning)
+        self.config_patches: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
 
@@ -173,11 +175,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
+
+        def fn() -> Any:
+            return bm_func([*sym_inputs, *args])
+
+        if self._benchmark_with_cudagraphs:
+            return benchmarker.benchmark_gpu_with_cuda_graph(fn)
+
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
+            return do_bench_using_profiling(fn)
         return benchmarker.benchmark(
-            # Shallow clone args since bm_func may clear args
-            lambda: bm_func([*sym_inputs, *args]),
+            fn,
             device=benchmarker.infer_device(*sym_inputs, *args),
         )
 
@@ -206,6 +214,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 gm=self.gm,
                 example_inputs=self.example_inputs,
                 subgraph_name=self.name,
+                config_patches=self.config_patches if self.config_patches else None,
             )
         )
 
@@ -287,6 +296,7 @@ class SubgraphTemplate(KernelTemplate):
         non_tensor_args: list[dict[str, Any]],
         default_impl: Callable[..., Any] | None = None,
         input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
+        config_patches_list: list[dict[str, Any]] | None = None,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -301,6 +311,7 @@ class SubgraphTemplate(KernelTemplate):
             non_tensor_args: List of non-tensor kwargs only, one dict per corresponding decomposition.
             default_impl: Default implementation for layout inference
             input_gen_fns: Optional dict mapping input indices to tensor generators
+            config_patches_list: Optional list of config patches per decomposition
 
         Returns:
             List of SubgraphChoiceCaller instances for autotuning
@@ -312,6 +323,10 @@ class SubgraphTemplate(KernelTemplate):
             f"decompositions and non_tensor_args must have same length, "
             f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
         )
+
+        # Default to empty config_patches if not provided
+        if config_patches_list is None:
+            config_patches_list = [{} for _ in decompositions]
 
         # Infer layouts and ensure layout consistency for fair autotuning comparison
         layouts = [
@@ -326,7 +341,9 @@ class SubgraphTemplate(KernelTemplate):
         layout = layouts[0]  # All layouts are now validated to be equivalent
 
         choices: list[SubgraphChoiceCaller] = []
-        for decomp, decomp_kwargs in zip(decompositions, non_tensor_args):
+        for decomp, decomp_kwargs, config_patches in zip(
+            decompositions, non_tensor_args, config_patches_list
+        ):
             # Create make_fx_graph function for this decomposition
             import functools
 
@@ -360,6 +377,8 @@ class SubgraphTemplate(KernelTemplate):
             )
             # Cache decomposition info for range-based dispatch
             choice.cache_decomposition(decomp, decomp_kwargs)
+            # Store config_patches for this choice
+            choice.config_patches = config_patches
             choices.append(choice)
 
         return choices
