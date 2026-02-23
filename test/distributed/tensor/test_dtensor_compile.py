@@ -1882,6 +1882,46 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(output.full_tensor(), ref_out)
 
     @with_comms
+    def test_unbacked_illegal_views(self):
+        """Test that views with unbacked shapes match eager behavior"""
+        device_mesh = self.build_device_mesh()
+
+        def create_dt(shard_dim):
+            tensor = torch.randn(8, 8, 8)
+            dt = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
+            for i in range(3):
+                torch._dynamo.decorators.mark_unbacked(dt, i)
+            return dt
+
+        # aot_eager backend decomposes to as_strided, will fail as unsupported
+        @torch.compile(backend="eager", fullgraph=True)
+        def flatten_on_even_mesh(x):
+            torch._check(x.size(0) % self.world_size == 0)
+            return x.view(-1)
+
+        # view should be legal, since sharding is even and flatten is on first dim
+        dt = create_dt(0)
+        flatten_on_even_mesh(dt)
+
+        # flattening on non-first dimension should fail
+        dt = create_dt(1)
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot be performed without redistribution"
+        ):
+            flatten_on_even_mesh(dt)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def flatten(x):
+            return x.view(-1)
+
+        # uneven case: not informing compiler of divisibility will crash
+        dt = create_dt(0)
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten unevenly sharded dimension 0"
+        ):
+            flatten(dt)
+
+    @with_comms
     def test_split_with_symint_split_size(self):
         """
         Test that split works with symbolic integer split_size when using
