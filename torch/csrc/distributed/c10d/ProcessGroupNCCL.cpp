@@ -221,6 +221,23 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
+bool safeEventQuery(const std::shared_ptr<at::cuda::CUDAEvent>& event) {
+#ifdef USE_ROCM
+  try {
+    return event->query();
+  } catch (const c10::Error& e) {
+    const std::string msg = e.what_without_backtrace();
+    if (msg.find("hipErrorCapturedEvent") != std::string::npos ||
+        msg.find("hipErrorStreamCaptureUnsupported") != std::string::npos) {
+      return false;
+    }
+    throw;
+  }
+#else
+  return event->query();
+#endif
+}
+
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
   // parentheses avoid some compiler warnings
   static const uint64_t min_version =
@@ -644,7 +661,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
     return false;
   }
   // Checking the work's corresponding CUDA event's status
-  if (!ncclStartEvent_->query()) {
+  if (!safeEventQuery(ncclStartEvent_)) {
     return false;
   }
   return true;
@@ -657,7 +674,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // hang if another thread is holding the CUDA global context lock. For
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
-  if (!ncclEndEvent_->query()) {
+  if (!safeEventQuery(ncclEndEvent_)) {
     return false;
   }
   return true;
@@ -922,6 +939,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   PrefixStore* prefixStore = dynamic_cast<PrefixStore*>(store_.get());
   globalStore_ =
       prefixStore ? prefixStore->getUnderlyingNonPrefixStore() : store_;
+  debugInfoPipeFile_ = getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
   auto desyncDebug = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -1778,7 +1796,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // DumpPipe is one per-trainer process, and its convenient to name them
     // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
     // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(pg_->globalRank());
+    dumpPipe.emplace(
+        pg_->globalRank(), pg_->debugInfoPipeFile_, pg_->traceBufferSize_);
   }
   while (true) {
     // This won't have any lock since this lock is only used here.
@@ -3742,8 +3761,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   }
 
   if (nanCheck) {
+    at::cuda::CUDAStreamGuard guard(ncclStream);
     for (const auto& input : inputs) {
-      checkForNan(input, ncclStream);
+      checkForNan(input);
     }
   }
 
@@ -4220,7 +4240,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Only check for NaN for send ops, for recv ops `tensor` can be a random
   // placeholder
   if (enableNanCheck_ && opType == OpType::SEND) {
-    checkForNan(tensor, ncclStream);
+    at::cuda::CUDAStreamGuard guard(ncclStream);
+    checkForNan(tensor);
   }
 
   if (!coalescing_state_) {
@@ -4503,7 +4524,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   TORCH_CHECK(
       !isUnsupportedFloat8(tensor.scalar_type()),
       "Unsupported Float8 type for NCCL reduction");
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -4519,7 +4540,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return allreduce_impl(tensor, "nccl:all_reduce", opts);
@@ -4533,7 +4555,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       !isUnsupportedFloat8(tensors.back().scalar_type()),
       "Unsupported Float8 type for NCCL reduction");
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective and assume only one collective
@@ -4551,7 +4573,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return collectiveCoalesced(
@@ -4588,7 +4611,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   }
   check_gpu_single_tensor(tensor);
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -4604,7 +4627,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   const auto root = opts.rootRank + opts.rootTensor;
   bool nanCheck = (root == rank_);
@@ -4685,7 +4709,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
     tensor = at::view_as_real(tensor);
   }
   check_gpu_single_tensor(tensor);
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -4701,7 +4725,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return collective(
@@ -4781,7 +4806,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   check_gpu_single_tensor(inputTensor);
   auto outputTensors_ = outputTensors.back();
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -4798,7 +4823,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
       std::vector<int64_t>(), // outSplitSize
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   bool same_size = check_same_size(outputTensors_);
   if (same_size) {
@@ -4881,7 +4907,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective and assume only one collective
@@ -4898,7 +4924,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   return collectiveCoalesced(
       inputs,
@@ -4932,7 +4959,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
       !isUnsupportedFloat8(outputTensor.scalar_type()),
       "Unsupported Float8 type for NCCL reduction");
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -4948,7 +4975,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   bool same_size = check_same_size(inputTensors_);
   if (same_size) {
@@ -5044,7 +5072,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
   TORCH_CHECK(
       !isUnsupportedFloat8(tensor.scalar_type()),
       "Unsupported Float8 type for NCCL reduction");
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -5060,7 +5088,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   // avoidRecordStreams_ note: collective() will stash inputs and outputs.
   // Note 2: for asyncOp = false, we don't want to record streams because we
@@ -5112,7 +5141,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
       !isUnsupportedFloat8(inputs.back().scalar_type()),
       "Unsupported Float8 type for NCCL reduction");
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective and assume only one collective
@@ -5129,7 +5158,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   return collectiveCoalesced(
       inputs,
@@ -5269,7 +5299,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
   check_gpu_single_tensor(outputTensor);
   check_gpu_single_tensor(inputTensor);
   if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
-    RECORD_PARAM_COMMS_DATA(
+    RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
         std::make_tuple(
             static_cast<int64_t>(seqCollective_) + 1,
             false), // seq + 1 to match collective
@@ -5285,7 +5315,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         std::vector<int64_t>(), // outSplitSizes
         globalRankStart_, // globalRankStart_
         globalRankStride_, // globalRankStride_
-        this->getSize()); // worldSize
+        this->getSize(), // worldSize
+        opts.asyncOp); // is asynchronized op
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
     // outputTensors.
@@ -5307,7 +5338,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
     c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
 
-    RECORD_PARAM_COMMS_DATA(
+    RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
         std::make_tuple(
             static_cast<int64_t>(seqCollective_) + 1,
             false), // seq + 1 to match collective
@@ -5323,7 +5354,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         outputSplitSizes, // outSplitSizes
         globalRankStart_, // globalRankStart_
         globalRankStride_, // globalRankStride_
-        this->getSize()); // worldSize
+        this->getSize(), // worldSize
+        opts.asyncOp); // is asynchronized op
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
     // outputTensors.
@@ -5387,7 +5419,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     outSplitSizes.push_back(outputTensors[r].numel());
   }
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -5403,7 +5435,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       outSplitSizes, // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   return collective(
       inputTensors,
@@ -5432,7 +5465,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
   auto tensor = tensors.back();
   check_gpu_single_tensor(tensor, true);
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqP2P_) + (coalescing_state_ & CoalP2P ? 0 : 1),
           true), // the 1st p2p in coalesced range sets coalescing_state_ and
@@ -5449,7 +5482,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      true); // is asynchronized op
 
   auto ret = pointToPoint(
       tensor,
@@ -5480,7 +5514,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
   auto tensor = tensors.back();
   check_gpu_single_tensor(tensor, true);
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqP2P_) + (coalescing_state_ & CoalP2P ? 0 : 1),
           true), // the 1st p2p in coalesced range sets coalescing_state_ and
@@ -5497,7 +5531,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       std::vector<int64_t>(), // outSplitSizes
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      true); // is asynchronized op
 
   auto ret = pointToPoint(
       tensor,
@@ -5589,7 +5624,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     outputs.emplace_back();
   }
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -5605,7 +5640,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       std::vector<int64_t>(), // outSplitSize
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   // avoidRecordStreams_ note: collective() will stash inputTensors and
   // outputs, which == outputTensors[0] on the root rank where it matters.
@@ -5677,7 +5713,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
     inputs.emplace_back();
   }
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -5693,7 +5729,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       std::vector<int64_t>(), // outSplitSize
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
   // inputs, which == inputTensors[0] on the root rank where it matters.
@@ -5747,7 +5784,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
         "output tensor size must be equal to world_size times input tensor size");
   }
 
-  RECORD_PARAM_COMMS_DATA(
+  RECORD_PARAM_COMMS_DATA_WITH_ASYNC_OP(
       std::make_tuple(
           static_cast<int64_t>(seqCollective_) + 1,
           false), // seq + 1 to match collective
@@ -5763,7 +5800,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
       std::vector<int64_t>(), // outSplitSize
       globalRankStart_, // globalRankStart_
       globalRankStride_, // globalRankStride_
-      this->getSize()); // worldSize
+      this->getSize(), // worldSize
+      opts.asyncOp); // is asynchronized op
 
   // avoidRecordStreams_ note: collective() will stash inputs and outputs.
   // Note 2: for asyncOp = false, we don't want to record streams because we
