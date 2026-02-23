@@ -115,7 +115,7 @@ case ${CUDA_VERSION} in
         fi
         ;;
     13.0)
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0"
         export TORCH_NVCC_FLAGS="-compress-mode=size"
         export BUILD_BUNDLE_PTXAS=1
         ;;
