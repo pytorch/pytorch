@@ -833,6 +833,11 @@ TEST_F(NNUtilsTest, PadSequence) {
   padded = rnn_utils::pad_sequence({b, a, c}, false, 0, "left");
   ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
 
+  // pad_to_multiple_of = 4
+  expected = torch::tensor({{4, 5, 0, 0}, {1, 2, 3, 0}, {6, 0, 0, 0}});
+  padded = rnn_utils::pad_sequence({b, a, c}, true, 0, "right", 4);
+  ASSERT_TRUE(padded.allclose(expected));
+
   // pad with non-zero value
   expected = torch::tensor({{4, 5, 1}, {1, 2, 3}, {6, 1, 1}});
   padded = rnn_utils::pad_sequence({b, a, c}, true, 1);

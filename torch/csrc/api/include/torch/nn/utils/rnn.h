@@ -299,6 +299,9 @@ inline std::tuple<Tensor, Tensor> pad_packed_sequence(
 ///     padding_value (double, optional): value for padded elements. Default: 0.
 ///     padding_side (str, optional): the side to pad the sequences on. Default:
 ///         "right".
+///     pad_to_multiple_of (int, optional): pad the sequence so that its length
+///         is a multiple of this number. Sequence lengths must be a multiple of
+///         8 to take advantage of NVIDIA Tensor Cores. Default: 1.
 ///
 /// Returns:
 ///     Tensor of size ``T x B x *`` if `batch_first` is ``false``.
@@ -307,8 +310,10 @@ inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
     double padding_value = 0,
-    std::string_view padding_side = "right") {
-  return at::pad_sequence(sequences, batch_first, padding_value, padding_side);
+    std::string_view padding_side = "right",
+    int64_t pad_to_multiple_of = 1) {
+  return at::pad_sequence(
+      sequences, batch_first, padding_value, padding_side, pad_to_multiple_of);
 }
 
 /// Packs a list of variable length Tensors
