@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -343,22 +344,29 @@ def get_stride_order(
 
 
 @overload
-def ir_node_to_tensor(x: None, guard_shape: bool = True) -> None: ...
+def ir_node_to_tensor(x: None, replace_symbols_with_hints: bool = False) -> None: ...
 
 
 @overload
-def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
+def ir_node_to_tensor(
+    x: IRNode, replace_symbols_with_hints: bool = False
+) -> torch.Tensor: ...
 
 
 def ir_node_to_tensor(
-    x: Optional[IRNode], guard_shape: bool = True
+    x: Optional[IRNode], replace_symbols_with_hints: bool = False
 ) -> Optional[torch.Tensor]:
+    # When replace_symbols_with_hints=False (default), sizes/strides remain as
+    # symbolic expressions, so downstream operations on the resulting tensor (e.g.,
+    # shape comparisons inside a kernel's meta function) may install guards. When
+    # True, symbolic expressions are replaced with concrete integer hints via
+    # size_hint, preventing any downstream guards.
     if x is None:
         return None
 
     shape_fn: Callable[[Union[int, Expr]], Union[int, Expr]]
-    if not guard_shape:
-        shape_fn = V.graph.sizevars.size_hint
+    if replace_symbols_with_hints:
+        shape_fn = V.graph.sizevars.optimization_hint
     else:
         shape_fn = identity
     size = [shape_fn(s) for s in x.get_size()]
@@ -604,6 +612,10 @@ class IRNode:
 
     def get_defining_op(self) -> Optional[Operation]:
         return None
+
+    def get_subgraphs(self) -> list[Subgraph]:
+        """Return subgraphs contained in this node"""
+        return []
 
     def get_stack_traces(self) -> OrderedSet[str]:
         # Return stack traces to user model code
@@ -859,6 +871,7 @@ class IRNode:
 class Operation:
     def __post_init__(self) -> None:
         self.operation_name: Optional[str] = None
+        self._config_patches: dict[str, Any] = {}
 
     def get_device(self) -> Optional[torch.device]:
         raise NotImplementedError
@@ -874,6 +887,14 @@ class Operation:
     def get_operation_name(self) -> str:
         assert self.operation_name is not None
         return self.operation_name
+
+    def get_config_patches(self) -> dict[str, Any]:
+        """Get config patches for this operation (e.g., coordinate_descent_tuning)."""
+        return self._config_patches
+
+    def set_config_patches(self, patches: dict[str, Any]) -> None:
+        """Set config patches for this operation."""
+        self._config_patches = patches
 
     def is_extern(self) -> bool:
         return False
@@ -1575,8 +1596,7 @@ class Reduction(Loops):
 
         if (
             isinstance(reduction_numel, Integer)
-            and V.graph.sizevars.size_hint_or_throw(reduction_numel)
-            < config.unroll_reductions_threshold
+            and int(reduction_numel) < config.unroll_reductions_threshold
             and (sympy_product(ranges) != 1 or is_gpu(device.type))
             and reduction_type != "dot"
         ):
@@ -1917,7 +1937,7 @@ class Reduction(Loops):
         ) -> OpsValue:
             return intermediate_loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges))
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(original_ranges))
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
@@ -3847,7 +3867,11 @@ class Layout(OutputSpec):
         if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            strides, make_channels_last_strides_for(shape), shape
+            # pyrefly: ignore [bad-specialization]
+            strides,
+            # pyrefly: ignore [bad-specialization]
+            make_channels_last_strides_for(shape),
+            shape,
         ):
             if size != 1 and left != right:
                 return False
@@ -4054,6 +4078,15 @@ class FlexibleLayout(Layout):
 
     allow_indexing = False
 
+    def get_fixed_layout_without_freezing(self) -> FixedLayout:
+        """
+        Compute what the strides would be if this layout were frozen,
+        without actually modifying the layout. This is used for speculative
+        stride computation during Triton template code generation.
+        """
+        # Create a temporary copy and use as_fixed to keep freezing path in sync
+        return copy.deepcopy(self).as_fixed()
+
     # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
     def contiguous_strides(sizes: Sequence[int]) -> list[Expr]:
@@ -4131,7 +4164,7 @@ class FlexibleLayout(Layout):
         the fill order should be [1, 3, 2, 0]
         """
         assert len(sizes) == len(stride)
-        stride = [V.graph.sizevars.size_hint_or_throw(x) for x in stride]
+        stride = V.graph.sizevars.guarding_hints_or_throw(stride)
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
@@ -5185,6 +5218,19 @@ class TemplateBuffer(OperationBuffer):
             None,
         )
 
+    def is_multi_outputs_template(self) -> bool:
+        """Whether this template produces multiple outputs via MultiOutputLayout."""
+        return isinstance(self.layout, MultiOutputLayout)
+
+    def can_fuse_multi_output_epilogue(self, snode: object) -> bool:
+        """Whether scheduler node can be fused as an epilogue of this multi-output template.
+
+        Returns ``False`` by default.  Subclasses may override to support
+        additional fusion patterns (e.g. epilogue fusion with multi-output
+        extraction and pointwise operations).
+        """
+        return False
+
 
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
@@ -5266,7 +5312,7 @@ class ChoiceCaller:
     During autotuning, self.benchmark() is first called to get benchmark result,
     and if this choice is selected, self.output_node() is called to get the output_node.
 
-    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    Children classes: TritonTemplateCaller, CUTLASSTemplateCaller.
     """
 
     def __init__(
@@ -5284,6 +5330,8 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
         self.failed: bool = False
+        # When True, benchmark using CUDA graph capture/replay
+        self._benchmark_with_cudagraphs: bool = False
         # A place to store annotations that can be read post benchmarking
         # Use this to shuttle information between ChoieCaller generation
         # and the end of benchmarking
@@ -5291,6 +5339,8 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
+        if self._benchmark_with_cudagraphs:
+            return benchmarker.benchmark_gpu_with_cuda_graph(lambda: algo(*args))
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: algo(*args))  # type: ignore[arg-type]
         return benchmarker.benchmark(algo, args, {"out": out}, device=None)
@@ -5430,7 +5480,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = self._make_kernel_renders[None]
 
 
-class CUDATemplateBuffer(TemplateBuffer):
+class CUTLASSTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
         layout: Layout,
@@ -5760,9 +5810,12 @@ class ConcatKernel(NopKernel):
         assert isinstance(fx_node_args, list), type(fx_node_args)
         # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
+            # pyrefly: ignore [missing-attribute]
             "val" in arg.meta
             and (
+                # pyrefly: ignore [missing-attribute]
                 arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                # pyrefly: ignore [missing-attribute]
                 or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
             )
             for arg in fx_node_args
@@ -6187,7 +6240,7 @@ class ExternKernel(InputsKernel):
                     torch.cuda.default_generators[device_index].clone_state()
                 )
             else:
-                example_args.append(ir_node_to_tensor(x, guard_shape=True))
+                example_args.append(ir_node_to_tensor(x))
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
@@ -6383,7 +6436,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=(
                             get_stride_order(
-                                V.graph.sizevars.size_hints_or_throw(
+                                V.graph.sizevars.guarding_hints_or_throw(
                                     x.get_layout().stride
                                 )
                             )
@@ -7084,6 +7137,7 @@ class SubgraphBuffer(ExternKernel):
         gm: torch.fx.GraphModule,
         example_inputs: list[Any],
         subgraph_name: str,
+        config_patches: dict[str, Any] | None = None,
     ):
         super().__init__(None, layout, input_nodes)
         self.gm = gm
@@ -7105,13 +7159,22 @@ class SubgraphBuffer(ExternKernel):
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
-            # Don't bother autotuning on Triton here
-            with inductor_config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
-            ):
+            # Base config: don't autotune Triton, but allow other optimizations
+            base_patches = {
+                "max_autotune": False,
+                "max_autotune_gemm": False,
+                "max_autotune_gemm_backends": "ATEN",
+            }
+            # Merge with user config_patches (e.g., coordinate_descent_tuning)
+            merged_patches: dict[str, Any] = {**base_patches, **(config_patches or {})}
+            with inductor_config.patch(merged_patches):
                 self.subgraph.run(*self.example_inputs)
+
+            # Tag all operations in subgraph with config_patches
+            # These will be applied during kernel codegen via SIMD scheduling
+            if config_patches:
+                for op in self.subgraph.operations:
+                    op.set_config_patches(config_patches.copy())
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         class CodegenGraph:
@@ -7121,6 +7184,7 @@ class SubgraphBuffer(ExternKernel):
 
         assert is_node_sequence(self.inputs)
         outer_inputs = [t.codegen_reference() for t in self.inputs]
+
         wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
             [*self.sym_inputs, *outer_inputs],
@@ -7179,6 +7243,7 @@ class UserDefinedTritonKernel(ExternKernel):
         (
             new_name,
             triton_meta,
+            inductor_meta,
             extra_launch_args,
         ) = wrapper.define_user_defined_triton_kernel(
             kernel,
@@ -7245,6 +7310,7 @@ class UserDefinedTritonKernel(ExternKernel):
             raw_args=raw_args_filtered,
             raw_keys=raw_keys_filtered,
             triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
             triton=True,
             device=self.get_device(),
             original_fxnode_name=self.fx_node.name,
@@ -8847,6 +8913,9 @@ class InvokeSubgraph(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+    def get_subgraphs(self) -> list[Subgraph]:
+        return [self.subgraph] if self.subgraph else []
+
     @classmethod
     def create(
         cls, subgraph: Subgraph, *operands: IRNode
@@ -9001,6 +9070,14 @@ class Conditional(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+    def get_subgraphs(self) -> list[Subgraph]:
+        subgraphs = []
+        if self.true_subgraph:
+            subgraphs.append(self.true_subgraph)
+        if self.false_subgraph:
+            subgraphs.append(self.false_subgraph)
+        return subgraphs
+
     @staticmethod
     def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
         if isinstance(s, int):
@@ -9037,10 +9114,12 @@ class Conditional(ExternKernel):
                     ret.append(output)
                 else:
                     ret.append(
+                        # pyrefly: ignore [bad-argument-type]
                         ExternKernel.require_exact_strides(
                             TensorBox(output), fake.stride(), allow_padding=False
                         )
                     )
+            # pyrefly: ignore [bad-return]
             return ret
 
         for subgraph in (true_fn, false_fn):
@@ -9128,6 +9207,28 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
+
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_outputs,
+        )
+
+        (_, _, _, true_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
+        )
+        (_, _, _, false_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
+        )
+
+        mutated_operand_indices = OrderedSet(true_mutated_inputs) | OrderedSet(
+            false_mutated_inputs
+        )
+
+        # Create MutationOutput for each mutated operand (for scheduler dependencies)
+        conditional.mutation_outputs = [
+            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
+            for idx in sorted(mutated_operand_indices)
+        ]
+
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
@@ -9201,6 +9302,14 @@ class WhileLoop(ExternKernel):
 
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+
+    def get_subgraphs(self) -> list[Subgraph]:
+        subgraphs = []
+        if self.cond_subgraph:
+            subgraphs.append(self.cond_subgraph)
+        if self.body_subgraph:
+            subgraphs.append(self.body_subgraph)
+        return subgraphs
 
     # Accidental aliasing can be created due to cse, where the empty buffers we
     # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.

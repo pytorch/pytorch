@@ -10,7 +10,7 @@ if(BUILD_LIBTORCHLESS)
 endif()
 
 # ---[ Configure macro file.
-set(C10_HIP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
+set(C10_CUDA_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/impl/hip_cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/hip/impl/hip_cmake_macros.h)
@@ -42,7 +42,7 @@ if(NOT BUILD_LIBTORCHLESS)
   # minimal.  I'm not sure if we need hip_hcc or not; for now leave it out
 
   # If building shared library, set dllimport/dllexport proper.
-  target_compile_options(c10_hip PRIVATE "-DC10_HIP_BUILD_MAIN_LIB")
+  target_compile_options(c10_hip PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
   # Enable hidden visibility if compiler supports it.
   if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
     target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
