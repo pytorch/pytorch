@@ -1069,21 +1069,6 @@ command = [
 ]
 
 [[linter]]
-code = 'CUDNNSYNC'
-include_patterns = [
-    '.ci/docker/common/install_cuda.sh',
-    '.ci/pytorch/windows/internal/cuda_install.bat',
-]
-command = [
-    'uv',
-    'run',
-    '--script',
-    'tools/linter/adapters/cudnn_version_consistency_linter.py',
-    '--',
-    '@{{PATHSFILE}}'
-]
-
-[[linter]]
 code = 'NO_WORKFLOWS_ON_FORK'
 include_patterns = [
     '.github/**/*.yml',
