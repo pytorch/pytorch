@@ -79,6 +79,7 @@ from .triton_compat import (
     Config,
     GPUTarget,
     HAS_WARP_SPEC,
+    IntelGPUError,
     KernelInterface,
     knobs,
     OutOfResources,
@@ -520,7 +521,7 @@ class CachingAutotuner(KernelInterface):
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
-            except (OutOfResources, PTXASError) as e:
+            except (OutOfResources, PTXASError, IntelGPUError) as e:
                 exc = e
         if len(compile_results) == 0:
             raise NoTritonConfigsError(
@@ -658,7 +659,12 @@ class CachingAutotuner(KernelInterface):
                 try:
                     launchers.append(result.make_launcher())
 
-                except (OutOfResources, PTXASError, torch.cuda.OutOfMemoryError) as e:
+                except (
+                    OutOfResources,
+                    PTXASError,
+                    torch.cuda.OutOfMemoryError,
+                    IntelGPUError,
+                ) as e:
                     exc = e
         if len(launchers) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
