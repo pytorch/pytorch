@@ -108,36 +108,11 @@ void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
     return;
   }
 
-  // (1) Switch to a non-capturing side stream.
-  // By using a side stream that is not being captured,
-  // (a) get_pool() in the allocator will route allocations to the default pool because
-  //     the capture filter (which checks cudaStreamGetCaptureInfo) returns false for this stream,
-  //     so allocator falls through to the default small_blocks/large_blocks pools.
-  // (b) Any operations issued on this side stream, such as the .fill_() calls below,
-  //     will NOT be recorded as part of the CUDA graph capture, and thus these modifications
-  //     do not become part of graph replays.
-  // This ensures that initializing and mutating the RNG state tensors is "invisible" to the graph.
-  const auto side_stream = at::cuda::getNonCapturingStreamFromPool();
-  at::cuda::CUDAStreamGuard stream_guard(side_stream);
-
-  // (2) Use relaxed capture mode to allow cudaMalloc.
-  // See cudaMallocMaybeCapturing in CUDACachingAllocator.cpp for more details.
-  // cudaMallocMaybeCapturing() only applies CUDAStreamCaptureModeGuard when
-  // the current stream IS capturing. But cudaStreamCaptureModeGlobal blocks
-  // cudaMalloc on ALL streams during capture. We need to explicitly relax
-  // the capture mode to permit allocation on our non-capturing side stream.
-  c10::cuda::CUDAStreamCaptureModeGuard mode_guard{cudaStreamCaptureModeRelaxed};
-
   auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
-  // Create tensor outside of inference mode to ensure it can be modified in-place later.
   c10::InferenceMode inference_guard(false);
-  rng_state_extragraph_ = at::empty({2}, options);
-
+  rng_state_seed_extragraph_ = at::empty({1}, options);
+  rng_state_offset_extragraph_ = at::empty({1}, options);
   offset_intragraph_ = 0;
-  // Single H2D copy: [seed, 0]
-  at::Tensor(rng_state_extragraph_).copy_(
-      at::tensor({static_cast<int64_t>(seed), 0L}, at::TensorOptions().dtype(at::kLong))
-          .to(rng_state_extragraph_.device()));
 }
 
 /**
@@ -170,14 +145,8 @@ uint64_t CUDAGeneratorCaptureState::finalize() {
 void CUDAGeneratorCaptureState::setup_for_replay(uint64_t seed, uint64_t philox_offset) {
   TORCH_INTERNAL_ASSERT(is_initialized(),
       "Capture state not initialized");
-  // Allocate tensor in pinned memory on CPU and use async copy to CUDA
-  auto pinned_options = at::TensorOptions()
-      .dtype(at::kLong)
-      .device(at::kCPU)
-      .pinned_memory(true);
-  at::Tensor pinned_tensor = at::tensor({static_cast<int64_t>(seed), static_cast<int64_t>(philox_offset)}, pinned_options);
-
-  at::Tensor(rng_state_extragraph_).copy_(pinned_tensor, /*non_blocking=*/true);
+  rng_state_seed_extragraph_.fill_(static_cast<int64_t>(seed));
+  rng_state_offset_extragraph_.fill_(static_cast<int64_t>(philox_offset));
 }
 
 /**
@@ -563,8 +532,8 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     state_->increase(increment);
 
     return PhiloxCudaState(
-        capture_state->rng_state_extragraph_.data_ptr<int64_t>(),
-        capture_state->rng_state_extragraph_.data_ptr<int64_t>() + 1,
+        capture_state->rng_state_seed_extragraph_.data_ptr<int64_t>(),
+        capture_state->rng_state_offset_extragraph_.data_ptr<int64_t>(),
         offset);
   } else {
     uint64_t offset = state_->philox_offset_per_thread_;

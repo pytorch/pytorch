@@ -199,16 +199,6 @@ C10_API CUDAStream
 getStreamFromPool(const int priority, DeviceIndex device = -1);
 
 /**
- * Get a stream from the pool that is guaranteed not to be capturing.
- */
-C10_API CUDAStream getNonCapturingStreamFromPool(
-    const bool isHighPriority = false,
-    DeviceIndex device = -1);
-// no default priority to disambiguate overloads
-C10_API CUDAStream
-getNonCapturingStreamFromPool(const int priority, DeviceIndex device = -1);
-
-/**
  * Get a CUDAStream from a externally allocated one.
  *
  * This is mainly for interoperability with different libraries where we
