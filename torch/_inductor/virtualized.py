@@ -208,16 +208,6 @@ _distributed_autotune_state: Virtualized[_DistributedAutotuneState] = Virtualize
 )
 
 
-def _active_user_lowering_ops_default() -> OrderedSet[Any]:
-    """Default factory for active_user_lowering_ops - returns empty set."""
-    return OrderedSet()
-
-
-_active_user_lowering_ops: Virtualized[OrderedSet[Any]] = Virtualized(
-    "active_user_lowering_ops", _active_user_lowering_ops_default
-)
-
-
 def _choices_default():
     """
     Lazy init the global choices handler
@@ -391,12 +381,6 @@ class _V:
     get_distributed_autotune_state: Callable[[], Any] = (
         _distributed_autotune_state._get_handler
     )
-    set_active_user_lowering_ops: Callable[[Any], Any] = (
-        _active_user_lowering_ops._set_handler
-    )
-    get_active_user_lowering_ops: Callable[[], OrderedSet[Any]] = (
-        _active_user_lowering_ops._get_handler
-    )
 
     @property
     def ops(self) -> OpsHandler[Any]:
@@ -459,11 +443,6 @@ class _V:
     @property
     def distributed_autotune_state(self):
         return _distributed_autotune_state._get_handler()
-
-    @property
-    def active_user_lowering_ops(self) -> OrderedSet[Any]:
-        """Set of ops currently being lowered via user_lowerings (for recursion guard)."""
-        return _active_user_lowering_ops._get_handler()
 
 
 V = _V()
