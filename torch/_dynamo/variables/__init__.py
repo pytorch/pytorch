@@ -18,7 +18,13 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 
 from .base import VariableTracker
 from .builtin import BuiltinVariable
-from .constant import ConstantVariable, EnumVariable
+from .constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    CONSTANT_VARIABLE_TRUE,
+    ConstantVariable,
+    EnumVariable,
+)
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
@@ -50,10 +56,11 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetClassVariable,
     OrderedSetVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
+from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -73,6 +80,7 @@ from .functions import (
     SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
+    TritonSetAllocatorSkipVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,
@@ -149,6 +157,7 @@ from .tensor import (
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
     FrozenDataClassVariable,
+    InspectVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -169,6 +178,9 @@ __all__ = [
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
+    "CONSTANT_VARIABLE_FALSE",
+    "CONSTANT_VARIABLE_NONE",
+    "CONSTANT_VARIABLE_TRUE",
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
@@ -186,6 +198,7 @@ __all__ = [
     "GetAttrVariable",
     "GradModeVariable",
     "InspectSignatureVariable",
+    "InspectVariable",
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
@@ -201,7 +214,6 @@ __all__ = [
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "OptimizerVariable",
-    "PlacementVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
