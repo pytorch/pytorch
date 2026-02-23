@@ -719,7 +719,7 @@ def invoke_leaf_function_autograd(
     )
 
 
-# TODO: allow user annotated mutation and aliasing info
+# TODO: aliasing is not allowed
 @invoke_leaf_function.py_functionalize_impl
 def invoke_leaf_function_functionalization(ctx, *all_args, **kwargs):
     from torch._higher_order_ops.auto_functionalize import (
