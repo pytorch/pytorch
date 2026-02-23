@@ -394,6 +394,11 @@ class MockGraphHandler(GraphLowering):
         return torch.float32
 
 
+def has_cpp_wrapper_for_device(device: str) -> bool:
+    init_backend_registration()
+    return get_wrapper_codegen_for_device(device, cpp_wrapper=True) is not None
+
+
 @contextlib.contextmanager
 def patch_inductor_backend(
     device: str,
