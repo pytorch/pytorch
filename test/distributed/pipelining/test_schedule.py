@@ -4,6 +4,7 @@ import copy
 import csv
 import logging
 import os
+from unittest.mock import MagicMock, patch
 
 from model_registry import MultiMLP
 
@@ -24,6 +25,7 @@ from torch.distributed.pipelining.schedules import (
     _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
+    _batch_p2p,
     _format_pipeline_order,
     _merge_bw,
     _PipelineSchedule,
@@ -1206,6 +1208,73 @@ class ScheduleUtilTests(TestCase):
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
+
+
+class TestBatchP2P(TestCase):
+    """Tests that _batch_p2p dispatches homogeneous ops individually to avoid
+    head-of-line blocking, while still batching mixed ops for deadlock avoidance."""
+
+    def _make_p2p_op(self, op, group_peer=0):
+        p = MagicMock()
+        p.op = op
+        p.tensor = torch.zeros(1)
+        p.group = MagicMock()
+        p.tag = 0
+        p.group_peer = group_peer
+        return p
+
+    def test_empty_ops(self):
+        self.assertEqual(_batch_p2p([]), [])
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.isend")
+    def test_all_isend_dispatched_individually(self, mock_isend, mock_batch):
+        mock_isend.return_value = MagicMock()
+        ops = [self._make_p2p_op(mock_isend, group_peer=i) for i in range(3)]
+
+        result = _batch_p2p(ops)
+
+        mock_batch.assert_not_called()
+        self.assertEqual(len(result), 3)
+        self.assertEqual(mock_isend.call_count, 3)
+        for p in ops:
+            mock_isend.assert_any_call(
+                p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer
+            )
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.irecv")
+    def test_all_irecv_dispatched_individually(self, mock_irecv, mock_batch):
+        mock_irecv.return_value = MagicMock()
+        ops = [self._make_p2p_op(mock_irecv, group_peer=i) for i in range(3)]
+
+        result = _batch_p2p(ops)
+
+        mock_batch.assert_not_called()
+        self.assertEqual(len(result), 3)
+        self.assertEqual(mock_irecv.call_count, 3)
+        for p in ops:
+            mock_irecv.assert_any_call(
+                p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer
+            )
+
+    @patch("torch.distributed.pipelining.schedules.dist.batch_isend_irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.irecv")
+    @patch("torch.distributed.pipelining.schedules.dist.isend")
+    def test_mixed_ops_use_batch(self, mock_isend, mock_irecv, mock_batch):
+        mock_batch.return_value = [MagicMock(), MagicMock()]
+        ops = [
+            self._make_p2p_op(mock_isend, group_peer=0),
+            self._make_p2p_op(mock_irecv, group_peer=1),
+        ]
+
+        result = _batch_p2p(ops)
+
+        mock_batch.assert_called_once_with(ops)
+        mock_isend.assert_not_called()
+        mock_irecv.assert_not_called()
+        self.assertEqual(len(result), 2)
+
 
 if __name__ == "__main__":
     run_tests()
