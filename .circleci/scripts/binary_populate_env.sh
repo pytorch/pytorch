@@ -20,7 +20,7 @@ if [[ -n "${PYTORCH_ROOT}"  ]]; then
   workdir=$(dirname "${PYTORCH_ROOT}")
 else
   # docker executor (binary builds)
-  workdir="/pytorch"
+  workdir="/"
 fi
 
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then

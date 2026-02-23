@@ -27,7 +27,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
   OS: windows-arm64
-  PYTORCH_ROOT: /pytorch 
+  PYTORCH_ROOT: /pytorch
   DOWNLOADS_DIR: c:\temp\downloads
   DEPENDENCIES_DIR: c:\temp\dependencies
   ENABLE_APL: 1
