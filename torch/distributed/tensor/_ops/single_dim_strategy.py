@@ -298,7 +298,14 @@ def _expand_single_dim_strategy_to_mesh(
     def _translate_list_op_schema(
         op_schema: OpSchema, output_tensor_meta: Sequence[TensorMeta], index: int
     ) -> tuple[OpSchema, TensorMeta]:
-        """Translate list op to per-element version of schema."""
+        """Translate foreach op to per-element version of schema."""
+        op_parts = str(op_schema.op).split(".")
+        base_op_name = op_parts[-2].replace("_foreach_", "")
+        # For inplace foreach ops (e.g., _foreach_maximum_), strip trailing underscore
+        # to get the base op name (e.g., maximum)
+        base_op_name = base_op_name.removesuffix("_")
+        foreach_variant = op_parts[-1]
+
         # select per-element inputs, outputs
         target_args, target_kwargs = tree_map_only(
             TupleStrategy,
@@ -313,7 +320,9 @@ def _expand_single_dim_strategy_to_mesh(
         else:
             # Inplace op: output is the first input
             first_input = target_args[0]
-            target_output_meta = first_input.tensor_meta if hasattr(first_input, 'tensor_meta') else None
+            target_output_meta = (
+                first_input.tensor_meta if hasattr(first_input, "tensor_meta") else None
+            )
 
         # For foreach ops, translate to per-element op name
         if "_foreach_" in str(op_schema.op):

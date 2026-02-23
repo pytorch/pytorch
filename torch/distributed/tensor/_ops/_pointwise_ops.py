@@ -648,7 +648,9 @@ register_single_dim_strategy(
     aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
 )(
     _make_partial_strategy(
-        extra_rules=[[Partial(r), Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")]
+        extra_rules=[
+            [Partial(r), Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
+        ]
     )
 )
 
