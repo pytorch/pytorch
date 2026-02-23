@@ -802,9 +802,9 @@ Tensor special_expit(const Tensor& self) {
 }
 
 Tensor& nan_to_num_out(const Tensor& self,
-    std::optional<double> nan,
-    std::optional<double> pos_inf,
-    std::optional<double> neg_inf,
+    const std::optional<Scalar> &nan,
+    const std::optional<Scalar> &pos_inf,
+    const std::optional<Scalar> &neg_inf,
     Tensor& result) {
   TORCH_CHECK(
       self.scalar_type() == result.scalar_type(),
@@ -826,18 +826,18 @@ Tensor& nan_to_num_out(const Tensor& self,
 
 Tensor nan_to_num(
     const Tensor& self,
-    std::optional<double> nan,
-    std::optional<double> pos_inf,
-    std::optional<double> neg_inf) {
+    const std::optional<Scalar> &nan,
+    const std::optional<Scalar> &pos_inf,
+    const std::optional<Scalar> &neg_inf) {
   auto result = at::empty_like(self);
   return at::nan_to_num_out(result, self, nan, pos_inf, neg_inf);
 }
 
 Tensor& nan_to_num_(
     Tensor& self,
-    std::optional<double> nan,
-    std::optional<double> pos_inf,
-    std::optional<double> neg_inf) {
+    const std::optional<Scalar> &nan,
+    const std::optional<Scalar> &pos_inf,
+    const std::optional<Scalar> &neg_inf) {
   return at::nan_to_num_out(self, self, nan, pos_inf, neg_inf);
 }
 

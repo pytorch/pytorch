@@ -3356,21 +3356,21 @@
   dispatch:
     CUDA: _fused_rms_norm_backward_cuda
 
-- func: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
+- func: nan_to_num(Tensor self, Scalar? nan=None, Scalar? posinf=None, Scalar? neginf=None) -> Tensor
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: nan_to_num
     SparseCPU, SparseCUDA, SparseMPS: nan_to_num_sparse
   tags: pointwise
 
-- func: nan_to_num_(Tensor(a!) self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor(a!)
+- func: nan_to_num_(Tensor(a!) self, Scalar? nan=None, Scalar? posinf=None, Scalar? neginf=None) -> Tensor(a!)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: nan_to_num_
     SparseCPU, SparseCUDA, SparseMPS: nan_to_num_sparse_
   tags: pointwise
 
-- func: nan_to_num.out(Tensor self, float? nan=None, float? posinf=None, float? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: nan_to_num.out(Tensor self, Scalar? nan=None, Scalar? posinf=None, Scalar? neginf=None, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA, MTIA: nan_to_num_out
     MPS: nan_to_num_out_mps
