@@ -606,6 +606,142 @@ def while_loop_func(
         return ctx.wrap_tensors(ret)
 
 
+@while_loop_op.py_impl(torch._C._functorch.TransformType.Vmap)
+def while_loop_vmap(interpreter, cond_fn, body_fn, carried_inputs, additional_inputs):
+    """Vmap batching rule for while_loop.
+
+    Converts to a masked loop: runs until ALL batch elements have converged,
+    freezing converged elements via torch.where so they don't change.
+    """
+    from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
+
+    # Unwrap carried_inputs and additional_inputs from batched tensors
+    carried_inputs = list(carried_inputs)
+    additional_inputs = list(additional_inputs)
+
+    (unwrapped_carried, carried_bdims), (
+        unwrapped_additional,
+        additional_bdims,
+    ) = (
+        unwrap_batched(carried_inputs, interpreter.level()),
+        unwrap_batched(additional_inputs, interpreter.level()),
+    )
+    # Flatten for easier manipulation
+    flat_carried, carried_spec = pytree.tree_flatten(unwrapped_carried)
+    flat_carried_bdims, _ = pytree.tree_flatten(carried_bdims)
+    flat_additional, additional_spec = pytree.tree_flatten(unwrapped_additional)
+    flat_additional_bdims, _ = pytree.tree_flatten(additional_bdims)
+
+    # Build in_dims tuples for restore_vmap
+    carried_in_dims = tuple(flat_carried_bdims)
+    additional_in_dims = tuple(flat_additional_bdims)
+
+    batch_size = interpreter.batch_size()
+    randomness = interpreter.randomness()
+
+    # Ensure all carried inputs that participate in vmap have batch dim at 0
+    flat_carried = [
+        t.movedim(bdim, 0) if bdim is not None and bdim != 0 else t
+        for t, bdim in zip(flat_carried, flat_carried_bdims)
+    ]
+    flat_carried_bdims = [0 if bdim is not None else None for bdim in flat_carried_bdims]
+    carried_in_dims = tuple(flat_carried_bdims)
+
+    flat_additional = [
+        t.movedim(bdim, 0) if bdim is not None and bdim != 0 else t
+        for t, bdim in zip(flat_additional, flat_additional_bdims)
+    ]
+    flat_additional_bdims = [
+        0 if bdim is not None else None for bdim in flat_additional_bdims
+    ]
+    additional_in_dims = tuple(flat_additional_bdims)
+
+    # Ensure all batched carried inputs have the batch dim (expand unbatched ones).
+    # Use .contiguous() so the stride matches what body_fn produces (the while_loop
+    # metadata check requires identical strides between carry-in and carry-out).
+    flat_carried = [
+        t.unsqueeze(0).expand(batch_size, *t.shape).contiguous() if bdim is None else t
+        for t, bdim in zip(flat_carried, flat_carried_bdims)
+    ]
+    flat_carried_bdims = [0] * len(flat_carried)
+    carried_in_dims = tuple(flat_carried_bdims)
+
+    all_in_dims = carried_in_dims + additional_in_dims
+
+    with interpreter.lower():
+
+        def wrapped_cond_fn(*flat_args):
+            n_carried = len(flat_carried)
+            carried_args = flat_args[:n_carried]
+            additional_args = flat_args[n_carried:]
+            # Restore vmap for the user cond_fn
+            fn, per_elem_bdims = restore_vmap(
+                lambda *args: (cond_fn(*args[:n_carried], *args[n_carried:]),),
+                all_in_dims,
+                batch_size,
+                randomness,
+            )(*flat_args)
+            pred = fn[0]
+            # pred is per-element bool (batch_size,); continue while any element active
+            return pred.any()
+
+        def wrapped_body_fn(*flat_args):
+            n_carried = len(flat_carried)
+            carried_args = flat_args[:n_carried]
+            additional_args = flat_args[n_carried:]
+
+            # Get per-element convergence mask
+            cond_result, _ = restore_vmap(
+                lambda *args: (cond_fn(*args[:n_carried], *args[n_carried:]),),
+                all_in_dims,
+                batch_size,
+                randomness,
+            )(*flat_args)
+            active_mask = cond_result[0]  # (batch_size,) bool
+
+            # Run body for all elements
+            new_carried, new_bdims = restore_vmap(
+                lambda *args: body_fn(*args[:n_carried], *args[n_carried:]),
+                all_in_dims,
+                batch_size,
+                randomness,
+            )(*flat_args)
+
+            flat_new, new_spec = pytree.tree_flatten(new_carried)
+            flat_new_bdims, _ = pytree.tree_flatten(new_bdims)
+
+            # Move all new outputs to have batch dim at 0
+            flat_new = [
+                t.movedim(bdim, 0) if bdim is not None and bdim != 0 else t
+                for t, bdim in zip(flat_new, flat_new_bdims)
+            ]
+            # Expand unbatched new outputs
+            flat_new = [
+                t.unsqueeze(0).expand(batch_size, *t.shape) if bdim is None else t
+                for t, bdim in zip(flat_new, flat_new_bdims)
+            ]
+
+            # Freeze converged elements: where active, use new; where done, keep old
+            mask = active_mask
+            result = []
+            for old, new in zip(carried_args, flat_new):
+                # Reshape mask for broadcasting: (batch_size, 1, 1, ...)
+                shape = (batch_size,) + (1,) * (old.ndim - 1)
+                result.append(torch.where(mask.view(shape), new, old))
+            return tuple(result)
+
+        unwrapped_out = while_loop_op(
+            wrapped_cond_fn,
+            wrapped_body_fn,
+            tuple(flat_carried),
+            tuple(flat_additional),
+        )
+
+    # All outputs have batch dim at 0
+    out_bdims = (0,) * len(unwrapped_out)
+    return wrap_batched(unwrapped_out, out_bdims, interpreter.level())
+
+
 class WhileLoopStackOutputOp(HigherOrderOperator):
     """
     while_loop_stack_output is a variant of while_loop that returns a stack of outputs.
