@@ -251,6 +251,10 @@ class CUDAAllocator : public DeviceAllocator {
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
+  virtual DataPtr allocateWithHint(size_t size, void* hint) {
+    // Default: ignore hint, fall back to normal allocation
+    return allocate(size);
+  }
   std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
     c10::DeviceGuard device_guard({at::kCUDA, device});
     size_t free = 0;
@@ -450,6 +454,10 @@ inline ShareableHandle shareIpcHandle(void* ptr) {
 
 inline std::string name() {
   return get()->name();
+}
+
+inline DataPtr allocateWithHint(size_t size, void* hint) {
+  return get()->allocateWithHint(size, hint);
 }
 
 inline cudaError_t memcpyAsync(

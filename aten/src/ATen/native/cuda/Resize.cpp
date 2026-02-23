@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/ResizeCommon.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -16,19 +17,32 @@ namespace at::native {
 
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
-  auto allocator = storage->allocator();
-  TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
 
   c10::Device device = storage->device();
 
   if (size_bytes == 0) {
+    void* old_ptr = storage->data_ptr().get();
+    size_t old_size = storage->nbytes();
     storage->set_data_ptr_noswap(at::DataPtr(nullptr, device));
     storage->set_nbytes(0);
+    if (old_ptr) {
+      storage->set_preferred_data_ptr(old_ptr, old_size);
+    }
     return;
   }
 
   c10::cuda::CUDAGuard guard(device.index());
-  at::DataPtr data = allocator->allocate(size_bytes);
+
+  void* hint = nullptr;
+  if (storage->preferred_data_ptr_size() == size_bytes) {
+    hint = storage->preferred_data_ptr();
+  }
+  storage->clear_preferred_data_ptr();
+
+  at::DataPtr data = hint
+      ? c10::cuda::CUDACachingAllocator::allocateWithHint(size_bytes, hint)
+      : c10::cuda::CUDACachingAllocator::get()->allocate(size_bytes);
+
   if (storage->data_ptr()) {
     at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
@@ -41,7 +55,6 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
             c10::cuda::getCurrentCUDAStream()));
   }
 
-  // Destructively overwrite data_ptr
   storage->set_data_ptr_noswap(std::move(data));
   storage->set_nbytes(size_bytes);
 }
