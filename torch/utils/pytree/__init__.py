@@ -76,6 +76,8 @@ def _import_cxx_pytree_and_store() -> _ModuleType:
             "Or set the environment variable `PYTORCH_USE_CXX_PYTREE=0`."
         )
 
+    global cxx  # once imported, stored in the global variable `cxx` to avoid repeated imports
+
     import torch.utils._cxx_pytree as cxx
 
     # This allows the following statements to work properly:
