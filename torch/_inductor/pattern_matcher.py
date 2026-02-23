@@ -2089,22 +2089,23 @@ class PatternMatcherPass:
                         counters[backend]["pattern_matcher_count"] += 1
                         counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
 
-                        # Track per-pattern counts for debugging granularity
-                        # Store at top level to avoid interfering with Counter arithmetic
-                        if getattr(entry, 'pattern_name', None):
-                            pattern_name = entry.pattern_name
-                        else:
-                            # Fallback: use pattern class name + operation target
-                            pattern_class = entry.pattern.__class__.__name__
-                            target = str(node.target) if node.target else "unknown"
-                            pattern_name = f"{pattern_class}_{target}"
+                        # Track per-pattern counts when debug mode is active
+                        if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG"):
+                            # Store at top level to avoid interfering with Counter arithmetic
+                            if getattr(entry, 'pattern_name', None):
+                                pattern_name = entry.pattern_name
+                            else:
+                                # Fallback: use pattern class name + operation target
+                                pattern_class = entry.pattern.__class__.__name__
+                                target = str(node.target) if node.target else "unknown"
+                                pattern_name = f"{pattern_class}_{target}"
 
-                        # Use top-level key to avoid Counter subtraction issues
-                        pattern_key = f"{backend}_pattern_matcher_per_pattern"
-                        if pattern_key not in counters:
-                            counters[pattern_key] = Counter()
+                            # Use top-level key to avoid Counter subtraction issues
+                            pattern_key = f"{backend}_pattern_matcher_per_pattern"
+                            if pattern_key not in counters:
+                                counters[pattern_key] = Counter()
 
-                        counters[pattern_key][pattern_name] += 1
+                            counters[pattern_key][pattern_name] += 1
         return count
 
     def clear(self) -> None:
