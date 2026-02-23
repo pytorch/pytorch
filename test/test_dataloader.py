@@ -3858,6 +3858,10 @@ class TestOutOfOrderDataLoader(TestCase):
 
 
 @instantiate_parametrized_tests
+@unittest.skipIf(
+    IS_WINDOWS or IS_MACOS,
+    "Threading based data loading workers not supported on Windows and MacOS",
+)
 class TestThreadingDataLoader(TestCase):
     def setUp(self):
         super().setUp()
@@ -4103,6 +4107,40 @@ class TestThreadingDataLoader(TestCase):
 
         all_data = torch.cat(all_data, 0)
         self.assertEqual(len(all_data), 60)  # len(dataset) * num_workers
+
+    def test_threading_iterable_dataset_with_worker_split(self):
+        # Test with IterableDataset that splits data based on worker_info.id
+        num_workers = 3
+        sizes_for_all_workers = [5, 10, 7]
+        dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
+
+        loader = DataLoader(
+            dataset,
+            batch_size=None,
+            num_workers=num_workers,
+            worker_method="thread",
+        )
+
+        fetched = list(loader)
+
+        # Build expected interleaved order based on round-robin allocation
+        expected = []
+        worker_iterators = [iter(range(s)) for s in sizes_for_all_workers]
+        while worker_iterators:
+            exhausted = []
+            for i, it in enumerate(worker_iterators):
+                try:
+                    expected.append(next(it))
+                except StopIteration:
+                    exhausted.append(i)
+            # Remove exhausted iterators in reverse order to preserve indices
+            # in worker_iterators after deletion
+            for i in reversed(exhausted):
+                worker_iterators.pop(i)
+
+        self.assertEqual(len(fetched), len(expected))
+        for i, (a, b) in enumerate(zip(fetched, expected)):
+            self.assertEqual(a, b, f"Mismatch at index {i}: got {a}, expected {b}")
 
     def test_threading_with_drop_last(self):
         # Test with drop_last=True
@@ -4399,6 +4437,7 @@ class TestThreadingDataLoader(TestCase):
         for w in worker_threads:
             self.assertFalse(w.is_alive())
 
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
     def test_threading_shutdown_on_program_exit(self):
         """Case 4: Iterator did some work but not completely exhausted, program exits,
         workers are shutdown and the program can exit without hanging.
