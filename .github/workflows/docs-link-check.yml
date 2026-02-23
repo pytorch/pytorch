@@ -39,7 +39,7 @@ jobs:
 
       - name: Download built docs from nightly
         run: |
-          pip install awscli
+          pip install awscli==1.36.26
           mkdir -p docs/_build/html
           # Download the Python docs from the nightly build
           aws s3 cp s3://pytorch.org/docs/main/ docs/_build/html/ --recursive --no-sign-request || \
