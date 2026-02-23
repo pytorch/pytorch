@@ -382,10 +382,15 @@ class TensorMeta:
 
     @classmethod
     def from_irnodes(
-        cls, irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]]
+        cls,
+        irnodes: Union[LayoutOrBuffer, Sequence[LayoutOrBuffer]],
+        *,
+        hint_override: Optional[int] = None,
     ) -> Union[TensorMeta, list[TensorMeta]]:
         if isinstance(irnodes, Sequence):
-            result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
+            result: list[Any] = [
+                cls.from_irnodes(x, hint_override=hint_override) for x in irnodes
+            ]
             assert all(isinstance(x, TensorMeta) for x in result)
             return result
 
@@ -401,9 +406,15 @@ class TensorMeta:
         return TensorMeta(
             device=device,
             dtype=dtype,
-            sizes=V.graph.sizevars.optimization_hints(node.get_size()),
-            strides=V.graph.sizevars.optimization_hints(node.get_stride()),
-            offset=V.graph.sizevars.optimization_hint(node.get_layout().offset),
+            sizes=V.graph.sizevars.optimization_hints_with_override(
+                node.get_size(), hint_override
+            ),
+            strides=V.graph.sizevars.optimization_hints_with_override(
+                node.get_stride(), hint_override
+            ),
+            offset=V.graph.sizevars.optimization_hint_with_override(
+                node.get_layout().offset, hint_override
+            ),
             name=node.get_name(),
         )
 
