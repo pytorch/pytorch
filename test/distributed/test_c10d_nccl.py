@@ -4462,6 +4462,27 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_coalesced_manager_op_integrity(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        process_group = c10d.distributed_c10d._get_default_group()
+        device = torch.device(f"cuda:{self.rank:d}")
+        with self.assertRaisesRegex(
+            ValueError,
+            "Coalescing manager requires all collectives to be the same type",
+        ):
+            with torch.distributed._coalescing_manager(
+                group=process_group, async_ops=True
+            ):
+                t = torch.ones(60, device=device) * (self.rank + 1)
+                torch.distributed.all_reduce(t)
+                output = torch.zeros(60 * self.world_size, device=device)
+                torch.distributed.all_gather_into_tensor(output, t)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     @runOnRocmArch(MI300_ARCH)
     def test_intra_node_comm_all_reduce(self):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
