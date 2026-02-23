@@ -70,7 +70,7 @@ void PrefixStore::wait(
   store_->wait(joinedKeys, timeout);
 }
 
-const std::chrono::milliseconds& PrefixStore::getTimeout() const noexcept {
+std::chrono::milliseconds PrefixStore::getTimeout() const noexcept {
   return store_->getTimeout();
 }
 

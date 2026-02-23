@@ -47,10 +47,10 @@ std::vector<uint8_t> HashStore::get(const std::string& key) {
   }
   // Slow path: wait up to any timeout_.
   auto pred = [&]() { return map_.find(key) != map_.end(); };
-  if (timeout_ == kNoTimeout) {
+  if (timeout_.load() == kNoTimeout) {
     cv_.wait(lock, pred);
   } else {
-    if (!cv_.wait_for(lock, timeout_, pred)) {
+    if (!cv_.wait_for(lock, timeout_.load(), pred)) {
       C10_THROW_ERROR(DistStoreError, "Wait timeout");
     }
   }
@@ -143,7 +143,7 @@ void HashStore::append(
 std::vector<std::vector<uint8_t>> HashStore::multiGet(
     const std::vector<std::string>& keys) {
   std::unique_lock<std::mutex> lock(m_);
-  auto deadline = std::chrono::steady_clock::now() + timeout_;
+  auto deadline = std::chrono::steady_clock::now() + timeout_.load();
   std::vector<std::vector<uint8_t>> res;
   res.reserve(keys.size());
 
@@ -153,7 +153,7 @@ std::vector<std::vector<uint8_t>> HashStore::multiGet(
       res.emplace_back(it->second);
     } else {
       auto pred = [&]() { return map_.find(key) != map_.end(); };
-      if (timeout_ == kNoTimeout) {
+      if (timeout_.load() == kNoTimeout) {
         cv_.wait(lock, pred);
       } else {
         if (!cv_.wait_until(lock, deadline, pred)) {
@@ -195,7 +195,7 @@ std::vector<uint8_t> HashStore::queuePop(const std::string& key, bool block) {
   std::unique_lock<std::mutex> lock(m_);
 
   if (block) {
-    waitLocked(lock, {key}, timeout_);
+    waitLocked(lock, {key}, timeout_.load());
   }
 
   auto& queue = queues_[key];
