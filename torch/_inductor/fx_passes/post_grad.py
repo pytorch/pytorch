@@ -729,6 +729,10 @@ def lazy_init(input_device: Optional[torch.device] = None):
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+    else:
+        from .quantization import _register_woq_lowerings
+
+        _register_woq_lowerings()
 
     # Put this patterns in post-grad pass rather than joint-graph
     # pass since otherwise there will be perf/peak-memory regression:

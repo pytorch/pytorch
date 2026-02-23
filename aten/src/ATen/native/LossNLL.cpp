@@ -47,6 +47,10 @@ TORCH_META_FUNC(nll_loss_forward)
   TORCH_CHECK(
       target.dim() <= 1,
       "0D or 1D target tensor expected, multi-target not supported");
+  TORCH_CHECK(
+      target.scalar_type() == kLong || target.scalar_type() == kByte,
+      "expected target dtype to be Long or Byte, but got ",
+      target.scalar_type());
   if (self.dim() == 1 && target.dim() == 1) {
       TORCH_CHECK_VALUE(
           target.size(0) == 1,
@@ -698,6 +702,8 @@ Tensor nll_loss_nd_symint(
   if (input_.dim() == 1 || input_.dim() == 2) {
     ret = at::nll_loss_symint(input_, target_, weight, reduction, std::move(ignore_index));
   } else if (input_.dim() == 4) {
+    input_ = input_.contiguous();
+    target_ = target_.contiguous();
     ret = at::nll_loss2d_symint(input_, target_, weight, reduction, std::move(ignore_index));
   } else {
     // dim == 3 or dim > 4

@@ -734,8 +734,20 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
 
   auto reduction_type = index_reduce_type(reduce);
 
-  if (!result.is_same(self))
+  std::cout << "===========================================" << std::endl;
+  std::cout << "in index_reduce_mps_out" << std::endl;
+  std::cout << "self=" << self << std::endl;
+  std::cout << "dim=" << dim << std::endl;
+  std::cout << "index=" << index << std::endl;
+  std::cout << "source=" << source << std::endl;
+  std::cout << "reduce=" << reduce << std::endl;
+  std::cout << "include_self=" << include_self << std::endl;
+  std::cout << "result=" << result << std::endl;
+  std::cout << "-------------------------------------------" << std::endl;
+
+  if (!result.is_same(self)) {
     result.copy_(self);
+  }
 
   if (!include_self) {
     AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half,
@@ -751,7 +763,7 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
                                    case ReductionType::MAX:
                                      init_val = std::numeric_limits<scalar_t>::has_infinity
                                          ? -std::numeric_limits<scalar_t>::infinity()
-                                         : std::numeric_limits<scalar_t>::lowest();
+                                         : std::numeric_limits<scalar_t>::min();
                                      break;
                                    case ReductionType::MIN:
                                      init_val = std::numeric_limits<scalar_t>::has_infinity
@@ -766,6 +778,8 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
                                  result.index_fill_(dim, index.to(at::ScalarType::Long), init_val);
                                });
   }
+
+  std::cout << "result=" << result << std::endl;
 
   IndexReduceParams params;
   params.index_stride = index.stride(0);
@@ -796,6 +810,8 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
     }
   });
 
+  std::cout << "result=" << result << std::endl;
+
   if (reduction_type == ReductionType::MEAN) {
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
     counts.index_add_(dim, index, at::ones_like(source));
@@ -805,7 +821,11 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
     } else {
       result.div_(counts, "floor");
     }
+    std::cout << "counts=" << counts << std::endl;
+    std::cout << "result=" << result << std::endl;
   }
+
+  std::cout << "===========================================" << std::endl;
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
