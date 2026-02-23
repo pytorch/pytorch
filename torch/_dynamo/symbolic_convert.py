@@ -72,6 +72,7 @@ from . import (
     graph_break_hints,
     logging as torchdynamo_logging,
     trace_rules,
+    utils as _utils_module,
     variables,
 )
 from .bytecode_analysis import (
@@ -139,7 +140,6 @@ from .source import (
 )
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
-    _get_error_on_graph_break,
     counters,
     get_fake_value,
     get_instruction_source_311,
@@ -1422,119 +1422,6 @@ class InstructionTranslatorBase(
         if self.is_trace_source_log_enabled:
             trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
-    def step(self) -> bool:
-        """Process exactly one instruction, return False we should exit"""
-        self.error_on_graph_break = _get_error_on_graph_break()
-
-        ip = self.instruction_pointer
-        if ip is None:
-            return False
-        self.current_instruction = inst = self.instructions[ip]
-        self.instruction_pointer = ip + 1
-
-        if inst.starts_line:
-            self.starts_line(inst.starts_line)
-
-        if (
-            not self.stack
-            and self.should_compile_partial_graph()
-            and self.is_non_empty_graph()
-        ):
-            self.current_speculation = self.speculate()
-            if self.current_speculation.failed(self):
-                self.step_graph_break(inst)
-                return False
-
-        if self.is_trace_bytecode_log_enabled:
-            trace_bytecode_log.debug(
-                "TRACE %s %s %s", inst.opname, inst.argval, repr(self.stack)
-            )
-
-        # Store the latest 20 bytecode execution for the process,
-        # Used repr for byte processing and limiting the length to 2048
-        if config.verbose:
-            try:
-                stack_repr = repr(self.stack)
-            except ValueError:
-                # Handle large integers that exceed sys.int_info.str_digits_check_threshold
-                stack_repr = "<self.stack repr truncated due to large integer>"
-            self.latest_bytecode_queue.append(
-                f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
-            )
-
-        self.update_block_stack(inst)
-
-        try:
-            self.dispatch_table[inst.opcode](self, inst)
-            return not self.output.should_exit
-        except TensorifyScalarRestartAnalysis:
-            raise
-        except exc.ObservedException as e:
-            self.exception_handler(e)
-            return True
-        except (ReturnValueOp, YieldValueOp):
-            return False
-        except (Unsupported, StepUnsupported) as e:
-            # More restrictive condition than should_compile_partial_graph:
-            # if this condition is true, then we SHOULD NOT attempt to find
-            # a previous checkpoint to resume from and try to resume - we should
-            # immediately error out.
-            # The condition is more restrictive because, it may be possible to resume significantly earlier
-            # in the code (the most recent speculation point). This happens, for example, in the case
-            # of a graph break in a try block.
-            if (
-                self.one_graph
-                or self.error_on_graph_break
-                or self.is_tracing_resume_prologue
-                or (isinstance(e, Unsupported) and e.skip_frame)
-            ):
-                if isinstance(e, StepUnsupported):
-                    unimplemented(
-                        gb_type="cannot resume from torch._dynamo.step_unsupported()",
-                        context="",
-                        explanation="traced torch._dynamo.step_unsupported(), but Dynamo is instructed "
-                        "to error on graph break. This graph break is used for debugging only.",
-                        hints=[
-                            "Remove the torch._dynamo.step_unsupported() call.",
-                            "Make sure fullgraph=False and error_on_graph_break=False.",
-                            *graph_break_hints.DYNAMO_BUG,
-                        ],
-                    )
-                raise
-            if self.current_speculation is None:
-                log.debug("empty checkpoint - cannot resume from graph break")
-                if isinstance(e, StepUnsupported):
-                    unimplemented(
-                        gb_type="torch._dynamo.step_unsupported() with empty checkpoint",
-                        context="",
-                        explanation="traced torch._dynamo.step_unsupported(), but there is no checkpoint "
-                        "to step_graph_break from. This graph break is used for debugging only.",
-                        hints=[
-                            "Remove the torch._dynamo.step_unsupported() call.",
-                            "Include at least one checkpoint: (1) include at least 2 ops and (2) make sure there is some "
-                            "line of code that is not in a try/with block, and has an empty Python stack.",
-                            *graph_break_hints.DYNAMO_BUG,
-                        ],
-                        skip_frame=True,
-                    )
-                assert isinstance(e, Unsupported)
-                e.skip_frame = True
-                raise
-            reason = (
-                "Encountered graph break that we cannot resume from. "
-                "Compiling up to the previous resumable state, "
-                "then skipping the rest of the function. "
-                f"Graph break encountered:\n\n{str(e)}"
-            )
-            self.log_graph_break(
-                self.code_options,
-                reason=reason,
-                exc=e,
-            )
-
-        self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
-        return False
-
     if sys.version_info >= (3, 11):
 
         def update_block_stack(self, inst: Instruction) -> None:
@@ -1800,8 +1687,126 @@ class InstructionTranslatorBase(
                 self.output.push_tx(self)
                 self.start_point = self.instruction_pointer
                 try:
-                    while self.step():
-                        pass
+                    # Cache frequently accessed attributes as locals
+                    _instructions = self.instructions
+                    _dispatch_table = self.dispatch_table
+                    _is_verbose = config.verbose
+                    _is_trace_bytecode = self.is_trace_bytecode_log_enabled
+                    _output = self.output
+
+                    # Inlined step loop: avoids per-bytecode method call overhead
+                    while True:
+                        self.error_on_graph_break = _utils_module._error_on_graph_break
+
+                        ip = self.instruction_pointer
+                        if ip is None:
+                            break
+                        self.current_instruction = inst = _instructions[ip]
+                        self.instruction_pointer = ip + 1
+
+                        if inst.starts_line:
+                            self.starts_line(inst.starts_line)
+
+                        if (
+                            not self.stack
+                            and self.should_compile_partial_graph()
+                            and self.is_non_empty_graph()
+                        ):
+                            self.current_speculation = self.speculate()
+                            if self.current_speculation.failed(self):
+                                self.step_graph_break(inst)
+                                break
+
+                        if _is_trace_bytecode:
+                            trace_bytecode_log.debug(
+                                "TRACE %s %s %s",
+                                inst.opname,
+                                inst.argval,
+                                repr(self.stack),
+                            )
+
+                        if _is_verbose:
+                            try:
+                                stack_repr = repr(self.stack)
+                            except ValueError:
+                                stack_repr = (
+                                    "<self.stack repr truncated due to large integer>"
+                                )
+                            self.latest_bytecode_queue.append(
+                                f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
+                            )
+
+                        self.update_block_stack(inst)
+
+                        try:
+                            _dispatch_table[inst.opcode](self, inst)
+                            if _output.should_exit:
+                                break
+                        except TensorifyScalarRestartAnalysis:
+                            raise
+                        except exc.ObservedException as e:
+                            self.exception_handler(e)
+                            continue
+                        except (ReturnValueOp, YieldValueOp):
+                            break
+                        except (Unsupported, StepUnsupported) as e:
+                            if (
+                                self.one_graph
+                                or self.error_on_graph_break
+                                or self.is_tracing_resume_prologue
+                                or (isinstance(e, Unsupported) and e.skip_frame)
+                            ):
+                                if isinstance(e, StepUnsupported):
+                                    unimplemented(
+                                        gb_type="cannot resume from torch._dynamo.step_unsupported()",
+                                        context="",
+                                        explanation="traced torch._dynamo.step_unsupported(), but Dynamo is instructed "
+                                        "to error on graph break. This graph break is used for debugging only.",
+                                        hints=[
+                                            "Remove the torch._dynamo.step_unsupported() call.",
+                                            "Make sure fullgraph=False and error_on_graph_break=False.",
+                                            *graph_break_hints.DYNAMO_BUG,
+                                        ],
+                                    )
+                                raise
+                            if self.current_speculation is None:
+                                log.debug(
+                                    "empty checkpoint - cannot resume from graph break"
+                                )
+                                if isinstance(e, StepUnsupported):
+                                    unimplemented(
+                                        gb_type="torch._dynamo.step_unsupported() with empty checkpoint",
+                                        context="",
+                                        explanation="traced torch._dynamo.step_unsupported(), but there is no checkpoint "
+                                        "to step_graph_break from. This graph break is used for debugging only.",
+                                        hints=[
+                                            "Remove the torch._dynamo.step_unsupported() call.",
+                                            "Include at least one checkpoint: (1) include at least 2 ops and "
+                                            "(2) make sure there is some line of code that is not in a try/with "
+                                            "block, and has an empty Python stack.",
+                                            *graph_break_hints.DYNAMO_BUG,
+                                        ],
+                                        skip_frame=True,
+                                    )
+                                assert isinstance(e, Unsupported)
+                                e.skip_frame = True
+                                raise
+                            reason = (
+                                "Encountered graph break that we cannot resume from. "
+                                "Compiling up to the previous resumable state, "
+                                "then skipping the rest of the function. "
+                                f"Graph break encountered:\n\n{str(e)}"
+                            )
+                            self.log_graph_break(
+                                self.code_options,
+                                reason=reason,
+                                exc=e,
+                            )
+                            # fail_and_restart_analysis always raises
+                            self.current_speculation.fail_and_restart_analysis(
+                                self.error_on_graph_break
+                            )
+
                 except Exception as e:
                     if self.is_tracing_resume_prologue:
                         raise ResumePrologueTracingError(
