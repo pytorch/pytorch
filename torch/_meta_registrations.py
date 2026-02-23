@@ -507,6 +507,7 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
+    from torch._subclasses.fake_impls import infer_size
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     # TODO: Ideally, we'd insert a deferred runtime assert here, but if we are
@@ -521,8 +522,10 @@ def meta_copy_(self, src, non_blocking=False):
 
     if isinstance(src, Tensor):
         intermediate = src.to(self, non_blocking)
-        if self.size() != intermediate.size():
-            aten.expand_copy.default(intermediate, self.size())
+        # Validate broadcast compatibility between src and self.
+        # We use infer_size instead of expand_copy because it handles
+        # unbacked symints gracefully via guard_or_false.
+        infer_size(intermediate.size(), self.size())
     return self
 
 
