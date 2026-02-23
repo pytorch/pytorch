@@ -32,7 +32,17 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
-StoreMode = Optional[Literal["atomic_add", "tma"]]
+AtomicMode = Literal[
+    "atomic_add",
+    "atomic_max",
+    "atomic_min",
+    "atomic_and",
+    "atomic_or",
+    "atomic_xor",
+    "atomic_cas",
+    "atomic_xchg",
+]
+StoreMode = Optional[Union[AtomicMode, Literal["tma"]]]
 ReductionType = Literal[
     "argmax",
     "argmin",
@@ -564,6 +574,10 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     def fma(self, x: T, y: T, z: T) -> T:
+        raise NotImplementedError
+
+    def mul_rn(self, x: T, y: T) -> T:
+        """Multiplication with round-to-nearest, preventing fusion with subsequent ops."""
         raise NotImplementedError
 
     def igamma(self, x: T, y: T) -> T:

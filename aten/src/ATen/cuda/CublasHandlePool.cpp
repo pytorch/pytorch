@@ -144,10 +144,10 @@ size_t parseChosenWorkspaceSize() {
   const bool gfx94_95 = at::detail::getCUDAHooks().isGPUArch({"gfx94", "gfx95"});
   const size_t default_size = gfx94_95 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
 #else
-  /* :4096:2:16:8 default, 32MiB for Hopper */
+  /* :4096:2:16:8 default, 32MiB for Hopper and Blackwell */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm90 = properties != nullptr && properties->major == 9 && properties->minor == 0;
-  const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
+  const bool use32mb = properties != nullptr && (properties->major == 9 || properties->major == 10 || properties->major == 12);
+  const size_t default_size = use32mb ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
 #endif
 
   if (val) {
@@ -174,11 +174,6 @@ size_t parseChosenWorkspaceSize() {
   }
 }
 
-size_t getChosenWorkspaceSize() {
-  size_t pool_size = parseChosenWorkspaceSize();
-  return pool_size;
-}
-
 size_t parseCUDABlasLtWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
@@ -188,12 +183,7 @@ size_t parseCUDABlasLtWorkspaceSize() {
   }
   size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
 #else
-#if defined(FBCODE)
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
-#else
-   /* use CUDABlas default workspace size if unified */
-  size_t workspace_size = getChosenWorkspaceSize() / 1024;
-#endif
 #endif
 
   if (val.has_value()) {
@@ -214,6 +204,11 @@ size_t parseCUDABlasLtWorkspaceSize() {
     }
   }
   return workspace_size * 1024;
+}
+
+size_t getChosenWorkspaceSize() {
+  size_t pool_size = parseChosenWorkspaceSize();
+  return pool_size;
 }
 
 #define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"

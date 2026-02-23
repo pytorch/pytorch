@@ -450,6 +450,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             traced.graph,
             collective_info,
             scheduled,
+            bucket_only_internode_comms=False,
         )
         bucketer.bucket_collectives()
 
@@ -460,6 +461,83 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         FileCheck().check("cat.default").check("all_reduce.default").check(
             "split_with_sizes"
         ).check_count("%mm", 2).run(graph_str)
+
+    def test_no_cross_type_bucketing_ar_and_rs(self):
+        """
+        Test that all_reduce and reduce_scatter on the same PG with
+        matching reduce_op and dtype are NOT bucketed together.
+
+        bucket_key() returns (group_name, reduce_op, dtype) for both
+        all_reduce and reduce_scatter. Without the collective type in
+        the key, they would be incorrectly grouped together.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 2
+
+            ar1 = torch.ops._c10d_functional.all_reduce(a, "sum", group_name)
+            ar2 = torch.ops._c10d_functional.all_reduce(b, "sum", group_name)
+
+            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                a, "sum", group_size, group_name
+            )
+            rs2 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                b, "sum", group_size, group_name
+            )
+
+            ar1_out = torch.ops._c10d_functional.wait_tensor(ar1)
+            ar2_out = torch.ops._c10d_functional.wait_tensor(ar2)
+            rs1_out = torch.ops._c10d_functional.wait_tensor(rs1)
+            rs2_out = torch.ops._c10d_functional.wait_tensor(rs2)
+
+            return ar1_out.sum() + ar2_out.sum() + rs1_out.sum() + rs2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+            traced = make_fx(func)(a, b)
+
+        ar1, ar2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        rs1, rs2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+
+        # No hiding — all exposed
+        hiding_annotations = {}
+
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            scheduled,
+            bucket_only_internode_comms=False,
+        )
+        bucketer.bucket_collectives()
+
+        # all_reduce ops should be bucketed together (1 bucketed all_reduce)
+        ar_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        self.assertEqual(len(ar_nodes), 1)
+
+        # reduce_scatter ops should be bucketed together (1 bucketed reduce_scatter)
+        rs_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        self.assertEqual(len(rs_nodes), 1)
 
     def test_can_bucket_multidtype_collectives(self):
         """
@@ -877,7 +955,7 @@ class TestCrossPGOverlap(InductorTestCase):
             return 0.0
 
         out = schedule_overlap_bucketing(
-            traced, custom_runtime_estimation=custom_runtime
+            traced, custom_runtime_estimation=custom_runtime, max_off_bucket_gb=None
         )
 
         # Get scheduled order
@@ -1205,6 +1283,40 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         # This should complete without errors
         result = scheduler.run()
         result.graph.lint()
+
+
+class TestForeachGroupsUnit(InductorTestCase):
+    """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
+
+    @unittest.skipIf(not HAS_GPU, "Requires GPU")
+    def test_foreach_groups_correctness(self):
+        """Test that foreach grouping computes correct groups and copies data correctly."""
+        from torch._inductor.fx_passes.bucketing import (
+            _ALL_DTYPES,
+            _compute_foreach_groups,
+            _pre_bucket_all_gather,
+        )
+
+        t1 = torch.randn(10, device="cuda")
+        t2 = torch.randn(20, device="cuda", dtype=torch.float16)
+        t3 = torch.randn(10, device="cuda")
+        ag_ins = [t1, t2, t3]
+        out_dtypes = [torch.float32, torch.float16, torch.float32]
+        out_dtype_ints = [_ALL_DTYPES.index(d) for d in out_dtypes]
+
+        # Mixed dtypes should produce groups with -1 delimiter
+        groups = _compute_foreach_groups(ag_ins, out_dtypes)
+        self.assertIsNotNone(groups)
+        self.assertIn(-1, groups)
+
+        # With and without groups should produce identical results
+        result_with = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, groups
+        )
+        result_without = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, None
+        )
+        self.assertTrue(torch.allclose(result_with, result_without))
 
 
 if __name__ == "__main__":

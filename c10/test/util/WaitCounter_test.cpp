@@ -30,9 +30,8 @@ class MockWaitCounterBackend
     return reinterpret_cast<intptr_t>(this);
   }
 
-  void stop(
-      std::chrono::steady_clock::time_point now,
-      intptr_t ctx) noexcept override {
+  void stop(std::chrono::steady_clock::time_point now, intptr_t ctx) noexcept
+      override {
     state_->stopCount.fetch_add(1);
     EXPECT_EQ(ctx, reinterpret_cast<intptr_t>(this));
   }

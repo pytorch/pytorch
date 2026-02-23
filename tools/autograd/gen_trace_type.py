@@ -468,7 +468,8 @@ def type_wrapper_name(f: NativeFunction, key: str = "Default") -> str:
 
 @with_native_function
 def method_definition(f: NativeFunction) -> str:
-    assert cpp.name(f.func) not in MANUAL_TRACER
+    if cpp.name(f.func) in MANUAL_TRACER:
+        raise AssertionError(f"Function {cpp.name(f.func)} is in MANUAL_TRACER")
 
     formals = ", ".join(
         # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
@@ -499,7 +500,8 @@ m.impl("${name}",
 
 @with_native_function
 def method_registration(f: NativeFunction) -> str:
-    assert cpp.name(f.func) not in MANUAL_TRACER
+    if cpp.name(f.func) in MANUAL_TRACER:
+        raise AssertionError(f"Function {cpp.name(f.func)} is in MANUAL_TRACER")
 
     return WRAPPER_REGISTRATION.substitute(
         name=f.func.name,

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 The APIs in this file are exposed as `functorch.*`. They are thin wrappers
 around the torch.func.* APIs that have deprecation warnings -- we're trying
@@ -8,20 +7,28 @@ NB: We don't use *args, **kwargs in the signatures because that changes the
 documentation.
 """
 
+from __future__ import annotations
+
 import textwrap
 import warnings
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, TYPE_CHECKING
 
 import torch._functorch.apis as apis
 import torch._functorch.eager_transforms as _impl
 import torch._functorch.make_functional as _nn_impl
 import torch.nn as nn
-from torch._functorch.eager_transforms import argnums_t
-from torch._functorch.vmap import in_dims_t, out_dims_t
 
 
-def get_warning(api, new_api=None, replace_newlines=False):
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch._functorch.eager_transforms import argnums_t
+    from torch._functorch.vmap import in_dims_t, out_dims_t
+
+
+def get_warning(
+    api: str, new_api: str | None = None, replace_newlines: bool = False
+) -> str:
     if new_api is None:
         new_api = f"torch.func.{api}"
     warning = (
@@ -37,12 +44,16 @@ def get_warning(api, new_api=None, replace_newlines=False):
     return warning
 
 
-def warn_deprecated(api, new_api=None):
+def warn_deprecated(api: str, new_api: str | None = None) -> None:
     warning = get_warning(api, new_api, replace_newlines=True)
     warnings.warn(warning, FutureWarning, stacklevel=3)
 
 
-def setup_docs(functorch_api, torch_func_api=None, new_api_name=None):
+def setup_docs(
+    functorch_api: Callable[..., Any],
+    torch_func_api: Callable[..., Any] | None = None,
+    new_api_name: str | None = None,
+) -> None:
     api_name = functorch_api.__name__
     if torch_func_api is None:
         torch_func_api = getattr(_impl, api_name)
@@ -57,54 +68,56 @@ def setup_docs(functorch_api, torch_func_api=None, new_api_name=None):
 
 
 def vmap(
-    func: Callable,
+    func: Callable[..., Any],
     in_dims: in_dims_t = 0,
     out_dims: out_dims_t = 0,
     randomness: str = "error",
     *,
-    chunk_size=None,
-) -> Callable:
+    chunk_size: int | None = None,
+) -> Callable[..., Any]:
     warn_deprecated("vmap", "torch.vmap")
     return apis.vmap(func, in_dims, out_dims, randomness, chunk_size=chunk_size)
 
 
-def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
+def grad(
+    func: Callable[..., Any], argnums: argnums_t = 0, has_aux: bool = False
+) -> Callable[..., Any]:
     warn_deprecated("grad")
     return apis.grad(func, argnums, has_aux)
 
 
 def grad_and_value(
-    func: Callable, argnums: argnums_t = 0, has_aux: bool = False
-) -> Callable:
+    func: Callable[..., Any], argnums: argnums_t = 0, has_aux: bool = False
+) -> Callable[..., Any]:
     warn_deprecated("grad_and_value")
     return apis.grad_and_value(func, argnums, has_aux)
 
 
-def vjp(func: Callable, *primals, has_aux: bool = False):
+def vjp(func: Callable[..., Any], *primals: Any, has_aux: bool = False) -> Any:
     warn_deprecated("vjp")
     return _impl.vjp(func, *primals, has_aux=has_aux)
 
 
 def jvp(
-    func: Callable,
+    func: Callable[..., Any],
     primals: Any,
     tangents: Any,
     *,
     strict: bool = False,
     has_aux: bool = False,
-):
+) -> Any:
     warn_deprecated("jvp")
     return _impl.jvp(func, primals, tangents, strict=strict, has_aux=has_aux)
 
 
 def jacrev(
-    func: Callable,
-    argnums: Union[int, tuple[int, ...]] = 0,
+    func: Callable[..., Any],
+    argnums: int | tuple[int, ...] = 0,
     *,
-    has_aux=False,
-    chunk_size: Optional[int] = None,
-    _preallocate_and_copy=False,
-):
+    has_aux: bool = False,
+    chunk_size: int | None = None,
+    _preallocate_and_copy: bool = False,
+) -> Callable[..., Any]:
     warn_deprecated("jacrev")
     return _impl.jacrev(
         func,
@@ -116,39 +129,41 @@ def jacrev(
 
 
 def jacfwd(
-    func: Callable,
+    func: Callable[..., Any],
     argnums: argnums_t = 0,
     has_aux: bool = False,
     *,
     randomness: str = "error",
-):
+) -> Callable[..., Any]:
     warn_deprecated("jacfwd")
     return _impl.jacfwd(func, argnums, has_aux, randomness=randomness)
 
 
-def hessian(func, argnums=0):
+def hessian(func: Callable[..., Any], argnums: int = 0) -> Callable[..., Any]:
     warn_deprecated("hessian")
     return _impl.hessian(func, argnums=argnums)
 
 
-def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
+def functionalize(
+    func: Callable[..., Any], *, remove: str = "mutations"
+) -> Callable[..., Any]:
     warn_deprecated("functionalize")
     return _impl.functionalize(func, remove=remove)
 
 
-def make_functional(model: nn.Module, disable_autograd_tracking: bool = False):
+def make_functional(model: nn.Module, disable_autograd_tracking: bool = False) -> Any:
     warn_deprecated("make_functional", "torch.func.functional_call")
     return _nn_impl.make_functional(model, disable_autograd_tracking)
 
 
 def make_functional_with_buffers(
     model: nn.Module, disable_autograd_tracking: bool = False
-):
+) -> Any:
     warn_deprecated("make_functional_with_buffers", "torch.func.functional_call")
     return _nn_impl.make_functional_with_buffers(model, disable_autograd_tracking)
 
 
-def combine_state_for_ensemble(models):
+def combine_state_for_ensemble(models: list[nn.Module]) -> Any:
     warn_deprecated("combine_state_for_ensemble", "torch.func.stack_module_state")
     return _nn_impl.combine_state_for_ensemble(models)
 
