@@ -20,7 +20,8 @@ class TensorInfo:
     def __post_init__(self) -> None:
         from ._dim_entry import DimEntry
 
-        assert all(isinstance(l, DimEntry) for l in self.levels)
+        if not all(isinstance(l, DimEntry) for l in self.levels):
+            raise AssertionError("All levels must be DimEntry instances")
 
     def ndim(self) -> int:
         from ._dim_entry import ndim_of_levels

@@ -133,6 +133,9 @@ class TransformGetItemToIndex(TorchFunctionMode):
     # scalar and create a view. We do not want that behavior in this case, so we
     # use this torchfunctionmode to override that behavior for score_mod
     # wherever we're running it.
+    #
+    # We also convert integer indices to 0-D tensors so that temp[0] produces
+    # the same backward graph as temp[0 * q_idx] (zeros_and_scatter with atomic_add).
     def __torch_function__(
         self,
         func: OpOverload,
@@ -141,9 +144,17 @@ class TransformGetItemToIndex(TorchFunctionMode):
         kwargs: Optional[dict[str, object]] = None,
     ) -> object:
         if func is torch.Tensor.__getitem__:
+            tensor_to_index = args[0]
+            assert isinstance(tensor_to_index, torch.Tensor)
             index_args = pytree.tree_leaves(args[1])
-            if all(isinstance(x, torch.Tensor) for x in index_args):
-                return mod_index(args[0], index_args)
+            if all(isinstance(x, (torch.Tensor, int)) for x in index_args):
+                converted_indices = [
+                    torch.tensor(x, dtype=torch.int64, device=tensor_to_index.device)
+                    if isinstance(x, int)
+                    else x
+                    for x in index_args
+                ]
+                return mod_index(tensor_to_index, converted_indices)
         return func(*args, **(kwargs or {}))
 
 

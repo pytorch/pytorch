@@ -58,6 +58,10 @@ from torch import Tensor
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
+from torch._higher_order_ops.cudagraph_conditional_nodes import (
+    ControlFlowOpWarmupDispatchMode,
+    CUDAGraphCaptureControlFlowOpDispatchMode,
+)
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -719,6 +723,7 @@ class CUDAWarmupNode:
             _use_cuda_memory_pool_manager(
                 self.device_index, self.cuda_graphs_pool, self.stream
             ),
+            ControlFlowOpWarmupDispatchMode(),
             get_history_recording(),
         ):
             out = self.wrapped_function.model(new_inputs)
@@ -1311,6 +1316,7 @@ class CUDAGraphNode:
                 pool=self.cuda_graphs_pool,
                 capture_error_mode="thread_local",
             ),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
             get_history_recording(),
         ):
             static_outputs = model(inputs)
@@ -2241,8 +2247,9 @@ class CUDAGraphTreeManager:
                     if log.isEnabledFor(logging.DEBUG):
                         unexpected_rerecord_reason = status_logger()
                         log.debug(
-                            "function %d re-recording due to %s",
-                            function_id.id,
+                            "[%s] Re-recording function=%s, reason=%s",
+                            self.compile_id,
+                            self.get_func_name(function_id),
                             unexpected_rerecord_reason,
                         )
                     else:
@@ -2331,8 +2338,8 @@ class CUDAGraphTreeManager:
         ):
             graph_id = self.new_graph_id()
             log.debug(
-                "Recording function %d (%s) of graph recording id %d, inputs: %s",
-                function_id.id,
+                "[%s] Recording function=%s, cuda_graph_id=%d, inputs: %s",
+                self.compile_id,
                 self.get_func_name(function_id),
                 graph_id.id,
                 format_inputs_log(new_inputs),
@@ -2376,11 +2383,15 @@ class CUDAGraphTreeManager:
         already_warm = function_id in self.warmed_up_functions
         func_name = self.get_func_name(function_id)
         if not already_warm:
-            log.debug("Running warmup of function %d (%s)", function_id.id, func_name)
+            log.debug(
+                "[%s] Running warmup function=%s",
+                self.compile_id,
+                func_name,
+            )
         else:
             log.debug(
-                "Running eager of function %d (%s) because ancestor needed to warm up",
-                function_id.id,
+                "[%s] Running eager function=%s",
+                self.compile_id,
                 func_name,
             )
         self.warmed_up_functions.add(function_id)

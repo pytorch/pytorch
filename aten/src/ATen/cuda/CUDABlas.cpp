@@ -478,8 +478,8 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
-  CuBlasLtMatrixLayout Adesc(abType, m, k, lda, opa == CUBLAS_OP_T);
-  CuBlasLtMatrixLayout Bdesc(abType, k, n, ldb, opb == CUBLAS_OP_T);
+  CuBlasLtMatrixLayout Adesc(abType, m, k, lda, opa != CUBLAS_OP_N);
+  CuBlasLtMatrixLayout Bdesc(abType, k, n, ldb, opb != CUBLAS_OP_N);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, ldc);
 
   if (num_batches > 1) {
@@ -575,9 +575,9 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
       "bgemm_internal_cublaslt error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
       " when calling cublasLtMatmul with transpose_mat1 ",
-      (opa == CUBLAS_OP_T),
+      transa,
       " transpose_mat2 ",
-      (opb == CUBLAS_OP_T),
+      transb,
       " m ",
       m,
       " n ",

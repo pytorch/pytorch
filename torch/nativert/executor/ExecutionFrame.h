@@ -111,6 +111,18 @@ class ExecutionFrame {
     }
   }
 
+  // Clears all non-persistent, non-managed intermediate values.
+  // This is used when returning frames to the pool to prevent stale
+  // tensor data from persisting across frame reuses (e.g. during
+  // rebatching with varying batch sizes).
+  void clearNonPersistentValues() {
+    for (size_t i = 0; i < allValues_.size(); ++i) {
+      if (!persistent_[i] && !isManagedValue(static_cast<ValueId>(i))) {
+        allValues_[i] = c10::IValue();
+      }
+    }
+  }
+
   void destroyBorrowedIValues() {
     for (const auto& id : borrowedValueIds_) {
       c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(getIValue(id));

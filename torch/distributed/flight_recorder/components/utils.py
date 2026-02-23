@@ -60,7 +60,6 @@ def format_frame(frame: dict[str, str]) -> str:
 def format_frames(frames: list[dict[str, str]]) -> str:
     formatted_frames = []
     for frame in frames:
-        # pyrefly: ignore [bad-argument-type]
         formatted_frames.append(format_frame(frame))
     return "\n".join(formatted_frames)
 

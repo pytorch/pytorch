@@ -227,10 +227,13 @@ class TestSDPA(NNTestCase):
         q_privateuse1 = q_cpu.to("openreg")
         k_privateuse1 = k_cpu.to("openreg")
         v_privateuse1 = v_cpu.to("openreg")
-        assert (
+        if (
             torch._fused_sdp_choice(q_privateuse1, k_privateuse1, v_privateuse1)
-            == SDPBackend.OVERRIDEABLE.value
-        )
+            != SDPBackend.OVERRIDEABLE.value
+        ):
+            raise AssertionError(
+                "Expected _fused_sdp_choice to return SDPBackend.OVERRIDEABLE.value"
+            )
 
     def test_scaled_dot_product_fused_attention_overrideable(self):
         """Test scaled dot product fused attention overrideable forward"""
