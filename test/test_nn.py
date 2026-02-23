@@ -12772,7 +12772,193 @@ if __name__ == '__main__':
         self.assertTrue(has_cuda_assert or has_hip_assert,
                         f"Expected device assert error in stderr, got: {stderr}")
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_cross_entropy_loss_half_precision_no_overflow(self, device, dtype):
+        # test for Issue: https://github.com/pytorch/pytorch/issues/85791
+        # regression test for fp16/bf16 overflow during reduction accumulation.
+        torch.manual_seed(42)
 
+        batch_size = 16
+        num_classes = 1024
+        seq_len = 512
+
+        input_fp32 = torch.randn(batch_size, num_classes, seq_len, device=device, dtype=torch.float32)
+        target = torch.randint(0, num_classes, (batch_size, seq_len), device=device)
+
+        # test both mean and sum reductions (these use fp32 accumulation for half precision)
+        for reduction in ['mean', 'sum']:
+            loss_fn = nn.CrossEntropyLoss(reduction=reduction)
+
+            # compute loss in fp32 as reference
+            loss_fp32 = loss_fn(input_fp32, target)
+
+            # compute loss in fp16/bf16
+            input_half = input_fp32.to(dtype)
+            loss_half = loss_fn(input_half, target)
+
+            # the loss should not be inf or nan
+            self.assertFalse(
+                torch.isnan(loss_half).any(),
+                f"{dtype} loss is NaN with reduction={reduction}")
+            self.assertFalse(
+                torch.isinf(loss_half).any(),
+                f"{dtype} loss is inf with reduction={reduction}")
+
+            self.assertEqual(
+                loss_half.to(torch.float32), loss_fp32,
+                rtol=1e-2, atol=1e-1, exact_dtype=False,
+                msg=f"Loss mismatch for {dtype} with reduction={reduction}")
+
+        # test reduction='none'
+        loss_fn_none = nn.CrossEntropyLoss(reduction='none')
+        input_half = input_fp32.to(dtype)
+        loss_none = loss_fn_none(input_half, target)
+
+        self.assertFalse(torch.isnan(loss_none).any())
+        self.assertFalse(torch.isinf(loss_none).any())
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_cross_entropy_loss_half_precision_with_weights_and_ignore(self, device, dtype):
+        # test for issue: https://github.com/pytorch/pytorch/issues/85791
+        # regression test for fp16/bf16 overflow during reduction accumulation with weights and ignore_index.
+        # This test validates the optimized FP16 compute + FP32 reduction path for weighted cross-entropy.
+        torch.manual_seed(123)
+
+        batch_size = 512
+        num_classes = 256
+        ignore_idx = -100
+
+        input_fp32 = torch.randn(batch_size, num_classes, device=device, dtype=torch.float32)
+        target = torch.randint(0, num_classes, (batch_size,), device=device)
+
+        # mark some targets as ignored (20% of samples)
+        target[::5] = ignore_idx
+
+        # create random class weights
+        weight_fp32 = torch.rand(num_classes, device=device, dtype=torch.float32)
+
+        for reduction in ['mean', 'sum']:
+            # test with weights and ignore_index
+            loss_fn = nn.CrossEntropyLoss(weight=weight_fp32, ignore_index=ignore_idx, reduction=reduction)
+
+            # FP32 reference
+            loss_fp32 = loss_fn(input_fp32, target)
+
+            # FP16/BF16 test
+            input_half = input_fp32.to(dtype)
+
+            loss_fn_half = nn.CrossEntropyLoss(weight=weight_fp32, ignore_index=ignore_idx, reduction=reduction)
+            loss_half = loss_fn_half(input_half, target)
+
+            # verify no overflow
+            self.assertFalse(
+                torch.isnan(loss_half).any(),
+                f"{dtype} loss is NaN with weights and ignore_index, reduction={reduction}")
+            self.assertFalse(
+                torch.isinf(loss_half).any(),
+                f"{dtype} loss is inf with weights and ignore_index, reduction={reduction}")
+
+            self.assertEqual(
+                loss_half.to(torch.float32), loss_fp32,
+                rtol=1e-2, atol=1e-1, exact_dtype=False,
+                msg=f"Loss mismatch for {dtype} with weights+ignore, reduction={reduction}")
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_nll_loss_half_precision_no_overflow(self, device, dtype):
+        # test for issue: https://github.com/pytorch/pytorch/issues/85791
+        # regression test for fp16/bf16 overflow during reduction accumulation in NLLLoss.
+        # This validates that the fix works for direct NLLLoss calls, not just CrossEntropyLoss.
+        torch.manual_seed(42)
+
+        batch_size = 512
+        num_classes = 1024
+
+        # Create log-probabilities (input to NLLLoss)
+        log_probs_fp32 = torch.randn(batch_size, num_classes, device=device, dtype=torch.float32)
+        log_probs_fp32 = F.log_softmax(log_probs_fp32, dim=1)
+
+        target = torch.randint(0, num_classes, (batch_size,), device=device)
+
+        # test both mean and sum reductions (these use fp32 accumulation for half precision)
+        for reduction in ['mean', 'sum']:
+            loss_fn = nn.NLLLoss(reduction=reduction)
+
+            # compute loss in fp32 as reference
+            loss_fp32 = loss_fn(log_probs_fp32, target)
+
+            # compute loss in fp16/bf16
+            log_probs_half = log_probs_fp32.to(dtype)
+            loss_half = loss_fn(log_probs_half, target)
+
+            # the loss should not be inf or nan
+            self.assertFalse(
+                torch.isnan(loss_half).any(),
+                f"{dtype} NLLLoss is NaN with reduction={reduction}")
+            self.assertFalse(
+                torch.isinf(loss_half).any(),
+                f"{dtype} NLLLoss is inf with reduction={reduction}")
+
+            self.assertEqual(
+                loss_half.to(torch.float32), loss_fp32,
+                rtol=1e-2, atol=1e-1, exact_dtype=False,
+                msg=f"NLLLoss mismatch for {dtype} with reduction={reduction}")
+
+        # test reduction='none' (should work fine in native precision)
+        loss_fn_none = nn.NLLLoss(reduction='none')
+        log_probs_half = log_probs_fp32.to(dtype)
+        loss_none = loss_fn_none(log_probs_half, target)
+
+        self.assertFalse(torch.isnan(loss_none).any())
+        self.assertFalse(torch.isinf(loss_none).any())
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_nll_loss_half_precision_with_weights_and_ignore(self, device, dtype):
+        # test for issue: https://github.com/pytorch/pytorch/issues/85791
+        # regression test for fp16/bf16 overflow during reduction accumulation in NLLLoss
+        # with weights and ignore_index. This validates the complete fix including edge cases.
+        torch.manual_seed(123)
+
+        batch_size = 512
+        num_classes = 256
+        ignore_idx = -100
+
+        # Create log-probabilities
+        log_probs_fp32 = torch.randn(batch_size, num_classes, device=device, dtype=torch.float32)
+        log_probs_fp32 = F.log_softmax(log_probs_fp32, dim=1)
+
+        target = torch.randint(0, num_classes, (batch_size,), device=device)
+
+        # mark some targets as ignored (20% of samples)
+        target[::5] = ignore_idx
+
+        # create random class weights
+        weight_fp32 = torch.rand(num_classes, device=device, dtype=torch.float32)
+
+        for reduction in ['mean', 'sum']:
+            # test with weights and ignore_index
+            loss_fn = nn.NLLLoss(weight=weight_fp32, ignore_index=ignore_idx, reduction=reduction)
+
+            # FP32 reference
+            loss_fp32 = loss_fn(log_probs_fp32, target)
+
+            # FP16/BF16 test
+            log_probs_half = log_probs_fp32.to(dtype)
+
+            loss_fn_half = nn.NLLLoss(weight=weight_fp32, ignore_index=ignore_idx, reduction=reduction)
+            loss_half = loss_fn_half(log_probs_half, target)
+
+            # verify no overflow
+            self.assertFalse(
+                torch.isnan(loss_half).any(),
+                f"{dtype} NLLLoss is NaN with weights and ignore_index, reduction={reduction}")
+            self.assertFalse(
+                torch.isinf(loss_half).any(),
+                f"{dtype} NLLLoss is inf with weights and ignore_index, reduction={reduction}")
+
+            self.assertEqual(
+                loss_half.to(torch.float32), loss_fp32,
+                rtol=1e-2, atol=1e-1, exact_dtype=False,
+                msg=f"NLLLoss mismatch for {dtype} with weights+ignore, reduction={reduction}")
 
     def test_cross_entropy_loss_prob_target_all_reductions(self, device):
         # Test with k-dimensional loss.

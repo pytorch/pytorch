@@ -312,33 +312,78 @@ void nll_loss_forward_out_cpu_template(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16,
-      ScalarType::Half,
-      input.scalar_type(),
-      "nll_loss_out_frame",
-      [&] {
+
+  const auto input_dtype = input.scalar_type();
+  const bool is_half_precision = (input_dtype == ScalarType::Half || input_dtype == ScalarType::BFloat16);
+
+  // Fast path for FP32/FP64 (common case)
+  if (C10_LIKELY(!is_half_precision)) {
+    AT_DISPATCH_FLOATING_TYPES(
+        input_dtype, "nll_loss_out_frame", [&] {
+          if (target.scalar_type() == kByte) {
+            nll_loss_out_frame<scalar_t, uint8_t>(
+                output, total_weight, input, target, weight, reduction, ignore_index);
+          } else {
+            nll_loss_out_frame<scalar_t, int64_t>(
+                output, total_weight, input, target, weight, reduction, ignore_index);
+          }
+        });
+    return;
+  }
+
+  // FP16/BF16 with reduction='none'
+  if (C10_LIKELY(reduction == Reduction::None)) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::BFloat16, ScalarType::Half, input_dtype, "nll_loss_out_frame", [&] {
+          if (target.scalar_type() == kByte) {
+            nll_loss_out_frame<scalar_t, uint8_t>(
+                output, total_weight, input, target, weight, reduction, ignore_index);
+          } else {
+            nll_loss_out_frame<scalar_t, int64_t>(
+                output, total_weight, input, target, weight, reduction, ignore_index);
+          }
+        });
+    return;
+  }
+
+  // FP16/BF16 with reduction: compute element-wise loss in native precision
+  // but perform reduction in FP32 to prevent overflow
+
+  // Convert weight to input dtype for element-wise operations if needed
+  const Tensor& weight_for_loss = weight.defined() && weight.scalar_type() != input_dtype
+      ? weight.to(input_dtype) : weight;
+
+  // Compute unreduced loss in native precision
+  auto output_unreduced = at::empty_like(input.select(-1, 0));
+  AT_DISPATCH_REDUCED_FLOATING_TYPES(
+      input_dtype, "nll_loss_out_frame", [&] {
         if (target.scalar_type() == kByte) {
           nll_loss_out_frame<scalar_t, uint8_t>(
-              output,
-              total_weight,
-              input,
-              target,
-              weight,
-              reduction,
-              ignore_index);
+              output_unreduced, total_weight, input, target, weight_for_loss,
+              Reduction::None, ignore_index);
         } else {
-          // assumed to be int64
           nll_loss_out_frame<scalar_t, int64_t>(
-              output,
-              total_weight,
-              input,
-              target,
-              weight,
-              reduction,
-              ignore_index);
+              output_unreduced, total_weight, input, target, weight_for_loss,
+              Reduction::None, ignore_index);
         }
       });
+
+  // Perform reduction in FP32 for numerical stability
+  auto sum_loss = output_unreduced.sum(ScalarType::Float);
+
+  // Compute normalization factor in FP32
+  auto valid_mask = target.ne(ignore_index);
+  auto valid_mask_flat = valid_mask.flatten();
+  Tensor norm_factor = weight.defined()
+      ? weight.gather(0, target.masked_fill(~valid_mask, 0).flatten())
+            .masked_fill(~valid_mask_flat, 0).to(ScalarType::Float).sum()
+      : valid_mask_flat.sum().to(ScalarType::Float);
+
+  // Store outputs - compute in FP32, then convert back to input dtype
+  auto result = (reduction == Reduction::Mean ? sum_loss / norm_factor : sum_loss)
+                    .to(input_dtype).item();
+  output.fill_(result);
+  total_weight.fill_(norm_factor.to(input_dtype).item());
 }
 
 template <typename scalar_t, typename target_t>
