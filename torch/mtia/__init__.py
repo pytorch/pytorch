@@ -186,7 +186,11 @@ def current_stream(device: Device = None) -> Stream:
             by :func:`~torch.mtia.current_device`, if :attr:`device` is ``None``
             (default).
     """
-    return torch._C._mtia_getCurrentStream(_get_device_index(device, optional=True))
+    if device is None:
+        device_idx = current_device()
+    else:
+        device_idx = _get_device_index(device, optional=True)
+    return torch._C._mtia_getCurrentStream(device_idx)
 
 
 def default_stream(device: Device = None) -> Stream:

@@ -2,9 +2,6 @@ from typing import Any
 
 import torch
 
-# The _get_device_index has been moved to torch.utils._get_device_index
-from torch._utils import _get_device_index as _torch_get_device_index
-
 
 def _get_device_index(
     device: Any, optional: bool = False, allow_cpu: bool = False
@@ -24,15 +21,23 @@ def _get_device_index(
     """
     if isinstance(device, int):
         return device
-    if isinstance(device, str):
-        device = torch.device(device)
-    if isinstance(device, torch.device):
-        if allow_cpu:
-            if device.type not in ["mtia", "cpu"]:
-                raise ValueError(f"Expected a mtia or cpu device, but got: {device}")
-        elif device.type != "mtia":
-            raise ValueError(f"Expected a mtia device, but got: {device}")
     if not torch.jit.is_scripting():
         if isinstance(device, torch.mtia.device):
             return device.idx
-    return _torch_get_device_index(device, optional, allow_cpu)
+    if isinstance(device, str):
+        device = torch.device(device)
+    device_idx: int | None = None
+    if isinstance(device, torch.device):
+        if not allow_cpu and device.type == "cpu":
+            raise ValueError(f"Expected a non cpu device, but got: {device}")
+        if device.type not in ["mtia", "cpu"]:
+            raise ValueError(f"Expected a mtia or cpu device, but got: {device}")
+        device_idx = -1 if device.type == "cpu" else device.index
+    if device_idx is None:
+        if optional:
+            device_idx = torch._C._accelerator_hooks_get_current_device()
+        else:
+            raise ValueError(
+                f"Expected a torch.device with a specified index or an integer, but got: {device}"
+            )
+    return device_idx
