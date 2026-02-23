@@ -1406,14 +1406,9 @@ class LoweringTest(MultiProcContinuousTest):
     @fresh_inductor_cache()
     def test_output_buffer_reuse(self):
         """
-        Verify that one_shot_all_reduce is lowered via ExternKernelOut
-        (not FallbackKernel), enabling its output to participate in
-        Inductor's AllocateLine.plan() buffer reuse.
-
-        With ExternKernelOut the allreduce output gets an ``out=`` parameter
-        in codegen, and the regular CUDA output buffer can be reused by
-        later ops.  With FallbackKernel the output is opaque and never
-        reused.
+        Verify that symm_mem ops are lowered via ExternKernelOut
+        (should_allocate()=True) so output buffers are visible to Inductor.
+        This is the foundation for subsequent PRs' P2P memory planning.
         """
         self._init_process()
 
@@ -1423,9 +1418,7 @@ class LoweringTest(MultiProcContinuousTest):
         w2 = torch.rand(N, N, device=self.device)
         w3 = torch.rand(N, N, device=self.device)
 
-        # Multi-layer TP pattern: mm -> allreduce -> mm -> allreduce -> mm -> allreduce
-        # The allreduce output from layer 1 should be reusable by layer 3's
-        # allreduce output (ping-pong pattern).
+        # Multi-layer TP pattern: mm -> allreduce, repeated 3 times.
         def func(x, w1, w2, w3):
             x = torch.mm(x, w1)
             x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
@@ -1438,24 +1431,21 @@ class LoweringTest(MultiProcContinuousTest):
         compiled = torch.compile(func, fullgraph=True)
         code = run_and_get_triton_code(compiled, x, w1, w2, w3)
 
-        # ExternKernelOut lowering produces out= calls for allreduce.
-        # 3 mm + 3 allreduce = 6 out= calls with ExternKernelOut.
-        # Without this change (FallbackKernel), only 3 out= (mm only).
+        # allreduce should use out= (ExternKernelOut, not FallbackKernel)
         out_calls = code.count(", out=")
         self.assertGreaterEqual(
             out_calls,
             6,
-            f"Expected at least 6 out= calls (3 mm + 3 allreduce), got {out_calls}. "
+            f"Expected at least 6 out= calls, got {out_calls}. "
             "one_shot_all_reduce may not be lowered via ExternKernelOut.",
         )
 
-        # With ExternKernelOut, allreduce outputs can be reused across layers.
+        # Output buffers should be reused across layers (ping-pong).
         reuse_count = code.count("# reuse")
         self.assertGreaterEqual(
             reuse_count,
             2,
-            f"Expected at least 2 buffer reuses, got {reuse_count}. "
-            "Allreduce output buffers may not be participating in buffer reuse.",
+            f"Expected at least 2 buffer reuses, got {reuse_count}.",
         )
 
     @skip_if_rocm_multiprocess  # test requires support for registered buffers
