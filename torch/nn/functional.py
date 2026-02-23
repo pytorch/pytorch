@@ -2841,7 +2841,9 @@ def batch_norm(
         _verify_batch_size(input.size())
 
     if training and eps <= 0.0:
-        raise ValueError(f"batch_norm eps must be positive during training, but got {eps}")
+        raise ValueError(
+            f"batch_norm eps must be positive during training, but got {eps}"
+        )
     elif eps < 0.0:
         raise ValueError(f"batch_norm eps must be non-negative, but got {eps}")
 
