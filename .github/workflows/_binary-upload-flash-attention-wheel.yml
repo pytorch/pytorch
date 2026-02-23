@@ -54,6 +54,7 @@ jobs:
         with:
           name: flash-attn-3-wheel-cu${{ matrix.build_cuda_short }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/artifacts
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.linux_run_id }}
 
       - name: Upload binaries to test index
@@ -100,6 +101,7 @@ jobs:
         with:
           name: flash-attn-3-wheel-cu${{ matrix.build_cuda_short }}-windows_amd64
           path: ${{ runner.temp }}/artifacts
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.windows_run_id }}
 
       - name: Upload binaries to test index

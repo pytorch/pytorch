@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
-    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
@@ -145,7 +144,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
-    @skipIfRocm
+    @torch._inductor.config.patch({"layout_optimization": True})
+    @patch("torch.cuda.is_available", lambda: False)
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -5927,6 +5927,48 @@ class CPUReproTests(TestCase):
                 atol = 1e-2 if dtype == torch.bfloat16 else 1e-5
                 rtol = 1e-2 if dtype == torch.bfloat16 else 1e-5
                 torch.testing.assert_close(ref_res, res, atol=atol, rtol=rtol)
+
+    # https://github.com/pytorch/pytorch/issues/136640
+    def test_inductor_dynamic_shapes_broadcasting(self) -> None:
+        def fn(x, y):
+            x_view = x.view(-1, 4)
+            y_view = y.view(-1, 4)
+            return x_view * y_view
+
+        x = torch.randn(4)
+        y = torch.randn(8)
+        out_ref = fn(x, y)
+        out_test = torch.compile(fn, dynamic=True, backend="inductor")(x, y)
+        self.assertEqual(out_ref, out_test)
+
+    # https://github.com/pytorch/pytorch/issues/119162
+    def test_inductor_rng_default_dtype(self) -> None:
+        @torch.compile
+        def fn():
+            tmp = torch.randn(4, 4, dtype=torch.bfloat16)
+            return tmp
+
+        try:
+            old = torch.get_default_dtype()
+            torch.set_default_dtype(torch.bfloat16)
+            out = fn()
+        finally:
+            torch.set_default_dtype(old)
+        # output dtype should be float32
+        self.assertEqual(out.dtype, torch.bfloat16)
+
+    def test_inductor_no_recursionerror_on_for_loops(self):
+        def forward(x):
+            for _ in range(10000):
+                x = 1.0 * x
+            return x
+
+        self.assertTrue(
+            same(
+                torch.compile(forward, backend="inductor")(torch.tensor([1.0])),
+                torch.tensor([1.0]),
+            )
+        )
 
 
 if __name__ == "__main__":
