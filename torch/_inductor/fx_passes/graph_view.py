@@ -111,7 +111,7 @@ def _is_root(stack: str) -> bool:
 
 def make_graph_view(
     graph: fx.Graph,
-    module_stack_fn: None | Callable[[fx.Node], list[tuple[str, type[Any]]]] = None,
+    module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
 ) -> Optional[GraphView]:
     """
     Code from: https://github.com/meta-pytorch/autoparallel/pull/158

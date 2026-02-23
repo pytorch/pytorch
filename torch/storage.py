@@ -453,7 +453,10 @@ def _share_memory_lock_protected(fn):
             if to_free is not None:
                 # Ensure that the cdata from the storage didn't change and only
                 # the data_ptr did.
-                assert self._cdata == to_free
+                if self._cdata != to_free:
+                    raise AssertionError(
+                        f"storage cdata changed unexpectedly: expected {to_free}, got {self._cdata}"
+                    )
                 with _share_memory_lock:
                     _share_memory_map[to_free].release()
                     del _share_memory_map[to_free]
@@ -630,7 +633,10 @@ def _get_always_warn_typed_storage_removal():
 
 def _set_always_warn_typed_storage_removal(always_warn):
     global _always_warn_typed_storage_removal
-    assert isinstance(always_warn, bool)
+    if not isinstance(always_warn, bool):
+        raise AssertionError(
+            f"always_warn must be bool, got {type(always_warn).__name__}"
+        )
     _always_warn_typed_storage_removal = always_warn
 
 
@@ -887,7 +893,10 @@ class TypedStorage:
         return self._untyped_storage
 
     def _new_wrapped_storage(self, untyped_storage) -> Self:
-        assert type(untyped_storage) is torch.UntypedStorage
+        if type(untyped_storage) is not torch.UntypedStorage:
+            raise AssertionError(
+                f"expected UntypedStorage, got {type(untyped_storage).__name__}"
+            )
 
         if type(self) is TypedStorage:
             return cast(

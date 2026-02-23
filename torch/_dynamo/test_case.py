@@ -94,7 +94,7 @@ class TestCase(TorchTestCase):
     def tearDown(self) -> None:
         trace_log.removeHandler(self.handler)
         for k, v in utils.counters.items():
-            print(k, v.most_common())
+            log.debug("%s %s", k, v.most_common())
         reset()
         utils.counters.clear()
         torch._C._autograd._saved_tensors_hooks_enable()
@@ -169,6 +169,7 @@ class CPythonTestCase(TestCase):
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
+    # pyrefly: ignore [bad-override]
     assertDictEqual = polyfills.assert_dict_equal
     # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
@@ -239,3 +240,7 @@ class CPythonTestCase(TestCase):
                 enable_trace_unittest=True,
             ),
         )
+
+    # pyrefly: ignore [implicit-any]
+    def wrap_with_policy(self, method_name: str, policy: Callable) -> None:
+        pass

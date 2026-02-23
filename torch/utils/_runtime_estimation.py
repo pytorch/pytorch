@@ -2,7 +2,7 @@ import torch
 from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch.fx.experimental.symbolic_shapes import (
     has_hint,
-    hint_int,
+    size_hint,
     statically_known_true,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -90,9 +90,10 @@ def get_compute_time(func_packet, args, kwargs, out, out_dtypes) -> float:  # ty
         float: The estimated compute time in nanoseconds.
     """
     if func_packet in flop_registry:
-        assert len(out_dtypes) == 1, (
-            f"Only support single out dtype got {out_dtypes} for {func_packet}"
-        )
+        if len(out_dtypes) != 1:
+            raise AssertionError(
+                f"Only support single out dtype got {out_dtypes} for {func_packet}"
+            )
         dtype = out_dtypes.pop()
         # This actually gives peta-FLOPs/s hence multiply by 1e15 to get the FLOPs/s
         peak_gpu_flops = get_device_tflops(dtype) * 1e15
@@ -125,7 +126,7 @@ def get_num_bytes(t: torch.Tensor) -> int:
 
         # For dims with stride=0 (expanded/broadcast), only 1 element accessed
         if not statically_known_true(stride == 0):
-            real_numel *= hint_int(size)
+            real_numel *= size_hint(size)
 
     return real_numel * t.element_size()
 

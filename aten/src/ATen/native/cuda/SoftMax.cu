@@ -280,7 +280,7 @@ __global__ void cunn_SpatialSoftMaxForward(
       ////////////////////////////////////////////////////////////
 
       if (blockDim.x > 1) {
-        accscalar_t max_input = at::numeric_limits<accscalar_t>::lowest();
+        accscalar_t max_input = std::numeric_limits<accscalar_t>::lowest();
         for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
           const accscalar_t value = static_cast<accscalar_t>(input[data_offset + d * dim_stride]);
           max_input = Max<accscalar_t>()(max_input, value);
@@ -297,7 +297,7 @@ __global__ void cunn_SpatialSoftMaxForward(
         for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x)
           output[data_offset + d * dim_stride] = epilogue(input[data_offset + d * dim_stride]);
       } else {
-        accscalar_t max_input = at::numeric_limits<accscalar_t>::lowest();
+        accscalar_t max_input = std::numeric_limits<accscalar_t>::lowest();
         for (index_t d = threadIdx.x; d < dim_size; d += blockDim.x) {
           const accscalar_t value = static_cast<accscalar_t>(input[data_offset + d * dim_stride]);
           max_input = Max<accscalar_t>()(max_input, value);
@@ -712,9 +712,9 @@ cunn_SoftMaxForwardFast(outscalar_t *output, const scalar_t *input, int classes)
 
   // find the max
   accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
-    shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+    shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
   accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
-    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+    Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
 
   // reduce all values
   accscalar_t threadExp = ilpReduce<SumExpfFloat, ILP, scalar_t, accscalar_t>(
@@ -746,9 +746,9 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
 
   // find the max
   accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
-    shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+    shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
   accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
-    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+    Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
 
   // reduce all values
   accscalar_t threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t>(
@@ -777,7 +777,7 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
-  accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
+  accscalar_t threadMax = std::numeric_limits<accscalar_t>::lowest();
   accscalar_t threadExp = static_cast<accscalar_t>(0);
 
   // Load the elements from gmem into reg, and get the max for current thread.
@@ -794,7 +794,7 @@ cunn_SoftMaxForwardReg(outscalar_t *output, const scalar_t *input, index_t class
 
   // Reduce to the max for block
   accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
-    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+    Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
 
   SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
   // reduce all values
@@ -830,7 +830,7 @@ cunn_SoftMaxForwardGmem(outscalar_t *output, const scalar_t *input, index_t clas
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
-  accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
+  accscalar_t threadMax = std::numeric_limits<accscalar_t>::lowest();
   accscalar_t threadExp = static_cast<accscalar_t>(0);
 
   // The first smem segment is used to cache input values and the last
@@ -852,7 +852,7 @@ cunn_SoftMaxForwardGmem(outscalar_t *output, const scalar_t *input, index_t clas
   }
 
   accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(smem_reduction_cache, threadMax,
-    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+    Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
 
   // Do the second step in sum exp calculation:
   SumExpfFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
@@ -891,7 +891,7 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
-  accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
+  accscalar_t threadMax = std::numeric_limits<accscalar_t>::lowest();
   accscalar_t threadExp = static_cast<accscalar_t>(0);
 
   // The first smem segment is used to cache input values and the last
@@ -919,7 +919,7 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
   }
 
   accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(smem_reduction_cache, threadMax,
-    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+    Max<accscalar_t>(), std::numeric_limits<accscalar_t>::lowest());
 
   // Reload input from shared memory to compute the sum. The previous
   // reduce has performed a __syncthreads() so the smem contents are populated.

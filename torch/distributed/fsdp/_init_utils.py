@@ -275,8 +275,8 @@ def _init_ignored_module_states(
     module: nn.Module,
     ignored_modules: Iterable[torch.nn.Module] | None,
     ignored_states: Iterable[torch.nn.Parameter]
-    | None
-    | Iterable[torch.nn.Module] = None,
+    | Iterable[torch.nn.Module]
+    | None = None,
 ) -> _FSDPState:
     if ignored_modules is not None and ignored_states is not None:
         raise ValueError(

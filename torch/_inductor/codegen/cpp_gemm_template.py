@@ -535,7 +535,7 @@ def gen_2d_view_of_epilogue_buf(
             #       size (1, 18, 18, 512), stride (165888, 9216, 512, 1)
             stride_order = list(
                 ir.get_stride_order(
-                    V.graph.sizevars.size_hints(epilogue_node.get_stride())
+                    V.graph.sizevars.guarding_hints_or_throw(epilogue_node.get_stride())
                 )
             )
             fill_order = ir.stride_order2fill_order(stride_order)
@@ -602,7 +602,13 @@ class CppGemmTemplate(CppTemplate):
         should_block_weights: bool = True,
         name="packed_gemm",
     ) -> None:
-        assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
+        assert layout.dtype in [
+            torch.float,
+            torch.bfloat16,
+            torch.half,
+            torch.uint8,
+            torch.int8,
+        ]
         super().__init__(
             name,
             input_nodes,
@@ -768,16 +774,16 @@ class CppGemmTemplate(CppTemplate):
             L1_limit_factor = 0.8
             L2_limit_factor = 0.5
 
-            L1_cache_size = (
-                torch._C._cpu._L1d_cache_size()
+            L1_cache_size = torch.cpu.get_capabilities().get(
+                "l1d_cache_size", 0
             )  # per core cache size in Bytes
             assert L1_cache_size > 0, (
                 f"Expect L1_cache_size > 0 but got {L1_cache_size}"
             )
             L1 = L1_cache_size * L1_limit_factor
 
-            L2_cache_size = (
-                torch._C._cpu._L2_cache_size()
+            L2_cache_size = torch.cpu.get_capabilities().get(
+                "l2_cache_size", 0
             )  # per core cache size in Bytes
             assert L2_cache_size > 0, (
                 f"Expect L2_cache_size > 0 but got {L2_cache_size}"
@@ -988,8 +994,10 @@ class CppGemmTemplate(CppTemplate):
                 if has_free_symbols(view_size):
                     # If batch size B is dynamic, we need to set the batch size and possibly stride
                     assert not has_free_symbols(view_size[1:])
-                    view_size[:] = V.graph.sizevars.size_hints(view_size)
-                    view_stride[:] = V.graph.sizevars.size_hints(view_stride)
+                    view_size[:] = V.graph.sizevars.guarding_hints_or_throw(view_size)
+                    view_stride[:] = V.graph.sizevars.guarding_hints_or_throw(
+                        view_stride
+                    )
                 # With the assumptation that W is the storage of unwrap view
                 # thus view it back here
                 new_inputs[1] = new_inputs[1].as_strided(
@@ -1535,7 +1543,6 @@ class CppGemmTemplate(CppTemplate):
             self.n,
             self.k,
             input_dtype=X.get_dtype(),
-            # pyrefly: ignore [missing-attribute]
             input2_dtype=W.get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
@@ -1553,10 +1560,14 @@ class CppGemmTemplate(CppTemplate):
         if isinstance(micro_gemm, CppMicroBrgemm):
             counters["inductor"]["cpp_micro_brgemm_counter"] += 1
 
-        L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
+        L1_cache_size = torch.cpu.get_capabilities().get(
+            "l1d_cache_size", 0
+        )  # per core cache size in Bytes
         assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
 
-        L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
+        L2_cache_size = torch.cpu.get_capabilities().get(
+            "l2_cache_size", 0
+        )  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
         options = dict(

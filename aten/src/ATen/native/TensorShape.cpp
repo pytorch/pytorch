@@ -4842,7 +4842,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
   if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
     return self.clone();
   }
-  auto dtype_size = self.dtype().itemsize();
+  auto dtype_size = c10::SymInt(self.dtype().itemsize());
   auto nbytes = self.storage().sym_nbytes();
   TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
   auto numel = nbytes / dtype_size;

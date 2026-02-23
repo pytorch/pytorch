@@ -94,35 +94,37 @@ TEST_F(EventTest, EventElapsedTime) {
   EXPECT_EQ(orEventDestroy(end), orSuccess);
 }
 
-// TODO: recording events to a stream is not allowed
-// if the stream and the event are not on the same device
-// Uncomment this test case after the issue is fixed.
-// see #167819
-TEST_F(EventTest, DISABLED_EventElapsedTimeDifferentDevicesFails) {
-  orStream_t stream = nullptr;
-  EXPECT_EQ(orStreamCreate(&stream), orSuccess);
+TEST_F(EventTest, EventElapsedTimeDifferentDevicesFails) {
+  orStream_t stream1 = nullptr;
+  orStream_t stream2 = nullptr;
+  orEvent_t event1= nullptr;
+  orEvent_t event2 = nullptr;
 
-  orEvent_t start = nullptr;
-  orEvent_t end = nullptr;
-  EXPECT_EQ(orEventCreateWithFlags(&start, orEventEnableTiming), orSuccess);
-
-  EXPECT_EQ(orEventRecord(start, stream), orSuccess);
+  EXPECT_EQ(orSetDevice(0), orSuccess);
+  EXPECT_EQ(orEventCreateWithFlags(&event1, orEventEnableTiming), orSuccess);
+  EXPECT_EQ(orStreamCreate(&stream1), orSuccess);
 
   // Switch device before creating the end event to force a mismatch.
   EXPECT_EQ(orSetDevice(1), orSuccess);
-  EXPECT_EQ(orEventCreateWithFlags(&end, orEventEnableTiming), orSuccess);
-  EXPECT_EQ(orSetDevice(0), orSuccess);
+  EXPECT_EQ(orEventCreateWithFlags(&event2, orEventEnableTiming), orSuccess);
+  EXPECT_EQ(orStreamCreate(&stream2), orSuccess);
 
-  EXPECT_EQ(orEventRecord(end, stream), orSuccess);
-  EXPECT_EQ(orEventSynchronize(start), orSuccess);
-  EXPECT_EQ(orEventSynchronize(end), orSuccess);
+  // recording events to a stream is not allowed if the stream and the event are not on the same device
+  EXPECT_EQ(orEventRecord(event1, stream2), orErrorUnknown);
+  EXPECT_EQ(orEventRecord(event2, stream1), orErrorUnknown);
+
+  EXPECT_EQ(orEventRecord(event1, stream1), orSuccess);
+  EXPECT_EQ(orEventRecord(event2, stream2), orSuccess);
+  EXPECT_EQ(orEventSynchronize(event1), orSuccess);
+  EXPECT_EQ(orEventSynchronize(event2), orSuccess);
 
   float elapsed_ms = 0.0f;
-  EXPECT_EQ(orEventElapsedTime(&elapsed_ms, start, end), orErrorUnknown);
+  EXPECT_EQ(orEventElapsedTime(&elapsed_ms, event1, event2), orErrorUnknown);
 
-  EXPECT_EQ(orEventDestroy(start), orSuccess);
-  EXPECT_EQ(orEventDestroy(end), orSuccess);
-  EXPECT_EQ(orStreamDestroy(stream), orSuccess);
+  EXPECT_EQ(orEventDestroy(event1), orSuccess);
+  EXPECT_EQ(orEventDestroy(event2), orSuccess);
+  EXPECT_EQ(orStreamDestroy(stream1), orSuccess);
+  EXPECT_EQ(orStreamDestroy(stream2), orSuccess);
 }
 
 TEST_F(EventTest, EventElapsedTimeRequiresTimingFlag) {

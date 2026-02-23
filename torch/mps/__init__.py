@@ -6,8 +6,6 @@ performance can be achieved, by running work on the metal GPU(s).
 See https://developer.apple.com/documentation/metalperformanceshaders for more details.
 """
 
-from typing import Union
-
 import torch
 from torch import Tensor
 
@@ -34,7 +32,7 @@ def synchronize() -> None:
     return torch._C._mps_deviceSynchronize()
 
 
-def get_rng_state(device: Union[int, str, torch.device] = "mps") -> Tensor:
+def get_rng_state(device: int | str | torch.device = "mps") -> Tensor:
     r"""Returns the random number generator state as a ByteTensor.
 
     Args:
@@ -44,9 +42,7 @@ def get_rng_state(device: Union[int, str, torch.device] = "mps") -> Tensor:
     return _get_default_mps_generator().get_state()
 
 
-def set_rng_state(
-    new_state: Tensor, device: Union[int, str, torch.device] = "mps"
-) -> None:
+def set_rng_state(new_state: Tensor, device: int | str | torch.device = "mps") -> None:
     r"""Sets the random number generator state.
 
     Args:

@@ -26,6 +26,88 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
+    # When ROCM_VERSION=nightly, install ROCm from TheRock nightly wheels
+    if [[ "${ROCM_VERSION}" == "nightly" ]]; then
+      echo "install_rocm.sh: installing ROCm from TheRock nightly wheels"
+
+      # Clean any previous ROCm installation in the base CI image.
+      if [[ -d /opt/rocm ]]; then
+        echo "Removing existing /opt/rocm from base image"
+        rm -rf /opt/rocm
+      fi
+
+      # Determine theRock nightly URL based on GPU architecture
+      # Check BUILD_ENVIRONMENT or PYTORCH_ROCM_ARCH for the target GPU
+      if [[ -z "${THEROCK_NIGHTLY_INDEX_URL:-}" ]]; then
+        if [[ "${BUILD_ENVIRONMENT}" == *"gfx950"* ]] || [[ "${PYTORCH_ROCM_ARCH}" == *"gfx950"* ]]; then
+          # MI350 (gfx950)
+          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx950-dcgpu/"
+          echo "Detected gfx950 architecture - using MI350 theRock nightly repository"
+        else
+          # Default to MI300 (gfx942/gfx94X)
+          THEROCK_NIGHTLY_INDEX_URL="https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/"
+          echo "Using gfx94X (MI300) theRock nightly repository"
+        fi
+      fi
+
+      export THEROCK_NIGHTLY_INDEX_URL
+      echo "TheRock Index URL: ${THEROCK_NIGHTLY_INDEX_URL}"
+
+      python3 -m pip install \
+        --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
+        "rocm[libraries,devel]"
+
+      # Use the rocm-sdk CLI helper to populate environment defaults
+      ROCM_HOME="$(rocm-sdk path --root)"
+      ROCM_BIN="$(rocm-sdk path --bin)"
+      ROCM_CMAKE_PREFIX="$(rocm-sdk path --cmake)"
+
+      echo "ROCM_HOME=${ROCM_HOME}"
+      echo "ROCM_BIN=${ROCM_BIN}"
+      echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
+
+      export ROCM_HOME
+      export ROCM_PATH="${ROCM_HOME}"
+      export PATH="${ROCM_BIN}:${PATH}"
+      export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
+
+      # theRock bundles system dependencies like libdrm, liblzma in rocm_sysdeps
+      ROCM_SYSDEPS="${ROCM_HOME}/lib/rocm_sysdeps"
+      ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS}/include"
+      ROCM_SYSDEPS_PKGCONFIG="${ROCM_SYSDEPS}/lib/pkgconfig"
+
+      # Write environment to file that can be sourced by CI scripts and users
+      cat > /etc/rocm_env.sh << ROCM_ENV
+# ROCm paths
+export ROCM_PATH="${ROCM_HOME}"
+export ROCM_HOME="${ROCM_HOME}"
+export ROCM_SOURCE_DIR="${ROCM_HOME}"
+export ROCM_BIN="${ROCM_BIN}"
+export ROCM_CMAKE="${ROCM_CMAKE_PREFIX}"
+export PATH="${ROCM_BIN}:\${PATH}"
+export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+# Device library paths
+export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
+export ROCM_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
+# theRock system dependencies
+export ROCM_SYSDEPS_INCLUDE="${ROCM_SYSDEPS_INCLUDE}"
+export CPLUS_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${CPLUS_INCLUDE_PATH:-}"
+export C_INCLUDE_PATH="${ROCM_SYSDEPS_INCLUDE}:\${C_INCLUDE_PATH:-}"
+export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
+export LD_LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
+export LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
+export MAGMA_HOME="${ROCM_HOME}/magma"
+# Disable MSLK for theRock nightly (not yet supported)
+export USE_MSLK=0
+ROCM_ENV
+
+      # Append to bash.bashrc so interactive shells get the env vars
+      echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
+
+      echo "install_rocm.sh: TheRock nightly ROCm install complete"
+      exit 0
+    fi
+
     # Make sure rocm packages from repo.radeon.com have highest priority
     cat << EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
@@ -72,6 +154,29 @@ EOF
       fi
     fi
 
+    # ROCm 7.2 needs a fix from procprof sdk that isn't available until 7.2.1
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 7.2) ]]; then
+        git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+        pushd rocm-systems/
+        git sparse-checkout init --cone
+        git sparse-checkout set projects/rocprofiler-sdk shared/rocprofiler-compute
+        git checkout develop
+        git checkout rocm-7.2.0
+        git config --global user.email "you@example.com"
+        git config --global user.name "Your Name"
+        git cherry-pick a71cc3cc88ed68b24c40cefec77d764053044862
+        sudo apt install -y cmake libdw-dev libsqlite3-dev
+        cmake                                         \
+              -B rocprofiler-sdk-build                \
+              -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
+              -DCMAKE_PREFIX_PATH=/opt/rocm           \
+              -DGPU_TARGETS="${PYTORCH_ROCM_ARCH}"    \
+              projects/rocprofiler-sdk
+        cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
+        cmake --build rocprofiler-sdk-build --target install
+        popd
+    fi
+
     # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
     for kdb in /opt/rocm/share/miopen/db/*.kdb
     do
@@ -111,6 +216,24 @@ EOF
     fi
 
     pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
+
+    # Write environment to file that can be sourced by CI scripts and users
+    cat > /etc/rocm_env.sh << ROCM_ENV
+# ROCm paths
+export ROCM_PATH=/opt/rocm
+export ROCM_HOME=/opt/rocm
+export ROCM_SOURCE_DIR=/opt/rocm
+export ROCM_BIN=/opt/rocm/bin
+export ROCM_CMAKE=/opt/rocm
+export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:\${PATH}
+# Device library paths
+export ROCM_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
+export HIP_DEVICE_LIB_PATH=/opt/rocm/amdgcn/bitcode
+export MAGMA_HOME=/opt/rocm/magma
+ROCM_ENV
+
+    # Append to bash.bashrc so interactive shells get the env vars
+    echo "source /etc/rocm_env.sh" >> /etc/bash.bashrc
 
     # Cleanup
     apt-get autoclean && apt-get clean

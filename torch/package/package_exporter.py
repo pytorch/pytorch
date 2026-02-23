@@ -129,7 +129,10 @@ class PackagingError(Exception):
             if error is None:
                 continue
             if error == PackagingErrorReason.NO_ACTION:
-                assert "action" not in attrs
+                if "action" in attrs:
+                    raise AssertionError(
+                        f"module {module_name} has NO_ACTION error but action is set"
+                    )
             broken[error].append(module_name)
 
         message = io.StringIO()
@@ -605,9 +608,10 @@ class PackageExporter:
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
 
-        assert (pickle_protocol == 4) or (pickle_protocol == 3), (
-            "torch.package only supports pickle protocols 3 and 4"
-        )
+        if pickle_protocol not in (3, 4):
+            raise AssertionError(
+                f"torch.package only supports pickle protocols 3 and 4, got {pickle_protocol}"
+            )
 
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
@@ -635,8 +639,10 @@ class PackageExporter:
             to the module is the one we use.
             """
 
-            assert isinstance(module, str)
-            assert isinstance(field, str)
+            if not isinstance(module, str):
+                raise AssertionError(f"module must be str, got {type(module).__name__}")
+            if not isinstance(field, str):
+                raise AssertionError(f"field must be str, got {type(field).__name__}")
             if self._can_implicitly_extern(module):
                 return
             for pattern, pattern_info in self.patterns.items():
@@ -660,7 +666,10 @@ class PackageExporter:
                         or opcode.name == "BINUNICODE"
                         or opcode.name == "BINUNICODE8"
                     ):
-                        assert isinstance(arg, str)
+                        if not isinstance(arg, str):
+                            raise AssertionError(
+                                f"expected str arg for {opcode.name}, got {type(arg).__name__}"
+                            )
                         module = field
                         field = arg
                         memo[memo_count] = arg
@@ -669,7 +678,10 @@ class PackageExporter:
                         or opcode.name == "BINGET"
                         or opcode.name == "GET"
                     ):
-                        assert isinstance(arg, int)
+                        if not isinstance(arg, int):
+                            raise AssertionError(
+                                f"expected int arg for {opcode.name}, got {type(arg).__name__}"
+                            )
                         module = field
                         field = memo.get(arg, None)
                     elif opcode.name == "MEMOIZE":
@@ -678,14 +690,20 @@ class PackageExporter:
                         if module is None:
                             # If not module was passed on in the entries preceding this one, continue.
                             continue
-                        assert isinstance(module, str)
+                        if not isinstance(module, str):
+                            raise AssertionError(
+                                f"module must be str, got {type(module).__name__}"
+                            )
                         if module not in all_dependencies:
                             all_dependencies.append(module)
                         _check_mocked_error(module, field)
                 elif (
                     pickle_protocol == 3 and opcode.name == "GLOBAL"
                 ):  # a global reference
-                    assert isinstance(arg, str)
+                    if not isinstance(arg, str):
+                        raise AssertionError(
+                            f"expected str arg for GLOBAL, got {type(arg).__name__}"
+                        )
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
@@ -697,7 +715,10 @@ class PackageExporter:
                     out with the other errors found by package exporter.
                 """
                 if module_name in mocked_modules:
-                    assert isinstance(module_name, str)
+                    if not isinstance(module_name, str):
+                        raise AssertionError(
+                            f"module_name must be str, got {type(module_name).__name__}"
+                        )
                     fields = mocked_modules[module_name]
                     self.dependency_graph.add_node(
                         module_name,

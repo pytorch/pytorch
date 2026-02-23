@@ -1268,7 +1268,8 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
             cp[...] = a0 * b1 - a1 * b0
             return cp
         else:
-            assert b.shape[-1] == 3
+            if b.shape[-1] != 3:
+                raise AssertionError(f"b.shape[-1] must be 3, got {b.shape[-1]}")
             # cp0 = a1 * b2 - 0  (a2 = 0)
             # cp1 = 0 - a0 * b2  (a2 = 0)
             # cp2 = a0 * b1 - a1 * b0
@@ -1276,13 +1277,15 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
             cp1[...] = -a0 * b2
             cp2[...] = a0 * b1 - a1 * b0
     else:
-        assert a.shape[-1] == 3
+        if a.shape[-1] != 3:
+            raise AssertionError(f"a.shape[-1] must be 3, got {a.shape[-1]}")
         if b.shape[-1] == 3:
             cp0[...] = a1 * b2 - a2 * b1
             cp1[...] = a2 * b0 - a0 * b2
             cp2[...] = a0 * b1 - a1 * b0
         else:
-            assert b.shape[-1] == 2
+            if b.shape[-1] != 2:
+                raise AssertionError(f"b.shape[-1] must be 2, got {b.shape[-1]}")
             cp0[...] = -a2 * b1
             cp1[...] = a2 * b0
             cp2[...] = a0 * b1 - a1 * b0

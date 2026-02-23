@@ -41,6 +41,7 @@ set(NATIVERT_TEST_SRCS
   ${TORCH_ROOT}/torch/nativert/graph/passes/pass_manager/PassManager.cpp
   ${TORCH_ROOT}/torch/nativert/kernels/KernelHandlerRegistry.cpp
   ${TORCH_ROOT}/torch/nativert/executor/triton/CpuTritonKernelManager.cpp
+  ${TORCH_ROOT}/torch/nativert/executor/triton/fb/MtiaTritonKernelManager.cpp
   ${TORCH_ROOT}/torch/nativert/kernels/TritonKernel.cpp
   ${TORCH_ROOT}/torch/nativert/executor/DelegateExecutor.cpp
   ${TORCH_ROOT}/torch/nativert/executor/AOTInductorDelegateExecutor.cpp

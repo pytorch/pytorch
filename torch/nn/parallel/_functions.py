@@ -10,16 +10,24 @@ from torch.nn.parallel import comm
 class Broadcast(Function):
     @staticmethod
     def forward(ctx, target_gpus, *inputs):
-        assert all(i.device.type != "cpu" for i in inputs), (
-            "Broadcast function not implemented for CPU tensors"
-        )
+        if not all(i.device.type != "cpu" for i in inputs):
+            raise AssertionError("Broadcast function not implemented for CPU tensors")
         target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.target_gpus = target_gpus
         if len(inputs) == 0:
             return ()
         ctx.num_inputs = len(inputs)
         ctx.input_device = inputs[0].get_device()
+
+        ctx.complex_mask = [inp.is_complex() for inp in inputs]
+
         outputs = comm.broadcast_coalesced(inputs, ctx.target_gpus)
+
+        for device_outputs in outputs:
+            for i, is_complex in enumerate(ctx.complex_mask):
+                if is_complex:
+                    device_outputs[i] = torch.view_as_complex(device_outputs[i])
+
         non_differentiables = []
         for idx, input_requires_grad in enumerate(ctx.needs_input_grad[1:]):
             if not input_requires_grad:
@@ -29,9 +37,11 @@ class Broadcast(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        return (None,) + ReduceAddCoalesced.apply(
+        grads = ReduceAddCoalesced.apply(
             ctx.input_device, ctx.num_inputs, *grad_outputs
         )
+
+        return (None,) + grads
 
 
 class ReduceAddCoalesced(Function):
@@ -41,8 +51,25 @@ class ReduceAddCoalesced(Function):
             grads[i].get_device() for i in range(0, len(grads), num_inputs)
         ]
 
-        grads_ = [grads[i : i + num_inputs] for i in range(0, len(grads), num_inputs)]
-        return comm.reduce_add_coalesced(grads_, destination)
+        complex_mask = [grads[i].is_complex() for i in range(num_inputs)]
+        ctx.complex_mask = complex_mask
+
+        grads_converted = tuple(
+            torch.view_as_real(g) if g.is_complex() else g for g in grads
+        )
+
+        grads_ = [
+            grads_converted[i : i + num_inputs]
+            for i in range(0, len(grads_converted), num_inputs)
+        ]
+        results = comm.reduce_add_coalesced(grads_, destination)
+
+        results = tuple(
+            torch.view_as_complex(r) if is_complex else r
+            for r, is_complex in zip(results, complex_mask)
+        )
+
+        return results
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -55,9 +82,8 @@ class ReduceAddCoalesced(Function):
 class Gather(Function):
     @staticmethod
     def forward(ctx, target_device, dim, *inputs):
-        assert all(i.device.type != "cpu" for i in inputs), (
-            "Gather function not implemented for CPU tensors"
-        )
+        if not all(i.device.type != "cpu" for i in inputs):
+            raise AssertionError("Gather function not implemented for CPU tensors")
         if target_device == "cpu":
             ctx.target_device = "cpu"
         else:
@@ -77,7 +103,15 @@ class Gather(Function):
         else:
             ctx.unsqueezed_scalar = False
         ctx.input_sizes = tuple(i.size(ctx.dim) for i in inputs)
-        return comm.gather(inputs, ctx.dim, ctx.target_device)
+
+        is_complex = len(inputs) > 0 and inputs[0].is_complex()
+
+        output = comm.gather(inputs, ctx.dim, ctx.target_device)
+
+        if is_complex:
+            output = torch.view_as_complex(output)
+
+        return output
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -99,7 +133,14 @@ class Scatter(Function):
         if torch.accelerator.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
             streams = [_get_stream(torch.device(device)) for device in target_gpus]
+
+        is_complex = input.is_complex()
+
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
+
+        if is_complex:
+            outputs = tuple(torch.view_as_complex(o) for o in outputs)
+
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):
@@ -123,7 +164,11 @@ def _get_stream(device: torch.device):
     global _streams
     if device.type == "cpu" or not torch.accelerator.is_available():
         return None
-    assert torch.accelerator.current_accelerator().type == device.type
+    if torch.accelerator.current_accelerator().type != device.type:
+        raise AssertionError(
+            f"Expected current accelerator type {torch.accelerator.current_accelerator().type} "
+            f"to match device type {device.type}"
+        )
     if _streams is None:
         _streams = [None] * torch.accelerator.device_count()
     if _streams[device.index] is None:

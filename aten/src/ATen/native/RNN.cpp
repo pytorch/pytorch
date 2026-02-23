@@ -695,6 +695,15 @@ void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, const 
     "hidden", hidden_label, " has inconsistent hidden_size: got ", hx.sym_size(1), ", expected ", hidden_size);
 }
 
+template<int64_t gate_count>
+inline void check_rnn_cell_forward_weights(const Tensor& w_ih, const Tensor& w_hh, const c10::SymInt& hidden_size){
+    TORCH_CHECK(w_ih.size(0) == gate_count * hidden_size, "weight_ih first dim must be ", gate_count, " * hidden_size = ",
+        gate_count * hidden_size, ", but got ", w_ih.size(0));
+    TORCH_CHECK(w_hh.size(0) == gate_count * hidden_size, "weight_hh first dim must be ", gate_count, " * hidden_size = ",
+        gate_count * hidden_size, ", but got ", w_hh.size(0));
+}
+
+
 template<typename hidden_type_tmpl, typename cell_params_tmpl>
 struct Cell {
   using hidden_type = hidden_type_tmpl;
@@ -938,7 +947,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
+    const int64_t* batch_sizes = input.batch_sizes.const_data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[0];
 
     const Tensor* input_ptr = &input.data;
@@ -997,7 +1006,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
+    const int64_t* batch_sizes = input.batch_sizes.const_data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[num_steps - 1];
 
     const Tensor* input_ptr = &input.data;
@@ -1537,8 +1546,9 @@ std::tuple<Tensor, Tensor> lstm_cell(
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
-  check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   auto hidden_size = w_hh.sym_size(1);
+  check_rnn_cell_forward_input(input, w_ih.sym_size(1));
+  check_rnn_cell_forward_weights<4>(w_ih, w_hh, hidden_size);
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
   check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 1);
   static at::Tensor undefined;
@@ -1652,6 +1662,7 @@ Tensor gru_cell(
 
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
+  check_rnn_cell_forward_weights<3>(w_ih, w_hh, w_hh.size(1));
   static at::Tensor undefined;
   return GRUCell<CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
@@ -1665,6 +1676,7 @@ Tensor rnn_tanh_cell(
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   static at::Tensor undefined;
+  check_rnn_cell_forward_weights<1>(w_ih, w_hh, w_hh.size(1));
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   return SimpleCell<tanh_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
@@ -1679,6 +1691,7 @@ Tensor rnn_relu_cell(
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   static at::Tensor undefined;
+  check_rnn_cell_forward_weights<1>(w_ih, w_hh, w_hh.size(1));
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   return SimpleCell<relu_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});

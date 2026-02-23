@@ -952,6 +952,10 @@ class CppOverrides(OpOverrides):
         return f"std::log2({x})"
 
     @staticmethod
+    def ldexp(x, n):
+        return f"std::ldexp({x}, {n})"
+
+    @staticmethod
     def nextafter(x, y):
         return f"std::nextafter({x}, {y})"
 
@@ -1632,7 +1636,7 @@ class CppVecOverrides(CppOverrides):
         return code
 
     @staticmethod
-    def to_dtype(x, dtype, src_dtype=None, use_compute_dtypes=True):
+    def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
         assert dtype in [
             torch.bool,
             torch.float64,
@@ -2041,7 +2045,6 @@ class CppKernel(Kernel):
                 # mask's dtype should be bool
                 mask.dtype = torch.bool
 
-        # pyrefly: ignore [bad-assignment]
         self._load_mask = mask
         try:
             yield mask
@@ -2197,18 +2200,7 @@ class CppKernel(Kernel):
             # chunk size to balance accuracy and performance
             chunk_size = 4096
 
-            # use acc helper If cannot get size_hint
-            try:
-                reduction_size_hint = V.graph.sizevars.size_hint(reduction_size)
-            except Exception:
-                return True
-
-            if reduction_size_hint > chunk_size:
-                # use helper if the reduction size is too large
-                V.graph.sizevars.check_lt(chunk_size, reduction_size)
-                return True
-            else:
-                V.graph.sizevars.check_leq(reduction_size, chunk_size)
+            return V.graph.sizevars.guard_or_false(sympy.Gt(reduction_size, chunk_size))
         return False
 
     def _acc_helper_init(
@@ -2376,9 +2368,8 @@ class CppKernel(Kernel):
 
     def size_hint(self):
         assert self.call_ranges is not None
-        return V.graph.sizevars.size_hint(
-            sympy_product(self.call_ranges), fallback=8192
-        )
+        expr = sympy_product(self.call_ranges)
+        return V.graph.sizevars.optimization_hint(expr)
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         assert isinstance(self, CppKernelProxy)
@@ -2547,7 +2538,7 @@ class CppKernel(Kernel):
         par = 1
         depth = 0
         for expr in ranges:
-            hint = V.graph.sizevars.size_hint(expr, fallback=8192)
+            hint = V.graph.sizevars.optimization_hint(expr, fallback=8192)
             if par >= 2 * threads or par == threads:
                 break
             if seq // threads < config.cpp.min_chunk_size:
@@ -3934,7 +3925,7 @@ class TilingSelect:
                     if tiling_indice < 0 or tiling_indice >= len(call_ranges):
                         continue
                     if has_free_symbols(call_ranges):
-                        call_range = V.graph.sizevars.size_hint(
+                        call_range = V.graph.sizevars.optimization_hint(
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
@@ -4997,10 +4988,16 @@ class CppScheduling(BaseScheduling):
         div_expr_ = None
         match_div = False
         matched_node = None
+        matched_index_size = None
+
+        # Collect node info for later compatibility check
+        node_bodies: list[tuple[Any, Any]] = []
 
         for node in nodes:
             assert isinstance(node.node, ir.ComputedBuffer)
-            _, original_body, _ = node.node.get_default_sizes_body()
+            sizes_body = node.node.get_default_sizes_body()
+            node_bodies.append((node, sizes_body))
+            (index_size, _), original_body, _ = sizes_body
             for name, expr in original_body.indexing_exprs.items():
                 if not isinstance(expr, sympy.Expr):
                     continue
@@ -5028,10 +5025,24 @@ class CppScheduling(BaseScheduling):
                         split_number = div_expr.args[1]
                         match_div = True
                         matched_node = node
+                        matched_index_size = index_size
 
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
         if not match_div:
             return nodes
+
+        # Check if all nodes have split_var in their iter_vars and have compatible sizes
+        # (same number of index dimensions). If not, bail out to avoid incompatible
+        # var_ranges after loop split which would cause assertion failures in
+        # simplify_and_reorder or codegen_functions.
+        assert matched_index_size is not None
+        matched_num_dims = len(matched_index_size)
+
+        for node, ((index_size, _), original_body, _) in node_bodies:
+            if split_var not in original_body.iter_vars:
+                return nodes
+            if len(index_size) != matched_num_dims:
+                return nodes
 
         extra_indexing_constraints = None
 
@@ -5220,7 +5231,7 @@ class CppScheduling(BaseScheduling):
                             )
                             local_buffers.append(local_buffer_used)
                             local_to_global_buffers[local_buffer_used.name] = []  # type: ignore[index]
-                        # pyrefly: ignore [index-error]
+
                         local_to_global_buffers[local_buffer_used.name].append(
                             global_buffer,
                         )

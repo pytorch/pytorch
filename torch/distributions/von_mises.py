@@ -70,7 +70,8 @@ def _log_modified_bessel_fn(x, order=0):
     Returns ``log(I_order(x))`` for ``x > 0``,
     where `order` is either 0 or 1.
     """
-    assert order == 0 or order == 1
+    if order != 0 and order != 1:
+        raise AssertionError(f"order must be 0 or 1, got {order}")
 
     # compute small solution
     y = x / 3.75
@@ -162,10 +163,8 @@ class VonMises(Distribution):
     @lazy_property
     def _proposal_r(self) -> Tensor:
         kappa = self._concentration
-        # pyrefly: ignore [unsupported-operation]
         tau = 1 + (1 + 4 * kappa**2).sqrt()
         rho = (tau - (2 * tau).sqrt()) / (2 * kappa)
-        # pyrefly: ignore [unsupported-operation]
         _proposal_r = (1 + rho**2) / (2 * rho)
         # second order Taylor expansion around 0 for small kappa
         _proposal_r_taylor = 1 / kappa + kappa

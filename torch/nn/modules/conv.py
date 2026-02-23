@@ -971,7 +971,8 @@ class ConvTranspose1d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose1d"
             )
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 1
@@ -1167,7 +1168,8 @@ class ConvTranspose2d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose2d"
             )
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 2
@@ -1350,7 +1352,8 @@ class ConvTranspose3d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose3d"
             )
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 3
@@ -1430,7 +1433,8 @@ class _LazyConvXdMixin(LazyModuleMixin):
             self.in_channels = self._get_in_channels(input)
             if self.in_channels % self.groups != 0:
                 raise ValueError("in_channels must be divisible by groups")
-            assert isinstance(self.weight, UninitializedParameter)
+            if not isinstance(self.weight, UninitializedParameter):
+                raise AssertionError("self.weight must be an UninitializedParameter")
             if self.transposed:
                 self.weight.materialize(
                     (
@@ -1448,7 +1452,8 @@ class _LazyConvXdMixin(LazyModuleMixin):
                     )
                 )
             if self.bias is not None:
-                assert isinstance(self.bias, UninitializedParameter)
+                if not isinstance(self.bias, UninitializedParameter):
+                    raise AssertionError("self.bias must be an UninitializedParameter")
                 self.bias.materialize((self.out_channels,))
             self.reset_parameters()
 
@@ -1532,11 +1537,11 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
@@ -1604,11 +1609,11 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
@@ -1677,11 +1682,11 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
@@ -1749,11 +1754,11 @@ class LazyConvTranspose1d(_LazyConvXdMixin, ConvTranspose1d):  # type: ignore[mi
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
@@ -1821,11 +1826,11 @@ class LazyConvTranspose2d(_LazyConvXdMixin, ConvTranspose2d):  # type: ignore[mi
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:
@@ -1893,11 +1898,11 @@ class LazyConvTranspose3d(_LazyConvXdMixin, ConvTranspose3d):  # type: ignore[mi
             padding_mode,
             **factory_kwargs,
         )
-        # pyrefly: ignore [bad-override, bad-argument-type]
+        # pyrefly: ignore [bad-override, unexpected-keyword]
         self.weight = UninitializedParameter(**factory_kwargs)
         self.out_channels = out_channels
         if bias:
-            # pyrefly: ignore [bad-override, bad-argument-type]
+            # pyrefly: ignore [bad-override, unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
 
     def _get_num_spatial_dims(self) -> int:

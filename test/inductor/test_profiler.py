@@ -11,13 +11,14 @@ import torch._inductor.test_case
 import torch._inductor.utils
 from torch import _dynamo as torchdynamo
 from torch._inductor import config
-from torch.profiler import ProfilerActivity
+from torch.profiler import ProfilerActivity, record_function
 from torch.testing._internal.common_utils import skipIfXpu, TemporaryFileName
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
 )
+from torch.testing._internal.logging_utils import logs_to_string
 from torch.torch_version import TorchVersion
 from torch.utils._triton import has_triton
 
@@ -320,6 +321,39 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertEqual("0", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
         else:
             self.assertEqual("1", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
+
+    @torch._dynamo.config.patch("capture_profiler_record_function", True)
+    def test_inductor_remove_profiler_ops(self):
+        """
+        Test that inductor post_grad graph doesn't have profiler ops even when
+        dynamo produce those ops.
+        """
+
+        def fn(x):
+            with record_function("my_net1"):
+                a = x.sin()
+            with record_function("my_cos"):
+                b = a.cos()
+            with record_function("my_net2"):
+                c = b + 2
+            return c
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            torch.compile(fn, fullgraph=True)(torch.randn(10))
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """\
+        sin: "f32[10][1]cpu" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+        cos: "f32[10][1]cpu" = torch.ops.aten.cos.default(sin);  sin = None
+        add: "f32[10][1]cpu" = torch.ops.aten.add.Tensor(cos, 2);  cos = None
+        return (add,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
 
 
 if __name__ == "__main__":

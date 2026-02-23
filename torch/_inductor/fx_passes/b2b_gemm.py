@@ -12,7 +12,6 @@ from ..ir import (
     FixedLayout,
     FlexibleLayout,
     InputBuffer,
-    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -513,7 +512,7 @@ def build_subgraph_buffer(
 
 def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
-) -> TensorBox | ShapeAsConstantBuffer:
+) -> TensorBox:
     """
     Creates a placeholder input buffers for producing subgraph_output
     """

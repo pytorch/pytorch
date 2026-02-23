@@ -1,5 +1,0 @@
-ERROR
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/ufuncs.py", line 1238, in add
-    out = lax.add(x, y)
-          ^^^^^^^^^^^^^
-TypeError: add got incompatible shapes for broadcasting: (1, 8), (1, 2).

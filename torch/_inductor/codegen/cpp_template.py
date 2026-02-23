@@ -72,7 +72,8 @@ class CppTemplate(KernelTemplate):
             call_args,
             expected_args,
         )
-        extra_args = V.graph.sizevars.size_hints(
+        # extra_args are only used for benchmarking, not compiled kernel correctness
+        extra_args = V.graph.sizevars.optimization_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
         # Cast the size hint from int to ctypes.c_ulonglong explicitly
@@ -85,7 +86,6 @@ class CppTemplate(KernelTemplate):
         bmreq = CppBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
-            # pyrefly: ignore [bad-argument-type]
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
             extra_args=extra_args,
             source_code=code,

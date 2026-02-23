@@ -35,10 +35,12 @@ def fuse_conv_bn_eval(
     .. note::
         Both ``conv`` and ``bn`` must be in eval mode, and ``bn`` must have its running buffers computed.
     """
-    assert not (conv.training or bn.training), "Fusion only for eval!"
+    if conv.training or bn.training:
+        raise AssertionError("Fusion only for eval!")
     fused_conv = copy.deepcopy(conv)
 
-    assert bn.running_mean is not None and bn.running_var is not None
+    if bn.running_mean is None or bn.running_var is None:
+        raise AssertionError("bn.running_mean and bn.running_var must not be None")
     fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
         fused_conv.weight,
         fused_conv.bias,
@@ -122,7 +124,8 @@ def fuse_linear_bn_eval(
     .. note::
         Both ``linear`` and ``bn`` must be in eval mode, and ``bn`` must have its running buffers computed.
     """
-    assert not (linear.training or bn.training), "Fusion only for eval!"
+    if linear.training or bn.training:
+        raise AssertionError("Fusion only for eval!")
     fused_linear = copy.deepcopy(linear)
 
     """
@@ -135,11 +138,14 @@ def fuse_linear_bn_eval(
     2. the number of features in bn is 1
     Otherwise, skip the folding path
     """
-    assert linear.out_features == bn.num_features or bn.num_features == 1, (
-        "To fuse, linear.out_features == bn.num_features or bn.num_features == 1"
-    )
+    if linear.out_features != bn.num_features and bn.num_features != 1:
+        raise AssertionError(
+            f"To fuse, linear.out_features == bn.num_features or bn.num_features == 1, "
+            f"got linear.out_features={linear.out_features} and bn.num_features={bn.num_features}"
+        )
 
-    assert bn.running_mean is not None and bn.running_var is not None
+    if bn.running_mean is None or bn.running_var is None:
+        raise AssertionError("bn.running_mean and bn.running_var must not be None")
     fused_linear.weight, fused_linear.bias = fuse_linear_bn_weights(
         fused_linear.weight,
         fused_linear.bias,

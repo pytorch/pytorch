@@ -1,7 +1,6 @@
 import torch
 
 import torch_openreg._C  # type: ignore[misc]
-
 from . import _lazy_init, current_device, device_count
 
 

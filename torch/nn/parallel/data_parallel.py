@@ -161,7 +161,6 @@ class DataParallel(Module, Generic[T]):
         self.module = module
         self.device_ids = [_get_device_index(x, True) for x in device_ids]
         self.output_device = _get_device_index(output_device, True)
-        # pyrefly: ignore [read-only]
         self.src_device_obj = torch.device(device_type, self.device_ids[0])
 
         if device_type == "cuda":
@@ -279,7 +278,8 @@ def data_parallel(
         inputs = ((),)
         module_kwargs = ({},)
 
-    assert module_kwargs is not None
+    if module_kwargs is None:
+        raise AssertionError("module_kwargs should not be None after scatter_kwargs")
 
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])

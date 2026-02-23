@@ -813,13 +813,18 @@ def _unique_impl(
         dim (int, optional): the dimension to operate upon. If ``None``, the
             unique of the flattened input is returned. Otherwise, each of the
             tensors indexed by the given dimension is treated as one of the
-            elements to apply the unique operation upon. See examples for more
-            details. Default: ``None``
+            elements to apply the unique operation upon. **Important:** when ``dim``
+            is specified, the operation finds unique sub-tensors (e.g., unique rows
+            or columns), not unique scalar values. This means individual values may
+            appear multiple times in the output if they exist in different sub-tensors.
+            See examples for more details. Default: ``None``
 
     Returns:
         (Tensor, Tensor (optional), Tensor (optional)): A tensor or a tuple of tensors containing
 
-            - **output** (*Tensor*): the output list of unique scalar elements.
+            - **output** (*Tensor*): the output list of unique scalar elements if :attr:`dim`
+              is ``None``; otherwise, the unique sub-tensors along the specified dimension.
+              Note that when :attr:`dim` is specified, scalar values may repeat in the output.
             - **inverse_indices** (*Tensor*): (optional) if
               :attr:`return_inverse` is True, there will be an additional
               returned tensor (same shape as input) representing the indices
@@ -851,6 +856,22 @@ def _unique_impl(
         >>> inverse_indices
         tensor([[0, 2],
                 [1, 2]])
+
+        >>> # When using dim, the operation finds unique sub-tensors, not unique values.
+        >>> # Notice how values can repeat in the output:
+        >>> x = torch.tensor([[1, 3, 2, 3], [1, 2, 1, 2]], dtype=torch.long)
+        >>> torch.unique(x, dim=0)  # unique rows
+        tensor([[1, 2, 1, 2],
+                [1, 3, 2, 3]])
+        >>> # Both rows are kept because they're different from each other,
+        >>> # even though values 1, 2, 3 appear multiple times in the output.
+        >>> torch.unique(x, dim=1)  # unique columns
+        tensor([[1, 2, 3],
+                [1, 1, 2]])
+        >>> # The value 1 appears twice because we're comparing columns, not values.
+        >>> # Compare with flattened (no dim):
+        >>> torch.unique(x)
+        tensor([1, 2, 3])
 
         >>> a = torch.tensor([
         ...     [
@@ -1252,11 +1273,12 @@ def tensordot(  # noqa: F811
 
     When called with a non-negative integer argument :attr:`dims` = :math:`d`, and
     the number of dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`,
-    respectively, :func:`~torch.tensordot` computes
+    respectively, :func:`~torch.tensordot` computes the tensor :math:`r` of shape
+    ``a.shape[:-dims] + b.shape[dims:]`` given by:
 
     .. math::
-        r_{i_0,...,i_{m-d}, i_d,...,i_n}
-          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} \times b_{k_0,...,k_{d-1}, i_d,...,i_n}.
+        r_{i_1,...,i_{m-d}, j_1,...,j_{n-d}}
+          = \sum_{k_1,...,k_d} a_{i_1,...,i_{m-d},k_1,...,k_d} \times b_{k_1,...,k_d, j_1,...,j_{n-d}}.
 
     When called with :attr:`dims` of the list form, the given dimensions will be contracted
     in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
@@ -1309,7 +1331,10 @@ def tensordot(  # noqa: F811
     if isinstance(dims, torch.Tensor):
         num_elements = dims.numel()
         if num_elements > 1:
-            assert dims.size()[0] == 2
+            if dims.size()[0] != 2:
+                raise AssertionError(
+                    f"dims tensor must have size 2 in first dimension, got {dims.size()[0]}"
+                )
             dims_a = torch.jit.annotate(list[int], dims[0].tolist())
             dims_b = torch.jit.annotate(list[int], dims[1].tolist())
         else:

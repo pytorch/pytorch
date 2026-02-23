@@ -1,0 +1,86 @@
+name: inductor-pallas
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      - ciflow/inductor-pallas/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  linux-jammy-py3_12-inductor-pallas-gpu-build:
+    name: pallas-gpu-py3.12-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-py3.12-pallas
+      cuda-arch-list: '9.0'
+      runner: linux.8xlarge.memory
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_12-inductor-pallas-gpu-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: pallas-gpu-py3.12-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_12-inductor-pallas-gpu-build
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_12-inductor-pallas-gpu-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-py3_12-inductor-pallas-tpu-build:
+    name: pallas-tpu-py3.12-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.12-gcc11-pallas-tpu
+      docker-image-name: ci-image:pytorch-linux-jammy-tpu-py3.12-pallas
+      test-matrix: |
+        { include: [
+          { config: "inductor-pallas-tpu", shard: 1, num_shards: 1, runner: "linux.google.tpuv7x.1" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_12-inductor-pallas-tpu-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: pallas-tpu-py3.12-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-py3_12-inductor-pallas-tpu-build
+    with:
+      build-environment: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_12-inductor-pallas-tpu-build.outputs.test-matrix }}
+    secrets: inherit

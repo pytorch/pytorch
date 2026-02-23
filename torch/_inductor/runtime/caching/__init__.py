@@ -1,18 +1,16 @@
-from . import config
+from . import config, encoders, memoizers
 from .context import IsolationSchema, SelectedCompileContext, SelectedRuntimeContext
 from .exceptions import (
     CacheError,
     FileLockTimeoutError,
     KeyEncodingError,
-    KeyPicklingError,
     LockTimeoutError,
     SystemError,
     UserError,
     ValueDecodingError,
     ValueEncodingError,
-    ValuePicklingError,
-    ValueUnPicklingError,
 )
+from .interfaces import Memoizer, PersistentMemoizer
 
 
 __all__ = [
@@ -20,14 +18,15 @@ __all__ = [
     "FileLockTimeoutError",
     "IsolationSchema",
     "KeyEncodingError",
-    "KeyPicklingError",
     "LockTimeoutError",
+    "Memoizer",
+    "PersistentMemoizer",
     "SelectedCompileContext",
     "SelectedRuntimeContext",
     "SystemError",
     "UserError",
     "ValueDecodingError",
     "ValueEncodingError",
-    "ValuePicklingError",
-    "ValueUnPicklingError",
+    "encoders",
+    "memoizers",
 ]

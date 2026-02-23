@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpftgbw3im/gs/cgsyieera4seqyue7fzzaqagnywx7pa5gw2e3zpdw52obaiqfgyp.py", line 12, in pallas_fused__to_copy_gather_sum_trunc_view_d26f0ef1_kernel
-    tmp3 = math.trunc(s77 / 6)
-           ^^^^
-NameError: name 'math' is not defined

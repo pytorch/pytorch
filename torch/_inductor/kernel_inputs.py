@@ -122,10 +122,7 @@ class KernelInputs(ABC):
             A tuple of shape tuples with integer hints for each input node
         """
         return tuple(
-            V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=torch._inductor.config.unbacked_symint_fallback,
-            )
+            V.graph.sizevars.optimization_hints(node.get_size())
             for node in self._input_nodes
         )
 
@@ -146,10 +143,7 @@ class KernelInputs(ABC):
             A tuple of stride tuples with integer hints for each input node
         """
         return tuple(
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=torch._inductor.config.unbacked_symint_fallback,
-            )
+            V.graph.sizevars.optimization_hints(node.get_stride())
             for node in self._input_nodes
         )
 
@@ -241,7 +235,7 @@ class MMKernelInputs(KernelInputs):
             m2_idx += len(input_nodes)
 
         assert 0 <= m1_idx < len(input_nodes), f"Invalid mat1_idx: {mat1_idx}"
-        assert 0 <= m1_idx < len(input_nodes), f"Invalid mat2_idx: {mat2_idx}"
+        assert 0 <= m2_idx < len(input_nodes), f"Invalid mat2_idx: {mat2_idx}"
 
         self._mat1_idx = mat1_idx
         self._mat2_idx = mat2_idx
@@ -336,3 +330,18 @@ class MMKernelInputs(KernelInputs):
         assert k == k_check, f"K dimensions don't match: {k} vs {k_check}"
 
         return (m, n, k)
+
+    def batch_hinted(self) -> int:
+        """
+        Get the hinted batch size for batched matrix multiplication.
+        Returns 1 for non-batched (2D) operations.
+
+        Returns:
+            The batch size as an integer
+        """
+        hinted_shapes = self.shapes_hinted()
+        mat1_shape = hinted_shapes[self._mat1_idx]
+
+        if len(mat1_shape) >= 3:
+            return mat1_shape[-3]  # Batch from third-to-last dimension
+        return 1  # Non-batched operation

@@ -52,6 +52,12 @@ def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
 
         fuzz_template = DTensorFuzzTemplate()
         tensor_dtypes = fuzz_template.supported_dtypes()
+    elif template == "dtensor_placements":
+        # Import here to avoid circular imports
+        from torchfuzz.codegen import DTensorFuzzPlacementsTemplate
+
+        fuzz_template = DTensorFuzzPlacementsTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
     elif template == "unbacked":
         # Import here to avoid circular imports
         from torchfuzz.codegen import UnbackedFuzzTemplate
@@ -561,7 +567,8 @@ def specs_compatible(spec1: Spec, spec2: Spec) -> bool:
         # For scalars, require exact dtype match for simplicity
         return spec1.dtype == spec2.dtype
     elif isinstance(spec1, TensorSpec):
-        assert isinstance(spec2, TensorSpec)
+        if not isinstance(spec2, TensorSpec):
+            raise AssertionError(f"Expected TensorSpec, got {type(spec2)}")
         # For tensors, shape and dtype should match exactly
         return spec1.size == spec2.size and spec1.dtype == spec2.dtype
 
