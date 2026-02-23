@@ -118,7 +118,7 @@ def _generate_node_name_to_qconfig(
                 qconfig_mapping, type(modules[module_name]), module_name, global_qconfig
             )
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(
-                qconfig, modules.get(node.target, None)
+                qconfig, modules.get(node.target)
             )
         elif node.op == "call_function":
             # precedence: module_name_qconfig
@@ -140,7 +140,7 @@ def _generate_node_name_to_qconfig(
                 qconfig_mapping, module_path, node.target, cur_object_type_idx, qconfig
             )
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(
-                qconfig, modules.get(node.target, None)
+                qconfig, modules.get(node.target)
             )
 
         elif node.op == "call_method":
@@ -159,7 +159,7 @@ def _generate_node_name_to_qconfig(
             # currently call_method does not support modifying qconfig
             # by order, we can add this later if it is needed.
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(
-                qconfig, modules.get(node.target, None)
+                qconfig, modules.get(node.target)
             )
 
         elif node.op == "call_module":
@@ -183,7 +183,7 @@ def _generate_node_name_to_qconfig(
                 qconfig_mapping, parent_name, module_type, cur_object_type_idx, qconfig
             )
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(
-                qconfig, modules.get(node.target, None)
+                qconfig, modules.get(node.target)
             )
 
             # regex is not supported eager mode propagate_qconfig_, we'll

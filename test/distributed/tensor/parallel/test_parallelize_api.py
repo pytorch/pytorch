@@ -55,7 +55,7 @@ class TensorParallelAPITests(DTensorTestBase):
                 (not rank0_only)
                 or (self.rank == 0)
                 or (
-                    name not in ["net2.bias"]
+                    name != "net2.bias"
                     and not skip_rowwise_bias
                     or name not in ["bias", "net2.bias"]
                 )

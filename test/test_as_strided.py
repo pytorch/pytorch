@@ -89,7 +89,8 @@ def enumerate_reachable_states(
         # 1. Unflatten: try factoring each dimension
         for dim in range(ndim):
             size = sizes[dim]
-            assert size > 1
+            if size <= 1:
+                raise AssertionError(f"size must be > 1, got {size}")
             # Try all factorizations x * y = size where both x, y >= 2
             # We only need to check x up to size // 2 since when x > size // 2,
             # y = size // x < 2, which we reject
@@ -387,7 +388,7 @@ class TestAsStrided(TestCase):
 
         impossible_cases = [
             ((8, 3), (1, 1)),  # Overlapping
-            ((2, 2), (6, 3)),  # Requires slice with step>1
+            ((2, 2), (6, 3)),  # Requires step>1 on non-last target dim
         ]
 
         for size, stride in impossible_cases:
@@ -598,6 +599,26 @@ class TestAsStrided(TestCase):
 
         # And with offset
         self.check_as_strided_via_views(base2, (5, 10), (600, 30), storage_offset=1800)
+
+        # Step slicing with offset: tensor[:, :, 6::4][:, :, :2]
+        self.check_as_strided_via_views(
+            base, (1, 888, 2), (10656, 12, 4), storage_offset=6
+        )
+
+    def test_step_slicing_last_dim(self) -> None:
+        """Test step>1 slicing on the last target dim per canonical source dim."""
+        # Simple: [2::3] from size 12
+        self.check_as_strided_via_views(torch.arange(12), (3,), (3,), storage_offset=2)
+
+        # 2D: last dim uses step slicing
+        base = torch.arange(24).view(4, 6)
+        self.check_as_strided_via_views(base, (4, 2), (6, 3), storage_offset=1)
+
+        # Step=2 with offset at boundary
+        self.check_as_strided_via_views(torch.arange(10), (3,), (2,), storage_offset=4)
+
+        # Large step, small target
+        self.check_as_strided_via_views(torch.arange(20), (2,), (9,), storage_offset=1)
 
     def test_unexpand_target_then_basic(self) -> None:
         """Test _unexpand_target_then with single stride-0 dim."""

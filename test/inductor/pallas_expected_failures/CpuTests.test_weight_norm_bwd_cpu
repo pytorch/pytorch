@@ -1,5 +1,2 @@
-ERROR
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/torch/_tensor.py", line 1763, in __dlpack__
-    raise BufferError(
-BufferError: Can't export tensors that require gradient, use tensor.detach()
+FAIL
+Accuracy failed: allclose not within tol

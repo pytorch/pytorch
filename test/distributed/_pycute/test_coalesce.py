@@ -47,14 +47,13 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class TestCoalesce(TestCase):
-    def helper_test_coalesce(self, layout, coalesced_layout=None):
+    def helper_test_coalesce(self, layout, expected_coalesced_layout):
         layoutR = coalesce(layout)
 
         _LOGGER.debug(f"{layout}  =>  {layoutR}")
 
-        if coalesced_layout:
-            self.assertEqual(coalesced_layout.shape, layoutR.shape)
-            self.assertEqual(coalesced_layout.stride, layoutR.stride)
+        self.assertEqual(expected_coalesced_layout.shape, layoutR.shape)
+        self.assertEqual(expected_coalesced_layout.stride, layoutR.stride)
         self.assertEqual(size(layoutR), size(layout))
 
         for i in range(size(layout)):
@@ -62,50 +61,68 @@ class TestCoalesce(TestCase):
 
     def test_coalesce(self):
         layout = Layout(1, 0)
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout(1, 0)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout(1, 1)
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout(1, 0)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
+
+        layout = Layout((1, 1), (42, 3))
+        expected_coalesced_layout = Layout(1, 0)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
+
+        layout = Layout((1, 1, 1), (17, 4, 3))
+        expected_coalesced_layout = Layout(1, 0)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 4))
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout(8, 1)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 4, 6))
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout(48, 1)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 4, 6), (1, 6, 2))
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout((2, 4, 6), (1, 6, 2))
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 1, 6), (1, 7, 2))
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout((2, 6), (1, 2))
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 1, 6), (4, 7, 8))
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout((2, 6), (4, 8))
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, (4, 6)))
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout(48, 1)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((1, 2), (8, 1))
-        coalesced_layout = Layout(2, 1)
-        self.helper_test_coalesce(layout, coalesced_layout)
+        expected_coalesced_layout = Layout(2, 1)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 4), (4, 1))
-        coalesced_layout = Layout(8, 1)
-        self.helper_test_coalesce(layout, coalesced_layout)
+        expected_coalesced_layout = Layout(8, 1)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 4, 6), (24, 6, 1))
-        coalesced_layout = Layout(48, 1)
-        self.helper_test_coalesce(layout, coalesced_layout)
+        expected_coalesced_layout = Layout(48, 1)
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout((2, 1, 3), (2, 4, 4))
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout((2, 3), (2, 4))
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout(((2, 2), (2, 2)), ((1, 4), (8, 32)))
-        self.helper_test_coalesce(layout)
+        expected_coalesced_layout = Layout((2, 2, 2, 2), (1, 4, 8, 32))
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
         layout = Layout(((2, 2), (2, 2)), ((32, 8), (4, 1)))
-        coalesced_layout = Layout((2, 4, 2), (32, 4, 1))
-        self.helper_test_coalesce(layout, coalesced_layout)
+        expected_coalesced_layout = Layout((2, 4, 2), (32, 4, 1))
+        self.helper_test_coalesce(layout, expected_coalesced_layout)
 
 
 if __name__ == "__main__":

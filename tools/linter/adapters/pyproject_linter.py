@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "packaging==25.0",
+#   "tomli==2.2.1 ; python_version < '3.11'",
+# ]
+# ///
 from __future__ import annotations
 
 import argparse

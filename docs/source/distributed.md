@@ -663,6 +663,29 @@ with torch.profiler():
 
 Please refer to the [profiler documentation](https://pytorch.org/docs/main/profiler.html) for a full overview of profiler features.
 
+## Optimization with Symmetric Memory
+
+### Copy Engine Collectives
+
+When NCCL collective operations are performed on symmetric memory tensors with
+the zero-CTA policy, data movement is offloaded to the GPU's copy engines (DMA
+engines) instead of using CUDA streaming multiprocessors (SMs). This frees up
+SMs for compute work, enabling better overlap of communication and computation.
+
+For setup instructions, requirements, and examples, see
+[Copy Engine Collectives](copy-engine-collectives) in the Symmetric Memory documentation.
+
+### Higher-Precision Reduction
+
+When NCCL collectives such as ``reduce_scatter`` and ``all_reduce`` operate on
+symmetric memory tensors, NCCL's symmetric kernel implementation automatically
+performs internal reduction with higher precision (e.g., BF16/FP16 in → FP32
+accumulate → BF16/FP16 out). This improves numerical accuracy without any code
+changes to the collective call.
+
+For details on scope, supported domains, and version requirements, see
+[Higher-Precision Reduction](higher-precision-reduction) in the Symmetric Memory documentation.
+
 ## Multi-GPU collective functions
 
 :::{warning}

@@ -75,7 +75,10 @@ class _BaseDataSparsiferTestCase(TestCase):
             kwargs.update(sparsifier_kwargs)
             kwargs["data_list"] = data_list
             sparsifier = sparsifier_type(**kwargs)
-        assert len(sparsifier.data_groups) == len(data_list)
+        if len(sparsifier.data_groups) != len(data_list):
+            raise AssertionError(
+                f"Expected {len(data_list)} data_groups, got {len(sparsifier.data_groups)}"
+            )
         for data_config_dict in data_with_config:
             name, data, config = (
                 data_config_dict["name"],
@@ -134,8 +137,14 @@ class _BaseDataSparsiferTestCase(TestCase):
             self.assertEqualBroadcasting(sparsified_data[0], 0)
             self.assertEqual(original_data, data)
             self.assertEqualBroadcasting(mask[0], 0)
-            assert "step_count" in sparsifier.state[name]
-            assert sparsifier.state[name]["step_count"] == 3
+            if "step_count" not in sparsifier.state[name]:
+                raise AssertionError(
+                    f"Expected 'step_count' in sparsifier.state['{name}']"
+                )
+            if sparsifier.state[name]["step_count"] != 3:
+                raise AssertionError(
+                    f"Expected step_count 3, got {sparsifier.state[name]['step_count']}"
+                )
 
     def check_squash_mask(self, data_list, data_with_config, defaults, **kwargs):
         sparsifier = self._make_sparsifier(
@@ -144,16 +153,19 @@ class _BaseDataSparsiferTestCase(TestCase):
         all_data = data_list + data_with_config
         for some_data in all_data:
             name, _, _ = self._get_name_data_config(some_data)
-            assert hasattr(sparsifier._container, name)
-            assert is_parametrized(sparsifier._container, name)
+            if not hasattr(sparsifier._container, name):
+                raise AssertionError(f"Expected container to have attribute '{name}'")
+            if not is_parametrized(sparsifier._container, name):
+                raise AssertionError(f"Expected container.{name} to be parametrized")
         sparsifier.step()
         sparsifier.squash_mask()
 
         for some_data in all_data:
             name, _, _ = self._get_name_data_config(some_data)
-            assert not is_parametrized(
-                sparsifier._container, name
-            )  # not parametrized anymore
+            if is_parametrized(sparsifier._container, name):
+                raise AssertionError(
+                    f"Expected container.{name} to not be parametrized after squash"
+                )
             with self.assertRaises(ValueError):
                 sparsifier.get_data(name, return_original=True)
 
@@ -168,7 +180,8 @@ class _BaseDataSparsiferTestCase(TestCase):
             )
             data1 = sparsifier._extract_weight(data1)
             data1_old = copy.deepcopy(data1)
-            assert torch.all(data1 == sparsifier.get_data(name=name1))
+            if not torch.all(data1 == sparsifier.get_data(name=name1)):
+                raise AssertionError("data1 does not match sparsifier data")
 
             sparsifier.step()
             mask = sparsifier.get_mask(name1)
@@ -177,16 +190,18 @@ class _BaseDataSparsiferTestCase(TestCase):
                 data1.shape
             )  # add another data with the same shape as original data
             sparsifier.add_data(name=name1, data=data2)
-            assert torch.all(data2 == sparsifier.get_data(name=name1))
+            if not torch.all(data2 == sparsifier.get_data(name=name1)):
+                raise AssertionError("data2 does not match sparsifier data")
 
-            assert torch.all(
-                sparsifier.get_mask(name1) == mask
-            )  # mask should not change
-            assert torch.all(data1_old == data1)
+            if not torch.all(sparsifier.get_mask(name1) == mask):
+                raise AssertionError("mask should not change after add_data")
+            if not torch.all(data1_old == data1):
+                raise AssertionError("data1 should not be modified")
 
-            assert (
-                sparsifier.data_groups[name1] == config
-            )  # if replaced old_config should match new config
+            if sparsifier.data_groups[name1] != config:
+                raise AssertionError(
+                    "old_config should match new config after replacement"
+                )
 
     def check_state_dict(self, data_list, data_with_config, defaults, **kwargs):
         sparsifier1 = self._make_sparsifier(
@@ -199,42 +214,58 @@ class _BaseDataSparsiferTestCase(TestCase):
 
         state_dict1 = sparsifier1.state_dict()
 
-        assert sparsifier1.state != sparsifier2.state
+        if sparsifier1.state == sparsifier2.state:
+            raise AssertionError("Expected sparsifier states to be different")
         name, _, _ = self._get_name_data_config(data_list[0])
         self.assertNotEqual(sparsifier1.get_mask(name), sparsifier2.get_mask(name))
 
         sparsifier2.load_state_dict(state_dict1)
-        assert len(sparsifier1.state) == len(sparsifier2.state)
-        assert len(sparsifier1.data_groups) == len(sparsifier2.data_groups)
+        if len(sparsifier1.state) != len(sparsifier2.state):
+            raise AssertionError(
+                f"Expected state lengths to match, got {len(sparsifier1.state)} vs {len(sparsifier2.state)}"
+            )
+        if len(sparsifier1.data_groups) != len(sparsifier2.data_groups):
+            raise AssertionError(
+                f"Expected data_groups lengths to match, got {len(sparsifier1.data_groups)} vs {len(sparsifier2.data_groups)}"
+            )
 
         state1 = state_dict1["state"]
         for name in state1:
             # compare mask
-            assert name in sparsifier2.state
-            assert "mask" in sparsifier2.state[name]
-            assert "mask" in sparsifier1.state[name]
+            if name not in sparsifier2.state:
+                raise AssertionError(f"Expected '{name}' in sparsifier2.state")
+            if "mask" not in sparsifier2.state[name]:
+                raise AssertionError(f"Expected 'mask' in sparsifier2.state['{name}']")
+            if "mask" not in sparsifier1.state[name]:
+                raise AssertionError(f"Expected 'mask' in sparsifier1.state['{name}']")
             mask1, mask2 = state1[name]["mask"], sparsifier2.state[name]["mask"]
-            assert mask1.is_sparse and not mask2.is_sparse
-            assert torch.all(
-                mask1.to_dense() == mask2
-            )  # mask1 is stored as sparse coo now
+            if not (mask1.is_sparse and not mask2.is_sparse):
+                raise AssertionError(
+                    "Expected mask1 to be sparse and mask2 to be dense"
+                )
+            if not torch.all(mask1.to_dense() == mask2):
+                raise AssertionError("Masks do not match after loading state dict")
 
             # compare data_groups
             dg1, dg2 = sparsifier1.data_groups, sparsifier2.data_groups
-            assert name in dg1 and name in dg2
-            assert dg1[name] == dg2[name]
+            if not (name in dg1 and name in dg2):
+                raise AssertionError(f"Expected '{name}' in both data_groups")
+            if dg1[name] != dg2[name]:
+                raise AssertionError(f"data_groups['{name}'] do not match")
 
             # compare container
             container1, container2 = sparsifier1._container, sparsifier2._container
-            assert torch.all(getattr(container1, name) == getattr(container2, name))
-            assert is_parametrized(container1, name) == is_parametrized(
-                container2, name
-            )
+            if not torch.all(getattr(container1, name) == getattr(container2, name)):
+                raise AssertionError(f"Container data for '{name}' do not match")
+            if is_parametrized(container1, name) != is_parametrized(container2, name):
+                raise AssertionError(f"Parametrization state for '{name}' do not match")
             if is_parametrized(container1, name):
                 param1 = getattr(container1.parametrizations, name)[0]
                 param2 = getattr(container2.parametrizations, name)[0]
-                assert hasattr(param1, "mask")
-                assert hasattr(param2, "mask")
+                if not hasattr(param1, "mask"):
+                    raise AssertionError("Expected param1 to have 'mask' attribute")
+                if not hasattr(param2, "mask"):
+                    raise AssertionError("Expected param2 to have 'mask' attribute")
                 self.assertEqual(param1.__dict__, param2.__dict__)
 
     def check_memory_reference(self, data_list, data_with_config, defaults, **kwargs):
@@ -255,11 +286,13 @@ class _BaseDataSparsiferTestCase(TestCase):
             weight = sparsifier._extract_weight(data)
             weight.data = weight + torch.randn(*weight.shape)
             contained_data = sparsifier.get_data(name=name)
-            assert (
+            if (
                 weight.data.storage().data_ptr()
-                == contained_data.data.storage().data_ptr()
-            )
-            assert torch.all(contained_data == weight)
+                != contained_data.data.storage().data_ptr()
+            ):
+                raise AssertionError("Memory reference is not preserved")
+            if not torch.all(contained_data == weight):
+                raise AssertionError("Contained data does not match weight")
 
 
 class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
@@ -271,7 +304,8 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
     """
 
     def run_all_checks(self, data_list, defaults, data_with_config, norm_type="L1"):
-        assert norm_type in ["L1", "L2"]
+        if norm_type not in ["L1", "L2"]:
+            raise AssertionError(f"norm_type must be 'L1' or 'L2', got '{norm_type}'")
         kwargs = {
             "sparsifier_type": DataNormSparsifier,
             "sparsifier_kwargs": {"norm": norm_type},
@@ -335,7 +369,8 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
         for some_data in all_data:
             name, _, _ = self._get_name_data_config(some_data)
             mask = sparsifier.get_mask(name=name)
-            assert (1.0 - mask.mean()) == 0  # checking sparsity level is 0
+            if (1.0 - mask.mean()) != 0:
+                raise AssertionError("Expected sparsity level to be 0 before step")
 
         sparsifier.step()
 
@@ -346,10 +381,12 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
             lb, ub = self._get_bounds_on_actual_sparsity(config, mask.shape)
             mask = mask.to(torch.float)
             actual_sparsity = round(1 - mask.mean().item(), 3)
-            assert actual_sparsity >= lb and actual_sparsity <= ub
-            assert (
-                actual_sparsity > 0.0
-            )  # exact sparsity level cannot be achieved due to size of tensor
+            if not (actual_sparsity >= lb and actual_sparsity <= ub):
+                raise AssertionError(
+                    f"Actual sparsity {actual_sparsity} not in bounds [{lb}, {ub}]"
+                )
+            if actual_sparsity <= 0.0:
+                raise AssertionError("Actual sparsity should be > 0.0")
 
         iters_before_collapse = 100
 
@@ -366,7 +403,8 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
             test_sparsifier.step()
             mask = test_sparsifier.get_mask(name="test_data")
             mask = mask.to(torch.float)
-            assert (1.0 - mask.mean().item()) > 0  # some sparsity achieved
+            if (1.0 - mask.mean().item()) <= 0:
+                raise AssertionError("Expected some sparsity to be achieved")
 
     def check_step_2_of_4(self, norm_type):
         # overriding default config for test purposes
@@ -391,8 +429,14 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
                 for idx in range(0, len(row), 4):
                     block = row[idx : idx + 4]
                     block, _ = block.sort()
-                    assert (block[:2] == 0).all()
-                    assert (block[2:] != 0).all()
+                    if not (block[:2] == 0).all():
+                        raise AssertionError(
+                            "Expected first 2 elements of block to be 0"
+                        )
+                    if not (block[2:] != 0).all():
+                        raise AssertionError(
+                            "Expected last 2 elements of block to be non-zero"
+                        )
 
     def check_sparsity_level(
         self, data_list, data_with_config, defaults, norm_type="L1"
@@ -406,11 +450,14 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
             itertools.product(sparsity_levels, sparse_block_shapes, zeros_per_blocks)
         )
 
-        assert (
+        if not (
             len(data_with_config) > 0
             and "name" in data_with_config[0]
             and "data" in data_with_config[0]
-        )
+        ):
+            raise AssertionError(
+                "data_with_config must have at least one entry with 'name' and 'data'"
+            )
         # get some data
         name, data = data_with_config[0]["name"], data_with_config[0]["data"]
         for idx, (sl, sbs, zpb) in enumerate(testcases[0]):
@@ -434,12 +481,18 @@ class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
             # sparse mask
             sparse_mask = (sparsified_data == 0).float()
             if zpb == 0:
-                assert sparse_mask.mean() == 0
+                if sparse_mask.mean() != 0:
+                    raise AssertionError(
+                        f"Expected sparse_mask.mean() == 0, got {sparse_mask.mean()}"
+                    )
             else:
                 # Ratio of individual zeros in the tensor
                 true_sl = min(max(sl, 0.0), 1.0)
                 true_sl = true_sl * zpb / sbs[0] / sbs[1]
-                assert sparse_mask.mean() == true_sl
+                if sparse_mask.mean() != true_sl:
+                    raise AssertionError(
+                        f"Expected sparse_mask.mean() == {true_sl}, got {sparse_mask.mean()}"
+                    )
 
 
 class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
@@ -710,15 +763,30 @@ class TestQuantizationUtils(TestCase):
             **sparse_config,
         )
 
-        assert type(model.emb1) is torch.ao.nn.quantized.modules.embedding_ops.Embedding
-        assert (
+        if (
+            type(model.emb1)
+            is not torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        ):
+            raise AssertionError(
+                f"Expected quantized Embedding, got {type(model.emb1)}"
+            )
+        if (
             type(model.embbag1)
-            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
-        )
-        assert type(model.emb_seq[0] is nn.Embedding)
-        assert type(model.emb_seq[1] is nn.EmbeddingBag)
-        assert type(model.linear1) is nn.Linear
-        assert type(model.linear2) is nn.Linear
+            is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        ):
+            raise AssertionError(
+                f"Expected quantized EmbeddingBag, got {type(model.embbag1)}"
+            )
+        if type(model.emb_seq[0]) is not nn.Embedding:
+            raise AssertionError(f"Expected nn.Embedding, got {type(model.emb_seq[0])}")
+        if type(model.emb_seq[1]) is not nn.EmbeddingBag:
+            raise AssertionError(
+                f"Expected nn.EmbeddingBag, got {type(model.emb_seq[1])}"
+            )
+        if type(model.linear1) is not nn.Linear:
+            raise AssertionError(f"Expected nn.Linear, got {type(model.linear1)}")
+        if type(model.linear2) is not nn.Linear:
+            raise AssertionError(f"Expected nn.Linear, got {type(model.linear2)}")
 
         dequant_emb1 = torch.dequantize(model.emb1.weight())
         dequant_embbag1 = torch.dequantize(model.embbag1.weight())
@@ -728,8 +796,10 @@ class TestQuantizationUtils(TestCase):
         sl_emb1 = (torch.abs(dequant_emb1) < threshold).float().mean()
         sl_embbag1 = (torch.abs(dequant_embbag1) < threshold).float().mean()
 
-        assert abs(sl_emb1 - 0.80) <= 0.05  # +- 5% leeway
-        assert abs(sl_embbag1 - 0.80) <= 0.05  # +- 5% leeway
+        if abs(sl_emb1 - 0.80) > 0.05:
+            raise AssertionError(f"Expected sl_emb1 ~0.80, got {sl_emb1}")
+        if abs(sl_embbag1 - 0.80) > 0.05:
+            raise AssertionError(f"Expected sl_embbag1 ~0.80, got {sl_embbag1}")
 
     def test_ptq_quantize_first(self):
         """The expectation is post_training_sparse_quantize function
@@ -749,21 +819,42 @@ class TestQuantizationUtils(TestCase):
             model, DataNormSparsifier, sparsify_first=False, **sparse_config
         )
 
-        assert type(model.emb1) is torch.ao.nn.quantized.modules.embedding_ops.Embedding
-        assert (
+        if (
+            type(model.emb1)
+            is not torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        ):
+            raise AssertionError(
+                f"Expected quantized Embedding, got {type(model.emb1)}"
+            )
+        if (
             type(model.embbag1)
-            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
-        )
-        assert (
+            is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        ):
+            raise AssertionError(
+                f"Expected quantized EmbeddingBag, got {type(model.embbag1)}"
+            )
+        if (
             type(model.emb_seq[0])
-            is torch.ao.nn.quantized.modules.embedding_ops.Embedding
-        )
-        assert (
+            is not torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        ):
+            raise AssertionError(
+                f"Expected quantized Embedding, got {type(model.emb_seq[0])}"
+            )
+        if (
             type(model.emb_seq[1])
-            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
-        )
-        assert type(model.linear1) is nn.Linear  # not quantized
-        assert type(model.linear2) is nn.Linear  # not quantized
+            is not torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        ):
+            raise AssertionError(
+                f"Expected quantized EmbeddingBag, got {type(model.emb_seq[1])}"
+            )
+        if type(model.linear1) is not nn.Linear:
+            raise AssertionError(
+                f"Expected nn.Linear (not quantized), got {type(model.linear1)}"
+            )
+        if type(model.linear2) is not nn.Linear:
+            raise AssertionError(
+                f"Expected nn.Linear (not quantized), got {type(model.linear2)}"
+            )
 
         dequant_emb1 = torch.dequantize(model.emb1.weight())
         dequant_embbag1 = torch.dequantize(model.embbag1.weight())
@@ -780,10 +871,14 @@ class TestQuantizationUtils(TestCase):
         sl_emb_seq_0 = (torch.abs(dequant_emb_seq_0) < threshold).float().mean()
         sl_emb_seq_1 = (torch.abs(dequant_emb_seq_1) < threshold).float().mean()
 
-        assert abs(sl_emb1 - 0.80) <= 0.05  # +- 5% leeway
-        assert abs(sl_embbag1 - 0.80) <= 0.05  # +- 5% leeway
-        assert abs(sl_emb_seq_0 - 0.80) <= 0.05  # +- 5% leeway
-        assert abs(sl_emb_seq_1 - 0.80) <= 0.05  # +- 5% leeway
+        if abs(sl_emb1 - 0.80) > 0.05:
+            raise AssertionError(f"Expected sl_emb1 ~0.80, got {sl_emb1}")
+        if abs(sl_embbag1 - 0.80) > 0.05:
+            raise AssertionError(f"Expected sl_embbag1 ~0.80, got {sl_embbag1}")
+        if abs(sl_emb_seq_0 - 0.80) > 0.05:
+            raise AssertionError(f"Expected sl_emb_seq_0 ~0.80, got {sl_emb_seq_0}")
+        if abs(sl_emb_seq_1 - 0.80) > 0.05:
+            raise AssertionError(f"Expected sl_emb_seq_1 ~0.80, got {sl_emb_seq_1}")
 
 
 if __name__ == "__main__":

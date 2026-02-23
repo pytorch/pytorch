@@ -75,6 +75,7 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.utils import _p_assert
+from torch.utils._typing_utils import copy_method_params, copy_method_sig
 
 from ._flat_param import FlatParameter, FlatParamHandle
 from ._optim_utils import (
@@ -410,8 +411,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         limit_all_gathers: bool = True,
         use_orig_params: bool = False,
         ignored_states: Iterable[torch.nn.Parameter]
-        | None
-        | Iterable[torch.nn.Module] = None,
+        | Iterable[torch.nn.Module]
+        | None = None,
         device_mesh: DeviceMesh | None = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
@@ -954,6 +955,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             for fsdp_module in traversal_utils._get_fsdp_states(self):
                 _register_orig_params(fsdp_module, fsdp_module)
 
+    @copy_method_sig(nn.Module._apply)
     def _apply(self, *args, **kwargs):
         """Deregister the original parameters and expose the :class:`FlatParameter` s before calling ``_apply()``."""
         # When using the original parameters: Since (1) the `FlatParameter`s
@@ -970,6 +972,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         with context:
             return super()._apply(*args, **kwargs)
 
+    @copy_method_params(nn.Module.named_buffers)
     def named_buffers(
         self,
         *args,
@@ -988,6 +991,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 buffer_name = buffer_name.replace(FSDP_PREFIX, "")
             yield (buffer_name, buffer)
 
+    @copy_method_params(nn.Module.named_parameters)
     def named_parameters(
         self,
         *args,
@@ -2059,7 +2063,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 )
                 self._unshard_event = self._unshard_stream.record_event()
             self._handle._prefetched = True
-        unshard_handle = UnshardHandle(self._handle, self._unshard_stream)
+        unshard_handle = UnshardHandle(self._handle, self._unshard_event)
         if async_op:
             return unshard_handle
         unshard_handle.wait()
@@ -2106,13 +2110,9 @@ def _get_grad_norm(
         # Reuse a tensor for zero to avoid a GPU sync
         return zero
     grads = [param.grad for param in params_with_grad]
-    grad_dtypes = {grad.dtype for grad in grads}
-    if len(grad_dtypes) != 1:
-        raise ValueError(
-            f"Requires uniform dtype across all gradients but got {grad_dtypes}"
-        )
     # Compute the gradient norm in FP32, where we treat the gradients as a
-    # single vector
+    # single vector. This naturally handles mixed-dtype gradients since we
+    # cast each gradient to FP32 during the norm computation.
     grad_norm = torch.linalg.vector_norm(
         torch.stack(
             [

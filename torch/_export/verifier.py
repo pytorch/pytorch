@@ -102,13 +102,24 @@ class _VerifierMeta(type):
         if bases:
             if "check" in attrs or "_check_graph_module" in attrs:
                 raise SyntaxError("Overriding method check is not allowed.")
-            assert "dialect" in attrs and attrs["dialect"] != "ATEN"
+            if "dialect" not in attrs or attrs["dialect"] == "ATEN":
+                raise AssertionError(
+                    f"subclass must define dialect != 'ATEN', got {attrs.get('dialect')}"
+                )
         else:
-            assert "check" in attrs
-            assert "_check_graph_module" in attrs
-            assert attrs["dialect"] == "ATEN"
+            if "check" not in attrs:
+                raise AssertionError("base class must define 'check' method")
+            if "_check_graph_module" not in attrs:
+                raise AssertionError(
+                    "base class must define '_check_graph_module' method"
+                )
+            if attrs["dialect"] != "ATEN":
+                raise AssertionError(
+                    f"base class dialect must be 'ATEN', got {attrs['dialect']}"
+                )
 
-        assert isinstance(attrs["dialect"], str)
+        if not isinstance(attrs["dialect"], str):
+            raise AssertionError(f"dialect must be str, got {type(attrs['dialect'])}")
         ret = type.__new__(metacls, name, bases, attrs)
         metacls._registry[attrs["dialect"]] = ret  # type: ignore[assignment]
         return ret
@@ -194,18 +205,21 @@ class Verifier(metaclass=_VerifierMeta):
                 ret = self.allowed_getattr_types()
             else:
                 ret = self.allowed_getattr_types_for_subgm()
-            assert not any(t is object for t in ret)
+            if any(t is object for t in ret):
+                raise AssertionError("allowed_getattr_types must not contain 'object'")
             return ret
 
         def _check_valid_op(op) -> None:
             def _allowed_builtin_ops() -> list:
                 ret = self.allowed_builtin_ops()
-                assert all(inspect.isbuiltin(op) for op in ret)
+                if not all(inspect.isbuiltin(op) for op in ret):
+                    raise AssertionError("allowed_builtin_ops must all be builtins")
                 return ret
 
             def _allowed_op_types() -> tuple[type[Any], ...]:
                 ret = self.allowed_op_types()
-                assert not any(t is object for t in ret)
+                if any(t is object for t in ret):
+                    raise AssertionError("allowed_op_types must not contain 'object'")
                 return ret
 
             # TODO Remove this allowlist.
@@ -361,9 +375,16 @@ def _verify_exported_program_signature(exported_program) -> None:
     ]
 
     if len(input_node_names) != len(gs.input_specs):
+        input_spec_names = [
+            spec.arg.name for spec in gs.input_specs if hasattr(spec.arg, "name")
+        ]
+        missing_in_specs = set(input_node_names) - set(input_spec_names)
+        missing_in_graph = set(input_spec_names) - set(input_node_names)
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})\n"
+            f"Placeholders missing input_specs: {missing_in_specs}\n"
+            f"Input_specs missing placeholders: {missing_in_graph}"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
@@ -464,18 +485,25 @@ def _verify_exported_program_signature(exported_program) -> None:
 
     # Check outputs
     output_node = list(exported_program.graph.nodes)[-1]
-    assert output_node.op == "output"
+    if output_node.op != "output":
+        raise AssertionError(f"last node must be output, got {output_node.op}")
     output_nodes = [
         arg.name if isinstance(arg, torch.fx.Node) else arg
         for arg in output_node.args[0]
     ]
 
     if len(output_nodes) != len(gs.output_specs):
+        output_spec_names = [
+            spec.arg.name if hasattr(spec.arg, "name") else str(spec.arg)
+            for spec in gs.output_specs
+        ]
+        missing_out_specs = set(output_nodes) - set(output_spec_names)
+        missing_out_graph = set(output_spec_names) - set(output_nodes)
         raise SpecViolationError(
             f"Number of output nodes {len(output_nodes)} is different "
-            "Than the number of outputs specified by the graph signature: \n"
-            f"Number of mutated buffers: {len(gs.buffers_to_mutate)}. \n"
-            f"Number of user outputs: {len(gs.user_outputs)}. \n"
+            f"Than the number of outputs specified by the graph signature: {len(gs.output_specs)}\n"
+            f"Nodes missing output_specs: {missing_out_specs}\n"
+            f"Output_specs missing nodes: {missing_out_graph}"
         )
 
     num_tokens = len(gs.output_tokens)

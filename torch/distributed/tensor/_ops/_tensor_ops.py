@@ -4,9 +4,12 @@ from collections.abc import Sequence, Sized
 from typing import cast
 
 import torch
+from torch._ops import OpOverload
 from torch._prims_common import IntLike
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
@@ -14,13 +17,13 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     RuntimeSchemaInfo,
     StrategyType,
+    TensorMeta,
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops._embedding_ops import MaskPartial
-from torch.distributed.tensor._ops.registration import (
-    register_op_strategy,
-    register_prop_rule,
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
@@ -29,10 +32,13 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_evenly_shardable,
     is_tensor_partial,
     normalize_dim,
+    register_op_strategy,
+    register_prop_rule,
     shift_shard_dims_after_insert,
     shift_shard_dims_after_remove,
 )
 from torch.distributed.tensor.placement_types import (
+    _MaskPartial,
     Partial,
     Placement,
     Replicate,
@@ -42,6 +48,7 @@ from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
@@ -91,6 +98,7 @@ register_op_strategy(
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
+        prims.view_of.default,
     ]
 )(propagate_single_input_strategy)
 
@@ -117,6 +125,14 @@ def equal_strategy(op_schema: OpSchema) -> StrategyType:
         raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
     if not isinstance(other_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(other_strategy)}")
+
+    # If either tensor is 0-dimensional (scalar), we must use Replicate for both
+    if self_strategy.ndim == 0 or other_strategy.ndim == 0:
+        replicate_spec = DTensorSpec(
+            mesh=mesh,
+            placements=tuple(Replicate() for _ in range(mesh.ndim)),
+        )
+        return OpStrategy([OpSpec(output_specs=replicate_spec)])
 
     select_strategy = (
         self_strategy
@@ -186,9 +202,16 @@ def create_like_strategy(op_schema: OpSchema) -> StrategyType:
                 Replicate() if isinstance(p, Partial) else p
                 for p in arg_spec.placements
             ),
+            tensor_meta=arg_spec.tensor_meta,
         )
         create_like_strategy.strategies.append(
-            OpSpec(output_specs=output_spec, input_specs=(arg_spec,))
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=(arg_spec,),
+                redistribute_cost=[
+                    generate_redistribute_costs(select_strategy, arg_spec),
+                ],
+            )
         )
 
     return create_like_strategy
@@ -251,39 +274,33 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
     return new_factory_strategy
 
 
-@register_op_strategy(aten.bucketize.Tensor)
-def gen_bucketize_strategy(op_schema: OpSchema) -> StrategyType:
-    """Just propagate input sharding, but expect replicated for boundaries input."""
-    mesh = op_schema.get_mesh_from_args()
-    input_strategy, boundaries_strategy = op_schema.args_schema
-    bucketize_strategy = OpStrategy([])
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-    if not isinstance(boundaries_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(boundaries_strategy)}")
-    for arg_strategy in input_strategy.strategies:
-        arg_spec = DTensorSpec(
-            mesh,
-            arg_strategy.output_spec.placements,
-            arg_strategy.output_spec.tensor_meta,
-        )
-        replica_spec = DTensorSpec(
-            mesh,
-            tuple([Replicate()] * mesh.ndim),
-            boundaries_strategy.strategies[0].output_spec.tensor_meta,
-        )
-        bucketize_strategy.strategies.append(
-            OpSpec(
-                output_specs=arg_spec,
-                input_specs=(arg_spec, replica_spec),
-                redistribute_cost=[
-                    generate_redistribute_costs(input_strategy, arg_spec),
-                    generate_redistribute_costs(boundaries_strategy, replica_spec),
-                ],
-            )
-        )
+@register_single_dim_strategy(aten.bucketize.Tensor)
+def bucketize_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Bucketize returns indices into a sorted boundary tensor.
 
-    return bucketize_strategy
+    Three families of strategies:
+    1. Shard the input (and output) on any dim, keep boundaries replicated.
+    2. Shard boundaries on dim 0, replicate input, output is Partial("sum").
+       Each rank counts how many of its local boundary values each input
+       element exceeds; summing across ranks gives the correct global index.
+    3. Partial("max") or Partial("min") input with replicated boundaries.
+       Bucketize is monotonically non-decreasing in its input, so reducing
+       local bucket indices with max (or min) across ranks gives the same
+       result as bucketizing the reduced input values.
+    """
+    input_meta, _boundaries_meta = args_schema
+    assert isinstance(input_meta, TensorMeta)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(len(input_meta.shape)):
+        strategies.append(
+            [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim), Replicate()]
+        )
+    strategies.append([Partial("sum"), Replicate(), _ShardingPlaceholder(0)])
+    for reduce_op in ("max", "min"):
+        strategies.append([Partial(reduce_op), Partial(reduce_op), Replicate()])
+    return strategies
 
 
 @register_op_strategy(aten.select.int, schema_info=RuntimeSchemaInfo(1))
@@ -661,7 +678,7 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
     if dim < len(index_shape) and index_shape[dim] == 1:
-        index_partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=dim)
+        index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),
@@ -770,8 +787,9 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     first_input_strategy = input_strategies[0]
     common_input_ndim = first_input_strategy.ndim
     dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
-    # normalize the dim to be within the common input ndim
-    dim = normalize_dim(dim, common_input_ndim)
+    # normalize the dim to be within the output ndim (input ndim + 1),
+    # since stack inserts a new dimension
+    dim = normalize_dim(dim, common_input_ndim + 1)
 
     mesh = first_input_strategy.mesh
 
@@ -803,6 +821,40 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
         )
     )
     return op_strategy
+
+
+# TODO enable in a separate PR along with more extensive validation.
+# currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
+# @register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+def cat_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_list = args_schema[0]
+    # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
+    assert isinstance(input_list, (tuple, list)), type(input_list)
+    assert all(isinstance(tm, TensorMeta) for tm in input_list)
+
+    if isinstance(input_list, list):
+        input_list = tuple(input_list)
+
+    num_inputs = len(input_list)
+    ndim_set = {len(meta.shape) for meta in input_list}
+    assert len(ndim_set) in (1, 2), (
+        "Expected all cat inputs to be the same ndim, except empty tensors"
+    )
+    if len(ndim_set) == 2:
+        assert 0 in ndim_set
+    common_ndim = max(ndim_set)
+    cat_dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
+    cat_dim = normalize_dim(cat_dim, common_ndim)
+    single_dim_strategies = []
+    for i in range(common_ndim):
+        if i != cat_dim:
+            single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+    # pyrefly: ignore [bad-argument-type]
+    single_dim_strategies.append([Partial("sum")] * (1 + num_inputs))
+    # pyrefly: ignore [bad-return]
+    return single_dim_strategies
 
 
 @register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
@@ -1184,7 +1236,7 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
 
     output_size_list = (
         size_split(input_strategy.shape[dim], split_size_or_sections)
-        if isinstance(split_size_or_sections, int)
+        if isinstance(split_size_or_sections, IntLike)
         else split_size_or_sections
     )
     if not isinstance(output_size_list, Sized):
@@ -1257,3 +1309,28 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+
+@register_op_strategy(aten.eye.m_out)
+def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Strategy for torch.eye with out= parameter.
+    The sharding is determined by the out tensor's placement.
+    """
+    # eye.m_out has signature: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+    # The out kwarg is a DTensor that determines the sharding
+    out_spec = op_schema.kwargs_schema["out"]
+    assert isinstance(out_spec, OpStrategy), (
+        f"Expected OpStrategy for out, got {type(out_spec)}"
+    )
+
+    return OpStrategy(
+        [
+            OpSpec(
+                output_specs=strategy.output_spec,
+                input_specs=[strategy.output_spec],  # out is both input and output
+                redistribute_cost=[[0.0]],
+            )
+            for strategy in out_spec.strategies
+        ]
+    )

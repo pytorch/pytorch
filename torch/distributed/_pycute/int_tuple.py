@@ -239,7 +239,7 @@ def crd2crd(
 
 
 # Filter trg according to crd: keep only elements of trg that are paired with None
-def slice_(crd: None | tuple | int, trg: tuple | int) -> tuple | int:
+def slice_(crd: tuple | int | None, trg: tuple | int) -> tuple | int:
     if is_tuple(crd):
         if is_tuple(trg):  # tuple tuple
             assert len(crd) == len(trg)
@@ -262,7 +262,7 @@ def slice_(crd: None | tuple | int, trg: tuple | int) -> tuple | int:
 
 
 # Determine if None appears at any of an int_tuples' terminals
-def has_none(a: None | tuple | int) -> bool:
+def has_none(a: tuple | int | None) -> bool:
     if is_tuple(a):
         return any(has_none(v) for v in a)
     else:

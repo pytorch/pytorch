@@ -32,9 +32,18 @@ def default_dtypes():
             complex_dtype=getattr(torch, config.numpy_default_complex),
             int_dtype=getattr(torch, config.numpy_default_int),
         )
-        assert isinstance(_default_dtypes.float_dtype, torch.dtype)
-        assert isinstance(_default_dtypes.complex_dtype, torch.dtype)
-        assert isinstance(_default_dtypes.int_dtype, torch.dtype)
+        if not isinstance(_default_dtypes.float_dtype, torch.dtype):
+            raise AssertionError(
+                f"float_dtype must be a torch.dtype, got {type(_default_dtypes.float_dtype)}"
+            )
+        if not isinstance(_default_dtypes.complex_dtype, torch.dtype):
+            raise AssertionError(
+                f"complex_dtype must be a torch.dtype, got {type(_default_dtypes.complex_dtype)}"
+            )
+        if not isinstance(_default_dtypes.int_dtype, torch.dtype):
+            raise AssertionError(
+                f"int_dtype must be a torch.dtype, got {type(_default_dtypes.int_dtype)}"
+            )
     return _default_dtypes
 
 
@@ -181,7 +190,10 @@ def nep50_to_tensors(x1, x2, handle_weaks, function_name):
         return x1, x2
 
     # scalar <op> tensor: NEP 50
-    assert x1_is_weak != x2_is_weak
+    if x1_is_weak == x2_is_weak:
+        raise AssertionError(
+            f"Expected exactly one weak type, got x1_is_weak={x1_is_weak}, x2_is_weak={x2_is_weak}"
+        )
 
     weak, not_weak = (x1, x2) if x1_is_weak else (x2, x1)
 

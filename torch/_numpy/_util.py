@@ -262,5 +262,8 @@ def ndarrays_to_tensors(*inputs):
         else:
             return input_
     else:
-        assert isinstance(inputs, tuple)  # sanity check
+        if not isinstance(inputs, tuple):
+            raise AssertionError(
+                f"Expected inputs to be a tuple, got {type(inputs).__name__}"
+            )
         return ndarrays_to_tensors(inputs)

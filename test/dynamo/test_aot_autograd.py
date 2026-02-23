@@ -336,15 +336,18 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertEqual(cc.frame_count, 1)
         self.assertTrue(failure_reason is None)
 
-    def test_double_backward_errors(self):
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_double_backward_with_compile(self):
         # Remove this test after we get double backward to actually work
         for grad_output in (torch.tensor(1.0, requires_grad=True), None):
             x = torch.tensor(1.0, requires_grad=True)
             err = "torch.compile with aot_autograd does not currently support double backward"
 
-            # The following cases should be equivalent:
-
             # (1) double backward entirely inside compiled function
+            # Graph break happens at autograd.grad, but y = x.sin().exp() already
+            # went through AOT autograd. When autograd.grad(y, x, create_graph=True)
+            # runs in eager, it backwards through AOT nodes, creating gx with grad_fn
+            # pointing to CompiledFunctionBackward. Second autograd.grad(gx, x) fails.
             def f1(x):
                 y = x.sin().exp()
                 (gx,) = torch.autograd.grad(
@@ -354,11 +357,13 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
                 return gx
 
             compiled_f1 = torch.compile(backend="aot_eager")(f1)
-            f1(x)
             with self.assertRaisesRegex(RuntimeError, err):
                 compiled_f1(x)
 
             # (2) the second half of double backward outside compiled function
+            # This works because autograd.grad inside the compiled function is traced,
+            # so gx.grad_fn is CompiledFunctionBackward (not BackwardBackward).
+            # The second autograd.grad(gx, x) is just first-level backward.
             def f2(x):
                 y = x.sin().exp()
                 (gx,) = torch.autograd.grad(
@@ -368,10 +373,11 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
             compiled_f2 = torch.compile(backend="aot_eager")(f2)
             gx = compiled_f2(x)
-            with self.assertRaisesRegex(RuntimeError, err):
-                torch.autograd.grad(gx, x)
+            torch.autograd.grad(gx, x)
 
             # (3) double backward entirely outside compiled function
+            # This still raises RuntimeError because autograd.grad is outside
+            # the compiled function, so the graph break detection doesn't apply.
             def f3(x):
                 y = x.sin().exp()
                 return y
@@ -753,6 +759,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    @patch("torch._functorch.config.check_custom_op_aliasing", False)
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that
@@ -1102,7 +1109,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             )
 
     def test_aot_autograd_raises_invalid_leaf_set(self):
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def f(x):
             x.set_(torch.ones(2))
 
@@ -1758,6 +1765,60 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         result_compiled = compiled_program(*args)
 
         self.assertTrue(torch.allclose(result_original, result_compiled))
+
+    def test_layer_norm_double_backward_dynamic_shapes(self):
+        """
+        Test that layer_norm with create_graph=True (double backward) works
+        with dynamic shapes without recompilations.
+
+        This tests the fix for layer_norm_double_backward to use SymInt properly
+        so that dynamic batch sizes don't cause specialization/recompilation.
+        """
+
+        class LayerNormGradModel(torch.nn.Module):
+            def __init__(self, dim=64):
+                super().__init__()
+                self.layer_norm = torch.nn.LayerNorm(dim)
+
+            def forward(self, x: torch.Tensor):
+                x = x.clone().requires_grad_(True)
+                y = self.layer_norm(x)
+                grad_outputs = torch.ones_like(y)
+                # create_graph=True triggers layer_norm_double_backward
+                (grad,) = torch.autograd.grad(
+                    y,
+                    x,
+                    grad_outputs=grad_outputs,
+                    create_graph=True,
+                    allow_unused=True,
+                )
+                return y, grad
+
+        model = LayerNormGradModel(dim=64)
+
+        # Trace with symbolic shapes
+        example_input = torch.randn(10, 64)
+        fx_model = make_fx(
+            model,
+            tracing_mode="symbolic",
+            _allow_non_fake_inputs=True,
+        )(example_input)
+
+        # Compile with dynamic=True and a counter to track recompilations
+        cnt = CompileCounterWithBackend(backend="inductor")
+        compiled_model = torch.compile(
+            fx_model, dynamic=True, fullgraph=True, backend=cnt
+        )
+
+        batch_sizes = [10, 20, 30, 40]
+        for batch_size in batch_sizes:
+            x = torch.randn(batch_size, 64)
+            y, grad = compiled_model(x)
+            self.assertEqual(y.shape, (batch_size, 64))
+            self.assertEqual(grad.shape, (batch_size, 64))
+
+        # Should only compile once regardless of batch size changes
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":

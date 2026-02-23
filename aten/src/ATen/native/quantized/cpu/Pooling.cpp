@@ -360,7 +360,7 @@ Tensor q_maxpool_3d(
   TORCH_CHECK(kT > 0 && kH > 0 && kW > 0, "kernel_size should be greater than zero.");
   TORCH_CHECK(sT > 0 && sH > 0 && sW > 0, "strides should be greater than zero.");
   TORCH_CHECK(
-      dT && dH > 0 && dW > 0,
+      dT > 0 && dH > 0 && dW > 0,
       "dilation should be greater than zero. "
       "Got (",
       dT,

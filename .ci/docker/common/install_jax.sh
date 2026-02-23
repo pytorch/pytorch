@@ -34,11 +34,22 @@ function install_jax_13() {
   echo "JAX ${JAX_VERSION} installation completed successfully for CUDA 13"
 }
 
+function install_jax_tpu() {
+  echo "Installing JAX ${JAX_VERSION} with TPU support"
+  pip_install "jax[tpu]==${JAX_VERSION}" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+
+  # Verify installation
+  python -c "import jax"  # check for errors
+  echo "JAX ${JAX_VERSION} installation completed successfully for TPU"
+}
+
 # idiomatic parameter and option handling in sh
 while test $# -gt 0
 do
     case "$1" in
     cpu) install_jax_cpu;
+        ;;
+    tpu) install_jax_tpu;
         ;;
     12.4|12.6|12.6.*|12.8|12.8.*|12.9|12.9.*) install_jax_12;
         ;;

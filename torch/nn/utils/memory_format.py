@@ -84,7 +84,7 @@ def convert_conv2d_weight_memory_format(
         )
     for child in module.children():
         convert_conv2d_weight_memory_format(child, memory_format)
-    # pyrefly: ignore [bad-return]
+
     return module
 
 
@@ -164,7 +164,7 @@ def convert_conv3d_weight_memory_format(
         )
     for child in module.children():
         convert_conv3d_weight_memory_format(child, memory_format)
-    # pyrefly: ignore [bad-return]
+
     return module
 
 

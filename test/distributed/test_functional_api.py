@@ -421,7 +421,7 @@ class TestGradCollectives(MultiThreadedTestCase):
         y = torch.rand([4], requires_grad=True)
         out = ft_c.all_reduce(x, "sum", dist.group.WORLD)
         (out + y).sum().backward()
-        self.assertIsNone(x.grad)
+        self.assertIsNotNone(x.grad)
 
 
 class TestMakeFx(TestCase):
@@ -465,6 +465,42 @@ class TestMakeFx(TestCase):
         FileCheck().check_not("get_attr").check("wait_tensor").run(
             str(mesh_dim_graph.graph)
         )
+
+
+class TestAllGatherViewOptimization(TestCase):
+    """Validate that all_gather_tensor delays wait() when the view optimization
+    applies and calls wait() early when the fallback path is needed."""
+
+    def setUp(self):
+        self.world_size = 4
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=0,
+        )
+
+    def tearDown(self):
+        dist.destroy_process_group()
+        super().tearDown()
+
+    def test_view_path_delays_wait(self):
+        # Shape [1, 8] with gather_dim=1: after all_gather -> [4, 8]
+        # numel_between = prod(shape[1:1]) = 1, so view optimization applies.
+        # Result should be an AsyncCollectiveTensor (wait delayed).
+        t = torch.randn(1, 8)
+        res = ft_c.all_gather_tensor(t, gather_dim=1, group=dist.group.WORLD)
+        self.assertIsInstance(res, ft_c.AsyncCollectiveTensor)
+
+    def test_fallback_path_waits_early(self):
+        # Shape [2, 8] with gather_dim=1: after all_gather -> [8, 8]
+        # numel_between = prod(shape[1:1]) = 1 but shape[0]=8 != group_size=4,
+        # so view optimization does NOT apply.
+        # Result should be a plain tensor (wait called early).
+        t = torch.randn(2, 8)
+        res = ft_c.all_gather_tensor(t, gather_dim=1, group=dist.group.WORLD)
+        self.assertNotIsInstance(res, ft_c.AsyncCollectiveTensor)
 
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
@@ -616,7 +652,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
                 return batch * 5
 
         compiled_func = torch.compile(func)
-        compiled_func(torch.ones((100,), device=device), self.process_group, self.rank)
+        compiled_func(torch.ones((100,), device=device), self.pg, self.rank)
         dist.barrier()
 
 

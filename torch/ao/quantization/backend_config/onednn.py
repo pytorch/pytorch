@@ -101,7 +101,7 @@ def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
         map_to_fused_module_eval = {
             nn.Linear: nni.LinearLeakyReLU,
         }
-        fused_module = map_to_fused_module_eval.get(type(linear), None)
+        fused_module = map_to_fused_module_eval.get(type(linear))
         if fused_module is not None:
             fused_linear = nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
             fm = fused_module(fused_linear, leaky_relu)

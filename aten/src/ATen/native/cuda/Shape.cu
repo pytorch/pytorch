@@ -463,7 +463,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       getCatGrid(batchCounter, catGrid);
     }
 #endif
-    int32_t trailingSize;
+    int32_t trailingSize = 0;
     int nDimsLocal = nDims;
     TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> kernelOutputParam;
     if (isInOutAligned) {

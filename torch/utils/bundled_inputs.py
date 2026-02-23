@@ -19,13 +19,13 @@ class InflatableArg(NamedTuple):
     must be of the same type as the argument to the function that it is a deflated
     input for.
 
-    'fmt' is a formatable code string that is executed to inflate the compressed data into
+    'fmt' is a formattable code string that is executed to inflate the compressed data into
     the appropriate input. It can use 'value' as an input to the format str. It must result
     in a value of the same type as 'value'.
 
-    'fmt_fn' is a formatable function code string that is executed to inflate the compressed
+    'fmt_fn' is a formattable function code string that is executed to inflate the compressed
     data into the appropriate input. It must result in a value of the same type as 'value'.
-    The function name should be the formatable part of the string.
+    The function name should be the formattable part of the string.
 
     Note: Only top level InflatableArgs can be inflated. i.e. you cannot place
     an inflatable arg inside of some other structure. You should instead create
@@ -40,7 +40,7 @@ class InflatableArg(NamedTuple):
 
 def bundle_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Sequence[tuple[Any, ...]] | None | dict[Callable, Sequence[tuple[Any, ...]] | None],
+        inputs: Sequence[tuple[Any, ...]] | dict[Callable, Sequence[tuple[Any, ...]] | None] | None,
         info: list[str] | dict[Callable, list[str]] | None = None,
         *,
         _receive_inflate_expr: list[str] | None = None,

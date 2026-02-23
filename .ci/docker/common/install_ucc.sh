@@ -8,8 +8,12 @@ else
   with_cuda=no
 fi
 
-if [[ -d "/opt/rocm" ]]; then
-  with_rocm=/opt/rocm
+if [[ -f /etc/rocm_env.sh ]]; then
+  source /etc/rocm_env.sh
+fi
+
+if [[ -d "${ROCM_PATH}" ]]; then
+  with_rocm="${ROCM_PATH}"
 else
   with_rocm=no
 fi
@@ -60,6 +64,12 @@ function install_ucc() {
     for arch in $amdgpu_targets; do
       HIP_OFFLOAD="$HIP_OFFLOAD --offload-arch=$arch"
     done
+    HIP_OFFLOAD="$HIP_OFFLOAD --rocm-path=${ROCM_PATH}"
+
+    # Set device library path if detected (handles TheRock vs traditional ROCm)
+    if [ -n "${ROCM_DEVICE_LIB_PATH}" ] && [ -d "${ROCM_DEVICE_LIB_PATH}" ]; then
+      HIP_OFFLOAD="$HIP_OFFLOAD --rocm-device-lib-path=${ROCM_DEVICE_LIB_PATH}"
+    fi
   else
     HIP_OFFLOAD="all-arch-no-native"
   fi
@@ -70,7 +80,10 @@ function install_ucc() {
     --with-nvcc-gencode="${NVCC_GENCODE}" \
     --with-rocm=$with_rocm                \
     --with-rocm-arch="${HIP_OFFLOAD}"
-  time make -j
+  # First observed by ROCm nightly builds, ucc rccl sources fail compile with
+  # error: #warning "NCCL C++ API is disabled because C compiler is being used. [-Werror=cpp]
+  # Work-around by adding make CFLAGS=-Wno-error=cpp
+  time make -j CFLAGS=-Wno-error=cpp
   sudo make install
 
   popd

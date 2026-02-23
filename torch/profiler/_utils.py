@@ -114,7 +114,8 @@ class BasicEvaluation:
         """
         Computes event's self time(total time - time in child ops).
         """
-        assert self.profile.kineto_results is not None
+        if self.profile.kineto_results is None:
+            raise AssertionError("kineto_results must not be None")
         stack = deque(self.profile.kineto_results.experimental_event_tree())
 
         # standard iterating dfs
@@ -124,9 +125,10 @@ class BasicEvaluation:
             for child_event in curr_event.children:
                 self_time -= child_event.duration_time_ns
                 stack.append(child_event)
-            assert EventKey(curr_event) not in self.metrics, (
-                f"Duplicate id: {curr_event.id}, {curr_event.name}"
-            )
+            if EventKey(curr_event) in self.metrics:
+                raise AssertionError(
+                    f"Duplicate id: {curr_event.id}, {curr_event.name}"
+                )
             self.metrics[EventKey(curr_event)] = EventMetrics(self_time_ns=self_time)
             self.metrics[
                 EventKey(curr_event)
@@ -138,7 +140,8 @@ class BasicEvaluation:
         All the events in the tree.
         This will return a list of Interval of queue depth data of cuda launch and kernels.
         """
-        assert self.profile.kineto_results is not None
+        if self.profile.kineto_results is None:
+            raise AssertionError("kineto_results must not be None")
         cuda_event_list = self.profile.kineto_results.events()
 
         def is_cuda_launch_kernel(e):
@@ -493,10 +496,15 @@ def map_recorded_events_to_aten_ops_with_stack_trace(traced_data):
     for timeline_event in event_timeline:
         match timeline_event.event_type:
             case "start":
-                assert timeline_event.identifier is not None
+                if timeline_event.identifier is None:
+                    raise AssertionError("identifier must not be None for start event")
 
                 if timeline_event.marker_type == "filename":
-                    assert isinstance(timeline_event.identifier, str)
+                    if not isinstance(timeline_event.identifier, str):
+                        raise AssertionError(
+                            f"identifier must be str for filename marker, "
+                            f"got {type(timeline_event.identifier).__name__}"
+                        )
                     # Push filename context - query metadata registry on-demand
                     metadata = _FX_METADATA_REGISTRY.get(timeline_event.identifier)
                     tid = timeline_event.event.get("tid")

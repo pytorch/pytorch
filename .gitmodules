@@ -109,9 +109,6 @@
 [submodule "third_party/mimalloc"]
 	path = third_party/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
-[submodule "third_party/opentelemetry-cpp"]
-	path = third_party/opentelemetry-cpp
-	url = https://github.com/open-telemetry/opentelemetry-cpp.git
 [submodule "third_party/cpp-httplib"]
 	path = third_party/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib.git
@@ -132,3 +129,6 @@
 [submodule "third_party/aiter"]
 	path = third_party/aiter
 	url = https://github.com/ROCm/aiter.git
+[submodule "third_party/mslk"]
+	path = third_party/mslk
+	url = https://github.com/meta-pytorch/MSLK.git

@@ -116,12 +116,17 @@ class ConstantOperator(Operator):
                     f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
                 )
 
-            # For DTensor template, convert to DTensor
-            if self.template == "dtensor":
-                return (
-                    f"{output_name}_local = {tensor_creation}.to('cuda')\n"
-                    f"    {output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
-                )
+            # For DTensor templates, constants are created outside the function
+            if self.template in ["dtensor", "dtensor_placements"]:
+                # For dtensor_placements, constants are handled in args_codegen
+                # For dtensor, use the global placements variable
+                if self.template == "dtensor_placements":
+                    return f"# {output_name} is created globally"
+                else:
+                    return (
+                        f"{output_name}_local = {tensor_creation}.to('cuda')\n"
+                        f"{output_name} = DTensor.from_local({output_name}_local, mesh, placements)"
+                    )
             else:
                 return f"{output_name} = {tensor_creation}"
 

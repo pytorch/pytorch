@@ -1,32 +1,23 @@
 from __future__ import annotations
 
 import token
-from typing import NamedTuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from . import EMPTY_TOKENS, ParseError
+from . import is_empty
 from .block import Block
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from tokenize import TokenInfo
+
+    from .python_file import PythonFile
 
 
-class BlocksResult(NamedTuple):
-    blocks: list[Block]
-    errors: dict[str, str]
-
-
-def blocks(tokens: Sequence[TokenInfo]) -> BlocksResult:
+def blocks(pf: PythonFile) -> list[Block]:
     blocks: list[Block] = []
-    indent_to_dedent = _make_indent_dict(tokens)
-    errors: dict[str, str] = {}
 
-    def starts_block(t: TokenInfo) -> bool:
-        return t.type == token.NAME and t.string in ("class", "def")
-
-    it = (i for i, t in enumerate(tokens) if starts_block(t))
-    blocks = [_make_block(tokens, i, indent_to_dedent, errors) for i in it]
+    it = (i for i, t in enumerate(pf.tokens) if t.string in ("class", "def"))
+    blocks = [_make_block(pf, i) for i in it]
 
     for i, parent in enumerate(blocks):
         for j in range(i + 1, len(blocks)):
@@ -47,30 +38,7 @@ def blocks(tokens: Sequence[TokenInfo]) -> BlocksResult:
         b.is_method = not b.is_class and bool(parents) and parents[0].is_class
 
     _add_full_names(blocks, [b for b in blocks if b.parent is None])
-    return BlocksResult(blocks, errors)
-
-
-def _make_indent_dict(tokens: Sequence[TokenInfo]) -> dict[int, int]:
-    dedents = dict[int, int]()
-    stack = list[int]()
-
-    for i, t in enumerate(tokens):
-        if t.type == token.INDENT:
-            stack.append(i)
-        elif t.type == token.DEDENT:
-            dedents[stack.pop()] = i
-
-    return dedents
-
-
-def _docstring(tokens: Sequence[TokenInfo], start: int) -> str:
-    for i in range(start + 1, len(tokens)):
-        tk = tokens[i]
-        if tk.type == token.STRING:
-            return tk.string
-        if tk.type not in EMPTY_TOKENS:
-            return ""
-    return ""
+    return blocks
 
 
 def _add_full_names(
@@ -91,39 +59,33 @@ def _add_full_names(
             _add_full_names(blocks, kids, b.full_name + ".")
 
 
-def _make_block(
-    tokens: Sequence[TokenInfo],
-    begin: int,
-    indent_to_dedent: dict[int, int],
-    errors: dict[str, str],
-) -> Block:
-    def next_token(start: int, token_type: int, error: str) -> int:
-        for i in range(start, len(tokens)):
-            if tokens[i].type == token_type:
-                return i
-        raise ParseError(tokens[-1], error)
+def _make_block(pf: PythonFile, begin: int) -> Block:
+    name = docstring = ""
+    end = 0
 
-    t = tokens[begin]
-    category = Block.Category[t.string.upper()]
-    indent = -1
-    dedent = -1
-    docstring = ""
-    name = "(not found)"
-    try:
-        ni = next_token(begin + 1, token.NAME, "Definition but no name")
-        name = tokens[ni].string
-        indent = next_token(ni + 1, token.INDENT, "Definition but no indent")
-        dedent = indent_to_dedent[indent]
-        docstring = _docstring(tokens, indent)
-    except ParseError as e:
-        errors[t.line] = " ".join(e.args)
+    for i in range(begin + 1, len(pf.tokens)):
+        t = pf.tokens[i]
+        if not name and t.type == token.NAME:
+            name = t.string
+        elif not end:
+            if t.type == token.INDENT:
+                end = pf.indent_to_dedent[i]
+                while is_empty(pf.tokens[end := end - 1]):
+                    pass
+            elif t.string == "...":
+                end = i
+        elif t.type == token.STRING:
+            docstring = t.string
+            break
+        elif not is_empty(t):
+            break
 
+    category = Block.Category[pf.tokens[begin].string.upper()]
     return Block(
         begin=begin,
         category=category,
-        dedent=dedent,
         docstring=docstring,
-        indent=indent,
+        end=end,
         name=name,
-        tokens=tokens,
+        tokens=pf.tokens,
     )

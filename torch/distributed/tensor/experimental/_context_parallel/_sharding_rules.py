@@ -16,8 +16,10 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     RuntimeSchemaInfo,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
-from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+from torch.distributed.tensor._ops.utils import (
+    expand_to_full_mesh_op_strategy,
+    register_op_strategy,
+)
 from torch.distributed.tensor.debug import (
     _clear_fast_path_sharding_prop_cache,
     _clear_python_sharding_prop_cache,

@@ -159,7 +159,8 @@ class TestLRScheduler(TestCase):
         gc.disable()
         ref = run()
 
-        assert ref() is None
+        if ref() is not None:
+            raise AssertionError("Expected scheduler to be garbage collected")
         gc.enable()  # restore
 
     def test_old_pattern_warning(self):
@@ -1622,7 +1623,8 @@ class TestLRScheduler(TestCase):
             return weakref.ref(scheduler)
 
         ref = test()
-        assert ref() is None
+        if ref() is not None:
+            raise AssertionError("Expected scheduler to be garbage collected")
         gc.enable()
 
     def test_cycle_lr_state_dict_picklable(self):
@@ -2152,7 +2154,7 @@ class TestLRScheduler(TestCase):
         scheduler_copy = LambdaLR(self.opt, lr_lambda=self.LambdaLRTestObject(-1))
         scheduler_copy.load_state_dict(state)
         for key in scheduler.__dict__:
-            if key not in {"optimizer"}:
+            if key != "optimizer":
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_CosineAnnealingWarmRestarts_lr_state_dict(self):

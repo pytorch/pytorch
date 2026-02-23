@@ -114,18 +114,25 @@ For each target dimension (except the last one from this canonical dim):
   2. This creates dimension with the correct stride. We then move to the next
      target dimension, which will be carved out of the "remainder" dimension.
   3. If the needed size (target_size * y) exceeds available size, we return
-     NotImplemented.
+     NotImplemented. (This can only be caused by a slice with nontrivial step)
 
 For the last target dimension from this canonical dim:
-  1. Its stride must match the canonical stride, otherwise we return NotImplemented.
-  2. Narrow to the final target size.
+  1. If its stride matches the canonical stride, narrow to the final target size.
+  2. If its stride is a multiple of the canonical stride and the offset fits
+     within the remainder, unflatten to separate the target dimension, then
+     narrow+squeeze to select a single position.
+  3. If its stride is a multiple of the canonical stride but the offset is too
+     large for the remainder, use slice with step>1 to select every Nth element.
+  4. Otherwise, return NotImplemented.
 
 Limitations:
-  - Slice operations with nontrivial step (e.g., [::2]) are not currently
-    supported. This means some valid view sequences cannot be reconstructed.
+  - Slice with nontrivial step is only supported for the last target dimension
+    per canonical source dimension. Multi-dimensional step patterns (e.g.,
+    where step>1 is needed on a non-last target dim) are not supported.
 """
 
 import functools
+import math
 import types
 
 import torch
@@ -134,7 +141,11 @@ import torch
 def _check_invariant(cond: bool, msg: str = "") -> None:
     """Internal invariant check. Not an assertion - these are algorithmic invariants."""
     if not cond:
-        raise RuntimeError(f"Internal invariant violated: {msg}" if msg else "Internal invariant violated")
+        raise RuntimeError(
+            f"Internal invariant violated: {msg}"
+            if msg
+            else "Internal invariant violated"
+        )
 
 
 def _canonicalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
@@ -153,6 +164,7 @@ def _canonicalize_tensor(tensor: torch.Tensor) -> torch.Tensor:
     # Narrow stride-0 dimensions to size 1
     for dim in reversed(range(result.ndim)):
         if result.stride(dim) == 0:
+            # could also use select()
             result = result.narrow(dim, 0, 1)
 
     # Squeeze all size-1 dimensions
@@ -234,6 +246,11 @@ def _unexpand_target_then(result: torch.Tensor, size, stride, storage_offset, cb
 
 
 def _squeeze_target_then(result: torch.Tensor, size, stride, storage_offset, cb):
+    """
+    Remove size-1 dimensions from target, call cb, then unsqueeze them back.
+
+    For example: (1, 5):(5, 1) -> squeeze -> (5,):(1,) -> cb -> unsqueeze -> (1, 5):(5, 1)
+    """
     dims = tuple(i for i, s in enumerate(size) if s == 1)
     new_size = tuple(s for i, s in enumerate(size) if i not in dims)
     new_stride = tuple(s for i, s in enumerate(stride) if i not in dims)
@@ -260,6 +277,11 @@ def _squeeze_target_then(result: torch.Tensor, size, stride, storage_offset, cb)
 
 
 def _permute_target_then(result: torch.Tensor, size, stride, storage_offset, cb):
+    """
+    Sort target dimensions by descending stride, call cb, then apply inverse permutation.
+
+    For example: (3, 5):(1, 3) -> sort -> (5, 3):(3, 1) -> cb -> inv permute -> (3, 5):(1, 3)
+    """
     perm, sorted_stride = zip(
         *sorted(enumerate(stride), key=lambda x: x[1], reverse=True), strict=True
     )
@@ -364,13 +386,15 @@ def _process_canonical_dims(
 
                 needed_size = target_size * next_dim_size
 
-                # Opportunistically consume offset when narrowing for unflatten
+                # Opportunistically consume offset, but cap so we don't
+                # exceed available size (leave remainder for inner dims)
                 narrow_start = 0
                 if remaining_offset > 0:
                     offset_in_dim = remaining_offset // canonical_stride
-                    if offset_in_dim < result.size(work_dim):
-                        narrow_start = offset_in_dim
-                        remaining_offset -= offset_in_dim * canonical_stride
+                    max_start = result.size(work_dim) - needed_size
+                    narrow_start = min(offset_in_dim, max(max_start, 0))
+                    if narrow_start > 0:
+                        remaining_offset -= narrow_start * canonical_stride
 
                 # Check if we have enough size
                 if result.size(work_dim) < needed_size + narrow_start:
@@ -405,35 +429,41 @@ def _process_canonical_dims(
                     target_stride > canonical_stride
                     and target_stride % canonical_stride == 0
                 ):
-                    # Edge case: need to unflatten and squeeze away trailing dimensions
-                    # unflatten(a*b, (a, b)) gives strides (b*canonical_stride, canonical_stride)
-                    # We want first dim stride = target_stride, so b = target_stride / canonical_stride
-                    remainder_size = target_stride // canonical_stride
-                    needed_size = target_size * remainder_size
+                    step = target_stride // canonical_stride
+                    start = (
+                        remaining_offset // canonical_stride
+                        if remaining_offset > 0 and canonical_stride > 0
+                        else 0
+                    )
 
-                    # Check if we have enough size
-                    if result.size(work_dim) < needed_size:
-                        return NotImplemented
+                    if start < step:
+                        # Unflatten+squeeze path: offset fits within remainder
+                        needed_size = target_size * step
 
-                    # Narrow if there's excess size
-                    if result.size(work_dim) != needed_size:
-                        result = result.narrow(work_dim, 0, needed_size)
+                        if result.size(work_dim) < needed_size:
+                            return NotImplemented
 
-                    # Unflatten to create target dimension and remainder
-                    result = result.unflatten(work_dim, (target_size, remainder_size))
+                        if result.size(work_dim) != needed_size:
+                            result = result.narrow(work_dim, 0, needed_size)
 
-                    # The remainder dimension (at work_dim + 1) needs to be eliminated
-                    # Opportunistically consume any remaining offset here
-                    narrow_start = 0
-                    if remaining_offset > 0 and canonical_stride > 0:
-                        # Can we consume offset by selecting a different position in the remainder?
-                        offset_in_remainder = remaining_offset // canonical_stride
-                        if offset_in_remainder < remainder_size:
-                            narrow_start = offset_in_remainder
-                            remaining_offset -= offset_in_remainder * canonical_stride
+                        result = result.unflatten(work_dim, (target_size, step))
 
-                    result = result.narrow(work_dim + 1, narrow_start, 1)
-                    result = result.squeeze(work_dim + 1)
+                        narrow_start = start
+                        if narrow_start > 0:
+                            remaining_offset -= narrow_start * canonical_stride
+
+                        result = result.narrow(work_dim + 1, narrow_start, 1)
+                        result = result.squeeze(work_dim + 1)
+                    else:
+                        # Step slicing fallback: offset too large for remainder
+                        end = start + (target_size - 1) * step
+                        if end >= result.size(work_dim):
+                            return NotImplemented
+
+                        idx = [slice(None)] * result.ndim
+                        idx[work_dim] = slice(start, end + 1, step)
+                        result = result[tuple(idx)]
+                        remaining_offset -= start * canonical_stride
                 else:
                     return NotImplemented
 
@@ -466,8 +496,6 @@ def as_strided_via_views(
         A view of the tensor with the target size/stride/offset, or NotImplemented
         if it cannot be achieved via simple view operations.
     """
-    import math
-
     # NB: When strides are insignificant, we don't reproduce them exactly, as
     # this would make the algorithm a lot more complicated for no reason
 
@@ -476,7 +504,9 @@ def as_strided_via_views(
     # Easy case 1: source tensor has numel==0
     if tensor.numel() == 0:
         if target_numel != 0:
-            return NotImplemented
+            raise RuntimeError(
+                f"cannot create a view of size {size} from a zero-element tensor"
+            )
         return tensor.view(size)
 
     # Easy case 2: source tensor has numel==1

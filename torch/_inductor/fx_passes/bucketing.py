@@ -59,6 +59,41 @@ def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     return (group_name, reduce_op, dtype)
 
 
+def _compute_foreach_groups(
+    ag_ins: list[torch.Tensor],
+    out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
+) -> list[int] | None:
+    """
+    Compute groups of indices that have the same src/dst dtype and shape.
+
+    Groups tensors by (src_dtype, dst_dtype, shape) to avoid falling back to the foreach slow path.
+
+    Returns a flat list with -1 as group delimiter, or None if only one group exists.
+    For example, groups [[0, 2], [1]] would be encoded as [0, 2, -1, 1].
+    """
+    from torch.fx.experimental.symbolic_shapes import size_hint
+
+    groups: defaultdict[tuple[torch.dtype, torch.dtype, tuple[int, ...]], list[int]] = (
+        defaultdict(list)
+    )
+    for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes)):
+        shape = tuple(size_hint(s) for s in ag_in.shape)
+        key = (ag_in.dtype, out_dtype, shape)
+        groups[key].append(i)
+
+    if len(groups) <= 1:
+        return None
+
+    # Encode as flat list with -1 as delimiter
+    result: list[int] = []
+    for i, group_indices in enumerate(groups.values()):
+        result.extend(group_indices)
+        if i < len(groups) - 1:
+            result.append(-1)
+
+    return result
+
+
 def _schedulable_wait_node(node: torch.fx.Node) -> bool:
     """
     Add additional check on if the wait node is schedulable
@@ -72,6 +107,7 @@ def _schedulable_wait_node(node: torch.fx.Node) -> bool:
     if not isinstance(node.args[0].target, Callable):
         return False
     is_callable: bool = node.args[0].op == "call_function"
+    # pyrefly: ignore [missing-attribute]
     coll: NCCL_COLL = get_collective_type_from_kernel_name(node.args[0].target.name())
     is_collective: bool = coll != NCCL_COLL.UNSUPPORTED
     return is_callable and is_collective
@@ -162,8 +198,8 @@ def bucket_all_gather(
     mode: BucketMode = "default",
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
-        from torch._inductor.fx_passes.bucketing import (  # pyrefly: ignore  # missing-module-attribute
-            bucket_cap_mb_by_bucket_idx_default,
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
@@ -179,8 +215,8 @@ def bucket_reduce_scatter(
     mode: BucketMode = "default",
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
-        from torch._inductor.fx_passes.bucketing import (  # pyrefly: ignore  # missing-module-attribute
-            bucket_cap_mb_by_bucket_idx_default,
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
@@ -227,8 +263,74 @@ def is_all_to_all_tensor(node: torch.fx.Node) -> bool:
     )
 
 
+def get_collective_type(node: torch.fx.Node) -> str:
+    """Get the collective type name for a node."""
+    if is_all_gather_into_tensor(node):
+        return "all_gather"
+    elif is_reduce_scatter_tensor(node):
+        return "reduce_scatter"
+    elif is_all_reduce_tensor(node):
+        return "all_reduce"
+    return ""
+
+
+def get_full_bucket_key(
+    node: torch.fx.Node, bucket_mode: BucketMode
+) -> tuple[str, Any]:
+    """Get the full bucket key including collective type and bucket key."""
+    return (get_collective_type(node), bucket_key(node, mode=bucket_mode))
+
+
 def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
+
+
+def is_fsdp_all_gather(
+    node: torch.fx.Node,
+    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
+) -> bool:
+    """
+    Check if the node is a FSDP-related all_gather by its recursive ancestors.
+    On the path from the all-gather to its originate placeholder, there should not be any compute node
+    So there should be ONLY ONE placeholder in its recursive ancestors.
+    """
+    if not is_all_gather_into_tensor(node):
+        return False
+
+    seen_placeholders = 0
+    for ancestor in all_node_ancestors[node]:
+        if ancestor.op == "placeholder":
+            seen_placeholders += 1
+
+    return seen_placeholders == 1
+
+
+def is_fsdp_reduce_scatter(node: torch.fx.Node) -> bool:
+    """
+    Check if a reduce_scatter node is FSDP-related by verifying its output flows
+    directly to graph outputs through only unary ops (e.g., to_copy, wait).
+    """
+    if not is_reduce_scatter_tensor(node):
+        return False
+
+    visited: OrderedSet[torch.fx.Node] = OrderedSet()
+    stack = [node]
+
+    while stack:
+        curr = stack.pop()
+        if curr in visited:
+            continue
+        visited.add(curr)
+
+        for user in curr.users:
+            if user.op == "output":
+                continue
+            # Non-unary op means computation with external data
+            if len(user.all_input_nodes) != 1:
+                return False
+            stack.append(user)
+
+    return True
 
 
 def collect_node_descendants(
@@ -439,8 +541,8 @@ def bucket_all_reduce(
     mode: str | None = None,
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
-        from torch._inductor.fx_passes.bucketing import (  # pyrefly: ignore  # missing-module-attribute
-            bucket_cap_mb_by_bucket_idx_default,
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
@@ -561,7 +663,21 @@ def _pre_bucket_all_gather(
         int
     ],  # dtype enum values, that inputs are converted to before all_gather
     rank: int,
+    foreach_group_indices: list[int] | None = None,
 ) -> torch.Tensor:
+    """
+    Pre-bucket all gather operation.
+
+    Args:
+        ag_ins: Input tensors to gather
+        group_size: Size of the process group
+        group_name: Name of the process group
+        dtype: Target dtype for the bucket
+        out_dtype_ints: Dtype enum values for each input
+        rank: Current rank
+        foreach_group_indices: Optional flat list of grouped indices with -1 as delimiter.
+            E.g., [0, 2, -1, 1] means groups [[0, 2], [1]].
+    """
     # Convert int indices back to torch.dtype
     out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
     ins_split_sizes_bytes = [
@@ -584,7 +700,30 @@ def _pre_bucket_all_gather(
         for dst, out_dtype in zip(foreach_copy_dsts, out_dtypes, strict=True)
     ]
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
-    torch._foreach_copy_(foreach_copy_dsts_typed, ag_ins_flattened)
+
+    # Parse pre-computed groups from flat list with -1 delimiters
+    if foreach_group_indices is not None:
+        groups_list: list[list[int]] = []
+        current_group: list[int] = []
+        for idx in foreach_group_indices:
+            if idx == -1:
+                if current_group:
+                    groups_list.append(current_group)
+                    current_group = []
+            else:
+                current_group.append(idx)
+        # Add last group if not empty
+        if current_group:
+            groups_list.append(current_group)
+
+        # Call foreach_copy_ per group
+        for group_indices in groups_list:
+            group_dsts = [foreach_copy_dsts_typed[idx] for idx in group_indices]
+            group_srcs = [ag_ins_flattened[idx] for idx in group_indices]
+            torch._foreach_copy_(group_dsts, group_srcs)
+    else:
+        # No grouping provided - single foreach_copy_ call
+        torch._foreach_copy_(foreach_copy_dsts_typed, ag_ins_flattened)
     return new_ag_out
 
 
@@ -595,6 +734,7 @@ def _pre_bucket_all_gather_fake(
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtype_ints: list[int],
     rank: int,
+    foreach_group_indices: list[int] | None = None,
 ) -> torch.Tensor:
     out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
     ins_split_sizes_bytes = [
@@ -640,8 +780,17 @@ def all_gather_merge_fn_to_trace_custom_ops(
     # TODO: custom ops support list[dtype] input
     out_dtype_ints = [_ALL_DTYPES.index(dt) for dt in out_dtypes]
 
+    # Pre-compute foreach groups for better foreach_copy_ performance
+    foreach_group_indices = _compute_foreach_groups(ag_ins, out_dtypes)
+
     new_ag_out = torch.ops.bucketing._pre_bucket_all_gather(
-        ag_ins, group_size, group_name, dtype, out_dtype_ints, rank
+        ag_ins,
+        group_size,
+        group_name,
+        dtype,
+        out_dtype_ints,
+        rank,
+        foreach_group_indices,
     )
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
@@ -853,7 +1002,9 @@ def process_collective_bucket(
         # Handle convert_element_type operations (for all_gather)
         node_in = n.args[0]
         if has_mergeable_all_gather_convert_dtype(n):
+            # pyrefly: ignore [bad-argument-type]
             ag_node_to_pre_nodes[n].append(node_in)
+            # pyrefly: ignore [missing-attribute]
             node_in = node_in.args[0]
 
         assert isinstance(node_in, torch.fx.Node)  # Ensure node_in is a Node
@@ -1031,6 +1182,7 @@ def merge_all_gather_bucket(
         ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
 
     # Process bucket with lazy input collection
+    # pyrefly: ignore [bad-argument-type]
     rank: int = dist.get_rank(_resolve_process_group(group_name))
 
     def create_trace_args(bucket_ins: list[torch.fx.Node]) -> tuple[Any, ...]:

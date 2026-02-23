@@ -514,7 +514,7 @@ class ModuleDict(Module):
     * the order of insertion, and
 
     * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
-      ``OrderedDict``, ``dict`` (started from Python 3.6) or another
+      ``OrderedDict``, ``dict`` or another
       :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 
@@ -778,11 +778,9 @@ class ParameterList(Module):
                     size_str,
                     device_str,
                 )
-                # pyrefly: ignore [bad-argument-type]
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
-                    # pyrefly: ignore [bad-argument-type]
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
 
@@ -1015,11 +1013,9 @@ class ParameterDict(Module):
                     size_str,
                     device_str,
                 )
-                # pyrefly: ignore [bad-argument-type]
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
-                    # pyrefly: ignore [bad-argument-type]
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
         tmpstr = "\n".join(child_lines)

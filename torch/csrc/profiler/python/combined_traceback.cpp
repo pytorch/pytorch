@@ -24,10 +24,24 @@ namespace {
 static std::mutex to_free_frames_mutex;
 static std::vector<CapturedTraceback::PyFrame> to_free_frames;
 struct PythonTraceback : public CapturedTraceback::Python {
-  std::vector<CapturedTraceback::PyFrame> gather() override {
+  bool canGather() override {
+    // Check if it's safe to gather Python frames from the current thread.
+    // Returns false for pure C++ threads that cannot acquire the GIL.
     if (!Py_IsInitialized()) {
-      return {};
+      return false;
     }
+    // Already holding GIL - safe to gather
+    if (PyGILState_Check() == 1) {
+      return true;
+    }
+    // Thread is registered with Python - can acquire GIL
+    if (PyGILState_GetThisThreadState() != nullptr) {
+      return true;
+    }
+    // Pure C++ thread with no Python state - cannot acquire GIL
+    return false;
+  }
+  std::vector<CapturedTraceback::PyFrame> gather() override {
     std::vector<CapturedTraceback::PyFrame> frames;
     py::gil_scoped_acquire acquire;
     {
@@ -143,10 +157,23 @@ struct PythonTraceback : public CapturedTraceback::Python {
       return result;
     }
 
-    // Get the traceback from the metadata dict
+    // Get the traceback from the metadata dict.
+    // This runs from a CUDA allocator callback, so a Python exception may
+    // already be pending (e.g. the forward function just raised). The compat
+    // shim for PyDict_GetItemRef on Python < 3.13 uses PyErr_Occurred() to
+    // distinguish "not found" from "error", so a stale pending exception would
+    // be misread as a lookup failure and then cleared, destroying the real
+    // exception. Save/restore the exception state to avoid that.
     py::gil_scoped_acquire gil;
+
+    PyObject* exc_type = nullptr;
+    PyObject* exc_value = nullptr;
+    PyObject* exc_tb = nullptr;
+    PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
+
     PyObject* dict = metadata->dict();
     if (!dict || !PyDict_Check(dict)) {
+      PyErr_Restore(exc_type, exc_value, exc_tb);
       return result;
     }
 
@@ -156,11 +183,13 @@ struct PythonTraceback : public CapturedTraceback::Python {
             torch::autograd::PyAnomalyMetadata::ANOMALY_TRACE_KEY,
             &traceback) < 0) {
       PyErr_Clear();
+      PyErr_Restore(exc_type, exc_value, exc_tb);
       return result;
     }
 
     if (!traceback || !PyList_Check(traceback)) {
       Py_XDECREF(traceback);
+      PyErr_Restore(exc_type, exc_value, exc_tb);
       return result;
     }
 
@@ -178,6 +207,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
     }
 
     Py_DECREF(traceback);
+    PyErr_Restore(exc_type, exc_value, exc_tb);
     return result;
   }
 };

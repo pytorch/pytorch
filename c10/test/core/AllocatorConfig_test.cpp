@@ -58,6 +58,7 @@ TEST(AllocatorConfigTest, allocator_config_test) {
       "device_specific_option_mb:64";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
+  EXPECT_EQ(AcceleratorAllocatorConfig::large_segment_size(), 20 * kMB);
   EXPECT_EQ(AcceleratorAllocatorConfig::max_split_size(), 40 * kMB);
   EXPECT_EQ(
       AcceleratorAllocatorConfig::max_non_split_rounding_size(), 30 * kMB);
@@ -80,11 +81,13 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   EXPECT_EQ(ExtendedAllocatorConfig::device_specific_option(), 64 * kMB);
 
   env =
+      "large_segment_size_mb:15,"
       "max_split_size_mb:20,"
       "max_non_split_rounding_mb:40,"
       "garbage_collection_threshold:0.8";
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
+  EXPECT_EQ(AcceleratorAllocatorConfig::large_segment_size(), 15 * kMB);
   EXPECT_EQ(AcceleratorAllocatorConfig::max_split_size(), 20 * kMB);
   EXPECT_EQ(
       AcceleratorAllocatorConfig::max_non_split_rounding_size(), 40 * kMB);
@@ -124,6 +127,10 @@ TEST(AllocatorConfigTest, allocator_config_test) {
   c10::CachingAllocator::setAllocatorSettings(env);
   EXPECT_EQ(c10::CachingAllocator::getAllocatorSettings(), env);
   EXPECT_EQ(AcceleratorAllocatorConfig::pinned_use_background_threads(), false);
+
+  // max_split_size_mb must be >= large_segment_size_mb
+  env = "max_split_size_mb:20,large_segment_size_mb:25";
+  ASSERT_THROW(c10::CachingAllocator::setAllocatorSettings(env), c10::Error);
 
   env = "foo:123,bar:456";
   ASSERT_THROW(c10::CachingAllocator::setAllocatorSettings(env), c10::Error);

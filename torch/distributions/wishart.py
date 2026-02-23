@@ -17,7 +17,8 @@ _log_2 = math.log(2)
 
 
 def _mvdigamma(x: Tensor, p: int) -> Tensor:
-    assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
+    if not x.gt((p - 1) / 2).all():
+        raise AssertionError("Wrong domain for multivariate digamma function.")
     return torch.digamma(
         x.unsqueeze(-1)
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
@@ -84,11 +85,14 @@ class Wishart(ExponentialFamily):
         scale_tril: Tensor | None = None,
         validate_args: bool | None = None,
     ) -> None:
-        assert (covariance_matrix is not None) + (scale_tril is not None) + (
-            precision_matrix is not None
-        ) == 1, (
-            "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
-        )
+        if (
+            (covariance_matrix is not None)
+            + (scale_tril is not None)
+            + (precision_matrix is not None)
+        ) != 1:
+            raise AssertionError(
+                "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+            )
 
         param = next(
             p

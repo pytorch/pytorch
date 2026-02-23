@@ -6,7 +6,6 @@ import warnings
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
 from torch.ao.quantization.backend_config import (
     BackendConfig,
     get_native_backend_config,
@@ -65,6 +64,9 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+
+NUMERIC_DEBUG_HANDLE_KEY = "numeric_debug_handle"
+CUSTOM_KEY = "custom"
 
 __all__ = [
     "convert",
@@ -208,7 +210,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
                 if key in ["_scale_", "_zero_point_"] and (
-                    not isinstance(value_or_node, (float, int))
+                    not isinstance(value_or_node, (float, int))  # noqa: UP038
                 ):
                     # For scale and zero_point values we register them as buffers in the root module.
                     # However, note that when the values are not tensors, as in the case of
@@ -247,11 +249,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 CUSTOM_KEY in node.meta
                 and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
             ):
-                if CUSTOM_KEY not in dequantized_node.meta:
-                    dequantized_node.meta[CUSTOM_KEY] = {}
-                dequantized_node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
-                    CUSTOM_KEY
-                ][NUMERIC_DEBUG_HANDLE_KEY]
+                raise NotImplementedError(
+                    "pt2e numeric suite has been migrated to torchao (https://github.com/pytorch/ao)"
+                )
             graph.erase_node(node)
     elif is_dynamic:
         # uint8/int8/fp16 dynamic quantization
@@ -345,9 +345,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             node.replace_all_uses_with(dequantized_node)
             # propagate numeric debug handle from observer/fake_quant node to dequantize node
             if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-                dequantized_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
-                    NUMERIC_DEBUG_HANDLE_KEY
-                ]
+                raise NotImplementedError(
+                    "pt2e numeric suite has been migrated to torchao (https://github.com/pytorch/ao)"
+                )
             graph.erase_node(node)
     elif dtype == torch.float16:
         # Insert to_fp16 -> to_fp32 node
@@ -596,7 +596,7 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
         # we only replace the specific use since dequantize could be used by other nodes
         # as well
         node.replace_input_with(arg, quantize_node)
-    elif isinstance(arg, (list, tuple)):
+    elif isinstance(arg, (list, tuple)):  # noqa: UP038
         for arg_element in arg:
             _maybe_recursive_remove_dequantize(arg_element, node, graph)
     elif isinstance(arg, dict):
@@ -838,7 +838,7 @@ def convert_weighted_module(
                 "weight_hh": weight_qparams_hh,
             }
         )
-    elif isinstance(float_module, (torch.nn.LSTM, torch.nn.GRU)):
+    elif isinstance(float_module, (torch.nn.LSTM, torch.nn.GRU)):  # noqa: UP038
         # format for wq_or_wq_dict (flattened attributes):
         # {"weight_ih_l0_scale": ..., "weight_ih_l0_qscheme": ..., ...}
         for wn in float_module._flat_weights_names:
@@ -1217,12 +1217,12 @@ def convert(
             return_node = node
             output = node.args[0]
             # outputs can be Node, list, tuple, dict, other cases are not supported yet
-            if isinstance(output, (list, tuple)):
+            if isinstance(output, (list, tuple)):  # noqa: UP038
                 for idx in output_quantized_idxs:
                     _maybe_recursive_remove_dequantize(
                         output[idx], return_node, model.graph
                     )
-            elif isinstance(output, (Node, dict)):
+            elif isinstance(output, (Node, dict)):  # noqa: UP038
                 # we treat dict as a single argument currently, but it can be extended
                 # to support {"key": dtype} after we change output_quantized_idxs to
                 # dict

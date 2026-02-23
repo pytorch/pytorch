@@ -151,13 +151,11 @@ class Embedding(Module):
         self.embedding_dim = embedding_dim
         if padding_idx is not None:
             if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, (
-                    "Padding_idx must be within num_embeddings"
-                )
+                if padding_idx >= self.num_embeddings:
+                    raise AssertionError("Padding_idx must be within num_embeddings")
             elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, (
-                    "Padding_idx must be within num_embeddings"
-                )
+                if padding_idx < -self.num_embeddings:
+                    raise AssertionError("Padding_idx must be within num_embeddings")
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         self.max_norm = max_norm
@@ -170,10 +168,10 @@ class Embedding(Module):
             )
             self.reset_parameters()
         else:
-            assert list(_weight.shape) == [
-                num_embeddings,
-                embedding_dim,
-            ], "Shape of weight does not match num_embeddings and embedding_dim"
+            if list(_weight.shape) != [num_embeddings, embedding_dim]:
+                raise AssertionError(
+                    "Shape of weight does not match num_embeddings and embedding_dim"
+                )
             self.weight = Parameter(_weight, requires_grad=not _freeze)
 
         self.sparse = sparse
@@ -249,9 +247,8 @@ class Embedding(Module):
             >>> embedding(input)
             tensor([[ 4.0000,  5.1000,  6.3000]])
         """
-        assert embeddings.dim() == 2, (
-            "Embeddings parameter is expected to be 2-dimensional"
-        )
+        if embeddings.dim() != 2:
+            raise AssertionError("Embeddings parameter is expected to be 2-dimensional")
         rows, cols = embeddings.shape
         embedding = cls(
             num_embeddings=rows,
@@ -394,13 +391,11 @@ class EmbeddingBag(Module):
         self.scale_grad_by_freq = scale_grad_by_freq
         if padding_idx is not None:
             if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, (
-                    "padding_idx must be within num_embeddings"
-                )
+                if padding_idx >= self.num_embeddings:
+                    raise AssertionError("padding_idx must be within num_embeddings")
             elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, (
-                    "padding_idx must be within num_embeddings"
-                )
+                if padding_idx < -self.num_embeddings:
+                    raise AssertionError("padding_idx must be within num_embeddings")
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         if _weight is None:
@@ -409,10 +404,10 @@ class EmbeddingBag(Module):
             )
             self.reset_parameters()
         else:
-            assert list(_weight.shape) == [
-                num_embeddings,
-                embedding_dim,
-            ], "Shape of weight does not match num_embeddings and embedding_dim"
+            if list(_weight.shape) != [num_embeddings, embedding_dim]:
+                raise AssertionError(
+                    "Shape of weight does not match num_embeddings and embedding_dim"
+                )
             self.weight = Parameter(_weight)
         self.mode = mode
         self.sparse = sparse
@@ -529,9 +524,8 @@ class EmbeddingBag(Module):
             >>> embeddingbag(input)
             tensor([[ 2.5000,  3.7000,  4.6500]])
         """
-        assert embeddings.dim() == 2, (
-            "Embeddings parameter is expected to be 2-dimensional"
-        )
+        if embeddings.dim() != 2:
+            raise AssertionError("Embeddings parameter is expected to be 2-dimensional")
         rows, cols = embeddings.shape
         embeddingbag = cls(
             num_embeddings=rows,
