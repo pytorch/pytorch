@@ -735,7 +735,6 @@ class InputObserverInfo:
                     aligned_flat_list[index] = tensor
                     continue
                 if not shape:
-                    # pyrefly: ignore[unsupported-operation]
                     aligned_flat_list[index] = torch.zeros(
                         tensor.shape, dtype=tensor.dtype, device=tensor.device
                     )
@@ -750,7 +749,6 @@ class InputObserverInfo:
                 )
                 new_shape = list(tensor.shape)
                 new_shape[dim] = 0
-                # pyrefly: ignore[unsupported-operation]
                 aligned_flat_list[index] = torch.empty(
                     tuple(new_shape), dtype=tensor.dtype, device=tensor.device
                 )
@@ -762,7 +760,6 @@ class InputObserverInfo:
             candidate.aligned_spec,
         )
         if self._best_candidate.cst_kwargs:
-            # pyrefly: ignore[invalid-argument]
             kwargs = {**kwargs, **self._best_candidate.cst_kwargs}
 
         if not as_args_kwargs:
@@ -1163,7 +1160,6 @@ class InputObserver:
 
             begin = time.perf_counter()
             try:
-                # pyrefly: ignore[bad-unpacking]
                 ort_outputs = onnx_program(**feeds)
                 error = None
             except Exception as e:
@@ -1182,7 +1178,6 @@ class InputObserver:
                 err_abs = 0.0
                 err_rel = 0.0
                 error = ""
-                # pyrefly: ignore[no-matching-overload]
                 for torch_tensor, ort_tensor in zip(outputs, ort_outputs):
                     if torch_tensor is None or ort_tensor is None:
                         if type(torch_tensor) is not type(ort_tensor) and not skip_none:

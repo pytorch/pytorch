@@ -195,7 +195,7 @@ case "$tag" in
     fi
     GCC_VERSION=13
     VISION=yes
-    ROCM_VERSION=7.1
+    ROCM_VERSION=7.2
     NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
@@ -315,16 +315,6 @@ case "$tag" in
   pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
-    ACL=yes
-    VISION=yes
-    OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
-    ;;
-  pytorch-linux-jammy-aarch64-py3.10-clang21)
-    ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=21
     ACL=yes
     VISION=yes
     OPENBLAS=yes
