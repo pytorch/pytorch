@@ -28,5 +28,9 @@ list_norm_impls.__module__ = __name__
 current_norm_impl.__module__ = __name__
 restore_norm_impl.__module__ = __name__
 
-# Import built-in implementations to trigger self-registration
-from . import _cutedsl_norms  # noqa: F401
+# Import built-in implementations to trigger self-registration.
+# Guarded because the CuteDSL kernels depend on cuda/cutlass packages.
+try:
+    from . import _cutedsl_norms  # noqa: F401
+except ImportError:
+    pass
