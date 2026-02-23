@@ -251,38 +251,6 @@ autosummary_filename_map = {
 }
 
 coverage_ignore_functions = [
-    # torch
-    "typename",
-    # torch.cuda._sanitizer
-    "zip_arguments",
-    "zip_by_key",
-    # torch.distributed.autograd
-    "is_available",
-    # torch.distributed.checkpoint.state_dict
-    "gc_context",
-    # torch.distributed.elastic.events
-    "record_rdzv_event",
-    # torch.distributed.elastic.metrics
-    "initialize_metrics",
-    # torch.distributed.elastic.rendezvous.registry
-    "get_rendezvous_handler",
-    # torch.distributed.launch
-    "launch",
-    "main",
-    "parse_args",
-    # torch.distributed.rpc
-    "is_available",
-    # torch.distributed.run
-    "config_from_args",
-    "determine_local_world_size",
-    "get_args_parser",
-    "get_rdzv_endpoint",
-    "get_use_env",
-    "main",
-    "parse_args",
-    "parse_min_max_nnodes",
-    "run",
-    "run_script_path",
     # torch.distributions.constraints
     "is_dependent",
     # torch.hub

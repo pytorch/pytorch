@@ -733,6 +733,7 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    typename
 
 Symbolic Numbers
 ----------------
