@@ -663,7 +663,7 @@ class DefaultsSource(ChainedSource):
                 self, "_name", f"{{0}}.{_esc_str(self.field)}[{_esc_str(self.idx_key)}]"
             )
 
-    def __reduce__(self) -> tuple:
+    def __reduce__(self) -> tuple[type["DefaultsSource"], tuple[Any, ...]]:
         # Only pass init=True fields (base, idx_key, is_kw).
         # The init=False fields (field, _name) are recomputed in __post_init__.
         return (self.__class__, (self.base, self.idx_key, self.is_kw))
