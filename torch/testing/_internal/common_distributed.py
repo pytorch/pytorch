@@ -410,7 +410,7 @@ def requires_gloo():
 
 def requires_nccl_version(version, msg):
     if not TEST_CUDA:
-        return lambda f: f
+        return skip_but_pass_in_sandcastle(TEST_SKIPS["no_cuda"].message)
     if not c10d.is_nccl_available():
         return skip_but_pass_in_sandcastle(
             "c10d was not compiled with the NCCL backend",
@@ -430,6 +430,8 @@ def requires_nccl_shrink():
 
 
 def requires_nccl():
+    if not TEST_CUDA:
+        return skip_but_pass_in_sandcastle(TEST_SKIPS["no_cuda"].message)
     return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
