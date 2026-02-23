@@ -119,7 +119,7 @@ jobs:
   opmicrobenchmark-build-rocm:
     if: github.repository_owner == 'pytorch'
     name: opmicrobenchmark-build-rocm
-    uses: ./.github/workflows/_rocm-build.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-jammy-rocm-py3_10
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
