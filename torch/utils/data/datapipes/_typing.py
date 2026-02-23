@@ -284,7 +284,6 @@ class _DataPipeMeta(GenericMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
-        # pyrefly: ignore [no-access]
         cls.__origin__ = None
         if "type" in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]

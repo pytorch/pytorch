@@ -173,6 +173,7 @@ def device_count() -> int:
 
 def current_device() -> int:
     r"""Return the index of a currently selected device."""
+    # pyrefly: ignore [missing-attribute]
     return torch._C._mtia_getDevice()
 
 
@@ -276,6 +277,7 @@ def set_device(device: Device) -> None:
     """
     device = _get_device_index(device)
     if device >= 0:
+        # pyrefly: ignore [missing-attribute]
         torch._C._mtia_setDevice(device)
 
 
@@ -303,9 +305,11 @@ class device:
         self.prev_idx = -1
 
     def __enter__(self):
+        # pyrefly: ignore [missing-attribute]
         self.prev_idx = torch._C._mtia_maybeExchangeDevice(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
+        # pyrefly: ignore [missing-attribute]
         self.idx = torch._C._mtia_maybeExchangeDevice(self.prev_idx)
         return False
 
