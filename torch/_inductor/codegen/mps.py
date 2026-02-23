@@ -88,10 +88,10 @@ class MetalExprPrinter(ExprPrinter_):
             else:
                 x = f"metal::floor({x}) / ({div})"
         mod = self.doprint(mod)
-        if div != 1:
-            # Workaround for Metal compiler bug with fused (x / A) % B
-            return f"c10::metal::safe_mod({x}, {mod})"
-        return f"({x}) % ({mod})"
+        # Workaround for Metal compiler bug with fused (x / A) % B
+        return (
+            f"c10::metal::safe_mod({x}, {mod})" if div == 65536 else f"({x}) % ({mod})"
+        )
 
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
