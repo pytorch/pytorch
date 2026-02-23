@@ -290,8 +290,10 @@ class Interpreter:
         log.debug("run_node %s", LazyString(lambda: _format_fx_node(n)))
         with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
-            assert isinstance(args, tuple)
-            assert isinstance(kwargs, dict)
+            if not isinstance(args, tuple):
+                raise AssertionError(f"Expected args to be tuple, got {type(args)}")
+            if not isinstance(kwargs, dict):
+                raise AssertionError(f"Expected kwargs to be dict, got {type(kwargs)}")
             return getattr(self, n.op)(n.target, args, kwargs)
 
     # Main Node running APIs
@@ -315,7 +317,8 @@ class Interpreter:
         Returns:
             Any: The argument value that was retrieved.
         """
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         if target.startswith("*"):
             # For a starred parameter e.g. `*args`, retrieve all
             # remaining values from the args list.
@@ -349,7 +352,8 @@ class Interpreter:
         Return:
             Any: The value of the attribute that was retrieved
         """
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         return self.fetch_attr(target)
 
     @compatibility(is_backward_compatible=True)
@@ -369,7 +373,8 @@ class Interpreter:
         Return
             Any: The value returned by the function invocation
         """
-        assert not isinstance(target, str)
+        if isinstance(target, str):
+            raise AssertionError("target should not be a string for call_function")
 
         # Execute the function and return the result
         return target(*args, **kwargs)
@@ -395,7 +400,8 @@ class Interpreter:
         self_obj, *args_tail = args
 
         # Execute the method and return the result
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         return getattr(self_obj, target)(*args_tail, **kwargs)
 
     @compatibility(is_backward_compatible=True)
@@ -418,7 +424,8 @@ class Interpreter:
         # Retrieve executed args and kwargs values from the environment
 
         # Execute the method and return the result
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         submod = self.fetch_attr(target)
 
         return submod(*args, **kwargs)
@@ -478,9 +485,11 @@ class Interpreter:
             Tuple[Tuple, Dict]: ``args`` and ``kwargs`` with concrete values for ``n``.
         """
         args = self.map_nodes_to_values(n.args, n)
-        assert isinstance(args, tuple)
+        if not isinstance(args, tuple):
+            raise AssertionError(f"Expected args to be tuple, got {type(args)}")
         kwargs = self.map_nodes_to_values(n.kwargs, n)
-        assert isinstance(kwargs, dict)
+        if not isinstance(kwargs, dict):
+            raise AssertionError(f"Expected kwargs to be dict, got {type(kwargs)}")
         return args, kwargs
 
     @compatibility(is_backward_compatible=True)
@@ -592,7 +601,8 @@ class Transformer(Interpreter):
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         default_value = next(iter(args)) if args else inspect.Signature.empty
         return Proxy(
             self.new_graph.placeholder(target, default_value=default_value), self.tracer
@@ -614,7 +624,8 @@ class Transformer(Interpreter):
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         return self.tracer.create_proxy("get_attr", target, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
@@ -622,7 +633,8 @@ class Transformer(Interpreter):
         self, target: "Target", args: tuple[Argument, ...], kwargs: dict[str, Any]
     ) -> Any:
         # Override so that the leaf module policy from `self.tracer` is respected.
-        assert isinstance(target, str)
+        if not isinstance(target, str):
+            raise AssertionError(f"Expected target to be str, got {type(target)}")
         submod = self.fetch_attr(target)
         return self.tracer.call_module(submod, submod.forward, args, kwargs)
 
@@ -649,7 +661,10 @@ class Transformer(Interpreter):
             new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))
             # also preserve the metadata from the old output node, if it exists
             old_output_node = list(self.graph.nodes)[-1]
-            assert old_output_node.op == "output"
+            if old_output_node.op != "output":
+                raise AssertionError(
+                    f"Expected output node, got op={old_output_node.op}"
+                )
             for k, v in old_output_node.meta.items():
                 new_output_node.meta[k] = v
 

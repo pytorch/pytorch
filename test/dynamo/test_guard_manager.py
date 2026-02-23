@@ -1462,6 +1462,129 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
                 opt_fn(x)
 
 
+class SourceCloneTests(torch._dynamo.test_case.TestCase):
+    def test_clone_identity_transform(self):
+        """Identity transform should produce a source with the same name."""
+        from torch._dynamo.source import AttrSource, GetItemSource, LocalSource
+
+        local = LocalSource("x")
+        attr = AttrSource(local, "weight")
+        item = GetItemSource(attr, 0)
+
+        for source in [local, attr, item]:
+            cloned = source.clone(lambda x: x)
+            self.assertEqual(cloned.name, source.name)
+
+    def test_clone_no_transform(self):
+        from torch._dynamo.source import AttrSource, LocalSource
+
+        local = LocalSource("x")
+        attr = AttrSource(local, "weight")
+
+        self.assertIs(local.clone(), local)
+        cloned_attr = attr.clone()
+        self.assertEqual(cloned_attr.name, attr.name)
+
+    def test_clone_parameterized_deep_chain(self):
+        """Replace a base source deep in a chain via transform_fn."""
+        from torch._dynamo.source import AttrSource, GetItemSource, LocalSource
+
+        # Build: L['x'].weight[0].grad_fn
+        local = LocalSource("x")
+        attr1 = AttrSource(local, "weight")
+        item = GetItemSource(attr1, 0)
+        attr2 = AttrSource(item, "grad_fn")
+
+        replacement = LocalSource("y")
+
+        def replace_local(source):
+            if isinstance(source, LocalSource) and source.local_name == "x":
+                return replacement
+            return source
+
+        cloned = attr2.clone(replace_local)
+        self.assertEqual(cloned.name, "L['y'].weight[0].grad_fn")
+        self.assertNotEqual(cloned.name, attr2.name)
+
+    def test_clone_chained_source_types(self):
+        """Test clone on various ChainedSource subclasses."""
+        from torch._dynamo.source import (
+            AttrSource,
+            GradSource,
+            LocalSource,
+            NNModuleSource,
+            TensorProperty,
+            TensorPropertySource,
+            TypeSource,
+        )
+
+        local = LocalSource("mod")
+        nn_mod = NNModuleSource(AttrSource(local, "layer"))
+        grad = GradSource(local)
+        tensor_prop = TensorPropertySource(local, TensorProperty.SIZE, idx=0)
+        type_src = TypeSource(local)
+
+        for source in [nn_mod, grad, tensor_prop, type_src]:
+            cloned = source.clone(lambda x: x)
+            self.assertEqual(cloned.name, source.name)
+
+    def test_clone_dict_get_item_source_with_constant_key(self):
+        from torch._dynamo.source import DictGetItemSource, LocalSource
+
+        local = LocalSource("d")
+        source = DictGetItemSource(local, "key")
+        cloned = source.clone()
+        self.assertEqual(cloned.name, source.name)
+
+        replacement = LocalSource("other_d")
+
+        def replace_local(s):
+            if isinstance(s, LocalSource) and s.local_name == "d":
+                return replacement
+            return s
+
+        cloned = source.clone(replace_local)
+        self.assertEqual(cloned.name, "L['other_d']['key']")
+
+    def test_clone_dict_get_item_source_with_source_key(self):
+        from torch._dynamo.source import (
+            ConstDictKeySource,
+            DictGetItemSource,
+            LocalSource,
+        )
+
+        local = LocalSource("d")
+        key_source = ConstDictKeySource(local, 0)
+        source = DictGetItemSource(local, key_source)
+
+        cloned = source.clone(lambda x: x)
+        self.assertEqual(cloned.name, source.name)
+
+    def test_clone_dict_subclass_get_item_source(self):
+        from torch._dynamo.source import DictSubclassGetItemSource, LocalSource
+
+        local = LocalSource("d")
+        source = DictSubclassGetItemSource(local, "key")
+
+        cloned = source.clone()
+        self.assertEqual(cloned.name, source.name)
+
+        cloned = source.clone(lambda x: x)
+        self.assertEqual(cloned.name, source.name)
+
+    def test_clone_get_item_source(self):
+        from torch._dynamo.source import GetItemSource, LocalSource
+
+        local = LocalSource("lst")
+        source = GetItemSource(local, 3)
+
+        cloned = source.clone()
+        self.assertEqual(cloned.name, source.name)
+
+        cloned = source.clone(lambda x: x)
+        self.assertEqual(cloned.name, source.name)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

@@ -13,7 +13,10 @@ from sympy import Expr
 from torch import SymInt
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
+    free_unbacked_symbols,
+    GuardOnDataDependentSymNode,
     has_free_unbacked_symbols,
+    IterateExprs,
     ShapeEnv,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -503,36 +506,37 @@ class SizeVarAllocator:
         return self.guard_or_false(sympy.Eq(size, 1))
 
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
-        """return the smaller of left and right, and guard on that choice"""
+        """Return the smaller of left and right, and guard on that choice."""
         if isinstance(left, Expr):
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-        try:
-            lv = self.size_hint_or_throw(left)
-            rv = self.size_hint_or_throw(right)
-        except TypeError:  # unbacked symints
-            if left == right or self.statically_known_leq(left, right):
-                return left
-            if self.statically_known_leq(right, left):
-                return right
-            gcd = sympy.gcd(left, right)
-            if left == gcd:  # handle `min(10*u0, u0)` etc
-                return left
-            if right == gcd:
-                return right
-            raise TypeError(
-                f"evaluate_min({left}, {right}) with unbacked symints"
-            ) from None
-        if lv <= rv:
-            self.check_leq(left, right)
+        if self.guard_or_false(sympy.Le(left, right)):
             return left
-        else:
-            self.check_leq(right, left)
+        if self.guard_or_false(sympy.Le(right, left)):
             return right
 
+        # GCD fallback: if gcd(a, b) == a then a divides b, implying a <= b.
+        #
+        # TODO: This is NOT always sound for unbacked symints.  It can
+        # produce wrong results when:
+        #   - inputs can be negative: gcd(u0, 10*u0) = u0, returns u0,
+        #     but if u0 < 0 then u0 > 10*u0 (e.g. u0=-1: min(-1,-10) = -10)
+        #   - a factor can be zero: gcd(u0, u0*u1) = u0, returns u0,
+        #     but if u1=0 then u0*u1=0 < u0 (e.g. u0=5,u1=0: min(5,0) = 0)
+        # TODO shall we add a runtime assertion at least.
+        gcd = sympy.gcd(left, right)
+        if left == gcd:
+            return left
+        if right == gcd:
+            return right
+
+        raise TypeError(
+            f"evaluate_min({left}, {right}) with unbacked symints"
+        ) from None
+
     def evaluate_max(self, left: Expr, right: Expr) -> Expr:
-        """return the larger of left and right, and guard on that choice"""
+        """Return the larger of left and right, and guard on that choice."""
         # Always choose the opposite of eval min for consistency
         # This means min(a, b) and max(a, b) produce the same guards
         min_val = self.evaluate_min(left, right)
@@ -547,7 +551,7 @@ class SizeVarAllocator:
         """
         if isinstance(expr, int):
             return expr
-        val = self.size_hint_or_throw(expr)
+        val = self.guarding_hint_or_throw(expr)
         self.check_equals(expr, sympy.Integer(val))
         return int(val)
 
@@ -591,6 +595,34 @@ class SizeVarAllocator:
 
         return sympy_subs(expr, self.backed_var_to_val)
 
+    def to_symint_or_int(self, expr: Union[Expr, int]) -> Union[SymInt, int]:
+        """Convert a sympy expression to SymInt, or return int as is."""
+        if isinstance(expr, int):
+            return expr
+
+        from torch.fx.experimental.sym_node import SymNode
+
+        expr = self.simplify(expr)
+        if isinstance(expr, (int, sympy.Integer)):
+            return int(expr)
+
+        # Remove precomputed replacements to get canonical form
+        # (consistent with symbolic_hint behavior)
+        expr = self.remove_precomputed_replacements(expr)
+
+        try:
+            hint = self.size_hint(expr)
+        except Exception:
+            hint = None
+        node = SymNode(expr, self.shape_env, int, hint)
+        return SymInt(node)
+
+    def to_symints_or_ints(
+        self, exprs: Sequence[Union[Expr, int]]
+    ) -> list[Union[SymInt, int]]:
+        """Convert a sequence of sympy expressions to SymInts, or return ints as is."""
+        return [self.to_symint_or_int(e) for e in exprs]
+
     def size_hint(
         self,
         expr: Union[Expr, int],
@@ -625,16 +657,48 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out)
             raise
 
-    def size_hint_or_throw(self, expr: Union[Expr, int]) -> int:
-        # Like size_hint but there's no fallback for unbacked symints, so it throws.
-        out = self.symbolic_hint(expr)
-        try:
-            return int(out)
-        except Exception:
-            log.debug("failed on: %s", out, exc_info=True)
-            raise
+    def guarding_hint_or_throw(self, expr: Union[Expr, int]) -> int:
+        """
+        Return a concrete integer hint for an expression that is safe to use for guarding.
 
-    def _maybe_realize_expr(self, expr: Expr, fallback: Optional[int]) -> Optional[int]:
+        This method evaluates the expression using only backed-symbols hints. Unlike
+        optimization_hint(), this method does NOT use heuristics or fallback values
+        for unbacked symbols.
+
+        Use this method when you need a hint value that will be used for guarding decision.
+
+        Args:
+            expr: A sympy expression or integer to evaluate.
+
+        Returns:
+            The concrete integer value of the expression based on backed symbol hints.
+
+        Raises:
+            GuardOnDataDependentSymNode: If the expression contains unbacked symbols
+            (data-dependent values) that cannot be resolved to concrete values.
+
+        See Also:
+            optimization_hint: For cases where fallback/heuristic values are acceptable
+                for unbacked symbols.
+        """
+        expr = self.simplify(expr)
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
+
+        # apply replacements
+        expr = self.remove_precomputed_replacements(expr)
+        expr = sympy_subs(expr, self.backed_var_to_val)
+        if has_free_unbacked_symbols(expr):
+            raise GuardOnDataDependentSymNode(expr)
+
+        result = self._maybe_realize_expr(expr, nan_fallback=None)
+
+        assert result is not None, expr
+        return result
+
+    def _maybe_realize_expr(
+        self, expr: Expr, nan_fallback: Optional[int]
+    ) -> Optional[int]:
         """
         Handle special sympy values in optimization hints.
 
@@ -645,8 +709,10 @@ class SizeVarAllocator:
             - fallback for NaN
             - None if no special handling needed
         """
-        if isinstance(expr, (int, sympy.Integer, float, sympy.Float, sympy.Rational)):
+        try:
             return int(expr)
+        except (TypeError, ValueError):
+            pass
 
         if isinstance(expr, Expr):
             if expr.has(sympy.I):
@@ -658,8 +724,8 @@ class SizeVarAllocator:
                 return sys.maxsize
             if expr in (-int_oo, -sympy.oo):
                 return -sys.maxsize
-            if fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
-                return fallback
+            if nan_fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
+                return nan_fallback
 
         return None
 
@@ -668,6 +734,9 @@ class SizeVarAllocator:
     ) -> int:
         """
         Return a concrete integer hint for an expression.
+
+        This function should be used for non-guarding based optimizations. If you
+        want a hint that you can guard on, use the guarding_hint API instead.
 
         This function will hint unbacked symbols using user provided optimization
         hints. If not provided, fallback will be used along with some heuristics
@@ -683,20 +752,23 @@ class SizeVarAllocator:
         if fallback is None:
             fallback = config.unbacked_symint_fallback
         assert fallback is not None
-        simplified = self.simplify(expr)
-        result = self._maybe_realize_expr(simplified, fallback)
+
+        original = expr
+        expr = self.simplify(expr)
+        result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
 
+        if isinstance(expr, sympy.Expr):
+            expr = expr.expand(identity=True)
+
         # remove precomputed_replacements
-        expr = self.remove_precomputed_replacements(simplified)
-        original = expr
+        expr = self.remove_precomputed_replacements(expr)
 
         # replace all backed symbols with their backed hints,
         # unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
-
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
@@ -709,9 +781,6 @@ class SizeVarAllocator:
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
         # TODO optimize _sub_unbacked_exprs
         expr = self._sub_unbacked_exprs(sympy.factor(original))
-
-        expr = sympy_subs(expr, self.backed_var_to_val)
-        expr = sympy_subs(expr, self.var_to_hint_override)
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
@@ -753,6 +822,17 @@ class SizeVarAllocator:
         if fallback is None:
             fallback = config.unbacked_symint_fallback
         return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
+
+    def all_unbacked_explicitly_hinted(self, exprs: IterateExprs) -> bool:
+        """
+        Return True if every unbacked symbol in *exprs* has an explicit
+        user-provided hint in var_to_hint_override.  If there are no
+        unbacked symbols at all, returns True (vacuously).
+        *exprs* can be a single expression or any iterable accepted by
+        free_unbacked_symbols (list, tuple, etc.).
+        """
+        unbacked = free_unbacked_symbols(exprs)
+        return unbacked.issubset(self.var_to_hint_override.keys())
 
     def optimization_hint_with_override(
         self,
@@ -814,12 +894,11 @@ class SizeVarAllocator:
             for x in exprs
         )
 
-    def size_hints_or_throw(
+    def guarding_hints_or_throw(
         self,
         exprs: Iterable[Union[Expr, int]],
     ) -> tuple[int, ...]:
-        # Like size_hints but there's no fallback for unbacked symints, so it throws.
-        return tuple(self.size_hint_or_throw(x) for x in exprs)
+        return tuple(self.guarding_hint_or_throw(x) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """
@@ -939,8 +1018,8 @@ class SizeVarAllocator:
                 }
                 # Each node is its own leader/parent initially
                 self.leader = list(range(len(self.expressions)))
-                # Track rank for union-by-rank
-                self.rank = [1] * len(self.expressions)
+                # Track size for union-by-size
+                self.size = [1] * len(self.expressions)
 
                 # Takes each edge from the undirected graph and starts merging them.
                 self._build_canonical_expr_mapping()
@@ -962,7 +1041,7 @@ class SizeVarAllocator:
                     return False  # already connected
                 leader, other = self.choose_leader(rootA, rootB)
                 self.leader[other] = leader
-                self.rank[leader] += self.rank[other]
+                self.size[leader] += self.size[other]
                 return True
 
             def find_expr(self, expr: Expr):
@@ -978,12 +1057,13 @@ class SizeVarAllocator:
             def choose_leader(self, a: int, b: int):
                 """
                 The leader will become the canonical expression.
+                Returns a (leader, follower) tuple.
 
                 Here are the heuristics used for choosing a leader:
                 1. Backed expression or constants preferred over unbacked expr
                 2. Simpler sub-expr when one contains the other
                 3. Higher frequency across equalities from deferred runtime assertions
-                4. Rank/size of the set
+                4. Size of the set
                 5. Fallback to sympy.Basic.compare
                 """
 
@@ -1013,10 +1093,10 @@ class SizeVarAllocator:
                     if degrees_lhs != degrees_rhs:
                         return degrees_lhs > degrees_rhs
 
-                    # Try to apply union-by-rank optimization to flatten the
+                    # Try to apply union-by-size optimization to flatten the
                     # leader trees.
-                    if self.rank[x] != self.rank[y]:
-                        return self.rank[x] > self.rank[y]
+                    if self.size[x] != self.size[y]:
+                        return self.size[x] > self.size[y]
 
                     # Fallback to sympy.Basic.compare for a deterministic ordering.
                     return lhs.compare(rhs) == -1
@@ -1063,11 +1143,14 @@ class SizeVarAllocator:
         while sub_cnt < sub_cnt_limit:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
-                return new_expr
+                break
             expr = sympy.factor(new_expr)
             sub_cnt += 1
+        else:
+            log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
 
-        log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
+        expr = sympy_subs(expr, self.backed_var_to_val)
+        expr = sympy_subs(expr, self.var_to_hint_override)
         return expr
 
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
@@ -1075,6 +1158,8 @@ class SizeVarAllocator:
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
 
+    # Return stride optimizaitons hints,
+    # only used for optimizations.
     def stride_hints(
         self,
         index: Expr,
@@ -1086,10 +1171,7 @@ class SizeVarAllocator:
                 index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
         result = []
         for s in self.stride_vars(index, vars, support_vars):
-            try:
-                result.append(self.size_hint_or_throw(s))
-            except TypeError:
-                result.append(0)
+            result.append(self.optimization_hint(s, fallback=0))
         return result
 
     def stride_order(self, index: Expr, vars: list[sympy.Symbol]) -> list[int]:

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vector>
-
 #include <c10/core/Device.h>
 #include <torch/nativert/executor/ExecutionFrame.h>
 #include <torch/nativert/executor/OpKernelKind.h>
@@ -101,9 +99,7 @@ class OpKernel {
   explicit OpKernel(
       const Node* node,
       OpKernelKind kind = OpKernelKind::kInterpreterFallbackKernel)
-      : node_(node),
-        kind_(kind),
-        _outputResized(node->outputs().size(), false) {
+      : node_(node), kind_(kind) {
     VLOG(1) << "Initializing kernel for node: " << *node_;
   }
 
@@ -156,10 +152,6 @@ class OpKernel {
   const static bool blockingEnabled_;
   // this should be set in the ctor!
   const OpKernelKind kind_;
-  // Tracks which outputs have been resized in the current computeInternal call.
-  // Reset after each computeInternal() call in compute().
-  // Sized to node->outputs().size() in the constructor.
-  mutable std::vector<bool> _outputResized;
 };
 
 } // namespace torch::nativert

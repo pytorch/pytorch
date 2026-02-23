@@ -286,12 +286,10 @@ class AttrSource(ChainedSource):
 
     def __post_init__(self) -> None:
         assert self.base, "Can't construct an AttrSource without a valid base source"
-        if "." in self.member:
-            member_parts = self.member.split(".")
-            object.__setattr__(
-                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
-            )
-            object.__setattr__(self, "member", member_parts[-1])
+        assert "." not in self.member, (
+            f"AttrSource member must not contain '.', got {self.member!r}. "
+            "Use OutputGraph.get_chained_attr_source() for dotted paths."
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -327,13 +325,13 @@ class GenericAttrSource(ChainedSource):
     member: str
 
     def __post_init__(self) -> None:
-        assert self.base, "Can't construct an AttrSource without a valid base source"
-        if "." in self.member:
-            member_parts = self.member.split(".")
-            object.__setattr__(
-                self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
-            )
-            object.__setattr__(self, "member", member_parts[-1])
+        assert self.base, (
+            "Can't construct a GenericAttrSource without a valid base source"
+        )
+        assert "." not in self.member, (
+            f"GenericAttrSource member must not contain '.', got {self.member!r}. "
+            "Use OutputGraph.get_chained_attr_source() for dotted paths."
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -794,21 +792,13 @@ class DictGetItemSource(ChainedSource):
             return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
     def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
-        # Clone the base recursively
         cloned_base = self.base.clone(transform_fn)
-
-        # Clone index if it's a Source
         cloned_index = self.index
         if isinstance(self.index, Source):
             cloned_index = self.index.clone(transform_fn)
-
-        # Create a new instance with the cloned fields
         result = dataclasses.replace(self, base=cloned_base, index=cloned_index)
-
-        # Apply transform_fn to the result if provided
         if transform_fn is not None:
             result = transform_fn(result)
-
         return result
 
 
@@ -855,21 +845,13 @@ class DictSubclassGetItemSource(ChainedSource):
             return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
     def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
-        # Clone the base recursively
         cloned_base = self.base.clone(transform_fn)
-
-        # Clone index if it's a Source
         cloned_index = self.index
         if isinstance(self.index, Source):
             cloned_index = self.index.clone(transform_fn)
-
-        # Create a new instance with the cloned fields
         result = dataclasses.replace(self, base=cloned_base, index=cloned_index)
-
-        # Apply transform_fn to the result if provided
         if transform_fn is not None:
             result = transform_fn(result)
-
         return result
 
 
@@ -1029,55 +1011,27 @@ class GlobalStateSource(Source):
 
 
 @dataclass_with_cached_hash(frozen=True)
-class TorchSource(Source):
-    """Points to the actual `torch` module - used instead of GlobalSource
-    in case the user has overridden `torch` in their local namespace"""
+class ImportSource(Source):
+    """Points to an imported module - used instead of GlobalSource
+    in case the user has overridden the module name in their local namespace"""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    module_name: str
+
+    def __post_init__(self) -> None:
         from .guards import GuardBuilder, install_guard
 
         install_guard(self.make_guard(GuardBuilder.ID_MATCH))
 
-    @property
+    @functools.cached_property
     def _name_template(self) -> str:
-        return "__import__('torch')"
+        return f"__import__('{self.module_name}')"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.extend_output(
             [
                 codegen.create_load_const(0),  # level
                 create_build_tuple(0),  # fromlist
-                codegen.create_import_name("torch"),
-            ]
-        )
-
-    @property
-    def guard_source(self) -> GuardSource:
-        return GuardSource.GLOBAL
-
-
-@dataclass_with_cached_hash(frozen=True)
-class CollectionsSource(Source):
-    """Points to the actual `collections` module - used instead of GlobalSource
-    in case the user has overridden `collections` in their local namespace"""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        from .guards import GuardBuilder, install_guard
-
-        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
-
-    @property
-    def _name_template(self) -> str:
-        return "__import__('collections')"
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.extend_output(
-            [
-                codegen.create_load_const(0),  # level
-                create_build_tuple(0),  # fromlist
-                codegen.create_import_name("collections"),
+                codegen.create_import_name(self.module_name),
             ]
         )
 
@@ -1218,6 +1172,7 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
+@functools.lru_cache
 def get_local_source_name(
     source: Source, *, only_allow_input: bool = False
 ) -> Optional[str]:
@@ -1230,14 +1185,17 @@ def get_local_source_name(
     return source.local_name
 
 
+@functools.lru_cache
 def is_from_local_source(source: Source, *, only_allow_input: bool = False) -> bool:
     return get_local_source_name(source, only_allow_input=only_allow_input) is not None
 
 
+@functools.lru_cache
 def is_from_global_source(source: Source) -> bool:
     return get_global_source_name(source) is not None
 
 
+@functools.lru_cache
 def get_global_source_name(source: Source | None) -> str | None:
     if isinstance(source, ChainedSource):
         return get_global_source_name(source.base)
@@ -1246,6 +1204,7 @@ def get_global_source_name(source: Source | None) -> str | None:
     return source.global_name
 
 
+@functools.lru_cache
 def is_from_nonlocal_source(source: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_nonlocal_source(source.base)
@@ -1256,6 +1215,7 @@ def is_from_nonlocal_source(source: Source) -> bool:
     )
 
 
+@functools.lru_cache
 def is_from_closure_source(source: Source) -> bool:
     if isinstance(source, ClosureSource):
         return True
@@ -1264,6 +1224,7 @@ def is_from_closure_source(source: Source) -> bool:
     return False
 
 
+@functools.lru_cache
 def is_from_source(source: Source, target: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)

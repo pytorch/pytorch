@@ -875,6 +875,15 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+@dataclass
+class InlinedCodeCache:
+    """Cache for code-object-derived data used during inlining."""
+
+    instructions: list[Any]
+    indexof: dict[Any, int]
+    code_options: dict[str, Any]
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -901,6 +910,8 @@ class TracingContext:
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
+        # Combined cache for inlined code data (instructions, indexof, code_options)
+        self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
         self.fake_mode: FakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -952,6 +963,7 @@ class TracingContext:
         self.global_context.global_state = {}
         self.previously_inlined_functions.clear()
         self.previously_cleaned_instructions.clear()
+        self.inlined_code_cache.clear()
 
     @staticmethod
     @contextmanager
@@ -1215,15 +1227,11 @@ class Source:
         return self.guard_source != GuardSource.SYNTHETIC_LOCAL
 
     def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
-        """
-        Clone the source, optionally applying a transformation function.
-        """
-        # For frozen dataclasses, returning self is effectively a clone
-        # Subclasses should override this if they have mutable state or need custom clone logic
-        result = self
+        # Frozen dataclass, so returning self is effectively a clone.
+        # Subclasses with mutable state should override.
         if transform_fn is not None:
-            result = transform_fn(result)
-        return result
+            return transform_fn(self)
+        return self
 
 
 # Subclasses can be found in torch/_dynamo/source.py
@@ -1272,17 +1280,10 @@ class ChainedSource(Source):
         return value
 
     def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
-        # Clone the base recursively
         cloned_base = self.base.clone(transform_fn)
-
-        # Create a new instance with the cloned base
-        # Using dataclasses.replace to create a new frozen dataclass instance
         result = dataclasses.replace(self, base=cloned_base)
-
-        # Apply transform_fn to the result if provided
         if transform_fn is not None:
             result = transform_fn(result)
-
         return result
 
 

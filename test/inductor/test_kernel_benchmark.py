@@ -84,10 +84,11 @@ class TestKernelBenchmark(TestCase):
             raise e
 
         # make sure we have the bandwidth information in the output
+        # -kc flag benchmarks all autotuning configs,
+        # so we check for at least GB_count occurrences rather than exactly.
         FileCheck().check_count(
             "GB/s",
             GB_count,
-            exactly=1,
         ).run(bench_out)
 
     def verify_remove_inductor_deps(self, compiled_module):
@@ -193,6 +194,9 @@ class TestKernelBenchmark(TestCase):
 
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
+    )
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
     @fresh_cache()
     def test_mm_triton_kernel_benchmark(self):
