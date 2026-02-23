@@ -1452,6 +1452,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_external_allocation_fallback(self):
+        """
+        When the input is not pre-allocated in symmetric memory, Inductor
+        auto-inserts an identity copy to P2P.  Verify codegen + correctness.
+        """
         self._init_process()
 
         N = 8
@@ -1460,15 +1464,25 @@ class LoweringTest(MultiProcContinuousTest):
             return torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
 
         x_input = torch.rand(N, N, device=self.device)
-
-        # Compilation should succeed here even though we do not control allocation
-        # of the input; user is responsible for passing a symmetric memory buffer.
         compiled_input_direct = torch.compile(func_input_direct, fullgraph=True)
+        code = run_and_get_triton_code(compiled_input_direct, x_input)
 
-        # At runtime, this should raise an error because the input is not
-        # a symmetric memory buffer as required by the op.
-        with self.assertRaises(RuntimeError):
-            run_and_get_triton_code(compiled_input_direct, x_input)
+        self.assertIn(
+            "empty_strided_p2p",
+            code,
+            "Expected P2P allocation for auto-inserted copy",
+        )
+
+        compiled_result = compiled_input_direct(x_input)
+        eager_result = x_input.clone()
+        dist.all_reduce(eager_result, op=dist.ReduceOp.SUM)
+        torch.testing.assert_close(
+            compiled_result,
+            eager_result,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Auto-copy to P2P does not match eager",
+        )
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
