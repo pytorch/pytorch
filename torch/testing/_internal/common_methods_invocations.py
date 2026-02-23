@@ -13603,23 +13603,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=True,
            supports_forward_ad=True,
-           skips=(
-               # The following dtypes did not work in forward but are listed by the OpInfo: {torch.complex64}
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # RuntimeError: Failed to create function state object for: cross_float2
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-           ),),
+           ),
     OpInfo('cumsum',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
