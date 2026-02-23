@@ -158,7 +158,8 @@ def associative_scan(
     Performs an inclusive scan with an associative combine function.
 
     .. warning::
-        `torch.associative_scan` is a prototype feature in PyTorch. It currently
+
+        ``torch.associative_scan`` is a prototype feature in PyTorch. It currently
         does not support autograd and you may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
