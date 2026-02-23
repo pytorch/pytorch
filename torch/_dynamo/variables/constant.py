@@ -49,6 +49,14 @@ class ConstantVariable(VariableTracker):
 
     @overload
     @staticmethod
+    def create(value: Literal[True]) -> Never: ...
+
+    @overload
+    @staticmethod
+    def create(value: Literal[False]) -> Never: ...
+
+    @overload
+    @staticmethod
     def create(value: bool) -> "ConstantVariable": ...
 
     # TODO: Refactor to make these return ConstantVariable
@@ -275,14 +283,12 @@ its type to `common_constant_types`.
 
         if name == "__len__" and not (args or kwargs):
             try:
-                # pyrefly: ignore [bad-argument-type]
                 return ConstantVariable.create(len(self.value))
             except TypeError as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
-                    # pyrefly: ignore [no-matching-overload]
                     round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
@@ -293,7 +299,6 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
-                # pyrefly: ignore [not-iterable, unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
@@ -380,6 +385,8 @@ its type to `common_constant_types`.
 
 
 CONSTANT_VARIABLE_NONE = ConstantVariable(None)
+CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
+CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
 
 
 class EnumVariable(VariableTracker):

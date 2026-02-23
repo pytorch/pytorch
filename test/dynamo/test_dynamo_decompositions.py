@@ -324,17 +324,67 @@ class GraphModule(torch.nn.Module):
         )
 
     @skipIfCrossRef
-    def test_foreach_lerp_inplace_no_decomposition(self):
-        """foreach_lerp_ should remain as the original op (no decomposition)."""
+    def test_foreach_lerp_inplace_decomposition_enabled(self):
+        """With decompositions enabled, foreach_lerp_ with scalar weight should decompose."""
+
+        def fn(tensors, end_tensors, weight):
+            torch._foreach_lerp_(tensors, end_tensors, weight)
+            return tensors
+
+        eager = EagerAndRecordGraphs()
+        with torch._dynamo.config.patch(enable_dynamo_decompositions=True):
+            tensors = [torch.randn(4), torch.randn(4)]
+            end_tensors = [torch.randn(4), torch.randn(4)]
+            weight = torch.tensor(0.5)
+            torch.compile(fn, backend=eager, fullgraph=True)(
+                tensors, end_tensors, weight
+            )
+
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_weight_: "f32[]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", \
+L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
+        l_weight_ = L_weight_
+        l_end_tensors_0_ = L_end_tensors_0_
+        l_end_tensors_1_ = L_end_tensors_1_
+        l_tensors_0_ = L_tensors_0_
+        l_tensors_1_ = L_tensors_1_
+
+        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, \
+l_tensors_1_]);  l_end_tensors_0_ = l_end_tensors_1_ = None
+        getitem: "f32[4]" = _foreach_sub[0]
+        getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
+        _foreach_mul = torch._foreach_mul((getitem, getitem_1), l_weight_);  getitem = getitem_1 = l_weight_ = None
+        getitem_2: "f32[4]" = _foreach_mul[0]
+        getitem_3: "f32[4]" = _foreach_mul[1];  _foreach_mul = None
+        _foreach_add_ = torch._foreach_add_([l_tensors_0_, l_tensors_1_], (getitem_2, getitem_3));  \
+l_tensors_0_ = l_tensors_1_ = getitem_2 = getitem_3 = _foreach_add_ = None
+        return ()
+""",
+        )
+
+    @skipIfCrossRef
+    def test_foreach_lerp_inplace_decomposition_disabled(self):
+        """With decompositions disabled, foreach_lerp_ should remain as the original op.
+
+        Note: When using a tensor weight and decompositions are disabled, there can be
+        graph breaks due to item() calls. This test uses a scalar weight to avoid that.
+        """
 
         def fn(tensors, end_tensors):
             torch._foreach_lerp_(tensors, end_tensors, 0.5)
             return tensors
 
         eager = EagerAndRecordGraphs()
-        tensors = [torch.randn(4), torch.randn(4)]
-        end_tensors = [torch.randn(4), torch.randn(4)]
-        torch.compile(fn, backend=eager, fullgraph=True)(tensors, end_tensors)
+        with torch._dynamo.config.patch(enable_dynamo_decompositions=False):
+            tensors = [torch.randn(4), torch.randn(4)]
+            end_tensors = [torch.randn(4), torch.randn(4)]
+            torch.compile(fn, backend=eager, fullgraph=True)(tensors, end_tensors)
 
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
@@ -352,6 +402,44 @@ L_end_tensors_1_: "f32[4]"):
 
         _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, \
 l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
+        return ()
+""",
+        )
+
+    def test_foreach_lerp_inplace_decomposition_disabled_capture_scalar(self):
+        """With decompositions disabled and capture_scalar_outputs=True, foreach_lerp_
+        with scalar weight should work without graph breaks.
+        """
+
+        def fn(tensors, end_tensors):
+            torch._foreach_lerp_(tensors, end_tensors, 0.5)
+            return tensors
+
+        eager = EagerAndRecordGraphs()
+        with torch._dynamo.config.patch(
+            enable_dynamo_decompositions=False, capture_scalar_outputs=True
+        ):
+            tensors = [torch.randn(4), torch.randn(4)]
+            end_tensors = [torch.randn(4), torch.randn(4)]
+            torch.compile(fn, backend=eager, fullgraph=True)(tensors, end_tensors)
+
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: \
+"f32[4]", L_end_tensors_1_: "f32[4]"):
+        l_tensors_0_ = L_tensors_0_
+        l_tensors_1_ = L_tensors_1_
+        l_end_tensors_0_ = L_end_tensors_0_
+        l_end_tensors_1_ = L_end_tensors_1_
+
+        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], \
+[l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = \
+l_end_tensors_1_ = _foreach_lerp_ = None
         return ()
 """,
         )

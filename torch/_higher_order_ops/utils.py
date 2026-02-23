@@ -312,7 +312,12 @@ def _set_compilation_env():
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode_det = detect_fake_mode(inputs)
+    fake_mode_det = None
+    for inp in pytree.tree_leaves(inputs):
+        if isinstance(inp, FakeTensor):
+            fake_mode_det = inp.fake_mode
+            break
+
     fake_mode: AbstractContextManager = nullcontext()
     tracing_mode = "fake"
     if fake_mode_det is not None:
@@ -1143,6 +1148,8 @@ class FunctionalizeCtxWrapper:
     def __init__(self, ctx, subgraph):
         self.ctx = ctx
         self.subgraph = subgraph
+        # Propagate so callers pass inputs as a list, enabling input deallocation.
+        self._boxed_call = getattr(subgraph, "_boxed_call", False)
 
     def __hash__(self):
         return id(self.subgraph)
@@ -1152,12 +1159,23 @@ class FunctionalizeCtxWrapper:
 
     def __call__(self, *args, **kwargs):
         if isinstance(self.subgraph, torch.fx.GraphModule):
-            # Running graph with interpreter is needed for propagating the stack_trace
-            with fx_traceback.preserve_node_meta():
-                return self.ctx.functionalize(torch.fx.Interpreter(self.subgraph).run)(
-                    *args, **kwargs
-                )
-        return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
+            if self._boxed_call:
+                # Not all callers respect _boxed_call (e.g. reenter_make_fx).
+                if len(args) == 1 and isinstance(args[0], list):
+                    return self.ctx.functionalize(self.subgraph)(args[0])
+                return self.ctx.functionalize(self.subgraph)(list(args))
+            else:
+                # Running graph with interpreter is needed for propagating the stack_trace
+                with fx_traceback.preserve_node_meta():
+                    return self.ctx.functionalize(
+                        torch.fx.Interpreter(self.subgraph).run
+                    )(*args, **kwargs)
+        functionalized = self.ctx.functionalize(self.subgraph)
+        if self._boxed_call:
+            if len(args) == 1 and isinstance(args[0], list):
+                return functionalized(args[0])
+            return functionalized(list(args))
+        return functionalized(*args, **kwargs)
 
 
 # A wrapper over HigherOrderOperator that also carries its schema
@@ -1230,25 +1248,31 @@ def materialize_as_graph(
 
     @torch._dynamo.disable(recursive=True, reason=None)
     def _materialize_as_graph_inner():
+        from torch._guards import active_fake_mode
+        from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
         with suspend_functionalization(), disable_functional_mode():
-            with disable_proxy_modes_tracing():
-                unfunc_t = [_from_fun(arg) for arg in args]
+            fake_mode = None
+            if _CURRENT_MAKE_FX_TRACER is not None:
+                fake_mode = _CURRENT_MAKE_FX_TRACER.fake_tensor_mode
+            if fake_mode is None:
+                fake_mode = active_fake_mode()
 
             with contextlib.ExitStack() as stack:
                 stack.enter_context(
                     torch.utils._python_dispatch._disable_current_modes()
                 )
+                if fake_mode is not None:
+                    stack.enter_context(fake_mode)
+
+                with disable_proxy_modes_tracing():
+                    unfunc_t = [_from_fun(arg) for arg in args]
+
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
                 )
                 if force_enable_grad:
                     stack.enter_context(torch.enable_grad())
-                # fake_mode is needed because parent tracer's fake_mode might
-                # be None but the associated inputs have fake mode or there
-                # is a global tracing context with fake mode. We nneed to
-                # make sure the fake mode when tracing subgraph is consistent.
-                if fake_mode := detect_fake_mode(unfunc_t):
-                    stack.enter_context(fake_mode)
                 return _maybe_reenter_make_fx(
                     fn, subgraph_decomp_table=subgraph_decomp_table
                 )(*unfunc_t)
