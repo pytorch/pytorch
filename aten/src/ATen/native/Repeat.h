@@ -10,6 +10,8 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
+#include <limits>
+
 namespace at::native {
 
 template <
@@ -26,6 +28,28 @@ static inline Tensor repeat_interleave_common(
   if (repeats.size(0) == 0) {
     return at::empty_like(repeats, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
+
+  // pre check for negative values and potential overflow before computing cumsum
+  if (!output_size.has_value()) {
+    auto min_max = repeats.aminmax();
+    int64_t min_repeat = std::get<0>(min_max).item<int64_t>();
+    int64_t max_repeat = std::get<1>(min_max).item<int64_t>();
+
+    TORCH_CHECK(min_repeat >= 0, "repeats can not be negative");
+
+    // if max_repeat * count could overflow int64, reject before overflowing in cumsum
+    int64_t count = repeats.size(0);
+    constexpr int64_t kInt64Max = std::numeric_limits<int64_t>::max();
+
+    TORCH_CHECK(
+        max_repeat <= kInt64Max / count,
+        "repeats values are too large. The sum of repeats would overflow. "
+        "Max repeat value: ",
+        max_repeat,
+        ", count: ",
+        count);
+  }
+
   Tensor repeats_ = repeats.contiguous();
   Tensor cumsum = repeats.cumsum(0);
   int64_t total = 0;
@@ -33,8 +57,6 @@ static inline Tensor repeat_interleave_common(
     total = output_size.value();
   } else {
     total = cumsum[-1].item<int64_t>();
-    TORCH_CHECK(
-        (repeats >= 0).all().item<uint8_t>(), "repeats can not be negative");
   }
 
   Tensor result = at::empty({total}, repeats.options());
