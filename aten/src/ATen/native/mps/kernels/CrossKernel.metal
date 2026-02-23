@@ -17,14 +17,25 @@ inline void cross_product(
   out[2 * os] = mul(x[0], y[ys]) - mul(x[xs], y[0]);
 }
 
+// Handles any contiguous layout regardless of which dim is the cross dim.
+// For cross-dim element stride B, thread tid covers the triple whose base is
+//   base = tid + 2*(tid/B)*B
+// i.e. B=numThreads (outermost) → base=tid; B=1 (innermost) → base=3*tid.
 template <typename T>
 kernel void cross_dense(
     device T* out [[buffer(0)]],
     constant T* input [[buffer(1)]],
     constant T* other [[buffer(2)]],
-    constant uint& n [[buffer(3)]],
+    constant uint& dim_stride [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
-  cross_product(out + tid, long(n), input + tid, long(n), other + tid, long(n));
+  uint base = tid + 2 * (tid / dim_stride) * dim_stride;
+  cross_product(
+      out + base,
+      long(dim_stride),
+      input + base,
+      long(dim_stride),
+      other + base,
+      long(dim_stride));
 }
 
 template <typename T>
@@ -42,7 +53,7 @@ kernel void cross_strided(
   int pos[max_ndim];
   pos_from_thread_index(int(tid), pos, squashed_sizes, ndim - 1);
   long out_offs = 0, in_offs = 0, oth_offs = 0;
-  int p = 0;
+  uint p = 0;
   for (uint d = 0; d < ndim; d++) {
     if (d == dim)
       continue;
@@ -66,7 +77,7 @@ kernel void cross_strided(
       device DTYPE * out [[buffer(0)]],                       \
       constant DTYPE * input [[buffer(1)]],                   \
       constant DTYPE * other [[buffer(2)]],                   \
-      constant uint & n [[buffer(3)]],                        \
+      constant uint & dim_stride [[buffer(3)]],               \
       uint tid [[thread_position_in_grid]]);                  \
   template [[host_name("cross_strided_" #DTYPE)]] kernel void \
   cross_strided<DTYPE>(                                       \
