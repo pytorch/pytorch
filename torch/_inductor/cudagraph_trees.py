@@ -58,6 +58,10 @@ from torch import Tensor
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
+from torch._higher_order_ops.cudagraph_conditional_nodes import (
+    ControlFlowOpWarmupDispatchMode,
+    CUDAGraphCaptureControlFlowOpDispatchMode,
+)
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -719,6 +723,7 @@ class CUDAWarmupNode:
             _use_cuda_memory_pool_manager(
                 self.device_index, self.cuda_graphs_pool, self.stream
             ),
+            ControlFlowOpWarmupDispatchMode(),
             get_history_recording(),
         ):
             out = self.wrapped_function.model(new_inputs)
@@ -1311,6 +1316,7 @@ class CUDAGraphNode:
                 pool=self.cuda_graphs_pool,
                 capture_error_mode="thread_local",
             ),
+            CUDAGraphCaptureControlFlowOpDispatchMode(),
             get_history_recording(),
         ):
             static_outputs = model(inputs)
