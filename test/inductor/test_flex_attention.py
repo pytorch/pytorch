@@ -1534,7 +1534,6 @@ class TestFlexAttention(InductorTestCase):
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
-    @skip_on_rocm  # TODO: NaNs on ROCM
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
         inputs = (
             score_mod,
@@ -2507,7 +2506,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_rocm  # TODO: Investigate
     def test_multiple_mask_calls(self, device):
         make_tensor = functools.partial(
             torch.randn,
@@ -3640,9 +3638,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
 
-        if torch.version.hip and mode == "paged_attention":
+        if (
+            torch.version.hip
+            and mode == "paged_attention"
+            and permute_order == (2, 0, 1, 3)
+            and shape == (2, 1, 128, 16)
+        ):
             raise self.skipTest(
-                "TODO: figure out why mode_paged_attention_permute_order3_shape0 on MI200 caused mem fault"
+                "ROCm paged attention permute_order3 shape0 triggers HIP illegal memory access"
             )
 
         dtype = torch.float32

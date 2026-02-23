@@ -2628,7 +2628,6 @@ def get_mm_log_filename() -> Optional[str]:
     return mm_file_name
 
 
-@functools.cache
 def get_flex_attention_log_filename() -> Optional[str]:
     flex_attention_file_name = os.environ.get(
         "TORCHINDUCTOR_FLEX_ATTENTION_LOGGING_FILE", None
