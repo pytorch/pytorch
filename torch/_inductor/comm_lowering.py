@@ -525,9 +525,7 @@ def register_symm_mem_lowerings():
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
             return inp
         else:
-            return _copy_input_to_comm_buffer(
-                inp, ir.CommBufferType.SYMM_MEM, group_name
-            )  # type: ignore[arg-type]
+            return _copy_input_to_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
 
     def _create_out_variant_node(
         out_op: torch._ops.OpOverload,
@@ -546,8 +544,10 @@ def register_symm_mem_lowerings():
         for t in tensor_inputs:
             t.realize()
 
+        device = output_like.get_device()
+        assert device is not None
         layout = ir.FixedLayout(
-            device=output_like.get_device(),
+            device=device,
             dtype=output_like.get_dtype(),
             size=output_like.get_size(),
             stride=ir.FlexibleLayout.contiguous_strides(output_like.get_size()),
@@ -560,7 +560,7 @@ def register_symm_mem_lowerings():
 
         node = ir.ExternKernelOut(
             layout=layout,
-            inputs=ir.ExternKernel.unwrap_storage(tensor_inputs),
+            inputs=ir.ExternKernel.unwrap_storage(tensor_inputs),  # type: ignore[arg-type]
             constant_args=constant_args,
             python_kernel_name=python_kernel_name,
             op_overload=out_op,
