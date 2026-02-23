@@ -199,12 +199,7 @@ def _parse_linux_cudnn_versions() -> dict[str, str]:
 def _parse_windows_cudnn_versions() -> dict[str, str]:
     """Return {cuda_short_version: cudnn_version} from cuda_install.bat."""
     text = (
-        REPO_ROOT
-        / ".ci"
-        / "pytorch"
-        / "windows"
-        / "internal"
-        / "cuda_install.bat"
+        REPO_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
     ).read_text()
     results: dict[str, str] = {}
     label_re = re.compile(r"^:cuda(\d+)\s*$")
