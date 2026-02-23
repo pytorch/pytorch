@@ -47,6 +47,11 @@ else()
   endif()
 endif()
 
+# Set ROCM_SOURCE_DIR for Kineto/roctracer if not already set
+if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
+  set(ENV{ROCM_SOURCE_DIR} "${ROCM_PATH}")
+endif()
+
 # MAGMA_HOME
 if(NOT DEFINED ENV{MAGMA_HOME})
   set(MAGMA_HOME ${ROCM_PATH}/magma)
