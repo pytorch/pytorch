@@ -7,6 +7,20 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
 
+class _PrintGradFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, format_str: str, *tensors: torch.Tensor):  # type: ignore[override]
+        ctx.format_str = format_str
+        return tensors
+
+    @staticmethod
+    def backward(ctx, *grad_outputs: torch.Tensor):  # type: ignore[override]
+        # Use the print HOP (not builtins.print) so this gets properly traced
+        # into the backward graph during AOT compilation.
+        print("[backward] " + ctx.format_str, *grad_outputs)
+        return (None,) + grad_outputs
+
+
 class Print(HigherOrderOperator):
     """
     print(format_str, *args, **kwargs) -> None
@@ -36,17 +50,61 @@ class Print(HigherOrderOperator):
        torch._higher_order_ops.print("activations: {}", dt)
        # Output: [rank 0] activations: tensor([0., 1.])
 
+    5. Gradient printing during backward (print_backward=True):
+       x = torch._higher_order_ops.print("x: {}", x, print_backward=True)
+       # Forward: prints "x: tensor([...])"
+       # Backward: prints "[backward] x: tensor([...])" with gradient values
+       # Returns the tensor args so they stay in the autograd graph.
+
     This HOP enables printing without causing graph break.
     """
 
     def __init__(self) -> None:
         super().__init__("print")
 
-    def __call__(self, format_str: str, *args: object, **kwargs: object) -> None:
+    def __call__(
+        self,
+        format_str: str,
+        *args: object,
+        print_backward: bool = False,
+        **kwargs: object,
+    ):  # type: ignore[override]
         if not isinstance(format_str, str):
             raise AssertionError(f"format_str must be a string, got {type(format_str)}")
+
+        # Forward print via normal HOP dispatch
         # pyrefly: ignore [missing-attribute]
-        return super().__call__(format_str, *args, **kwargs)
+        super().__call__(format_str, *args, **kwargs)
+
+        if not print_backward:
+            return None
+
+        # Collect tensor args, build a grad-only format string for backward
+        tensor_args = [a for a in args if isinstance(a, torch.Tensor)]
+        tensor_kwargs = {k: v for k, v in kwargs.items() if isinstance(v, torch.Tensor)}
+
+        all_tensors = list(tensor_args) + list(tensor_kwargs.values())
+        if not all_tensors:
+            return None
+
+        # Build a format string for the gradient print using only tensor placeholders
+        grad_fmt_parts = []
+        for i, a in enumerate(args):
+            if isinstance(a, torch.Tensor):
+                grad_fmt_parts.append("{}")
+        grad_kwarg_keys = [k for k, v in kwargs.items() if isinstance(v, torch.Tensor)]
+        for k in grad_kwarg_keys:
+            grad_fmt_parts.append(f"{k}=" + "{}")
+
+        grad_format_str = (
+            format_str if not grad_fmt_parts else "grad " + " ".join(grad_fmt_parts)
+        )
+
+        results = _PrintGradFunction.apply(grad_format_str, *all_tensors)
+
+        if len(all_tensors) == 1:
+            return results[0]
+        return results
 
     # pyrefly: ignore [bad-override]
     def gen_schema(
