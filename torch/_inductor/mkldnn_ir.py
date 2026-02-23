@@ -117,8 +117,8 @@ def _prepare_convolution_fusion_create(
         bias.realize()
     with V.graph.fake_mode:
         # TODO <Leslie> cleaned up the fake_tensor trace as Linear implementation
-        x_fake = ir_node_to_tensor(x, guard_shape=True)
-        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+        x_fake = ir_node_to_tensor(x)
+        weight_fake = ir_node_to_tensor(weight)
         dims = len(x_fake.size()) - 2
         assert 0 < len(padding) <= dims
         assert 0 < len(dilation) <= dims
