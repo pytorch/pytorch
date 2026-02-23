@@ -12,6 +12,7 @@ from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
+import torch.utils._pytree as pytree
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -103,7 +104,6 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
                 nonrecursive_disable_wrapper
             )
             nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
-            # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
 
         if fn is None:
@@ -220,23 +220,69 @@ def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> N
 
 
 def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
-    # Like `allow_in_graph`, but with the following enhancements/differences:
-    #
-    # 1. Supports user-defined class as inputs, as long as the class has been
-    #    registered with pytree.
-    # 2. Reads to global/captured tensors forces the underlying graph to treat
-    #    those tensors as constant, and we _assume_ they will not be updated. This
-    #    is similar to FX tracing.
-    # 3. In the resulting Dynamo graph, the call to a `nonstrict_trace`-ed function
-    #    will be represented as a call to `torch._higher_order_ops.flat_apply`,
-    #    which takes in the `nonstrict_trace`-ed function and pytree-flattened
-    #    inputs.
-    # 4. Only the returned function is traceable, and the original function will
-    #    not be. Moreover, `nonstrict_trace` can be used inside a `torch.compile`
-    #    region.
-    #
-    # NOTE: like `allow_in_graph`, aliasing information is neither preserved
-    # between inputs themselves, nor between inputs and outputs.
+    """
+    Decorator to mark a function as nonstrict-traceable for dynamo.
+
+    A nonstrict-traced function appears as an opaque call in the dynamo graph.
+    Dynamo does not trace into the function body (hence the "nonstrict"), but
+    aot_autograd will trace into it.
+
+    This is similar to ``allow_in_graph`` but with enhanced support for:
+    - User-defined classes as inputs (must be registered with pytree)
+    - ``nn.Module`` as input arguments (parameters and buffers are tracked for autograd)
+    - Global/captured tensors treated as constants (assumed not updated during execution)
+
+    Note:
+        - With ``backend="eager"``, the original Python function runs directly.
+          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
+          With ``backend="inductor"``, the traced graph is compiled with inductor.
+
+        - Training is supported: you can call ``.backward()`` on outputs and gradients
+          will flow through the nonstrict-traced function.
+
+    Dangerous patterns (may cause silent incorrectness):
+        - Side effects between nonstric_traced fn and compiled region: The function should
+          not depend on variables mutated by other code inside the compiled function, and code
+          after the call should not depend on mutations made by it.
+
+        - Implicit inputs (closures/globals): Tensors captured from enclosing scopes
+          are treated as constants. Gradients will NOT flow back to them. Pass tensors
+          as explicit arguments if gradients are needed.
+
+    Restrictions:
+        - Both inputs and outputs must use pytree-compatible types. User-defined classes
+          must be registered via :func:`torch.utils._pytree.register_pytree_node`,
+          :func:`torch.utils._pytree.register_dataclass`, or
+          :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
+          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
+          tuple, dict) are already handled by default.
+        - Primitive values and container structure are specialized per call site:
+          each call site expects the same primitives and structure on every execution.
+
+    Example::
+
+        >>> import torch
+        >>> @torch._dynamo.nonstrict_trace
+        ... def traced_forward(model, x):
+        ...     # It's OK to have dynamo graph break within nonstrict_trace region
+        ...     torch._dynamo.graph_break()
+        ...     return model(x) + x
+        ...
+        >>> class MyModule(torch.nn.Module):
+        ...     def __init__(self):
+        ...         super().__init__()
+        ...         self.inner = torch.nn.Linear(10, 10)
+        ...
+        ...     def forward(self, x):
+        ...         return traced_forward(self.inner, x)
+        ...
+        >>> # Compile and run
+        >>> model = MyModule()
+        >>> opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+        >>> out = opt_model(torch.randn(10, 10))
+        >>> out.sum().backward()  # Gradients flow through traced_forward
+
+    """
     assert callable(traceable_fn), "nonstrict_trace expects a callable"
 
     _check_mutually_exclusive_decorators(traceable_fn, "nonstrict_trace")
@@ -261,6 +307,57 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     weakref.finalize(wrapped, deregister)
 
     return wrapped
+
+
+def _invoke_leaf_function_python(
+    real_impl: Callable[..., Any],
+    fake_impl: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
+    """Call invoke_leaf_function HOP directly from Python.
+
+    This enables @leaf_function to work with make_fx
+    without relying on Dynamo to intercept the call.
+    """
+    from torch._higher_order_ops.flat_apply import func_to_graphable
+    from torch._higher_order_ops.invoke_leaf_function import (
+        convert_modules_to_states,
+        invoke_leaf_function,
+        make_leaf_function_wrappers,
+        store_makefx_modules,
+    )
+
+    captured_modules: list[torch.nn.Module] = []
+    seen_module_ids: dict[int, int] = {}  # id(module) -> position in captured_modules
+    for val in pytree.tree_flatten(
+        (args, kwargs), is_leaf=lambda x: isinstance(x, torch.nn.Module)
+    )[0]:
+        if isinstance(val, torch.nn.Module) and id(val) not in seen_module_ids:
+            seen_module_ids[id(val)] = len(captured_modules)
+            captured_modules.append(val)
+
+    global_indices = store_makefx_modules(captured_modules)
+    module_to_index = {
+        mod_id: global_indices[pos] for mod_id, pos in seen_module_ids.items()
+    }
+
+    processed = convert_modules_to_states((args, kwargs), module_to_index)
+    flat_args, input_spec = pytree.tree_flatten(processed)
+
+    # Single-element mutable list so the wrappers can write back the output
+    # TreeSpec. Read captured_out_spec[0] after the wrappers have been called.
+    captured_out_spec: list[pytree.TreeSpec | None] = [None]
+    wrapped_real, wrapped_fake = make_leaf_function_wrappers(
+        real_impl, fake_impl, captured_out_spec
+    )
+
+    _, real_fn_spec = func_to_graphable(wrapped_real)
+    _, fake_fn_spec = func_to_graphable(wrapped_fake)
+    flat_out = invoke_leaf_function(real_fn_spec, fake_fn_spec, input_spec, *flat_args)
+
+    assert captured_out_spec[0] is not None
+    return pytree.tree_unflatten(flat_out, captured_out_spec[0])
 
 
 def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
@@ -326,17 +423,10 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         to trace through and potentially optimize the code.
 
     Usage:
-        **Supported Inputs**:
-        - Inputs must use pytree-compatible types: tensors, Python primitives
-        (int, float, bool, str), and built-in containers (list, tuple, dict).
-        User-defined classes must be registered as pytree nodes via
-        :func:`torch.utils.pytree.register_pytree_node`.
-        - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers are
-        tracked for autograd. The module must exist outside the compile region.
-
-        **Supported Outputs**: Must be a tuple of tensors: ``return (tensor,)`` for one tensor,
-        ``return (a, b)`` for multiple. Primitive types (int, float, bool, str) can also be
-        included in outputs.
+        **Inputs and Outputs**:
+        - Both inputs and outputs must use pytree-compatible types.
+        Tensors, Python primitives (int, float, bool, str), and built-in containers
+        (list, tuple, dict) are supported by default.
 
         Note: We recommend leaf_functions only accept and return tensors. Though primitive
         types (int, float, bool, str) are supported in inputs and outputs, they may cause
@@ -367,7 +457,15 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # At runtime: real function runs (counter increments to 1, 2, 3, ...)
             # But returned count is always 999 (from fake implementation at compile time)
 
-        **register_fake (required)**: Since the function body is not traced, you must
+        - User-defined classes must be registered via :func:`torch.utils._pytree.register_pytree_node`
+        or :func:`torch.utils._pytree.register_dataclass`.
+
+        - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers
+        are tracked for autograd. The module must exist outside the compile region.
+        Running the module multiple times must not modify its parameters, buffers, or attributes.
+
+        **register_fake (required)**:
+        Since the function body is not traced, you must
         provide a shape-inference function via ``@fn.register_fake``. It runs at compile
         time with FakeTensor inputs (tensors with no data, only metadata) and must
         satisfy the following requirements:
@@ -524,7 +622,21 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     @functools.wraps(fn)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        return fn(*args, **kwargs)
+        if inner._torchdynamo_leaf_fake_fn is None:  # type: ignore[attr-defined]
+            raise ValueError(
+                f"leaf_function '{getattr(fn, '__name__', fn)}' "
+                "requires a fake implementation. Please provide one using the @<func>.register_fake "
+                "decorator. See the leaf_function docstring for details."
+            )
+        # This wrapper call enables @leaf_function to work with make_fx tracing
+
+        return _invoke_leaf_function_python(
+            fn,
+            # pyrefly: ignore [bad-argument-type]
+            inner._torchdynamo_leaf_fake_fn,
+            args,
+            kwargs,
+        )  # type: ignore[attr-defined]
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
@@ -1156,14 +1268,15 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
 def _allow_in_graph_einops() -> None:
     import einops
 
-    if einops.__version__ >= "0.8.2":
-        if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
-            # trigger backend registration up front to avoid a later guard failure
-            # that would otherwise cause a recompilation
-            einops.rearrange(torch.randn(1), "i -> i")
-
-        # einops 0.8.2+ don't need explicit allow_in_graph calls
-        return
+    # There is a lru_cache logspam issue with einops when allow_in_graph is not
+    # used. Disabling this for now until the lru_cache issue is resolved.
+    # if einops.__version__ >= "0.8.2":
+    #     if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+    #         # trigger backend registration up front to avoid a later guard failure
+    #         # that would otherwise cause a recompilation
+    #         einops.rearrange(torch.randn(1), "i -> i")
+    #     # einops 0.8.2+ don't need explicit allow_in_graph calls
+    #     return
 
     try:
         # requires einops > 0.6.1, torch >= 2.0
