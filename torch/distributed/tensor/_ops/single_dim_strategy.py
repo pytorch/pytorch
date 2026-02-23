@@ -299,8 +299,7 @@ def _expand_single_dim_strategy_to_mesh(
         base_op_name = op_parts[-2].replace("_foreach_", "")
         # For inplace foreach ops (e.g., _foreach_maximum_), strip trailing underscore
         # to get the base op name (e.g., maximum)
-        if base_op_name.endswith("_"):
-            base_op_name = base_op_name[:-1]
+        base_op_name = base_op_name.removesuffix("_")
         foreach_variant = op_parts[-1]
 
         # select per-element inputs, outputs
@@ -317,7 +316,9 @@ def _expand_single_dim_strategy_to_mesh(
         else:
             # Inplace op: output is the first input
             first_input = target_args[0]
-            target_output_meta = first_input.tensor_meta if hasattr(first_input, 'tensor_meta') else None
+            target_output_meta = (
+                first_input.tensor_meta if hasattr(first_input, "tensor_meta") else None
+            )
 
         # figure out target op variant
         variant_map = {
