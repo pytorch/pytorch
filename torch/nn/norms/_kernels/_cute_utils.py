@@ -1,10 +1,9 @@
-'''
+"""
 Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
 CuTE DSL utilities for RMSNorm/LayerNorm kernels from Quack.
-'''
-
-
+"""
 # pyre-ignore-all-errors
+# pyrefly: ignore-errors
 # ruff: noqa: S101
 
 from __future__ import annotations
@@ -256,7 +255,9 @@ def cluster_reduce(
     for i in cutlass.range_constexpr(num_iter):
         idx = lane_idx + i * cute.arch.WARP_SIZE
         if idx < cute.size(reduction_buffer, mode=[1]):
-            block_reduce_val = operator.add(block_reduce_val, reduction_buffer[row_idx, idx])
+            block_reduce_val = operator.add(
+                block_reduce_val, reduction_buffer[row_idx, idx]
+            )
     return cute.arch.warp_reduction(block_reduce_val, operator.add)
 
 
@@ -326,9 +327,7 @@ def get_tiled_copy(
     num_threads: int,
     vecsize: int = 1,
 ):
-    assert N % vecsize == 0, (
-        f"Input N {N} is not divisible by vector size {vecsize}"
-    )
+    assert N % vecsize == 0, f"Input N {N} is not divisible by vector size {vecsize}"
     assert num_threads % cute.arch.WARP_SIZE == 0
     num_blocks_N = cute.ceil_div(N // vecsize, threads_per_row * cluster_n)
     tiler_mn = (

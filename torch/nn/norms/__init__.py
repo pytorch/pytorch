@@ -10,7 +10,7 @@ Usage::
     torch.nn.norms.activate_norm_impl("cutedsl_rmsnorm")
     # F.rms_norm / nn.RMSNorm now uses CuteDSL kernels on CUDA
 
-    torch.nn.norms.restore_norm_impl()        # back to default
+    torch.nn.norms.restore_norm_impl()  # back to default
 """
 
 from . import _registry

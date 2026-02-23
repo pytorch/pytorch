@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 """Registry for norm implementations.
 
-This module contains the registration system for norm implementations.
-It has no torch dependencies to avoid circular imports during initialization.
+Follows the implementation of FA4 registration for SDPA
 """
 
 import logging

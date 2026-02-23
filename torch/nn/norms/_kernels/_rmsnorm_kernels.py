@@ -1,10 +1,9 @@
-'''
+"""
 Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
 RMSNorm CuTE DSL kernel classes from quack
-'''
-
-
+"""
 # pyre-ignore-all-errors
+# pyrefly: ignore-errors
 # ruff: noqa: S101
 
 import math
@@ -115,8 +114,12 @@ class RMSNorm:
         )
         vecsize = math.gcd(self.N, 128 // largest_dtype_width)
         tiled_copy, tiler_mn, threads_per_row = get_tiled_copy(
-            self.dtype, self.N, self.cluster_n,
-            self._threads_per_row(), self._num_threads(), vecsize=vecsize,
+            self.dtype,
+            self.N,
+            self.cluster_n,
+            self._threads_per_row(),
+            self._num_threads(),
+            vecsize=vecsize,
         )
         num_threads = tiled_copy.size
         mW, mB = [
@@ -262,9 +265,7 @@ class RMSNorm:
             reduction_buffer[None, None, 0],
             mbar_ptr,
             init_val=0.0,
-            hook_fn=cute.arch.cluster_wait
-            if const_expr(self.cluster_n > 1)
-            else None,
+            hook_fn=cute.arch.cluster_wait if const_expr(self.cluster_n > 1) else None,
         )
         rstd = cute.math.rsqrt(sum_sq_x / shape[1] + eps, fastmath=True)
         if const_expr(mRstd is not None):
@@ -454,8 +455,12 @@ class RMSNormBackward:
         )
         vecsize = math.gcd(self.N, 128 // largest_dtype_width)
         tiled_copy, tiler_mn, threads_per_row = get_tiled_copy(
-            self.dtype, self.N, self.cluster_n,
-            self._threads_per_row(), self._num_threads(), vecsize=vecsize,
+            self.dtype,
+            self.N,
+            self.cluster_n,
+            self._threads_per_row(),
+            self._num_threads(),
+            vecsize=vecsize,
         )
         num_threads = tiled_copy.size
         mW = expand(mW, dim=0, size=tiler_mn[0]) if const_expr(mW is not None) else None
@@ -519,8 +524,12 @@ class RMSNormBackward:
         sX = smem.allocate_tensor(mX.element_type, smem_layout, byte_alignment=16)
         sdO = smem.allocate_tensor(mdO.element_type, smem_layout, byte_alignment=16)
         reduction_buffer, mbar_ptr = allocate_reduction_buffer_and_mbar(
-            smem, self.reduction_dtype, self.stage, self.cluster_n,
-            tv_layout, is_persistent=True,
+            smem,
+            self.reduction_dtype,
+            self.stage,
+            self.cluster_n,
+            tv_layout,
+            is_persistent=True,
         )
         if const_expr(mbar_ptr is not None):
             mbar_full_ptr, mbar_empty_ptr = mbar_ptr, mbar_ptr + 2
@@ -582,7 +591,11 @@ class RMSNormBackward:
         num_warps = cute.size(tiled_copy) // cute.arch.WARP_SIZE
 
         initialize_cluster(
-            tidx, mbar_ptr, num_warps, self.cluster_n, self.stage,
+            tidx,
+            mbar_ptr,
+            num_warps,
+            self.cluster_n,
+            self.stage,
             is_persistent=True,
         )
 

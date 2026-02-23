@@ -71,5 +71,3 @@ def cutedsl_rmsnorm_bwd(
         else torch.Tensor()
     )
     return dx, dw
-
-

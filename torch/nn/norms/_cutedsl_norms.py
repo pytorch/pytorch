@@ -10,10 +10,7 @@ import torch
 from torch.library import Library
 
 from . import _registry
-from ._kernels.norms import (
-    cutedsl_rmsnorm_bwd,
-    cutedsl_rmsnorm_fwd,
-)
+from ._kernels.norms import cutedsl_rmsnorm_bwd, cutedsl_rmsnorm_fwd
 
 
 __all__ = [
@@ -57,11 +54,7 @@ def _collect_tensors(*tensors: torch.Tensor | None) -> tuple[torch.Tensor, ...]:
     return tuple(t for t in tensors if t is not None)
 
 
-# ---------------------------------------------------------------------------
 # RMSNorm
-# ---------------------------------------------------------------------------
-
-
 def register_cutedsl_rmsnorm() -> _CuteDSLNormHandle:
     """Register CuteDSL RMSNorm kernels with the PyTorch dispatcher."""
     lib = Library("aten", "IMPL", "CUDA")  # noqa: TOR901
@@ -111,8 +104,5 @@ def _cutedsl_fused_rms_norm_backward_impl(
     return grad_input, grad_weight
 
 
-# ---------------------------------------------------------------------------
 # Self-registration
-# ---------------------------------------------------------------------------
-
 _registry.register_norm_impl("cutedsl_rmsnorm", register_fn=register_cutedsl_rmsnorm)
