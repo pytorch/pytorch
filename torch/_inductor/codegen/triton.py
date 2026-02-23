@@ -4803,7 +4803,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         descending: bool,
     ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
-        assert not self.cooperative_reduction, "TODO"
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
