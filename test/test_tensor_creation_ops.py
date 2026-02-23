@@ -1101,9 +1101,8 @@ class TestTensorCreation(TestCase):
     # Note: This test validates undefined behavior consistency in float-to-ints casts
     # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
     # nondeterministically fails, warning "invalid value encountered in cast"
-    @onlyCPU
     @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
-    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.uint16, torch.int16, torch.uint32, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
 
@@ -1114,9 +1113,8 @@ class TestTensorCreation(TestCase):
             if dtype in (torch.int8, torch.int16):
                 refs = (0, -1, 0)
         else:
-            refs = (0, 0, 0)
-            if dtype in (torch.int32, torch.int64):
-                refs = (torch.iinfo(dtype).min, ) * 3
+            # reference values for -inf, inf, nan conversions
+            refs = (torch.iinfo(dtype).min, torch.iinfo(dtype).max, 0)
         self._float_to_int_conversion_helper(vals, device, dtype, refs)
 
     @onlyNativeDeviceTypes
