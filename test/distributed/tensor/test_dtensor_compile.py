@@ -1921,6 +1921,31 @@ class TestDTensorCompileE2E(DTensorTestBase):
         ):
             flatten(dt)
 
+        @torch.compile(backend="eager", fullgraph=True)
+        def flatten_and_split_evenly(x):
+            a, b, c = x.shape
+            torch._check(a % self.world_size == 0)
+            torch._check(c % self.world_size == 0)
+            return x.view(c, b, a)
+
+        # full flatten -> split is fine if both input & output dims are evenly shardable
+        dt = create_dt(0)
+        out = flatten_and_split_evenly(dt)
+        self.assertEqual(out.placements, (Shard(0),))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def flatten_and_split(x):
+            a, b, c = x.shape
+            torch._check(a % self.world_size == 0)
+            return x.view(c, b, a)
+
+        # but fails if we don't tell compiler this
+        dt = create_dt(0)
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot be performed without redistribution"
+        ):
+            flatten_and_split(dt)
+
     @with_comms
     def test_split_with_symint_split_size(self):
         """
