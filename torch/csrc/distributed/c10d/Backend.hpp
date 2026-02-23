@@ -50,6 +50,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     std::string group_name;
     std::string group_desc;
     std::vector<uint64_t> global_ranks_in_group;
+
+    bool operator==(const Options& other) const noexcept {
+      return timeout == other.timeout && backend == other.backend &&
+          group_name == other.group_name &&
+          global_ranks_in_group == other.global_ranks_in_group;
+    }
   };
 
   explicit Backend(int rank, int size);
@@ -529,4 +535,23 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 };
 
+inline size_t hash_combine(size_t seed, size_t value) {
+  return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
+}
+
 } // namespace c10d
+
+namespace std {
+template <>
+struct hash<c10d::Backend::Options> {
+  size_t operator()(const c10d::Backend::Options& opts) const noexcept {
+    size_t h = hash<int64_t>{}(opts.timeout.count());
+    h = c10d::hash_combine(h, hash<string>{}(opts.backend));
+    h = c10d::hash_combine(h, hash<string>{}(opts.group_name));
+    for (auto r : opts.global_ranks_in_group) {
+      h = c10d::hash_combine(h, hash<uint64_t>{}(r));
+    }
+    return h;
+  }
+};
+} // namespace std

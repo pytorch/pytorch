@@ -3178,7 +3178,16 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_readwrite(
               "global_ranks_in_group",
               &::c10d::Backend::Options::global_ranks_in_group)
-          .def_readwrite("group_name", &::c10d::Backend::Options::group_name);
+          .def_readwrite("group_name", &::c10d::Backend::Options::group_name)
+          .def(
+              "__eq__",
+              [](const ::c10d::Backend::Options& self,
+                 const ::c10d::Backend::Options& other) {
+                return self == other;
+              })
+          .def("__hash__", [](const ::c10d::Backend::Options& self) {
+            return std::hash<::c10d::Backend::Options>{}(self);
+          });
 
 #ifdef USE_C10D_GLOO
   auto processGroupGloo =
@@ -3192,7 +3201,16 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       processGroupGloo, "_Options", backendOptions)
       .def(py::init<>())
       .def_readwrite("_devices", &::c10d::ProcessGroupGloo::Options::devices)
-      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads);
+      .def_readwrite("_threads", &::c10d::ProcessGroupGloo::Options::threads)
+      .def(
+          "__eq__",
+          [](const ::c10d::ProcessGroupGloo::Options& self,
+             const ::c10d::ProcessGroupGloo::Options& other) {
+            return self == other;
+          })
+      .def("__hash__", [](const ::c10d::ProcessGroupGloo::Options& self) {
+        return std::hash<::c10d::ProcessGroupGloo::Options>{}(self);
+      });
 
   processGroupGloo
       .def_static(
@@ -3569,7 +3587,16 @@ Example::
              const py::dict& memo) {
             return ::c10d::ProcessGroupNCCL::Options(self);
           },
-          py::arg("memo"));
+          py::arg("memo"))
+      .def(
+          "__eq__",
+          [](const ::c10d::ProcessGroupNCCL::Options& self,
+             const ::c10d::ProcessGroupNCCL::Options& other) {
+            return self == other;
+          })
+      .def("__hash__", [](const ::c10d::ProcessGroupNCCL::Options& self) {
+        return std::hash<::c10d::ProcessGroupNCCL::Options>{}(self);
+      });
 
 #endif
 
