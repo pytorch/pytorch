@@ -1844,8 +1844,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # User-defined data descriptor with a Python __get__.
             return self._invoke_descriptor_get(tx, name, type_attr, source)
 
-        # C-level data descriptor (property with C fget, _tuplegetter,
-        # member/getset descriptors, Cython attrs, etc.) — resolve via
+        # C-level data descriptor (property with C fget, member/getset
+        # descriptors, Cython attrs, etc.) — resolve via
         # object.__getattribute__ which is side-effect free.
         resolved = type(self.value).__getattribute__(self.value, name)
         return VariableTracker.build(tx, resolved, source)
@@ -1870,13 +1870,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if isinstance(type_attr, staticmethod):
             if can_use_mro_source:
-                source = AttrSource(self.get_source_by_walking_mro(tx, name), "__func__")
+                source = AttrSource(
+                    self.get_source_by_walking_mro(tx, name), "__func__"
+                )
             func = type_attr.__get__(self.value)
             return VariableTracker.build(tx, func, source)
         elif isinstance(type_attr, classmethod):
             source_fn = None
             if can_use_mro_source:
-                source_fn = AttrSource(self.get_source_by_walking_mro(tx, name), "__func__")  # type: ignore[assignment]
+                source_fn = AttrSource(
+                    self.get_source_by_walking_mro(tx, name), "__func__"
+                )  # type: ignore[assignment]
             return variables.UserMethodVariable(
                 type_attr.__func__,
                 self.var_getattr(tx, "__class__"),
@@ -2840,6 +2844,21 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
             self._tuple_vt = tuple_vt
+
+    def _resolve_data_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        if isinstance(type_attr, _collections._tuplegetter):
+            # namedtuple fields are _tuplegetter descriptors implemented in C.
+            # We emulate _tuplegetter.__get__ by indexing into the tracked
+            # tuple items, because self.value may not hold actual runtime values.
+            _, (idx, _) = type_attr.__reduce__()
+            return self._tuple_vt.items[idx]  # type: ignore[union-attr]
+        return super()._resolve_data_descriptor(tx, name, type_attr, source)
 
     def call_method(
         self,
