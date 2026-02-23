@@ -1896,6 +1896,20 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
+    def _collect_config_patches(self, node_schedule: list[Any]) -> dict[str, Any]:
+        """Collect and merge config_patches from all operations in the node schedule.
+
+        This enables scoped config (e.g., coordinate_descent_tuning) for kernels
+        that contain decomposition operations.
+        """
+        merged_patches: dict[str, Any] = {}
+        for node in node_schedule:
+            if isinstance(node, BaseSchedulerNode) and node.node is not None:
+                patches = node.node.get_config_patches()
+                if patches:
+                    merged_patches.update(patches)
+        return merged_patches
+
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         """
         Generate code for nodes in kernel_features
@@ -1916,8 +1930,13 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
+
+        # Collect config_patches from operations (e.g., decomposition ops with
+        # coordinate_descent_tuning) and apply during kernel codegen
+        config_patches = self._collect_config_patches(node_schedule)
+
         for kernel in kernels:
-            with V.set_kernel_handler(kernel):
+            with V.set_kernel_handler(kernel), config.patch(**config_patches):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
@@ -3182,8 +3201,11 @@ class SIMDScheduling(BaseScheduling):
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+            # Collect config_patches from operations
+            config_patches = self._collect_config_patches(node_schedule)
+            config_patches["benchmark_kernel"] = benchmark_kernel
             with (
-                config.patch("benchmark_kernel", benchmark_kernel),
+                config.patch(**config_patches),
                 V.set_kernel_handler(kernel),
             ):
                 src_code = kernel.codegen_kernel()
