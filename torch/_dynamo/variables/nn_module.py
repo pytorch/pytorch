@@ -39,8 +39,8 @@ from ..exc import (
     ObservedAttributeError,
     raise_observed_exception,
     unimplemented,
-    Unsupported,
     UnspecializeRestartAnalysis,
+    Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -303,22 +303,16 @@ class NNModuleVariable(VariableTracker):
     ) -> Optional[VariableTracker]:
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
-            getattribute_fn = inspect.getattr_static(
-                type(base), "__getattribute__"
-            )
+            getattribute_fn = inspect.getattr_static(type(base), "__getattribute__")
             new_source = (
-                AttrSource(obj_source, "__getattribute__")
-                if obj_source
-                else None
+                AttrSource(obj_source, "__getattribute__") if obj_source else None
             )
             try:
                 return variables.UserMethodVariable(
                     getattribute_fn,
                     self,
                     source=new_source,
-                ).call_function(
-                    tx, [variables.ConstantVariable.create(name)], {}
-                )
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
             except ObservedAttributeError:
                 handle_observed_exception(tx)
             except Unsupported:
@@ -367,6 +361,9 @@ class NNModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
+        # NB: We look up attributes in __dict__ directly, bypassing any custom
+        # __getattribute__. Custom __getattribute__ is only traced through as a
+        # fallback (via _custom_getattr_fallback) for attributes not found here.
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
         all_class_attribute_names = set()
