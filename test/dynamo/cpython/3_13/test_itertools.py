@@ -1626,7 +1626,7 @@ class TestBasicOps(__TestCase):
             self.assertRaises(TypeError, dropwhile, operator.pow, [(4,5)], 'extra')
             self.assertRaises(TypeError, next, dropwhile(10, [(4,5)]))
         #self.assertRaises(ValueError, next, dropwhile(errfunc, [(4,5)]))
-        # 
+        #
         ## check copy, deepcopy, pickle
         #self.assertEqual(list(copy.copy(dropwhile(underten, data))), [20, 2, 4, 6, 8])
         #self.assertEqual(list(copy.deepcopy(dropwhile(underten, data))),
