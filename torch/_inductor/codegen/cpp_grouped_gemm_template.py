@@ -1,5 +1,6 @@
 import contextlib
 import logging
+import os
 from collections.abc import Callable
 from typing import Any, cast, Optional, TypeVar
 from unittest.mock import patch
@@ -511,6 +512,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             Y_list={"Y" + str(idx): Y for idx, Y in enumerate(Y_list)},
             Y_2d_list=Y_2d_list,
             multi_output_buffers=multi_output_buffers,
+            cpu_count=os.cpu_count(),
         )
         with contextlib.ExitStack() as stack:
             stack.enter_context(
