@@ -62,7 +62,7 @@ class TestDecompSharding(TestCase):
 
     def test_custom_recursive_decomp(self):
         """
-        op1 decomps -> op2, which decomps -> matmul
+        op1 decomps -> op2, which decomps -> mm
 
         def op1(x, y):
             return op2(x, y) * 1.0
@@ -98,11 +98,11 @@ class TestDecompSharding(TestCase):
                 return x @ y
 
             @torch.library.register_fake("sharding_decomps::op1")
-            def op1_fake(x, y):
+            def op1_meta(x, y):
                 return torch.empty_like(x) @ torch.empty_like(y)
 
             @torch.library.register_fake("sharding_decomps::op2")
-            def op2_fake(x, y):
+            def op2_meta(x, y):
                 return torch.empty_like(x) @ torch.empty_like(y)
 
             mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(-1, 2))
@@ -175,8 +175,7 @@ class TestDecompSharding(TestCase):
         out = aten.smooth_l1_loss.default(input, target)
         self.assertEqual(out.placements, (Partial("avg"), Partial("avg")))
 
-        # expand_copy
-        check_no_strategy(aten.expand_copy.default)
+        # expand_copy: has a registered strategy (same as expand)
         input = d_empty(16, 1, device_mesh=mesh, placements=[Partial("min")])
         out = aten.expand_copy.default(input, [-1, 16])
         self.assertEqual(out.placements, (Partial("min"),))
