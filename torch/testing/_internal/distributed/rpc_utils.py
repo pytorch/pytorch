@@ -11,21 +11,21 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
-    CudaDdpComparisonTest,
     DdpComparisonTest,
     DdpUnderDistAutogradTest,
+    DeviceDdpComparisonTest,
 )
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
-    CudaRemoteModuleTest,
+    DeviceRemoteModuleTest,
     RemoteModuleTest,
     ThreeWorkersRemoteModuleTest,
 )
 from torch.testing._internal.distributed.rpc.dist_autograd_test import (
-    CudaDistAutogradTest,
+    DeviceDistAutogradTest,
     DistAutogradTest,
     FaultyAgentDistAutogradTest,
     TensorPipeAgentDistAutogradTest,
-    TensorPipeCudaDistAutogradTest,
+    TensorPipeDeviceDistAutogradTest,
 )
 from torch.testing._internal.distributed.rpc.dist_optimizer_test import (
     DistOptimizerTest,
@@ -50,9 +50,9 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 from torch.testing._internal.distributed.rpc.rpc_test import (
-    CudaRpcTest,
+    DeviceRpcTest,
     RpcTest,
-    TensorPipeAgentCudaRpcTest,
+    TensorPipeAgentDeviceRpcTest,
     TensorPipeAgentRpcTest,
 )
 
@@ -118,11 +118,11 @@ GENERIC_TESTS = [
     DdpComparisonTest,
     ReinforcementLearningRpcTest,
 ]
-GENERIC_CUDA_TESTS = [
-    CudaRpcTest,
-    CudaDistAutogradTest,
-    CudaRemoteModuleTest,
-    CudaDdpComparisonTest,
+GENERIC_DEVICE_TESTS = [
+    DeviceRpcTest,
+    DeviceDistAutogradTest,
+    DeviceRemoteModuleTest,
+    DeviceDdpComparisonTest,
 ]
 
 
@@ -133,9 +133,9 @@ TENSORPIPE_TESTS = [
     TensorPipeAgentRpcTest,
     TensorPipeAgentDistAutogradTest,
 ]
-TENSORPIPE_CUDA_TESTS = [
-    TensorPipeAgentCudaRpcTest,
-    TensorPipeCudaDistAutogradTest,
+TENSORPIPE_DEVICE_TESTS = [
+    TensorPipeAgentDeviceRpcTest,
+    TensorPipeDeviceDistAutogradTest,
 ]
 
 
