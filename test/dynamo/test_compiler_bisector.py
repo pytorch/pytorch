@@ -263,6 +263,74 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "lowerings")
         self.assertEqual(out.bisect_number, 2)
         self.assertTrue("relu" in out.debug_info)
+        # Check lowering_info is populated with range bisection results
+        self.assertIsNotNone(out.lowering_info)
+        self.assertLessEqual(out.lowering_info.start_index, out.lowering_info.end_index)
+        self.assertEqual(out.lowering_info.end_index, out.bisect_number)
+        # Check nodes_in_range is populated
+        self.assertGreater(len(out.lowering_info.nodes_in_range), 0)
+        # Verify the buggy relu node is in the range
+        node_names = [node_name for _, node_name, _ in out.lowering_info.nodes_in_range]
+        self.assertTrue(any("relu" in s for s in node_names))
+        # Check print_graph produces output
+        graph_str = out.lowering_info.print_graph()
+        self.assertIn("Minimal lowering range", graph_str)
+        self.assertIn("relu", graph_str)
+
+    def test_bad_lowering_range_minimization(self):
+        """Test that lowering bisection minimizes from both ends and creates pruned graph."""
+
+        def test_fn():
+            torch._dynamo.reset()
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+
+                def my_func(x):
+                    # Multiple ops: add -> mul -> relu
+                    # Only relu has the bug, so range should minimize to just relu
+                    y = x + 1
+                    y = y * 2
+                    return y.relu()
+
+                inp = torch.rand([100], device="cuda")
+
+                return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "lowerings")
+        self.assertIsNotNone(out.lowering_info)
+
+        # Range should be minimized to just the relu node
+        # (start_index should equal end_index for single node)
+        self.assertEqual(out.lowering_info.start_index, out.lowering_info.end_index)
+        self.assertEqual(len(out.lowering_info.nodes_in_range), 1)
+
+        # The node should be relu
+        _, node_name, _ = out.lowering_info.nodes_in_range[0]
+        self.assertIn("relu", node_name)
+
+        # FX graph should be captured
+        self.assertIsNotNone(out.lowering_info.fx_graph)
+
+        # Pruned graph should contain only the relu node
+        pruned_graph = out.lowering_info.get_pruned_graph()
+        self.assertIsNotNone(pruned_graph)
+
+        # Count call_function nodes in pruned graph (should be 1 - just relu)
+        call_function_count = sum(
+            1 for node in pruned_graph.graph.nodes if node.op == "call_function"
+        )
+        self.assertEqual(call_function_count, 1)
+
+        # The pruned graph should have a placeholder for the input from mul
+        placeholder_count = sum(
+            1 for node in pruned_graph.graph.nodes if node.op == "placeholder"
+        )
+        self.assertEqual(placeholder_count, 1)
+
+        # Example inputs should be captured
+        self.assertIsNotNone(out.lowering_info.example_inputs)
+        self.assertGreater(len(out.lowering_info.example_inputs), 0)
 
     def test_eager_backend(self):
         # should indicate problem with first backend
