@@ -19,6 +19,9 @@ from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+)
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.utils import _pytree as pytree
 
@@ -438,6 +441,78 @@ def forward(self, args_0):
             "nested function with non-constructible closure in output",
         ):
             _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_aot_export_flex_attention_callable_mask_mod(self):
+        """Test flex_attention AOT export with callable class as mask_mod.
+
+        _MaskModWrapper must delegate __eq__ to callable objects for TreeSpec
+        comparison in AOTAutograd's PytreeThunk.set() (utils.py:162).
+        """
+        from torch._functorch.aot_autograd import aot_export_module
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        _register_blockmask_pytree()
+
+        class ComposedMaskMod:
+            def __init__(self, *mask_fns):
+                self.mask_fns = mask_fns
+
+            def __call__(self, b, h, q, k):
+                result = True
+                for fn in self.mask_fns:
+                    result = result & fn(b, h, q, k)
+                return result
+
+            def __eq__(self, other):
+                if not isinstance(other, ComposedMaskMod):
+                    return NotImplemented
+                return self.mask_fns == other.mask_fns
+
+            def __hash__(self):
+                return hash(self.mask_fns)
+
+        def causal_mask(b, h, q, k):
+            return q >= k
+
+        class FlexAttentionModel(torch.nn.Module):
+            def __init__(self, embed_dim: int, num_heads: int):
+                super().__init__()
+                self.num_heads = num_heads
+                self.head_dim = embed_dim // num_heads
+                self.q_proj = torch.nn.Linear(embed_dim, embed_dim)
+                self.k_proj = torch.nn.Linear(embed_dim, embed_dim)
+                self.v_proj = torch.nn.Linear(embed_dim, embed_dim)
+
+            def forward(self, x):
+                B, L, D = x.shape
+                q = self.q_proj(x).view(B, L, self.num_heads, self.head_dim)
+                k = self.k_proj(x).view(B, L, self.num_heads, self.head_dim)
+                v = self.v_proj(x).view(B, L, self.num_heads, self.head_dim)
+                q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+
+                mask_mod = ComposedMaskMod(causal_mask)
+                block_mask = create_block_mask(
+                    mask_mod, B=B, H=self.num_heads, Q_LEN=L, KV_LEN=L, device=x.device
+                )
+                out = flex_attention(q, k, v, block_mask=block_mask)
+                return (out.transpose(1, 2).contiguous().view(B, L, D),)
+
+        embed_dim, num_heads, seq_len = 64, 2, 128
+        model = FlexAttentionModel(embed_dim, num_heads).cuda()
+        x = torch.randn(1, seq_len, embed_dim, device="cuda")
+
+        gm, signature = aot_export_module(model, [x], trace_joint=False)
+
+        # aot_export_module flattens params/buffers into the graph signature
+        params = [p for p in model.parameters()]
+        out_eager = model(x)[0]
+        out_export = gm(*params, x)[0]
+        self.assertEqual(out_eager.shape, out_export.shape)
+        self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim

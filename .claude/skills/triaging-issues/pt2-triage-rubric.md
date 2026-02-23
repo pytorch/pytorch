@@ -31,6 +31,8 @@ When component isn't clear from the issue body:
 
 ---
 
+**This is critical** when you have identified an issue as inductor, and the failing device is "cpu" ONLY, then this is a CPU inductor issue, and should be redirected to `oncall: cpu inductor`
+
 ## 3. Don't Over-Tag pt2-dispatcher
 
 `module: pt2-dispatcher` is for bugs **IN** the dispatcher code, not just when it appears in a stack trace.
@@ -65,6 +67,8 @@ When component isn't clear from the issue body:
 | DTensor has a bad error message under compile | Bug is in PT2's error handling → PT2 owns UX |
 | Distributed training fails, but stack trace shows inductor issue | Bug is in inductor → PT2 owns it |
 
+For PT2-D issues, you may also add `oncall: distributed` but DO NOT hand this off fully - keep the `oncall: pt2` label.
+
 **Examples - DO redirect:**
 
 | Situation | Why redirect |
@@ -76,6 +80,8 @@ When component isn't clear from the issue body:
 **The test:** Ask "where would the fix need to be made?" If the fix is in PT2 code, PT2 owns it.
 
 **Adding labels for visibility:** You CAN add domain labels (e.g., `module: dtensor`) so domain experts see the issue, but don't ADD the oncall redirect label unless you're actually handing it off.
+
+**This is critical** when you have identified an issue as inductor, and the failing device is "cpu" ONLY, then this is a CPU inductor issue, and should be redirected to `oncall: cpu inductor`
 
 ---
 
@@ -117,7 +123,10 @@ Check for existing labels before inventing categories:
 
 ## 8. High Priority Criteria
 
-Mark `high priority` if ANY of these apply:
+**This is critical** You should not explicitly add `high priority` - add `triage review` instead
+so that it is reviewed at the next triage meeting by the oncall.
+
+Mark `triage review` if ANY of these apply:
 
 | Criteria | Example |
 |----------|---------|
@@ -127,8 +136,6 @@ Mark `high priority` if ANY of these apply:
 | **Flaky test** | Usually indicates regression |
 | **Important model regressed** (>10% perf) | Common model, significant slowdown |
 | **Important customer** | Huggingface, common usage patterns |
-
-Note: Adding `high priority` auto-adds `triage review` for discussion.
 
 ---
 

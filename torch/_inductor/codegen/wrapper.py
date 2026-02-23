@@ -1502,6 +1502,7 @@ class PythonWrapperCodegen(CodeGen):
             if original is None:
                 continue
             layout = original.get_output_spec()
+            assert isinstance(layout, ir.Layout)
             if layout.allocator == ir.AllocatorType.SYMM_MEM:
                 result.append((idx, name, original))
         return result
@@ -1528,6 +1529,7 @@ class PythonWrapperCodegen(CodeGen):
 
         for idx, name, original in symm_mem_inputs:
             layout = original.get_output_spec()
+            assert isinstance(layout, ir.Layout)
             device = layout.device
             assert device is not None and device.index is not None
             dtype = layout.dtype
@@ -2864,7 +2866,7 @@ class PythonWrapperCodegen(CodeGen):
                     name,
                     ws.device,
                     ws.dtype,
-                    shape=(V.graph.sizevars.size_hint(ws.count),),
+                    shape=(V.graph.sizevars.optimization_hint(ws.count),),
                     stride=(1,),
                 )
             )

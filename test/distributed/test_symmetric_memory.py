@@ -1452,6 +1452,10 @@ class LoweringTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_external_allocation_fallback(self):
+        """
+        When the input is not pre-allocated in symmetric memory, Inductor
+        auto-inserts an identity copy to P2P.  Verify codegen + correctness.
+        """
         self._init_process()
 
         N = 8
