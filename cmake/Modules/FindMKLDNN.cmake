@@ -20,6 +20,17 @@ IF(NOT MKLDNN_FOUND)
   SET(MKLDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
 
   if(USE_XPU) # Build oneDNN GPU library
+    find_program(CCACHE_PROGRAM ccache)
+    if(CCACHE_PROGRAM)
+      set(SYCL_COMPILER_LAUNCHER
+          "${CCACHE_PROGRAM}"
+          CACHE STRING "SYCL compiler launcher")
+      message("MKLDNN find CCACHE_PROGRAM: ${CCACHE_PROGRAM}")
+      string(STRIP "${SYCL_COMPILER_LAUNCHER}" CLEANED_SYCL_COMPILER_LAUNCHER)
+      string(REPLACE "\\" "/" CLEANED_SYCL_COMPILER_LAUNCHER "${CLEANED_SYCL_COMPILER_LAUNCHER}")
+    else()
+      message("MKLDNN could not find ccache.")
+    endif()
     if(WIN32)
       # Windows
       set(DNNL_HOST_COMPILER "DEFAULT")
@@ -45,6 +56,7 @@ IF(NOT MKLDNN_FOUND)
         list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
       endif()
     endif()
+    message("sccache debug: XPU_MKLDNN_DIR_PREFIX -> ${XPU_MKLDNN_DIR_PREFIX}")
     ExternalProject_Add(xpu_mkldnn_proj
       GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
       GIT_TAG v3.10.2
@@ -52,6 +64,8 @@ IF(NOT MKLDNN_FOUND)
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
       -DCMAKE_CXX_COMPILER=${SYCL_CXX_DRIVER}
+      -DCMAKE_C_COMPILER_LAUNCHER=${CLEANED_SYCL_COMPILER_LAUNCHER}
+      -DCMAKE_CXX_COMPILER_LAUNCHER=${CLEANED_SYCL_COMPILER_LAUNCHER}
       -DDNNL_GPU_RUNTIME=SYCL
       -DDNNL_CPU_RUNTIME=THREADPOOL
       -DDNNL_BUILD_TESTS=OFF
