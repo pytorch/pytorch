@@ -3,6 +3,7 @@ import contextlib
 import functools
 from collections.abc import Callable
 from typing import Union
+from typing_extensions import TypeVarTuple, Unpack
 
 import torch
 import torch.utils._pytree as pytree
@@ -606,8 +607,17 @@ def while_loop_func(
         return ctx.wrap_tensors(ret)
 
 
+_CarriedTs = TypeVarTuple("_CarriedTs")
+
+
 @while_loop_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def while_loop_vmap(interpreter, cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop_vmap(
+    interpreter,
+    cond_fn: Callable[[Unpack[_CarriedTs]], torch.Tensor],
+    body_fn: Callable[[Unpack[_CarriedTs]], tuple[Unpack[_CarriedTs]]],
+    carried_inputs: tuple[Unpack[_CarriedTs]],
+    additional_inputs: tuple[torch.Tensor, ...],
+):
     """Vmap batching rule for while_loop.
 
     Converts to a masked loop: runs until ALL batch elements have converged,
@@ -616,15 +626,18 @@ def while_loop_vmap(interpreter, cond_fn, body_fn, carried_inputs, additional_in
     from torch._functorch.vmap import restore_vmap, unwrap_batched, wrap_batched
 
     # Unwrap carried_inputs and additional_inputs from batched tensors
-    carried_inputs = list(carried_inputs)
-    additional_inputs = list(additional_inputs)
+    carried_inputs_list = list(carried_inputs)
+    additional_inputs_list = list(additional_inputs)
 
-    (unwrapped_carried, carried_bdims), (
-        unwrapped_additional,
-        additional_bdims,
+    (
+        (unwrapped_carried, carried_bdims),
+        (
+            unwrapped_additional,
+            additional_bdims,
+        ),
     ) = (
-        unwrap_batched(carried_inputs, interpreter.level()),
-        unwrap_batched(additional_inputs, interpreter.level()),
+        unwrap_batched(carried_inputs_list, interpreter.level()),
+        unwrap_batched(additional_inputs_list, interpreter.level()),
     )
     # Flatten for easier manipulation
     flat_carried, carried_spec = pytree.tree_flatten(unwrapped_carried)
@@ -632,24 +645,21 @@ def while_loop_vmap(interpreter, cond_fn, body_fn, carried_inputs, additional_in
     flat_additional, additional_spec = pytree.tree_flatten(unwrapped_additional)
     flat_additional_bdims, _ = pytree.tree_flatten(additional_bdims)
 
-    # Build in_dims tuples for restore_vmap
-    carried_in_dims = tuple(flat_carried_bdims)
-    additional_in_dims = tuple(flat_additional_bdims)
-
     batch_size = interpreter.batch_size()
     randomness = interpreter.randomness()
 
     # Ensure all carried inputs that participate in vmap have batch dim at 0
     flat_carried = [
         t.movedim(bdim, 0) if bdim is not None and bdim != 0 else t
-        for t, bdim in zip(flat_carried, flat_carried_bdims)
+        for t, bdim in zip(flat_carried, flat_carried_bdims, strict=True)
     ]
-    flat_carried_bdims = [0 if bdim is not None else None for bdim in flat_carried_bdims]
-    carried_in_dims = tuple(flat_carried_bdims)
+    flat_carried_bdims = [
+        0 if bdim is not None else None for bdim in flat_carried_bdims
+    ]
 
     flat_additional = [
         t.movedim(bdim, 0) if bdim is not None and bdim != 0 else t
-        for t, bdim in zip(flat_additional, flat_additional_bdims)
+        for t, bdim in zip(flat_additional, flat_additional_bdims, strict=True)
     ]
     flat_additional_bdims = [
         0 if bdim is not None else None for bdim in flat_additional_bdims
@@ -661,7 +671,7 @@ def while_loop_vmap(interpreter, cond_fn, body_fn, carried_inputs, additional_in
     # metadata check requires identical strides between carry-in and carry-out).
     flat_carried = [
         t.unsqueeze(0).expand(batch_size, *t.shape).contiguous() if bdim is None else t
-        for t, bdim in zip(flat_carried, flat_carried_bdims)
+        for t, bdim in zip(flat_carried, flat_carried_bdims, strict=True)
     ]
     flat_carried_bdims = [0] * len(flat_carried)
     carried_in_dims = tuple(flat_carried_bdims)
@@ -672,9 +682,6 @@ def while_loop_vmap(interpreter, cond_fn, body_fn, carried_inputs, additional_in
 
         def wrapped_cond_fn(*flat_args):
             n_carried = len(flat_carried)
-            carried_args = flat_args[:n_carried]
-            additional_args = flat_args[n_carried:]
-            # Restore vmap for the user cond_fn
             fn, per_elem_bdims = restore_vmap(
                 lambda *args: (cond_fn(*args[:n_carried], *args[n_carried:]),),
                 all_in_dims,
@@ -688,9 +695,10 @@ def while_loop_vmap(interpreter, cond_fn, body_fn, carried_inputs, additional_in
         def wrapped_body_fn(*flat_args):
             n_carried = len(flat_carried)
             carried_args = flat_args[:n_carried]
-            additional_args = flat_args[n_carried:]
 
-            # Get per-element convergence mask
+            # Re-evaluate cond_fn to get the per-element active mask. This means
+            # cond_fn is evaluated twice per iteration (once here, once in
+            # wrapped_cond_fn), but avoids threading state between the two.
             cond_result, _ = restore_vmap(
                 lambda *args: (cond_fn(*args[:n_carried], *args[n_carried:]),),
                 all_in_dims,
@@ -713,18 +721,18 @@ def while_loop_vmap(interpreter, cond_fn, body_fn, carried_inputs, additional_in
             # Move all new outputs to have batch dim at 0
             flat_new = [
                 t.movedim(bdim, 0) if bdim is not None and bdim != 0 else t
-                for t, bdim in zip(flat_new, flat_new_bdims)
+                for t, bdim in zip(flat_new, flat_new_bdims, strict=True)
             ]
             # Expand unbatched new outputs
             flat_new = [
                 t.unsqueeze(0).expand(batch_size, *t.shape) if bdim is None else t
-                for t, bdim in zip(flat_new, flat_new_bdims)
+                for t, bdim in zip(flat_new, flat_new_bdims, strict=True)
             ]
 
             # Freeze converged elements: where active, use new; where done, keep old
             mask = active_mask
             result = []
-            for old, new in zip(carried_args, flat_new):
+            for old, new in zip(carried_args, flat_new, strict=True):
                 # Reshape mask for broadcasting: (batch_size, 1, 1, ...)
                 shape = (batch_size,) + (1,) * (old.ndim - 1)
                 result.append(torch.where(mask.view(shape), new, old))

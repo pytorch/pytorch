@@ -8568,9 +8568,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         # elem 0: sum=0, needs 4 iters (sum=12>=10)
         # elem 1: sum=9, needs 1 iter (sum=12>=10)
         # elem 2: sum=24>=10, 0 iters
-        expected = torch.tensor(
-            [[4.0, 4.0, 4.0], [4.0, 4.0, 4.0], [8.0, 8.0, 8.0]]
-        )
+        expected = torch.tensor([[4.0, 4.0, 4.0], [4.0, 4.0, 4.0], [8.0, 8.0, 8.0]])
         self.assertEqual(result[0], expected)
 
     def test_while_loop_in_vmap_multi_carry(self):
