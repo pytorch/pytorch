@@ -40,8 +40,8 @@ if try_import_cutlass():
     from cutlass_cppgen.backend.evt.backend.emitter_base import (  # type: ignore[import-not-found]
         FusionCallbacks,
     )
-    from cutlass_cppgen.backend.evt.backend.sm100_emitter import (
-        Sm100CollectiveEpilogue,  # type: ignore[import-not-found]
+    from cutlass_cppgen.backend.evt.backend.sm100_emitter import (  # type: ignore[import-not-found]
+        Sm100CollectiveEpilogue,
     )
     from cutlass_cppgen.backend.evt.backend.sm90_emitter import (  # type: ignore[import-not-found]
         CollectiveEpilogue,
