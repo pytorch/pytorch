@@ -796,6 +796,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size2 = remaining[current_group + 1]
                     size3 = FloorDiv(size, size1 * size2)
                     return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
                         make_combined(
                             [size2, size3],
                             [
@@ -833,6 +834,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
                         make_combined(
                             [size2],
                             [
@@ -844,6 +846,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 else:
                     if current_group < len(remaining):
                         return_getters.append(
+                            # pyrefly: ignore [bad-argument-type]
                             operator.itemgetter(add_range(current_group, size))
                         )
             return_getters_groups.append(return_getters)
@@ -851,6 +854,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
             f"failed to set ranges {remaining} {lengths}"
         )
+        # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
     @classmethod
@@ -1641,9 +1645,6 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
-        if not V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel)):
-            return self._codegen_mix_order_reduction(node2, node1)
-
         def _pick_split_size():
             # the overridden has highest priority
             if config.triton.mix_order_reduction_split_size is not None:
@@ -1664,8 +1665,6 @@ class SIMDScheduling(BaseScheduling):
 
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
-
-        assert V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel))
 
         # split epilogue out of node2
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
@@ -1897,6 +1896,20 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
+    def _collect_config_patches(self, node_schedule: list[Any]) -> dict[str, Any]:
+        """Collect and merge config_patches from all operations in the node schedule.
+
+        This enables scoped config (e.g., coordinate_descent_tuning) for kernels
+        that contain decomposition operations.
+        """
+        merged_patches: dict[str, Any] = {}
+        for node in node_schedule:
+            if isinstance(node, BaseSchedulerNode) and node.node is not None:
+                patches = node.node.get_config_patches()
+                if patches:
+                    merged_patches.update(patches)
+        return merged_patches
+
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         """
         Generate code for nodes in kernel_features
@@ -1917,8 +1930,13 @@ class SIMDScheduling(BaseScheduling):
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         MultiKernel.merge_workspaces_inplace(kernels)
+
+        # Collect config_patches from operations (e.g., decomposition ops with
+        # coordinate_descent_tuning) and apply during kernel codegen
+        config_patches = self._collect_config_patches(node_schedule)
+
         for kernel in kernels:
-            with V.set_kernel_handler(kernel):
+            with V.set_kernel_handler(kernel), config.patch(**config_patches):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
@@ -2130,7 +2148,7 @@ class SIMDScheduling(BaseScheduling):
                     partial_code.finalize_hook("<DEF_KERNEL>")
                 partial_code.finalize_hook("<ARGDEFS>", strict=False)
 
-            # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
+            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
 
             for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
@@ -2280,6 +2298,7 @@ class SIMDScheduling(BaseScheduling):
                         if size_hint is None
                         else self._make_shape_cache_key(template_node.node, size_hint)
                     )
+                    # pyrefly: ignore [unsupported-operation]
                     kernels[shape_cache_key] = kernel
 
             if only_gen_src_code:
@@ -2408,6 +2427,7 @@ class SIMDScheduling(BaseScheduling):
                     )
                     with V.set_kernel_handler(kernel):
                         src_code = kernel.codegen_kernel()
+                    # pyrefly: ignore [bad-argument-type]
                     kernel_code_list.append((src_code, kernel, node_group))
             else:
                 # Multi-node: create ComboKernel with combo subkernels
@@ -2431,7 +2451,9 @@ class SIMDScheduling(BaseScheduling):
                     )
 
                 src_code = kernel.codegen_kernel()
+                # pyrefly: ignore [bad-argument-type]
                 kernel_code_list.append((src_code, kernel, node_group))
+        # pyrefly: ignore [bad-return]
         return kernel_code_list
 
     def codegen_combo_kernel(self, combo_kernel_node):
@@ -3179,8 +3201,11 @@ class SIMDScheduling(BaseScheduling):
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+            # Collect config_patches from operations
+            config_patches = self._collect_config_patches(node_schedule)
+            config_patches["benchmark_kernel"] = benchmark_kernel
             with (
-                config.patch("benchmark_kernel", benchmark_kernel),
+                config.patch(**config_patches),
                 V.set_kernel_handler(kernel),
             ):
                 src_code = kernel.codegen_kernel()

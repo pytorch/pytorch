@@ -185,7 +185,6 @@ def _is_input_arg_dtype_supported_by_backend(
     if isinstance(arg, (list, tuple)):  # noqa: UP038
         return all(
             _is_input_arg_dtype_supported_by_backend(
-                # pyrefly: ignore [bad-argument-type]
                 a,
                 node,
                 qconfig,
@@ -740,7 +739,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         for inner_arg in arg:
             new_inner_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
                 node,
-                # pyrefly: ignore [bad-argument-type]
                 inner_arg,
                 qconfig,
                 model,
@@ -1160,7 +1158,6 @@ def _maybe_insert_observers_before_graph_output(
         elif isinstance(maybe_node, (list, tuple)):  # noqa: UP038
             results = [
                 _recursive_maybe_replace_node_with_obs(
-                    # pyrefly: ignore [bad-argument-type]
                     inner_node,
                     model,
                     named_modules,
@@ -1338,15 +1335,19 @@ def _maybe_make_input_output_share_observers(
             if input_idx == 0:
                 continue
             iteration_guard = 0
+            # pyrefly: ignore [bad-argument-type]
             while not _is_activation_post_process_node(input_arg, named_modules):
                 # failed to trace back since no input arg for the current node
+                # pyrefly: ignore [missing-attribute]
                 if len(input_arg.args) < 1:
                     return False
+                # pyrefly: ignore [bad-index, unsupported-operation]
                 input_arg = input_arg.args[0]
                 iteration_guard += 1
                 if iteration_guard > 10000:
                     raise AssertionError("Unable to find observer of previous node")
 
+            # pyrefly: ignore [missing-attribute]
             parent_name, name = _parent_name(input_arg.target)
             setattr(named_modules[parent_name], name, obs_mod_to_use)
 
