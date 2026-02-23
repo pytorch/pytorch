@@ -10,7 +10,7 @@ import enum
 import operator
 from collections.abc import Sequence
 from typing import Any, Literal, Optional, overload, TYPE_CHECKING, Union
-from typing_extensions import override
+from typing_extensions import Never, override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -42,6 +42,18 @@ class ConstantVariable(VariableTracker):
     The create() method intelligently constructs appropriate variable types for
     nested collections.
     """
+
+    @overload
+    @staticmethod
+    def create(value: None) -> Never: ...
+
+    @overload
+    @staticmethod
+    def create(value: Literal[True]) -> Never: ...
+
+    @overload
+    @staticmethod
+    def create(value: Literal[False]) -> Never: ...
 
     @overload
     @staticmethod
@@ -146,9 +158,15 @@ its type to `common_constant_types`.
         return type(obj) in common_constant_types
 
     @staticmethod
-    def is_literal(obj: object) -> bool:
+    def is_literal(obj: object, cache: dict[int, object] | None = None) -> bool:
+        if cache is None:
+            cache = {}
+        if id(obj) in cache:
+            # no-op if there is a cyclical reference
+            return True
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
-            return all(ConstantVariable.is_literal(x) for x in obj)  # type: ignore[attr-defined]
+            cache[id(obj)] = obj
+            return all(ConstantVariable.is_literal(x, cache) for x in obj)  # type: ignore[attr-defined]
         return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(
@@ -265,14 +283,12 @@ its type to `common_constant_types`.
 
         if name == "__len__" and not (args or kwargs):
             try:
-                # pyrefly: ignore [bad-argument-type]
                 return ConstantVariable.create(len(self.value))
             except TypeError as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
-                    # pyrefly: ignore [no-matching-overload]
                     round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
@@ -283,7 +299,6 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
-                # pyrefly: ignore [not-iterable, unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
@@ -367,6 +382,11 @@ its type to `common_constant_types`.
             isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
+
+
+CONSTANT_VARIABLE_NONE = ConstantVariable(None)
+CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
+CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
 
 
 class EnumVariable(VariableTracker):

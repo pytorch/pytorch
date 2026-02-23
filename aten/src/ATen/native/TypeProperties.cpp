@@ -55,8 +55,11 @@ bool is_neg(const Tensor& self) {
   return self.is_neg();
 }
 
-// True if `self` and `from` have compatible tensor type so that `from`'s
-// TensorImpl can be copied to `self`.
+// Returns true if `self` and `from` have compatible tensor types,
+// allowing `from`'s TensorImpl to be copied to `self`.
+// For any backend based on PrivateUse1, since _has_compatible_shallow_copy_type
+// is a standard aten operator, you can override this operator for the Dispatch
+// Key `PrivateUse1`. See OpenRegMinimal.cpp for an example of overriding this operator.
 bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
   return self.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
       from.key_set());

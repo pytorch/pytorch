@@ -1585,18 +1585,18 @@ class ExceptionTests(__TestCase):
                 recurse_in_body_and_except()
 
         recursionlimit = sys.getrecursionlimit()
-        try:
-            set_relative_recursion_limit(10)
-            for func in (recurse_in_except, recurse_after_except, recurse_in_body_and_except):
-                with self.subTest(func=func):
+        for func in (recurse_in_except, recurse_after_except, recurse_in_body_and_except):
+            with self.subTest(func=func):
+                try:
+                    set_relative_recursion_limit(10)
                     try:
                         func()
                     except RecursionError:
                         pass
                     else:
                         self.fail("Should have raised a RecursionError")
-        finally:
-            sys.setrecursionlimit(recursionlimit)
+                finally:
+                    sys.setrecursionlimit(recursionlimit)
 
 
     @cpython_only
