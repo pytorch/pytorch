@@ -205,7 +205,8 @@ class TestCustomOpAutoTune(TestCase):
             configs=[CustomOpConfig(decomp) for decomp in decompositions],
             name="test_rmsnorm_autotuned",
             input_gen_fns={
-                "x": lambda x: torch.randn_like(x, device=self.device) * 0.02,
+                "input_tensor": lambda x: torch.randn_like(x, device=self.device)
+                * 0.02,
                 "weight": lambda weight: torch.ones_like(weight, device=self.device),
             },
         )
@@ -1159,9 +1160,92 @@ class TestCustomOpAutoTune(TestCase):
 
         # Both calls should use the same fallback kernel with different kwargs in codegen
         code = "\n".join(codes)
-        breakpoint()
         self.assertIn("scale=2.0", code)
         self.assertIn("scale=5.0", code)
+
+    @skipIfXpu
+    @config.patch({"test_configs.force_custom_op_decomposition": True})
+    def test_config_overrides_runtime_kwargs(self):
+        """Test that CustomOpConfig params override runtime default kwargs.
+
+        The op has scale=1.0 as default, but the config specifies scale=7.0.
+        With force_custom_op_decomposition=True, the decomposition should be
+        called with scale=7.0 and this should be reflected in the output code.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        test_op_name = f"test_lib::config_override_{id(self)}"
+
+        def scale_impl(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def config_override_op(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @config_override_op.register_fake
+        def _(x: torch.Tensor, scale: float = 1.0):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            config_override_op,
+            configs=[CustomOpConfig(scale_impl, scale=7.0)],
+            name=f"config_override_test_{id(self)}",
+        )
+
+        x = torch.ones(4, 4, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x):
+            return config_override_op(x)
+
+        torch._dynamo.reset()
+        result, codes = run_and_get_code(test_model, x)
+
+        # The config's scale=7.0 should override the runtime default scale=1.0
+        torch.testing.assert_close(result, x * 7.0, rtol=1e-3, atol=1e-3)
+        code = "\n".join(codes)
+        self.assertIn("7.0", code)
+
+    @skipIfXpu
+    def test_input_gen_fns_invoked(self):
+        """Test that input_gen_fns are actually called during benchmarking."""
+        test_op_name = f"test_lib::input_gen_test_{id(self)}"
+        gen_calls = []
+
+        def decomp(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x * weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def input_gen_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x * weight
+
+        @input_gen_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            input_gen_op,
+            configs=[CustomOpConfig(decomp)],
+            name=f"input_gen_test_{id(self)}",
+            input_gen_fns={
+                "x": lambda t: (gen_calls.append("x"), torch.ones_like(t))[1],
+                "weight": lambda t: (gen_calls.append("weight"), torch.ones_like(t))[1],
+            },
+        )
+
+        x = torch.randn(4, 4, device=self.device, dtype=self.dtype)
+        w = torch.randn(4, 4, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, w):
+            return input_gen_op(x, w)
+
+        torch._dynamo.reset()
+        test_model(x, w)
+
+        self.assertIn("x", gen_calls)
+        self.assertIn("weight", gen_calls)
 
     @skipIfXpu
     @parametrize("force_choice", [None, True, False])
