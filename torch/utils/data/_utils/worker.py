@@ -496,8 +496,7 @@ def _thread_worker_loop(
 ):
     """
     Thread worker loop that uses the common base worker loop for threads.
-    Sets up thread-local RNG state and creates deep copies of dataset/transforms
-    to avoid race conditions and shared state issues.
+    Sets up thread-local RNG state to avoid race conditions and shared state issues.
     """
     torch.multiprocessing._set_thread_name("pt_thread_data_worker")
 

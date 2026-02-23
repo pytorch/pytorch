@@ -202,7 +202,8 @@ class DataLoader(Generic[_T_co]):
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
         worker_method (str, optional): The worker method to be used. Either ``"multiprocessing"`` for process-based workers
-            or ``"thread"`` for thread-based workers. (default: ``"multiprocessing"``)
+            or ``"thread"`` for thread-based workers. (default: ``"multiprocessing"``). Note that ``"thread"`` is not
+            supported for MacOS and Windows.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -946,6 +947,15 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
 
     def _get_data(self):
         # Fetches data from `self._data_queue`.
+        #
+        # We check workers' status every `STATUS_CHECK_INTERVAL` seconds,
+        # which we achieve by running `self._try_get_data(timeout=STATUS_CHECK_INTERVAL)`
+        # in a loop. This is the only mechanism to detect worker failures for
+        # Windows. For other platforms, a SIGCHLD handler is also used for
+        # worker failure detection.
+        #
+        # If `pin_memory=True`, we also need check if `pin_memory_thread` had
+        # died at timeouts.
         if self._timeout > 0:
             success, data = self._try_get_data(self._timeout)
             if success:
