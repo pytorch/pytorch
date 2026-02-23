@@ -78,7 +78,6 @@ def patches(fn):
     return wrapped
 
 
-# @instantiate_parametrized_tests
 class TestSelectAlgorithm(TestCase):
     def setUp(self):
         super().setUp()
