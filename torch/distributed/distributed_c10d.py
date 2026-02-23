@@ -2754,9 +2754,9 @@ def _coalescing_manager(
         # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
         if any(op.op is not op0 for op in op_list):
-            raise ValueError(
+            raise RuntimeError(
                 "Coalescing manager requires all collectives to be the same type, "
-                f"but got mixed types: {set(op.op.__name__ for op in op_list)}"
+                f"but got mixed types: {set(op.op.__name__ for op in op_list)}"  # noqa: C401
             )
 
         if op0 is all_reduce:

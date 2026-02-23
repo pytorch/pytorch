@@ -4470,7 +4470,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         process_group = c10d.distributed_c10d._get_default_group()
         device = torch.device(f"cuda:{self.rank:d}")
         with self.assertRaisesRegex(
-            ValueError,
+            RuntimeError,
             "Coalescing manager requires all collectives to be the same type",
         ):
             with torch.distributed._coalescing_manager(
