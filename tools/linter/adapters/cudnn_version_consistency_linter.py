@@ -23,9 +23,7 @@ from typing import NamedTuple
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 LINUX_SCRIPT = REPO_ROOT / ".ci" / "docker" / "common" / "install_cuda.sh"
-WINDOWS_SCRIPT = (
-    REPO_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
-)
+WINDOWS_SCRIPT = REPO_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
 
 
 class LintSeverity(str, Enum):
@@ -57,7 +55,7 @@ def parse_linux_cudnn_versions(text: str) -> dict[str, tuple[str, int]]:
     results: dict[str, tuple[str, int]] = {}
     func_re = re.compile(r"^function install_(\d+)\s*\{")
     cudnn_re = re.compile(r"^\s*CUDNN_VERSION=(\S+)")
-    current_func = None
+    current_func: str | None = None
     for lineno, line in enumerate(text.splitlines(), 1):
         m = func_re.match(line)
         if m:
@@ -86,7 +84,7 @@ def parse_windows_cudnn_versions(text: str) -> dict[str, tuple[str, int]]:
     cudnn_re = re.compile(
         r"^set CUDNN_FOLDER=cudnn-windows-x86_64-([0-9.]+)_cuda\d+-archive"
     )
-    current_label = None
+    current_label: str | None = None
     for lineno, line in enumerate(text.splitlines(), 1):
         m = label_re.match(line)
         if m:
