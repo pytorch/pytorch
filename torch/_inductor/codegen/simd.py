@@ -2656,7 +2656,9 @@ class SIMDScheduling(BaseScheduling):
             collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])
             return (collapsed_leading_dim,) + tuple(dims[first_trailing_dim:])
 
-        def tile_var_ranges(var_ranges, ranges_to_tile) -> tuple[sympy.Expr, ...]:
+        def tile_var_ranges(
+            var_ranges, ranges_to_tile, total_numel
+        ) -> tuple[sympy.Expr, ...]:
             # Pattern match the subexpression pertaining to each index variable.
             tiling = []
             for var, numel in var_ranges:
@@ -2684,7 +2686,7 @@ class SIMDScheduling(BaseScheduling):
                 if not V.graph.sizevars.statically_known_equals(dim, sympy.S.One)
             ]
 
-            return collapse_dims(tiling, sympy_product(r for _, r in var_ranges))
+            return collapse_dims(tiling, total_numel)
 
         is_pointwise = reduction_numel == 1
         tilings = OrderedSet[immutable_dict[str, sympy.Expr]]()
@@ -2739,11 +2741,15 @@ class SIMDScheduling(BaseScheduling):
                 reduction_var_ranges = (
                     None if is_pointwise else all_var_ranges[reduction_start_idx:]
                 )
-                pointwise_tiling = tile_var_ranges(pointwise_var_ranges, node_ranges[0])
+                pointwise_tiling = tile_var_ranges(
+                    pointwise_var_ranges, node_ranges[0], pointwise_numel
+                )
                 reduction_tiling = (
                     (sympy.S.One,)
                     if is_pointwise
-                    else tile_var_ranges(reduction_var_ranges, node_ranges[1])
+                    else tile_var_ranges(
+                        reduction_var_ranges, node_ranges[1], reduction_numel
+                    )
                 )
 
                 if len(pointwise_tiling) and len(reduction_tiling) > 0:
