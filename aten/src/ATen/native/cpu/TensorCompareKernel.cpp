@@ -99,6 +99,90 @@ inline void compare_base_kernel(const Tensor& result1, const Tensor& result2,
       result1, result2, self, dim, keepdim, loop);
 }
 
+// Fast path for min/max when reducing a dimension of size 2.
+//
+// The generic compare_base_kernel strides along the reduction dim for each
+// output element. When that stride is large (e.g. dim-0 on a big contiguous
+// tensor), every comparison incurs a cache miss. This fast path instead
+// selects the two slices and iterates element-wise over contiguous memory
+// using at::parallel_for with direct comparisons (no function pointers) to
+// enable compiler auto-vectorization (AVX2/AVX512).
+//
+// When the slices are non-contiguous we fall back to the generic path.
+enum class CompareOp { MIN, MAX };
+
+template <typename scalar_t, CompareOp op>
+bool compare_dim2_fast_path(
+    const Tensor& result,
+    const Tensor& indice,
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim) {
+  auto slice0 = self.select(dim, 0);
+  auto slice1 = self.select(dim, 1);
+
+  // Only use the fast path when both slices are contiguous so we can
+  // iterate with raw pointers.  Non-contiguous cases fall back.
+  if (!slice0.is_contiguous() || !slice1.is_contiguous()) {
+    return false;
+  }
+
+  auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
+  self_sizes[dim] = 1;
+
+  if (!keepdim) {
+    if (result.ndimension() >= dim) {
+      result.unsqueeze_(dim);
+    }
+    if (indice.ndimension() >= dim) {
+      indice.unsqueeze_(dim);
+    }
+  }
+
+  at::native::resize_output(result, self_sizes);
+  at::native::resize_output(indice, self_sizes);
+
+  auto result_view = result.select(dim, 0);
+  auto indice_view = indice.select(dim, 0);
+
+  TORCH_INTERNAL_ASSERT(result_view.is_contiguous());
+  TORCH_INTERNAL_ASSERT(indice_view.is_contiguous());
+
+  const int64_t n = slice0.numel();
+  const scalar_t* C10_RESTRICT s0 = slice0.const_data_ptr<scalar_t>();
+  const scalar_t* C10_RESTRICT s1 = slice1.const_data_ptr<scalar_t>();
+  scalar_t* C10_RESTRICT r = result_view.data_ptr<scalar_t>();
+  int64_t* C10_RESTRICT idx = indice_view.data_ptr<int64_t>();
+
+  // Use direct comparisons (no function pointers) so the compiler can
+  // auto-vectorize the inner loop with AVX2/AVX512 instructions.
+  // NaN semantics: first NaN wins (index 0 if s0 is NaN).
+  // For MIN: first_wins when isnan(s0) || s0 <= s1
+  // For MAX: first_wins when isnan(s0) || s0 >= s1
+  at::parallel_for(0, n, at::internal::GRAIN_SIZE, [s0, s1, r, idx](int64_t begin, int64_t end) {
+    for (int64_t i = begin; i < end; ++i) {
+      bool first_wins;
+      if constexpr (op == CompareOp::MIN) {
+        // NaN in s0 → first wins; s0 <= s1 → first wins
+        // Using !(s1 < s0) handles NaN correctly: if s0 is NaN,
+        // s1 < NaN is false, so !(false) = true → first wins.
+        first_wins = !(s1[i] < s0[i]);
+      } else {
+        // NaN in s0 → first wins; s0 >= s1 → first wins
+        first_wins = !(s1[i] > s0[i]);
+      }
+      r[i] = first_wins ? s0[i] : s1[i];
+      idx[i] = first_wins ? 0 : 1;
+    }
+  });
+
+  if (!keepdim) {
+    result.squeeze_(dim);
+    indice.squeeze_(dim);
+  }
+  return true;
+}
+
 void min_kernel_impl(
     const Tensor& result,
     const Tensor& indice,
@@ -106,6 +190,17 @@ void min_kernel_impl(
     int64_t dim,
     bool keepdim) {
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
+
+  if (self_dim_size == 2) {
+    bool used_fast_path = false;
+    AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
+      used_fast_path = compare_dim2_fast_path<scalar_t, CompareOp::MIN>(
+          result, indice, self, dim, keepdim);
+    });
+    if (used_fast_path) {
+      return;
+    }
+  }
 
   AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
@@ -139,6 +234,17 @@ void max_kernel_impl(
     int64_t dim,
     bool keepdim) {
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
+
+  if (self_dim_size == 2) {
+    bool used_fast_path = false;
+    AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
+      used_fast_path = compare_dim2_fast_path<scalar_t, CompareOp::MAX>(
+          result, indice, self, dim, keepdim);
+    });
+    if (used_fast_path) {
+      return;
+    }
+  }
 
   AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (

@@ -2522,6 +2522,96 @@ class TestReductions(TestCase):
         self.assertEqual(x.argmax(dim=-2, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
         self.assertEqual(x.argmin(dim=-2, keepdim=True), torch.zeros(1, n, dtype=torch.int64))
 
+    def test_min_dim_two_rows(self, device):
+        x = torch.tensor([[3.0, 1.0, 5.0], [2.0, 4.0, 0.0]], device=device)
+        values, indices = x.min(dim=0)
+        self.assertEqual(values, torch.tensor([2.0, 1.0, 0.0], device=device))
+        self.assertEqual(indices, torch.tensor([1, 0, 1], device=device, dtype=torch.int64))
+
+        # keepdim
+        values, indices = x.min(dim=0, keepdim=True)
+        self.assertEqual(values, torch.tensor([[2.0, 1.0, 0.0]], device=device))
+        self.assertEqual(indices, torch.tensor([[1, 0, 1]], device=device, dtype=torch.int64))
+
+        # non-contiguous input
+        y = x[:, ::2]
+        self.assertFalse(y.is_contiguous())
+        values, indices = y.min(dim=0)
+        self.assertEqual(values, torch.tensor([2.0, 0.0], device=device))
+        self.assertEqual(indices, torch.tensor([1, 1], device=device, dtype=torch.int64))
+
+        # NaN handling: first NaN wins, fast path must match generic path
+        x_nan = torch.tensor(
+            [[float("nan"), 1.0, float("nan"), 2.0],
+             [0.0, float("nan"), 3.0, float("nan")]],
+            device=device,
+        )
+        values, indices = x_nan.min(dim=0)
+        ref_values, ref_indices = x_nan.t().min(dim=1)
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices, ref_indices)
+
+        # inf / -inf edge cases
+        x_inf = torch.tensor(
+            [[float("-inf"), 1.0, float("inf"), -1.0],
+             [0.0, float("inf"), 2.0, float("-inf")]],
+            device=device,
+        )
+        values, indices = x_inf.min(dim=0)
+        ref_values, ref_indices = x_inf.t().min(dim=1)
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices, ref_indices)
+
+        # tied values: first element (index 0) wins
+        x_tie = torch.tensor([[7.0, 7.0], [7.0, 7.0]], device=device)
+        values, indices = x_tie.min(dim=0)
+        self.assertEqual(indices, torch.tensor([0, 0], device=device, dtype=torch.int64))
+
+    def test_max_dim_two_rows(self, device):
+        x = torch.tensor([[3.0, 1.0, 5.0], [2.0, 4.0, 0.0]], device=device)
+        values, indices = x.max(dim=0)
+        self.assertEqual(values, torch.tensor([3.0, 4.0, 5.0], device=device))
+        self.assertEqual(indices, torch.tensor([0, 1, 0], device=device, dtype=torch.int64))
+
+        # keepdim
+        values, indices = x.max(dim=0, keepdim=True)
+        self.assertEqual(values, torch.tensor([[3.0, 4.0, 5.0]], device=device))
+        self.assertEqual(indices, torch.tensor([[0, 1, 0]], device=device, dtype=torch.int64))
+
+        # non-contiguous input
+        y = x[:, ::2]
+        self.assertFalse(y.is_contiguous())
+        values, indices = y.max(dim=0)
+        self.assertEqual(values, torch.tensor([3.0, 5.0], device=device))
+        self.assertEqual(indices, torch.tensor([0, 0], device=device, dtype=torch.int64))
+
+        # NaN handling: first NaN wins, fast path must match generic path
+        x_nan = torch.tensor(
+            [[float("nan"), 1.0, float("nan"), 2.0],
+             [0.0, float("nan"), 3.0, float("nan")]],
+            device=device,
+        )
+        values, indices = x_nan.max(dim=0)
+        ref_values, ref_indices = x_nan.t().max(dim=1)
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices, ref_indices)
+
+        # inf / -inf edge cases
+        x_inf = torch.tensor(
+            [[float("-inf"), 1.0, float("inf"), -1.0],
+             [0.0, float("inf"), 2.0, float("-inf")]],
+            device=device,
+        )
+        values, indices = x_inf.max(dim=0)
+        ref_values, ref_indices = x_inf.t().max(dim=1)
+        self.assertEqual(values, ref_values)
+        self.assertEqual(indices, ref_indices)
+
+        # tied values: first element (index 0) wins
+        x_tie = torch.tensor([[7.0, 7.0], [7.0, 7.0]], device=device)
+        values, indices = x_tie.max(dim=0)
+        self.assertEqual(indices, torch.tensor([0, 0], device=device, dtype=torch.int64))
+
     @dtypes(torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.int, torch.long, torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.int, torch.long, torch.half, torch.float, torch.double)
