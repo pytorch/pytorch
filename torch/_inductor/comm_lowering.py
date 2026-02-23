@@ -86,16 +86,20 @@ def _propagate_comm_layout_to_upstream(
     buffer: ir.Buffer,
     comm_buffer_type: ir.CommBufferType,
     group_name: "torch.distributed.distributed_c10d.GroupName",
-) -> "Optional[ir.Buffer]":
+) -> "ir.Buffer | None":
     """
-    Propagate CommBufferLayout to the upstream buffer that feeds *buffer*.
+    Propagate CommBufferLayout to the upstream buffer that feeds buffer.
 
-    Example: mm -> add(residual) -> allreduce.  The add is a ComputedBuffer
-    that Inductor may run in-place on mm's output.  P2P and regular CUDA use
-    separate reuse pools, so if only the add output gets CommBufferLayout the
-    in-place reuse breaks — the P2P buffer is allocated but never written
-    ("disconnected P2P buffer" bug).  Propagating CommBufferLayout to mm's
-    output and letting add mutate it via MutationLayout fixes this.
+    When a pointwise op is optimized to run in-place on its
+    input, the input and output share the same storage via buffer reuse.
+    Comm buffers use a separate reuse pool from regular CUDA buffers, so
+    if only the pointwise output gets CommBufferLayout, the in-place reuse
+    with its upstream regular CUDA input will fail — leaving the comm
+    buffer uninitialized (the "disconnected P2P buffer" bug).
+
+    By marking the upstream buffer as a comm buffer and then making the
+    downstream ComputedBuffer mutate the upstream via MutationLayout,
+    we avoid allocating a separate comm buffer for the downstream op.
 
     Returns the converted upstream buffer, or None.
     """
@@ -511,9 +515,9 @@ def register_symm_mem_lowerings():
         group_name: str,  # type: ignore[arg-type]
     ) -> ir.TensorBox:
         """
-        Ensure *inp* is in P2P memory for a symm_mem collective.
+        Ensure inp is in P2P memory for a symm_mem collective.
 
-        Returns the (possibly replaced) TensorBox — callers must use
+        Returns the (possibly replaced) TensorBox. Callers must use
         the return value since a new identity-copy buffer may be created.
         # TODO: PR#5 adds a Layout-based path (Path 2) for InputBuffer.
         """
@@ -521,7 +525,9 @@ def register_symm_mem_lowerings():
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
             return inp
         else:
-            return _copy_input_to_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
+            return _copy_input_to_comm_buffer(
+                inp, ir.CommBufferType.SYMM_MEM, group_name
+            )  # type: ignore[arg-type]
 
     def _create_out_variant_node(
         out_op: torch._ops.OpOverload,
