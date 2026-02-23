@@ -47,6 +47,7 @@ from torch._library.opaque_object import is_opaque_type
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
+    is_contiguous_for_memory_format_or_false,
     is_float_dtype,
     make_channels_last_strides_for,
     StrideType,
@@ -56,6 +57,7 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
+    GuardOnDataDependentSymNode,
     IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
@@ -603,6 +605,10 @@ class IRNode:
     def get_defining_op(self) -> Optional[Operation]:
         return None
 
+    def get_subgraphs(self) -> list[Subgraph]:
+        """Return subgraphs contained in this node"""
+        return []
+
     def get_stack_traces(self) -> OrderedSet[str]:
         # Return stack traces to user model code
         # A single IRNode could correspond to multiple lines of code
@@ -857,6 +863,7 @@ class IRNode:
 class Operation:
     def __post_init__(self) -> None:
         self.operation_name: Optional[str] = None
+        self._config_patches: dict[str, Any] = {}
 
     def get_device(self) -> Optional[torch.device]:
         raise NotImplementedError
@@ -872,6 +879,14 @@ class Operation:
     def get_operation_name(self) -> str:
         assert self.operation_name is not None
         return self.operation_name
+
+    def get_config_patches(self) -> dict[str, Any]:
+        """Get config patches for this operation (e.g., coordinate_descent_tuning)."""
+        return self._config_patches
+
+    def set_config_patches(self, patches: dict[str, Any]) -> None:
+        """Set config patches for this operation."""
+        self._config_patches = patches
 
     def is_extern(self) -> bool:
         return False
@@ -2204,7 +2219,7 @@ class WelfordReduction(MultiOutputReduction):
         # TODO: Unrolled reduction
         # if (
         #     isinstance(reduction_numel, Integer)
-        #     and V.graph.sizevars.size_hint(reduction_numel)
+        #     and int(reduction_numel)
         #     < config.unroll_reductions_threshold
         #     and sympy_product(ranges) != 1
         # ):
@@ -2347,7 +2362,9 @@ class WelfordReduction(MultiOutputReduction):
         ) -> OpsValue:
             return loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        # numel_hint is only used to choose between ReductionHint.OUTER vs
+        # OUTER_TINY, which is a performance heuristic, not a correctness decision.
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(ranges))
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
@@ -3233,20 +3250,22 @@ class View(GenericView):
         ) -> IRNode:
             """
             Handle the case where view is not possible with current strides.
-            For unbacked symbols, make contiguous; otherwise use dynamic_reshape_indexer.
+            Try dynamic_reshape_indexer first; if it fails with unbacked
+            symbols (guard_or_false can't resolve comparisons), fall back
+            to making the tensor contiguous.
             """
-            nonlocal old_size, new_size, unbacked_symbols_in_sizes
-            if unbacked_symbols_in_sizes:
-                # For unbacked symbols, we must require contiguous
+            nonlocal old_size, new_size
+            try:
+                reindex = cls.dynamic_reshape_indexer(old_size, new_size)
+                return cls(data=x, size=list(new_size), reindex=reindex)
+            except GuardOnDataDependentSymNode:
                 # dynamic_reshape_indexer cannot handle unbacked SymInts
+                # because guard_or_false can't resolve size comparisons.
                 # https://github.com/pytorch/pytorch/issues/145561
                 x = ExternKernel.require_contiguous(x)
                 return create_reinterpret_view(
                     x, new_size, FlexibleLayout.contiguous_strides(new_size)
                 )
-            # For backed symbols, fall back to dynamic_reshape_indexer
-            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-            return cls(data=x, size=list(new_size), reindex=reindex)
 
         if 0 in new_size:
 
@@ -3350,7 +3369,7 @@ class View(GenericView):
         """
         Perform a reshape entirely by modifying indexing math
         """
-        size_hint = V.graph.sizevars.size_hint
+        guard_or_false = V.graph.sizevars.guard_or_false
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -3380,28 +3399,32 @@ class View(GenericView):
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
-            elif size_hint(size_new) == size_hint(size_old):
+            elif guard_or_false(sympy.Eq(size_new, size_old)):
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
-            elif size_hint(size_new) < size_hint(size_old):
-                while size_hint(size_new) < size_hint(size_old):
+            elif guard_or_false(sympy.Lt(size_new, size_old)):
+                while guard_or_false(sympy.Lt(size_new, size_old)):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
                 V.graph.sizevars.check_equals(size_new, size_old)
-            elif size_hint(size_new) > size_hint(size_old):
+            elif guard_or_false(sympy.Gt(size_new, size_old)):
                 divisor = sympy.S.One
                 modulus = size_old
                 view_expr.append(ModularIndexing(var, divisor, modulus))
                 divisor = divisor * modulus
-                while size_hint(size_new) > size_hint(size_old):
+                while guard_or_false(sympy.Gt(size_new, size_old)):
                     modulus = stack_old.pop()
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
                 V.graph.sizevars.check_equals(size_new, size_old)
             else:
+                # With backed symbols, one of Eq/Lt/Gt must be true,
+                # so reaching here is a bug. With unbacked symbols,
+                # guard_or_false can't resolve all comparisons.
+                if free_unbacked_symbols(size_old) or free_unbacked_symbols(size_new):
+                    raise GuardOnDataDependentSymNode(sympy.Eq(size_new, size_old))
                 raise AssertionError
 
         while stack_old:
@@ -6293,11 +6316,13 @@ class ExternKernel(InputsKernel):
             and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
-                x_unwrap_view_fx_node.meta["val"].is_contiguous(
-                    memory_format=torch.channels_last
+                is_contiguous_for_memory_format_or_false(
+                    x_unwrap_view_fx_node.meta["val"],
+                    memory_format=torch.channels_last,
                 )
-                or x_unwrap_view_fx_node.meta["val"].is_contiguous(
-                    memory_format=torch.channels_last_3d
+                or is_contiguous_for_memory_format_or_false(
+                    x_unwrap_view_fx_node.meta["val"],
+                    memory_format=torch.channels_last_3d,
                 )
             )
         ):
@@ -6803,7 +6828,9 @@ class ExternKernel(InputsKernel):
         sizevars = V.graph.sizevars
         sizes = self.get_size()
         strides = self.get_stride()
-        strides = [sizevars.size_hint(x) for x in strides]
+        # Stride hints are only used as sort keys to determine dimension
+        # ordering for canonicalization, not for correctness.
+        strides = [sizevars.optimization_hint(x) for x in strides]
         # TODO: I can't tell if the symbols here are temporary
         index_vars = [sympy_index_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
@@ -7121,6 +7148,7 @@ class SubgraphBuffer(ExternKernel):
         gm: torch.fx.GraphModule,
         example_inputs: list[Any],
         subgraph_name: str,
+        config_patches: dict[str, Any] | None = None,
     ):
         super().__init__(None, layout, input_nodes)
         self.gm = gm
@@ -7142,13 +7170,22 @@ class SubgraphBuffer(ExternKernel):
         import torch._inductor.config as inductor_config
 
         with V.set_graph_handler(self.subgraph):
-            # Don't bother autotuning on Triton here
-            with inductor_config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
-            ):
+            # Base config: don't autotune Triton, but allow other optimizations
+            base_patches = {
+                "max_autotune": False,
+                "max_autotune_gemm": False,
+                "max_autotune_gemm_backends": "ATEN",
+            }
+            # Merge with user config_patches (e.g., coordinate_descent_tuning)
+            merged_patches: dict[str, Any] = {**base_patches, **(config_patches or {})}
+            with inductor_config.patch(merged_patches):
                 self.subgraph.run(*self.example_inputs)
+
+            # Tag all operations in subgraph with config_patches
+            # These will be applied during kernel codegen via SIMD scheduling
+            if config_patches:
+                for op in self.subgraph.operations:
+                    op.set_config_patches(config_patches.copy())
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         class CodegenGraph:
@@ -7158,6 +7195,7 @@ class SubgraphBuffer(ExternKernel):
 
         assert is_node_sequence(self.inputs)
         outer_inputs = [t.codegen_reference() for t in self.inputs]
+
         wrapper.codegen_subgraph_with_flattened_outputs(
             CodegenGraph(self.subgraph),
             [*self.sym_inputs, *outer_inputs],
@@ -8886,6 +8924,9 @@ class InvokeSubgraph(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
+    def get_subgraphs(self) -> list[Subgraph]:
+        return [self.subgraph] if self.subgraph else []
+
     @classmethod
     def create(
         cls, subgraph: Subgraph, *operands: IRNode
@@ -9039,6 +9080,14 @@ class Conditional(ExternKernel):
 
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+
+    def get_subgraphs(self) -> list[Subgraph]:
+        subgraphs = []
+        if self.true_subgraph:
+            subgraphs.append(self.true_subgraph)
+        if self.false_subgraph:
+            subgraphs.append(self.false_subgraph)
+        return subgraphs
 
     @staticmethod
     def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
@@ -9264,6 +9313,14 @@ class WhileLoop(ExternKernel):
 
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+
+    def get_subgraphs(self) -> list[Subgraph]:
+        subgraphs = []
+        if self.cond_subgraph:
+            subgraphs.append(self.cond_subgraph)
+        if self.body_subgraph:
+            subgraphs.append(self.body_subgraph)
+        return subgraphs
 
     # Accidental aliasing can be created due to cse, where the empty buffers we
     # allocated for backward to use gets csed into the same buffer in function fx_graph_cse.
