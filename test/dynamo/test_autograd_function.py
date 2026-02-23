@@ -1419,7 +1419,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_out):
                 return grad_out
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def foo(x):
             return Foo.apply(x)
 

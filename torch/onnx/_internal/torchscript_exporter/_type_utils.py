@@ -153,7 +153,7 @@ class JitScalarType(enum.IntEnum):
         """
         if dtype not in _DTYPE_TO_SCALAR_TYPE:
             raise errors.OnnxExporterError(f"Unknown dtype: {dtype}")
-        # pyrefly: ignore [bad-index, index-error]
+        # pyrefly: ignore [bad-index]
         return _DTYPE_TO_SCALAR_TYPE[dtype]
 
     @classmethod
