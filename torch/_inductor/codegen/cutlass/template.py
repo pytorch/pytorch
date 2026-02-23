@@ -13,7 +13,7 @@ from torch._inductor import config
 from torch._inductor.utils import clear_on_fresh_cache, Placeholder
 from torch._logging import getArtifactLogger
 
-from ...autotune_process import CUDABenchmarkRequest, TensorMeta
+from ...autotune_process import CUTLASSBenchmarkRequest, TensorMeta
 from ...ir import Buffer, CUTLASSTemplateBuffer, IRNode, Layout
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
@@ -157,9 +157,12 @@ class CUTLASSTemplate(KernelTemplate):
             call_args,
             expected_args,
         )
-        V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
-        size_args = V.graph.sizevars.size_hints(kernel.get_dynamic_shape_args())
-        offset_args = V.graph.sizevars.size_hints(kernel.get_offset_args())
+        # Resolve symbolic sizes to concrete ints for benchmarking only.
+        V.graph.sizevars.optimization_hints(
+            map(sympy.expand, call_args[len(expected_args) :])
+        )
+        size_args = V.graph.sizevars.optimization_hints(kernel.get_dynamic_shape_args())
+        offset_args = V.graph.sizevars.optimization_hints(kernel.get_offset_args())
 
         if key is not None:
             self.code_cache[key] = code, size_args, offset_args
@@ -206,12 +209,13 @@ class CUTLASSTemplate(KernelTemplate):
         code = code.replace(self.name, kernel_name)
 
         # create the BenchmarkRequest
-        bmreq = CUDABenchmarkRequest(
+        bmreq = CUTLASSBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=input_tensor_meta,
             output_tensor_meta=output_tensor_meta,
             extra_args=extra_args,
             source_code=code,
+            device_type=self.device_type,
         )
 
         # kwargs has "op" argument in case of CUTLASSGemmTemplate
