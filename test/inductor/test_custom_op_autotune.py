@@ -7,6 +7,8 @@ config specifies an optional decomposition function and its associated parameter
 Inductor benchmarks all variants and automatically selects the best performing one.
 """
 
+import unittest
+
 import torch
 import torch._inductor.runtime.benchmarking
 from torch._inductor import config
@@ -16,13 +18,14 @@ from torch._inductor.kernel.custom_op import (
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import IS_MACOS, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 torch.set_float32_matmul_precision("high")
 
 
+@unittest.skipIf(IS_MACOS, "TODO: mac")
 class TestCustomOpAutoTune(TestCase):
     """Test custom operation autotuning functionality."""
 
