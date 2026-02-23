@@ -236,6 +236,7 @@ class FrameStateSizeEntry:
     stride: Union[
         AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
+    excluded_sizes: Optional[tuple[Optional[int], ...]] = None
 
     def render(self) -> str:
         # Special cases
@@ -361,6 +362,25 @@ class FrameStateSizeEntry:
         return tuple(cls._merge_atom(x, y) for x, y in zip(xs, ys))
 
     def __ior__(self, other: Self) -> Self:
+        # Before merging sizes (which may promote a dim to auto_dynamic),
+        # record the first static size that will be lost.  For example, if
+        # self.size = (3, 4) and other.size = (5, 4), dim 0 is about to
+        # become dynamic.  We save 3 into excluded_sizes so a guard on the
+        # dynamic graph can reject inputs with size(0)==3, letting them
+        # fall through to the earlier static graph in the cache.
+        if isinstance(self.size, tuple) and isinstance(other.size, tuple):
+            if len(self.size) == len(other.size):
+                excluded = list(self.excluded_sizes or (None,) * len(self.size))
+                for i in range(len(self.size)):
+                    si = self.size[i]
+                    if (
+                        type(si) is int
+                        and type(other.size[i]) is int
+                        and si != other.size[i]
+                        and excluded[i] is None
+                    ):
+                        excluded[i] = si
+                self.excluded_sizes = tuple(excluded)
         self.scalar = self._merge_atom(self.scalar, other.scalar)
         self.size = self._merge_atom_tup(self.size, other.size)
         self.stride = self._merge_atom_tup(self.stride, other.stride)
