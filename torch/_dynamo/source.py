@@ -791,6 +791,16 @@ class DictGetItemSource(ChainedSource):
         else:
             return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        cloned_base = self.base.clone(transform_fn)
+        cloned_index = self.index
+        if isinstance(self.index, Source):
+            cloned_index = self.index.clone(transform_fn)
+        result = dataclasses.replace(self, base=cloned_base, index=cloned_index)
+        if transform_fn is not None:
+            result = transform_fn(result)
+        return result
+
 
 # Same as DictGetItemSource but used for dict.__getitem__ calls to ensure that
 # torch.compile does not run the overridden __getitem__ method
@@ -833,6 +843,16 @@ class DictSubclassGetItemSource(ChainedSource):
             return f"dict.__getitem__({{0}}, {_esc_str(self.index.name)})"
         else:
             return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
+
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        cloned_base = self.base.clone(transform_fn)
+        cloned_index = self.index
+        if isinstance(self.index, Source):
+            cloned_index = self.index.clone(transform_fn)
+        result = dataclasses.replace(self, base=cloned_base, index=cloned_index)
+        if transform_fn is not None:
+            result = transform_fn(result)
+        return result
 
 
 @dataclass_with_cached_hash(frozen=True)
