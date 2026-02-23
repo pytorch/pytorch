@@ -161,9 +161,8 @@ else:
                     )
                 return pg
             else:
-                return _resolve_process_group(
-                    name
-                )  # pyrefly: ignore[bad-argument-type]
+                # pyrefly: ignore[bad-argument-type]
+                return _resolve_process_group(name)
 
         def register_pg(self, name: str, pg: ProcessGroup) -> None:
             self._pg_registry[name] = pg
@@ -176,7 +175,8 @@ else:
             world_size = get_world_size()
             if layout_numel > world_size:
                 raise RuntimeError(
-                    f"Mesh should not be bigger than default world size {world_size}, but found {layout_numel} ranks!"
+                    f"Mesh should not be bigger than default world size {world_size}, "
+                    f"but found {layout_numel} ranks!"
                 )
 
             backend = get_backend()
@@ -197,12 +197,16 @@ else:
                     if num_devices_per_host == 0:
                         return
                     warnings.warn(
-                        "It seems like you did not set/select the default device for the current process before the DeviceMesh "
-                        "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
-                        "It is recommended to set the current device for the process BEFORE the DeviceMesh initialization so that "
-                        "the underlying communicator (i.e. NCCL) can be initialized properly. "
-                        "Given that the current process has no default device selected, DeviceMesh will use a heuristic to set the "
-                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. ",
+                        "It seems like you did not set/select the default device for "
+                        "the current process before the DeviceMesh initialization or "
+                        "use a launcher (i.e. torchrun) which populates `LOCAL_RANK` "
+                        "environment variable. It is recommended to set the current "
+                        "device for the process BEFORE the DeviceMesh initialization "
+                        "so that the underlying communicator (i.e. NCCL) can be "
+                        "initialized properly. Given that the current process has no "
+                        "default device selected, DeviceMesh will use a heuristic to "
+                        "set the device_id via `global_rank % num_devices_per_host`, "
+                        "assuming homogeneous hardware cluster. ",
                         stacklevel=2,
                     )
                     if (
@@ -211,7 +215,8 @@ else:
                     ):
                         raise RuntimeError(
                             f"DeviceMesh only support homogeneous hardware, but found "
-                            f"{world_size} ranks and {num_devices_per_host} {self._device_type} devices!"
+                            f"{world_size} ranks and {num_devices_per_host} "
+                            f"{self._device_type} devices!"
                         )
                     device_handle.set_device(get_rank() % num_devices_per_host)
 
@@ -304,8 +309,8 @@ else:
                 if get_rank() in subgroup_ranks:
                     if pg_name is not None:
                         raise RuntimeError(
-                            f"Each device mesh dimension should get only one process group, but got {get_rank()} "
-                            f"in {subgroup_ranks}!"
+                            f"Each device mesh dimension should get only one process group, "
+                            f"but got {get_rank()} in {subgroup_ranks}!"
                         )
                     pg_name = dim_group.group_name
             self._pg_cache[cache_key] = pg_name
