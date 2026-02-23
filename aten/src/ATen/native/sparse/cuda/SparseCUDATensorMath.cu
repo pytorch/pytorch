@@ -702,7 +702,7 @@ void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices
   search_end_matrix_indices_cuda_kernel<<<grid_size, block_size, 0, stream>>>(
     mat_el_end_indices,
     num_matrices,
-    static_cast<const int64_t*>(indices_1D.data_ptr()),
+    indices_1D.data_ptr<int64_t>(),
     num_elements
   );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -723,6 +723,12 @@ cudaDataType getTensorCudaDataType(Tensor self) {
   }
   return cuda_data_type;
 }
+
+// cusparseSpMV bug on CUDA < 13.1 -> COO row index array needs to be 16-byte aligned.
+// See https://github.com/pytorch/pytorch/issues/167901
+#if defined(USE_CUDA) && CUDA_VERSION < 13010
+#define CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
+#endif
 
 Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
@@ -773,19 +779,15 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   Tensor indices_dim1 = indices[1];
   Tensor indices_dim2 = indices[2];
 
-  auto mat_el_end_indices_host = [&]() -> Tensor {
-    auto device_buffer = at::empty({num_matrices}, indices.options());
-    search_end_matrix_indices(device_buffer.data_ptr<int64_t>(), num_matrices, indices_dim0);
-    auto host_buffer = at::empty({num_matrices}, indices.options().device(at::kCPU).pinned_memory(true));
-    host_buffer.copy_(device_buffer);
-    return host_buffer;
-  }();
-  int64_t* mat_el_end_indices = mat_el_end_indices_host.data_ptr<int64_t>();
+  auto mat_el_end_indices_host = at::empty({num_matrices}, indices.options().device(at::kCPU).pinned_memory(true));
+  search_end_matrix_indices(mat_el_end_indices_host.data_ptr<int64_t>(), num_matrices, indices_dim0);
+  cudaDeviceSynchronize();
+  auto* mat_el_end_indices = mat_el_end_indices_host.data_ptr<int64_t>();
 
   // cusparseSpMV bug on CUDA < 13.1 -> COO row index array needs to be 16-byte aligned,
   // so we use a buffer for misaglined sub-arrays to copy into.
+#ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
   auto aligned_row_indices_buffer = [&]() -> Tensor {
-#if defined(USE_CUDA) && CUDA_VERSION < 13010
     if (dim_k == 1) { // implies cusparseSpMV
       const auto* row_indices_start_ptr = indices_dim1.data_ptr<int64_t>();
       const auto* mat_end_offsets_ptr = mat_el_end_indices_host.data_ptr<int64_t>();
@@ -803,9 +805,9 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
       }
       return max_nnz ? at::empty({max_nnz}, indices.options()) : Tensor{};
     }
-#endif
     return Tensor{};
   }();
+#endif
 
   Scalar beta = 0;
   Scalar alpha = 1;
@@ -826,11 +828,11 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
-      int64_t* row_indices_start_ptr = static_cast<int64_t*>(indices_dim1.data_ptr());
-      int64_t* col_indices_start_ptr = static_cast<int64_t*>(indices_dim2.data_ptr());
-      scalar_t* values_start_ptr = static_cast<scalar_t*>(values.data_ptr());
-      scalar_t* mat2_start_ptr = static_cast<scalar_t*>(mat2_contig.data_ptr());
-      scalar_t* result_start_ptr = static_cast<scalar_t*>(tmp_result.data_ptr());
+      auto* row_indices_start_ptr = indices_dim1.data_ptr<int64_t>();
+      auto* col_indices_start_ptr = indices_dim2.data_ptr<int64_t>();
+      auto* values_start_ptr = values.data_ptr<scalar_t>();
+      auto* mat2_start_ptr = mat2_contig.data_ptr<scalar_t>();
+      auto* result_start_ptr = tmp_result.data_ptr<scalar_t>();
       for (
         int64_t cur_mat_num = 0;
         cur_mat_num < num_matrices;
@@ -841,6 +843,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
         // Create variables to view just the current set of matrices
         int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
         cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
+#ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
         auto* row_indices_ptr = [&]() -> auto* {
           auto* start = row_indices_start_ptr + mat_el_begin_idx;
           // See the definition of `aligned_row_indices_buffer`
@@ -852,6 +855,9 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
           }
           return start;
         }();
+#else
+        auto* row_indices_ptr = row_indices_start_ptr + mat_el_begin_idx;
+#endif
         auto* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
         scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
 
