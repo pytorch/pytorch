@@ -5,7 +5,6 @@
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/core/StreamGuard.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/CallOnce.h>
 #include <deque>
@@ -185,9 +184,7 @@ CUDAGeneratorCaptureState* CUDAGeneratorState::get_capture_state(CaptureId_t cap
       "RNG op during graph capture but could not find the CUDAGraph object. "
       "This should not happen.");
 
-  // Create and initialize capture state. The initialize() method temporarily
-  // routes allocations to the default pool (not the graph pool) so the RNG
-  // state tensors persist across graph replays.
+  // Create and initialize capture state.
   auto capture_state = make_intrusive<CUDAGeneratorCaptureState>();
   capture_state->initialize(seed_for_init);
 
@@ -241,7 +238,7 @@ void CUDAGeneratorState::increase(uint64_t increment) {
 uint64_t CUDAGeneratorState::capture_epilogue(CaptureId_t capture_id) {
   auto capture_state = get_capture_state(capture_id, false);
   // If there is no captured state, return 0.
-  if(capture_state){
+  if (capture_state) {
     return capture_state->finalize();
   } else {
     return 0;

@@ -109,8 +109,7 @@ struct CUDAGeneratorCaptureState : public c10::intrusive_ptr_target {
   // Check if tensors are allocated
   bool is_initialized() const { return rng_state_seed_extragraph_.defined(); }
 
-  // Allocate tensors and initialize with seed.
-  // Uses a non-capturing side stream so allocations go to the default pool.
+  // Allocate tensors and initialize with seed value.
   void initialize(uint64_t seed);
 
   // Increment offset during capture

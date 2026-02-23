@@ -25,17 +25,6 @@ static bool _cuda_graphs_debug = false;
 static std::mutex capture_id_to_graph_mutex;
 static ska::flat_hash_map<CaptureId_t, CUDAGraph*> capture_id_to_graph;
 
-std::optional<CaptureId_t> getCaptureId(std::optional<cudaStream_t> stream) {
-  cudaStream_t s = stream.value_or(c10::cuda::getCurrentCUDAStream());
-  cudaStreamCaptureStatus status{};
-  CaptureId_t capture_id = 0;
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(s, &status, &capture_id));
-  if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
-    return capture_id;
-  }
-  return std::nullopt;
-}
-
 // Get the CUDAGraph associated with a capture ID, if any.
 // The returned pointer must not be used after the graph's reset() or destruction;
 // the map stores raw pointers and entries are removed in reset().
