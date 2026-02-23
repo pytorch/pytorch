@@ -249,7 +249,8 @@ class TestTorchDlPack(TestCase):
     def test_from_dlpack_dtype(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
-        assert x.dtype == y.dtype
+        if x.dtype != y.dtype:
+            raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipMeta
     @onlyCUDA
@@ -263,9 +264,11 @@ class TestTorchDlPack(TestCase):
 
             def __dlpack__(self, stream=None):
                 if torch.version.hip is None:
-                    assert stream == 1
+                    if stream != 1:
+                        raise AssertionError(f"expected stream=1, got {stream}")
                 else:
-                    assert stream == 0
+                    if stream != 0:
+                        raise AssertionError(f"expected stream=0, got {stream}")
                 capsule = self.tensor.__dlpack__(stream=stream)
                 return capsule
 
@@ -468,8 +471,9 @@ class TestTorchDlPack(TestCase):
             # DLPack support only available from NumPy 1.22 onwards.
             # Here, we test having another framework (NumPy) calling our
             # Tensor.__dlpack__ implementation.
-            arr = np.from_dlpack(t)
-            self.assertEqual(t, arr)
+            np_from_dlpack = np.from_dlpack(t)
+            np_from_copy = t.numpy()
+            self.assertEqual(np_from_dlpack, np_from_copy)
 
         # We can't use the array created above as input to from_dlpack.
         # That's because DLPack imported NumPy arrays are read-only.

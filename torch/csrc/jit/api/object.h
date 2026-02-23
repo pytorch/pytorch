@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/class_type.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/api/method.h>
@@ -8,6 +9,8 @@
 #include <utility>
 
 namespace torch::jit {
+
+using ::c10::ClassType;
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;

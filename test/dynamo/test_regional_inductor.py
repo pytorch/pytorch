@@ -75,7 +75,8 @@ def aot_eager_regional_inductor(
     if serialize:
 
         def regional_inductor_pickle(gm, *example_args):
-            result = regional_inductor_fn(gm, *example_args)
+            with torch._functorch.config.patch(force_autograd_cache=True):
+                result = regional_inductor_fn(gm, *example_args)
             serialized = GraphPickler.dumps(result)
 
             fake_mode = detect_fake_mode(example_args)
@@ -995,11 +996,10 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
                 captured_gms[1].code.strip(),
                 """\
 def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, alias_2, alias_3, tangents_0):
-    full_10 = torch.ops.aten.full.default([1, 1, 768], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
     fw_graph0 = self.fw_graph0
     joint_graph0 = self.joint_graph0
     mask_graph0 = self.mask_graph0
-    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, alias_2, alias_3, tangents_0, full_10, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = alias_2 = alias_3 = tangents_0 = full_10 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
+    flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_0, primals_0, primals_0, alias_2, alias_3, tangents_0, None, fw_graph0, joint_graph0, (768, 768, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6, primals_7, primals_8, 128, 128, mask_graph0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_0 = alias_2 = alias_3 = tangents_0 = fw_graph0 = joint_graph0 = primals_1 = primals_2 = primals_3 = primals_4 = primals_5 = primals_6 = primals_7 = primals_8 = mask_graph0 = None
     getitem_3 = flex_attention_backward[0]
     getitem_4 = flex_attention_backward[1]
     getitem_5 = flex_attention_backward[2];  flex_attention_backward = None
@@ -1379,7 +1379,10 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         y = torch.randn(10, requires_grad=True)
 
         # Compile with regional inductor
-        with torch.fx.traceback.preserve_node_meta(enable=False):
+        with (
+            torch.fx.traceback.preserve_node_meta(enable=False),
+            torch._functorch.config.patch(force_autograd_cache=True),
+        ):
             from torch._subclasses.fake_tensor import FakeTensorMode
             from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -1441,7 +1444,10 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
             fake_y = fake_mode.from_tensor(y)
 
             # Create forward graph
-            with torch.fx.traceback.preserve_node_meta(enable=False):
+            with (
+                torch.fx.traceback.preserve_node_meta(enable=False),
+                torch._functorch.config.patch(force_autograd_cache=True),
+            ):
                 gm = make_fx(fn)(fake_x, fake_y)
                 fw_code = regional_inductor(gm, fake_x, fake_y)
 
@@ -1483,7 +1489,10 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         with fake_mode:
             fake_x = fake_mode.from_tensor(x)
 
-            with torch.fx.traceback.preserve_node_meta(enable=False):
+            with (
+                torch.fx.traceback.preserve_node_meta(enable=False),
+                torch._functorch.config.patch(force_autograd_cache=True),
+            ):
                 gm = make_fx(fn)(fake_x)
                 compiled_gm = regional_inductor(gm, fake_x)
 

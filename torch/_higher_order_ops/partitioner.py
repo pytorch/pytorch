@@ -13,7 +13,10 @@ logger.setLevel(logging.DEBUG)
 
 def _find_hop_subgraph_outputs(gm: torch.fx.GraphModule) -> tuple[torch.fx.Node]:
     output_node_args = gm.graph.find_nodes(op="output")[0].args
-    assert isinstance(output_node_args, tuple)
+    if not isinstance(output_node_args, tuple):
+        raise AssertionError(
+            f"expected output_node_args to be tuple, got {type(output_node_args)}"
+        )
     return output_node_args[0]
 
 
@@ -225,7 +228,10 @@ class HopJointGraph:
         for node in self.joint_gm.graph.find_nodes(
             op="call_function", target=torch.ops.aten.sym_size.int
         ):
-            assert hasattr(node, "meta") and "val" in node.meta, node
+            if not (hasattr(node, "meta") and "val" in node.meta):
+                raise AssertionError(
+                    f"node {node} must have 'meta' attribute with 'val' key"
+                )
             val = node.meta["val"]
             expr = val.node.expr
             if expr in placeholder_exprs:
@@ -262,7 +268,10 @@ class HopJointGraph:
                 continue
             val = n.meta["val"]
             if isinstance(val, torch.SymInt) and is_complex_expr(val.node.expr):
-                assert n.meta.get("recompute", None) is None
+                if n.meta.get("recompute", None) is not None:
+                    raise AssertionError(
+                        f"node {n} with complex SymInt expression should not have recompute policy set"
+                    )
 
                 n.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
 
@@ -309,12 +318,18 @@ def create_hop_joint_graph(
     fw_gm = materialize_as_graph(fw_fn, fw_args, force_enable_grad=True)
     fw_gm_output_nodes = _find_hop_subgraph_outputs(fw_gm)
 
-    assert all(
+    if not all(
         isinstance(n, torch.fx.Node) and "val" in n.meta for n in fw_gm_output_nodes
-    )
+    ):
+        raise AssertionError(
+            "all fw_gm output nodes must be torch.fx.Node with 'val' in meta"
+        )
     fw_gm_output_vals = tuple(n.meta["val"] for n in fw_gm_output_nodes)  # type: ignore[arg-type]
 
-    assert all(isinstance(val, torch.Tensor) for val in fw_gm_output_vals)
+    if not all(isinstance(val, torch.Tensor) for val in fw_gm_output_vals):
+        raise AssertionError(
+            f"all fw_gm output values must be torch.Tensor, got {[type(v) for v in fw_gm_output_vals]}"
+        )
     example_grads = tuple(torch.zeros_like(val) for val in fw_gm_output_vals)
 
     joint_fn = create_bw_fn(fw_fn, fw_args, return_fw_outputs=True)

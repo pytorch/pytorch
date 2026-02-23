@@ -7,6 +7,7 @@ import copy
 import functools
 import itertools
 import sys
+import threading
 import types
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -55,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_HPU,
     TEST_PRIVATEUSE1,
+    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
@@ -70,7 +72,10 @@ else:
     DEVICE_TYPE = "cpu"
     PG_BACKEND = "gloo"
 
-NUM_DEVICES = 4
+if TEST_WITH_ROCM:
+    NUM_DEVICES = min(4, max(2, torch.cuda.device_count()))
+else:
+    NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
 if (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) and DEVICE_COUNT > 1:
@@ -138,7 +143,10 @@ class ModelArgs:
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        assert args.dim % args.n_heads == 0
+        if args.dim % args.n_heads != 0:
+            raise AssertionError(
+                f"Expected args.dim % args.n_heads == 0, got {args.dim} % {args.n_heads}"
+            )
         self.head_dim = args.dim // args.n_heads
         self.n_heads = args.n_heads
         self.dropout_p = args.dropout_p
@@ -206,8 +214,10 @@ class TransformerBlock(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        assert args.vocab_size is not None
-        assert args.max_seq_len is not None
+        if args.vocab_size is None:
+            raise AssertionError("Expected args.vocab_size to not be None")
+        if args.max_seq_len is None:
+            raise AssertionError("Expected args.max_seq_len to not be None")
         self.model_args = args
         self.max_seq_len = args.max_seq_len
         self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
@@ -224,7 +234,10 @@ class Transformer(nn.Module):
 
     def forward(self, tokens):
         _bsz, seq_len = tokens.size()
-        assert seq_len <= self.max_seq_len
+        if seq_len > self.max_seq_len:
+            raise AssertionError(
+                f"Expected seq_len <= max_seq_len, got {seq_len} > {self.max_seq_len}"
+            )
         h = self.tok_embeddings(tokens)
         pos = torch.arange(0, seq_len, device=tokens.device)
         p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
@@ -246,7 +259,8 @@ class Transformer(nn.Module):
         use_seq_parallel: bool,
         local_output_for_attn: bool = False,
     ) -> nn.Module:
-        assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
+        if not isinstance(module, Transformer):
+            raise AssertionError(f"Requires Transformer but got {module}")
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
@@ -364,6 +378,20 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
         backend = dist.get_default_backend_for_device(DEVICE_TYPE)
         return backend
 
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file):
+        # Set device before initializing process group to ensure
+        # each rank is bound to the correct GPU. However, if world_size > device_count,
+        # we skip the test.
+        if torch.accelerator.is_available():
+            if world_size > torch.accelerator.device_count():
+                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+            else:
+                torch.accelerator.set_device_index(rank)
+
+        # Call parent's _init_pg to do the actual process group initialization
+        super()._init_pg(rank, world_size, rdvz_file)
+
 
 class DTensorTestBase(MultiProcessTestCase):
     @property
@@ -413,6 +441,8 @@ class DTensorTestBase(MultiProcessTestCase):
             "gloo",
             "mpi",
             f"cpu:gloo,{self.device_type}:{curr_backend}",
+            "cpu:gloo,cuda:ncclx",
+            "cuda:ncclx",
             "hccl",
             "xccl",
             "fake",
@@ -515,7 +545,8 @@ TestFunc = Callable[[...], object]
 
 # wrapper to initialize comms (processgroup)
 def with_comms(
-    eager_init: Union[TestFunc, bool] = False, backend: Optional[str] = None
+    eager_init: Union[TestFunc, bool] = False,
+    backend: Optional[str] = None,
 ) -> TestFunc:
     def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
         @wraps(func)  # pyre-ignore[6]
@@ -563,7 +594,20 @@ class DTensorOpTestBase(MultiThreadedTestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        # Enable thread-safe lock for ShardingPropagator since we run
+        # multi-threaded tests.
+        from torch.distributed.tensor._sharding_prop import ShardingPropagator
+
+        self._orig_fake_mode_lock = ShardingPropagator._fake_mode_lock
+        ShardingPropagator._fake_mode_lock = threading.Lock()
         self._spawn_threads()
+
+    def tearDown(self) -> None:
+        # Restore the original (no-op) lock
+        from torch.distributed.tensor._sharding_prop import ShardingPropagator
+
+        ShardingPropagator._fake_mode_lock = self._orig_fake_mode_lock
+        super().tearDown()
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
@@ -573,12 +617,14 @@ class DTensorConverter:
         mesh: DeviceMesh,
         args: tuple[object, ...],
         kwargs: dict[str, object],
+        replicate_only: bool = False,
     ) -> None:
         self.hit = 0
         self.miss = 0
         self.mesh = mesh
         self.args = args
         self.kwargs = kwargs
+        self.replicate_only = replicate_only
         flatten_args, flatten_args_spec = tree_flatten(args)
         flatten_kwargs, flatten_kwargs_spec = tree_flatten(kwargs)
 
@@ -630,6 +676,10 @@ class DTensorConverter:
         )
 
     def gen_sharding_choices_for_arg(self, arg: torch.Tensor) -> Sequence[Placement]:
+        # If replicate_only is set, only use Replicate placement
+        if self.replicate_only:
+            return [Replicate()]
+
         mesh_size = self.mesh.size()
         sharding_choices: list[Placement] = [Replicate()]
         # c10d collective does not support bool tensor
@@ -953,12 +1003,18 @@ def patched_distribute_tensor(
     placements,
     shard_order,
     use_graph_based_transform=True,
+    src_data_rank: int | None = 0,
 ):
     """wrapper function to support shard_order for tensor distribution"""
     if placements is None:
         placements = shard_order_to_placement(shard_order, device_mesh)
     placements = tuple(placements)
-    tensor_dt = distribute_tensor(input_tensor, device_mesh, placements)
+    tensor_dt = distribute_tensor(
+        input_tensor, device_mesh, placements, src_data_rank=src_data_rank
+    )
+    # Do not consider _StridedShard to express shard order
+    tensor_dt._spec.use_strided_shard_as_shard_order = False
+    tensor_dt._spec.__post_init__()
     # fix the shard order
     return redistribute(
         tensor_dt, device_mesh, placements, shard_order, use_graph_based_transform
@@ -1014,9 +1070,56 @@ def generate_shard_orders(mesh, tensor_rank):
                     range(tensor_rank), len(splitted_list)
                 ):
                     shard_order = {}
-                    assert len(tensor_dims) == len(splitted_list)
+                    if len(tensor_dims) != len(splitted_list):
+                        raise AssertionError(
+                            f"Expected len(tensor_dims) == len(splitted_list), "
+                            f"got {len(tensor_dims)} != {len(splitted_list)}"
+                        )
                     for tensor_dim, mesh_dims in zip(tensor_dims, splitted_list):
                         shard_order[tensor_dim] = device_order[
                             mesh_dims[0] : mesh_dims[-1] + 1
                         ]
                     yield _convert_shard_order_dict_to_ShardOrder(shard_order)
+
+
+def validate_sharding_rule_sample(
+    op, full_args, full_kwargs, input_placements, output_placements, device_mesh
+):
+    from torch.utils import _pytree as pytree
+
+    # Extract tensors from args in order, pair with placements
+    full_tensors = [
+        a for a in pytree.tree_leaves(full_args) if isinstance(a, torch.Tensor)
+    ]
+    full_tensors += [
+        a for a in pytree.tree_leaves(full_kwargs) if isinstance(a, torch.Tensor)
+    ]
+
+    dtensors = [
+        distribute_tensor(t, device_mesh, (p,))
+        for t, p in zip(full_tensors, input_placements)
+    ]
+
+    # Build sharded args by replacing tensors with their sharded local versions
+    dtensor_idx = 0
+
+    def _to_local_shard(a):
+        nonlocal dtensor_idx
+        if isinstance(a, torch.Tensor):
+            local = dtensors[dtensor_idx].to_local()
+            dtensor_idx += 1
+            return local
+        return a
+
+    local_args, local_kwargs = pytree.tree_map(
+        _to_local_shard, (full_args, full_kwargs)
+    )
+
+    # run and compare
+    ref_output = op(*full_args, **full_kwargs)
+    local_output = op(*local_args, **local_kwargs)
+    output_dt = DTensor.from_local(local_output, device_mesh, output_placements)
+    full_output = output_dt.redistribute(device_mesh, (Replicate(),)).to_local()
+    return ref_output.shape == full_output.shape and torch.allclose(
+        ref_output, full_output, atol=1e-5, rtol=1e-5
+    )

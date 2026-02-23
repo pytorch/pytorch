@@ -747,8 +747,6 @@ class GLU(Module):
           dimensions
         - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
 
-    .. image:: ../scripts/activation_images/GLU.png
-
     Examples::
 
         >>> m = nn.GLU()

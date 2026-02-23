@@ -246,7 +246,8 @@ def sig_for_ops(opname: str) -> list[str]:
 
     # we have to do this by hand, because they are hand-bound in Python
 
-    assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
+    if not (opname.endswith("__") and opname.startswith("__")):
+        raise AssertionError(f"Unexpected op {opname}")
 
     name = opname[2:-2]
     if name == "rpow":
@@ -990,7 +991,8 @@ def gather_docstrs() -> dict[str, str]:
 def add_docstr_to_hint(docstr: str, hint: str) -> str:
     docstr = inspect.cleandoc(docstr).strip()
     if "..." in hint:  # function or method
-        assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
+        if not hint.endswith("..."):
+            raise AssertionError(f"Hint `{hint}` does not end with '...'")
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
@@ -1484,7 +1486,10 @@ def gen_pyi(
             # deprecated structseqs are currently not included for torch functions
             tuple_name, tuple_def = structseq
             if tuple_name in structseqs:
-                assert structseqs[tuple_name] == tuple_def
+                if structseqs[tuple_name] != tuple_def:
+                    raise AssertionError(
+                        f"Duplicate structseq {tuple_name} with different definition"
+                    )
             else:
                 structseqs[tuple_name] = tuple_def
 
@@ -1904,7 +1909,10 @@ def gen_pyi(
             # deprecated structseqs are currently not included for torch functions
             tuple_name, tuple_def = structseq
             if tuple_name in structseqs:
-                assert structseqs[tuple_name] == tuple_def
+                if structseqs[tuple_name] != tuple_def:
+                    raise AssertionError(
+                        f"Duplicate structseq {tuple_name} with different definition"
+                    )
             else:
                 structseqs[tuple_name] = tuple_def
 

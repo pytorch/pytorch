@@ -1,27 +1,27 @@
-# mypy: ignore-errors
-
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 import contextlib
-from collections.abc import Callable
 from functools import partial, wraps
-from typing import Any, Optional, Union
+from typing import Any, Optional, overload, TYPE_CHECKING, Union
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.autograd.forward_ad as fwAD
 from torch._C._functorch import (
-    _assert_wrapped_functional,
-    _func_decrement_nesting,
-    _func_increment_nesting,
+    _assert_wrapped_functional,  # type: ignore[attr-defined]
+    _func_decrement_nesting,  # type: ignore[attr-defined]
+    _func_increment_nesting,  # type: ignore[attr-defined]
     _grad_decrement_nesting,
     _grad_increment_nesting,
     _jvp_decrement_nesting,
     _jvp_increment_nesting,
-    _propagate_functional_input_mutation,
+    _propagate_functional_input_mutation,  # type: ignore[attr-defined]
     _unwrap_for_grad,
     _unwrap_functional_tensor,
     _wrap_for_grad,
@@ -49,14 +49,23 @@ from .apis import vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 
-def lazy_dynamo_disallow(func):
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator, Sequence
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_T = TypeVar("_T")
+
+
+def lazy_dynamo_disallow(func: Callable[_P, _R]) -> Callable[_P, _R]:
     import torch._dynamo
 
     return torch._dynamo.disallow_in_graph(func)
 
 
 @contextlib.contextmanager
-def enable_inplace_requires_grad(enabled):
+def enable_inplace_requires_grad(enabled: bool) -> Generator[None, None, None]:
     prev_state = get_inplace_requires_grad_allowed()
     set_inplace_requires_grad_allowed(enabled)
     try:
@@ -65,14 +74,14 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
-def _set_tensor_requires_grad(x):
+def _set_tensor_requires_grad(x: torch.Tensor) -> torch.Tensor:
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
     return x.requires_grad_()
 
 
-def _create_differentiable(inps, level=None):
-    def create_differentiable(x):
+def _create_differentiable(inps: Any, level: int | None = None) -> Any:
+    def create_differentiable(x: torch.Tensor | Any) -> torch.Tensor:
         if isinstance(x, torch.Tensor):
             with enable_inplace_requires_grad(True):
                 return _set_tensor_requires_grad(x)
@@ -81,9 +90,17 @@ def _create_differentiable(inps, level=None):
     return tree_map(create_differentiable, inps)
 
 
-def _undo_create_differentiable(inps, level=None):
-    def unwrap_tensors(x):
+_Tensors = torch.Tensor | tuple[torch.Tensor, ...]
+_TensorsT = TypeVar("_TensorsT", bound=_Tensors)
+_TensorsU = TypeVar("_TensorsU", bound=_Tensors)
+
+
+def _undo_create_differentiable(inps: _TensorsT, level: int | None = None) -> _TensorsT:
+    def unwrap_tensors(x: _TensorsU) -> _TensorsU:
         if isinstance(x, torch.Tensor):
+            if level is None:
+                raise AssertionError("level must not be None when unwrapping tensors")
+            # pyrefly: ignore[bad-return]
             return _unwrap_for_grad(x, level)
         # TODO: Remove the following hack for namedtuples
         if isinstance(x, tuple):
@@ -94,28 +111,39 @@ def _undo_create_differentiable(inps, level=None):
     return tree_map(unwrap_tensors, inps)
 
 
-def _is_differentiable(maybe_tensor):
+def _is_differentiable(maybe_tensor: object) -> bool:
     if not isinstance(maybe_tensor, torch.Tensor):
         return False
     return maybe_tensor.requires_grad
 
 
-def _any_differentiable(tensor_or_tuple_of_tensors):
-    flat_args, _ = tree_unflatten(tensor_or_tuple_of_tensors)
+def _any_differentiable(
+    tensor_or_tuple_of_tensors: _Tensors,
+) -> bool:
+    flat_args, _ = tree_flatten(tensor_or_tuple_of_tensors)
     return any(tuple(map(_is_differentiable, flat_args)))
 
 
-def _wrap_tensor_for_grad(maybe_tensor, level):
+def _wrap_tensor_for_grad(maybe_tensor: _T, level: int) -> _T:
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
+    # pyrefly: ignore[bad-return]
     return _wrap_for_grad(maybe_tensor, level)
 
 
-def _wrap_all_tensors(tensor_pytree, level):
+def _wrap_all_tensors(tensor_pytree: _T, level: int) -> _T:
     return tree_map(partial(_wrap_tensor_for_grad, level=level), tensor_pytree)
 
 
-def _as_tuple(val):
+# TODO: this is more accurate - enable in 3.11
+# _Ts = TypeVarTuple("_Ts")
+# @overload
+# def _as_tuple(val: tuple[*_Ts]) -> tuple[*_Ts]: ...
+@overload
+def _as_tuple(val: tuple[_R, ...]) -> tuple[_R]: ...
+@overload
+def _as_tuple(val: _R) -> tuple[_R]: ...
+def _as_tuple(val: object) -> object:
     if isinstance(val, tuple):
         return val
     return (val,)
@@ -125,8 +153,12 @@ def _as_tuple(val):
 
 
 def _autograd_grad(
-    outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True
-):
+    outputs: Sequence[torch.Tensor],
+    inputs: Sequence[torch.Tensor],
+    grad_outputs: Sequence[torch.Tensor] | None = None,
+    retain_graph: bool = False,
+    create_graph: bool = True,
+) -> tuple[torch.Tensor, ...]:
     if grad_outputs is None:
         diff_outputs = tuple(out for out in outputs if out.requires_grad)
     else:
@@ -192,7 +224,7 @@ def _autograd_grad(
 #   because we're crossing the boundary from a `grad` outside the
 #   no_grad to a `grad` inside the no_grad.
 #
-# NB: vjp has some interesting behavior because the vjp's callable can be called
+# NB: vjp has some interesting behavior because the vjp's Callable[..., Any] can be called
 # under a different grad_mode than the forward computation...
 #
 # NB: forward-mode AD: forward-mode AD doesn't respect torch.no_grad, but
@@ -202,7 +234,9 @@ def _autograd_grad(
 
 # How do we increment and decrement the nesting? I don't think we can.
 @exposed_in("torch.func")
-def vjp(func: Callable, *primals, has_aux: bool = False):
+def vjp(
+    func: Callable[..., Any], *primals: Any, has_aux: bool = False
+) -> tuple[Any, Callable[..., Any]] | tuple[Any, Callable[..., Any], Any]:
     """
     Standing for the vector-Jacobian product, returns a tuple containing the
     results of ``func`` applied to ``primals`` and a function that, when
@@ -210,7 +244,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
     respect to ``primals`` times ``cotangents``.
 
     Args:
-        func (Callable): A Python function that takes one or more arguments. Must
+        func (Callable[..., Any]): A Python function that takes one or more arguments. Must
             return one or more Tensors.
         primals (Tensors): Positional arguments to ``func`` that must all be
             Tensors. The returned function will also be computing the
@@ -302,7 +336,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
 
 
 @contextlib.contextmanager
-def grad_increment_nesting():
+def grad_increment_nesting() -> Generator[int, None, None]:
     try:
         grad_level = _grad_increment_nesting()
         yield grad_level
@@ -310,21 +344,21 @@ def grad_increment_nesting():
         _grad_decrement_nesting()
 
 
-def enter_jvp_nesting():
+def enter_jvp_nesting() -> int:
     global JVP_NESTING
     jvp_level = _jvp_increment_nesting()
     JVP_NESTING += 1
     return jvp_level
 
 
-def exit_jvp_nesting():
+def exit_jvp_nesting() -> None:
     global JVP_NESTING
     _jvp_decrement_nesting()
     JVP_NESTING -= 1
 
 
 @contextlib.contextmanager
-def jvp_increment_nesting():
+def jvp_increment_nesting() -> Generator[int, None, None]:
     try:
         yield enter_jvp_nesting()
     finally:
@@ -333,8 +367,11 @@ def jvp_increment_nesting():
 
 @doesnt_support_saved_tensors_hooks
 def _vjp_with_argnums(
-    func: Callable, *primals, argnums: Optional[argnums_t] = None, has_aux: bool = False
-):
+    func: Callable[..., Any],
+    *primals: Any,
+    argnums: Optional[argnums_t] = None,
+    has_aux: bool = False,
+) -> tuple[Any, Callable[..., Any]] | tuple[Any, Callable[..., Any], Any]:
     # This is the same function as vjp but also accepts an argnums argument
     # All args are the same as vjp except for the added argument
     # argnums (Optional[int or tuple[int,...]]): Optional, specifies the argument(s) to compute gradients with respect to.
@@ -358,6 +395,7 @@ def _vjp_with_argnums(
                 tree_map_(partial(_create_differentiable, level=level), diff_primals)
             primals_out = func(*primals)
 
+            aux: Any = None
             if has_aux:
                 if not (isinstance(primals_out, tuple) and len(primals_out) == 2):
                     raise RuntimeError(
@@ -373,7 +411,10 @@ def _vjp_with_argnums(
             results = _undo_create_differentiable(primals_out, level)
 
             for primal_out in flat_primals_out:
-                assert isinstance(primal_out, torch.Tensor)
+                if not isinstance(primal_out, torch.Tensor):
+                    raise AssertionError(
+                        f"expected primal_out to be a Tensor, got {type(primal_out)}"
+                    )
                 if primal_out.is_floating_point() or primal_out.is_complex():
                     continue
                 raise RuntimeError(
@@ -382,7 +423,11 @@ def _vjp_with_argnums(
                     f"with dtype {primal_out.dtype}"
                 )
 
-        def wrapper(cotangents, retain_graph=True, create_graph=None):
+        def wrapper(
+            cotangents: Any,
+            retain_graph: bool = True,
+            create_graph: bool | None = None,
+        ) -> Any:
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
@@ -403,19 +448,20 @@ def _vjp_with_argnums(
             return tree_unflatten(result, primals_spec)
 
     if has_aux:
-        return results, wrapper, aux
+        return results, wrapper, aux  # type: ignore[possibly-unbound]
     else:
         return results, wrapper
 
 
-def _safe_zero_index(x):
-    assert len(x) == 1
+def _safe_zero_index(x: tuple[_R, ...]) -> _R:
+    if len(x) != 1:
+        raise AssertionError(f"expected tuple of length 1, got length {len(x)}")
     return x[0]
 
 
 # jacrev and jacfwd don't support complex functions
 # Helper function to throw appropriate error.
-def error_if_complex(func_name, args, is_input):
+def error_if_complex(func_name: str, args: Any, is_input: bool) -> None:
     flat_args = pytree.tree_leaves(args)
     for idx, arg in enumerate(flat_args):
         if isinstance(arg, torch.Tensor) and arg.dtype.is_complex:
@@ -429,13 +475,13 @@ def error_if_complex(func_name, args, is_input):
 
 @exposed_in("torch.func")
 def jacrev(
-    func: Callable,
+    func: Callable[..., Any],
     argnums: Union[int, tuple[int, ...]] = 0,
     *,
-    has_aux=False,
+    has_aux: bool = False,
     chunk_size: Optional[int] = None,
-    _preallocate_and_copy=False,
-):
+    _preallocate_and_copy: bool = False,
+) -> Callable[..., Any]:
     """
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
     ``argnum`` using reverse mode autodiff
@@ -566,12 +612,15 @@ def jacrev(
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
     @wraps(func)
-    def wrapper_fn(*args):
+    def wrapper_fn(*args: Any) -> Any:
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
+        aux: Any = None
         if has_aux:
+            # pyrefly: ignore[bad-unpacking]
             output, vjp_fn, aux = vjp_out
         else:
+            # pyrefly: ignore[bad-unpacking]
             output, vjp_fn = vjp_out
 
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
@@ -586,18 +635,21 @@ def jacrev(
         primals = _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
 
-        def compute_jacobian_stacked():
+        def compute_jacobian_stacked() -> list[Any]:
             # Helper function to compute chunked Jacobian
             # The intermediate chunked calculation are only
             # scoped at this function level.
-            chunked_results = []
+            chunked_results: list[list[Any]] = []
             for flat_basis_chunk in _chunked_standard_basis_for_(
                 flat_output, flat_output_numels, chunk_size=chunk_size
             ):
                 if chunk_size == 1:
                     # sanity check.
                     for t in flat_basis_chunk:
-                        assert t.size(0) == 1
+                        if t.size(0) != 1:
+                            raise AssertionError(
+                                f"expected t.size(0) to be 1, got {t.size(0)}"
+                            )
 
                     flat_basis_chunk = tree_map(
                         lambda t: torch.squeeze(t, 0), flat_basis_chunk
@@ -635,13 +687,14 @@ def jacrev(
 
             return flat_results
 
-        def compute_jacobian_preallocate_and_copy():
+        def compute_jacobian_preallocate_and_copy() -> list[Any]:
             # Helper function to compute chunked Jacobian
             # The intermediate chunked calculation are only
             # scoped at this function level.
             out_vec_size = sum(flat_output_numels)
 
             # Don't pre-allocate if we have a single chunk.
+            stacked_results: list[torch.Tensor] = []
             if not (chunk_size is None or chunk_size >= out_vec_size):
                 stacked_results = [
                     primal.new_zeros(out_vec_size, *primal.shape)
@@ -656,7 +709,10 @@ def jacrev(
                 if chunk_size == 1:
                     # sanity check.
                     for t in flat_basis_chunk:
-                        assert t.size(0) == 1
+                        if t.size(0) != 1:
+                            raise AssertionError(
+                                f"expected t.size(0) to be 1, got {t.size(0)}"
+                            )
 
                     flat_basis_chunk = [torch.squeeze(t, 0) for t in flat_basis_chunk]
 
@@ -680,10 +736,10 @@ def jacrev(
                         )
                     return flat_results
 
-                for r, sr in zip(flat_results, stacked_results):
+                for r, sr in zip(flat_results, stacked_results):  # type: ignore[possibly-unbound]
                     sr[idx * chunk_size : (idx + 1) * chunk_size].copy_(r)
 
-            return stacked_results
+            return stacked_results  # type: ignore[possibly-unbound]
 
         if _preallocate_and_copy:
             flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
@@ -725,7 +781,7 @@ def jacrev(
             )
         output_input = tree_unflatten(flat_output_input, output_spec)
         if has_aux:
-            return output_input, aux
+            return output_input, aux  # type: ignore[possibly-unbound]
         return output_input
 
     return wrapper_fn
@@ -772,7 +828,11 @@ def jacrev(
 # - one of shape [   3] for the second output
 
 
-def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
+def _chunked_standard_basis_for_(
+    tensors: Sequence[torch.Tensor],
+    tensor_numels: Sequence[int],
+    chunk_size: int | None = None,
+) -> Generator[tuple[torch.Tensor, ...], None, None]:
     # This function:
     # - constructs a N=sum(tensor_numels) standard basis. i.e. an NxN identity matrix.
     # - Splits the identity matrix into chunks with each chunk size determined by `tensor_numels`.
@@ -793,9 +853,14 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
     # NOTE: Argument `chunk_size` is used to generate chunked basis instead of
     #       one huge basis matrix. `chunk_size` dictates the maximum size of the
     #       basis matrix along dim=0.
-    assert len(tensors) == len(tensor_numels)
-    assert len(tensors) > 0
-    assert chunk_size is None or chunk_size > 0
+    if len(tensors) != len(tensor_numels):
+        raise AssertionError(
+            f"len(tensors)={len(tensors)} != len(tensor_numels)={len(tensor_numels)}"
+        )
+    if len(tensors) == 0:
+        raise AssertionError("tensors must have at least one element")
+    if chunk_size is not None and chunk_size <= 0:
+        raise AssertionError(f"chunk_size must be > 0 or None, got {chunk_size}")
     total_numel = sum(tensor_numels)
     if chunk_size and chunk_size < total_numel:
         chunk_numels = get_chunk_sizes(total_numel, chunk_size)
@@ -815,7 +880,8 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
         )
 
         for chunk, diag_start_idx in zip(chunks, diag_start_indices):
-            chunk.diagonal(diag_start_idx + chunk_idx * chunk_size).fill_(1)
+            offset = int(diag_start_idx) + chunk_idx * chunk_size
+            chunk.diagonal(offset).fill_(1)
         chunks = tuple(
             chunk.view(total_numel, *tensor.shape)
             for chunk, tensor in zip(chunks, tensors)
@@ -823,12 +889,15 @@ def _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
         yield chunks
 
 
-def _construct_standard_basis_for(tensors, tensor_numels):
+def _construct_standard_basis_for(
+    tensors: Sequence[torch.Tensor], tensor_numels: Sequence[int]
+) -> tuple[torch.Tensor, ...] | None:
     for basis in _chunked_standard_basis_for_(tensors, tensor_numels, chunk_size=None):
         return basis
+    return None
 
 
-def _validate_and_wrap_argnum(argnum, num_args):
+def _validate_and_wrap_argnum(argnum: int, num_args: int) -> int:
     if not isinstance(argnum, int):
         raise RuntimeError(f"argnum must be int, got: {type(argnum)}")
     if argnum >= 0 and argnum < num_args:
@@ -838,7 +907,7 @@ def _validate_and_wrap_argnum(argnum, num_args):
     raise RuntimeError(f"Got argnum={argnum}, but only {num_args} positional inputs")
 
 
-def _check_unique_non_empty(argnums):
+def _check_unique_non_empty(argnums: argnums_t) -> None:
     if isinstance(argnums, tuple):
         if len(argnums) == 0:
             raise RuntimeError("argnums must be non-empty")
@@ -846,7 +915,9 @@ def _check_unique_non_empty(argnums):
             raise RuntimeError(f"argnums elements must be unique, got {argnums}")
 
 
-def _replace_args(old_args, new_args, argnums):
+def _replace_args(
+    old_args: tuple[Any, ...], new_args: tuple[Any, ...], argnums: argnums_t
+) -> tuple[Any, ...]:
     if isinstance(argnums, int):
         if len(new_args) != 1:
             raise RuntimeError(
@@ -862,14 +933,18 @@ def _replace_args(old_args, new_args, argnums):
                 f"Argnums size {len(argnums)}, new_args size {len(new_args)}"
             )
 
-        def get_right_elem(i):
-            return new_args[argnums.index(i)] if i in argnums else old_args[i]
+        argnums_tuple = argnums
+
+        def get_right_elem(i: int) -> Any:
+            return (
+                new_args[argnums_tuple.index(i)] if i in argnums_tuple else old_args[i]
+            )
 
         return tuple(get_right_elem(i) for i in range(len(old_args)))
     raise RuntimeError(f"argnums must be int or Tuple[int, ...], got: {type(argnums)}")
 
 
-def _validate_and_wrap_argnums(argnums, num_args):
+def _validate_and_wrap_argnums(argnums: argnums_t, num_args: int) -> argnums_t:
     if isinstance(argnums, int):
         return _validate_and_wrap_argnum(argnums, num_args)
     if isinstance(argnums, tuple):
@@ -877,7 +952,9 @@ def _validate_and_wrap_argnums(argnums, num_args):
     raise AssertionError("Should never get here")
 
 
-def _slice_argnums(args, argnums, as_tuple=True):
+def _slice_argnums(
+    args: tuple[Any, ...], argnums: argnums_t, as_tuple: bool = True
+) -> Any:
     if not isinstance(argnums, int) and not isinstance(argnums, tuple):
         raise RuntimeError(
             f"argnums must be int or Tuple[int, ...], got: {type(argnums)}"
@@ -962,7 +1039,9 @@ def assert_non_empty_list_of_tensors(
 jvp_str = "jvp(f, primals, tangents)"
 
 
-def safe_unpack_dual(dual, strict):
+def safe_unpack_dual(
+    dual: torch.Tensor, strict: bool
+) -> tuple[torch.Tensor, torch.Tensor]:
     if not isinstance(dual, torch.Tensor):
         raise RuntimeError(
             f"{jvp_str}: expected f(*args) to return only tensors"
@@ -983,13 +1062,13 @@ def safe_unpack_dual(dual, strict):
 
 @exposed_in("torch.func")
 def jvp(
-    func: Callable,
+    func: Callable[..., Any],
     primals: Any,
     tangents: Any,
     *,
     strict: bool = False,
     has_aux: bool = False,
-):
+) -> tuple[Any, Any] | tuple[Any, Any, Any]:
     """
     Standing for the Jacobian-vector product, returns a tuple containing
     the output of `func(*primals)` and the "Jacobian of ``func`` evaluated at
@@ -1046,14 +1125,14 @@ def jvp(
 
 
 def _jvp_with_argnums(
-    func: Callable,
+    func: Callable[..., Any],
     primals: Any,
     tangents: Any,
     argnums: Optional[argnums_t],
     *,
     strict: bool = False,
     has_aux: bool,
-):
+) -> tuple[Any, Any] | tuple[Any, Any, Any]:
     # This is the same function as jvp but also accepts an argnums argument
     # Most args are the same as jvp except for the added argument
     # argnums (int or tuple[int, ...]): Optional, specifies the argument(s) to compute gradients with respect to.
@@ -1100,6 +1179,7 @@ def _jvp_with_argnums(
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)
+                aux: Any = None
                 if has_aux:
                     if not (isinstance(result_duals, tuple) and len(result_duals) == 2):
                         raise RuntimeError(
@@ -1125,26 +1205,29 @@ def _jvp_with_argnums(
                 primals_out_unflatten = tree_unflatten(primals_out, spec)
                 tangents_out_unflatten = tree_unflatten(tangents_out, spec)
                 if has_aux:
-                    return primals_out_unflatten, tangents_out_unflatten, aux
+                    return primals_out_unflatten, tangents_out_unflatten, aux  # type: ignore[possibly-unbound]
 
                 return primals_out_unflatten, tangents_out_unflatten
 
 
-def safe_unflatten(tensor, dim, shape):
+def safe_unflatten(tensor: torch.Tensor, dim: int, shape: torch.Size) -> torch.Tensor:
     if len(shape) == 0:
-        assert tensor.shape[dim] == 1
+        if tensor.shape[dim] != 1:
+            raise AssertionError(
+                f"expected tensor.shape[{dim}] to be 1, got {tensor.shape[dim]}"
+            )
         return tensor.squeeze(dim)
     return tensor.unflatten(dim, shape)
 
 
 @exposed_in("torch.func")
 def jacfwd(
-    func: Callable,
+    func: Callable[..., Any],
     argnums: argnums_t = 0,
     has_aux: bool = False,
     *,
     randomness: str = "error",
-):
+) -> Callable[..., Any]:
     """
     Computes the Jacobian of ``func`` with respect to the arg(s) at index
     ``argnum`` using forward-mode autodiff
@@ -1251,27 +1334,30 @@ def jacfwd(
     """
 
     @wraps(func)
-    def wrapper_fn(*args):
+    def wrapper_fn(*args: Any) -> Any:
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
         flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
+        if flat_basis is None:
+            raise AssertionError("flat_basis must not be None")
         basis = tree_unflatten(flat_basis, primals_spec)
 
-        def push_jvp(basis):
+        def push_jvp(basis: Any) -> Any:
             output = _jvp_with_argnums(
                 func, args, basis, argnums=argnums, has_aux=has_aux
             )
             # output[0] is the output of `func(*args)`
             error_if_complex("jacfwd", output[0], is_input=False)
             if has_aux:
-                _, jvp_out, aux = output
+                _, jvp_out, aux = output  # pyrefly: ignore[bad-unpacking]
                 return jvp_out, aux
-            _, jvp_out = output
+            _, jvp_out = output  # pyrefly: ignore[bad-unpacking]
             return jvp_out
 
         results = vmap(push_jvp, randomness=randomness)(basis)
+        aux: Any = None
         if has_aux:
             results, aux = results
             # aux is in the standard basis format, e.g. NxN matrix
@@ -1302,14 +1388,14 @@ def jacfwd(
         if isinstance(argnums, int):
             jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
         if has_aux:
-            return tree_unflatten(jac_outs_ins, spec), aux
+            return tree_unflatten(jac_outs_ins, spec), aux  # type: ignore[possibly-unbound]
         return tree_unflatten(jac_outs_ins, spec)
 
     return wrapper_fn
 
 
 @exposed_in("torch.func")
-def hessian(func, argnums=0):
+def hessian(func: Callable[..., Any], argnums: argnums_t = 0) -> Callable[..., Any]:
     """
     Computes the Hessian of ``func`` with respect to the arg(s) at index
     ``argnum`` via a forward-over-reverse strategy.
@@ -1352,7 +1438,13 @@ def hessian(func, argnums=0):
 
 
 @doesnt_support_saved_tensors_hooks
-def grad_and_value_impl(func, argnums, has_aux, args, kwargs) -> Callable:
+def grad_and_value_impl(
+    func: Callable[..., Any],
+    argnums: argnums_t,
+    has_aux: bool,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> tuple[Any, Any]:
     with grad_increment_nesting() as level:
         output, aux, grad_input = None, None, None
         # See NOTE [grad and vjp interaction with no_grad]
@@ -1396,6 +1488,7 @@ def grad_and_value_impl(func, argnums, has_aux, args, kwargs) -> Callable:
             grad_input = _undo_create_differentiable(grad_input, level)
             output = _undo_create_differentiable(output, level)
             if has_aux:
+                # pyrefly: ignore[bad-specialization]
                 aux = _undo_create_differentiable(aux, level)
 
         if has_aux:
@@ -1403,7 +1496,13 @@ def grad_and_value_impl(func, argnums, has_aux, args, kwargs) -> Callable:
         return grad_input, output
 
 
-def grad_impl(func: Callable, argnums: argnums_t, has_aux: bool, args, kwargs):
+def grad_impl(
+    func: Callable[..., Any],
+    argnums: argnums_t,
+    has_aux: bool,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> Any:
     results = grad_and_value_impl(func, argnums, has_aux, args, kwargs)
     if has_aux:
         grad, (_, aux) = results
@@ -1413,22 +1512,24 @@ def grad_impl(func: Callable, argnums: argnums_t, has_aux: bool, args, kwargs):
 
 
 def _maybe_wrap_functional_tensor(
-    maybe_tensor, level, *, _python_functionalize: bool = False
-):
+    maybe_tensor: Any, level: int, *, _python_functionalize: bool = False
+) -> Any:
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
     wrapped = _wrap_functional_tensor(maybe_tensor, level)
     _assert_wrapped_functional(maybe_tensor, wrapped)
     if _python_functionalize:
+        # pyrefly: ignore[missing-argument]
         out = FunctionalTensor(wrapped)
+        # pyrefly: ignore[missing-attribute]
         torch._mirror_autograd_meta_to(maybe_tensor, out)
         return out
     return wrapped
 
 
 def _wrap_all_tensors_to_functional(
-    tensor_pytree, level, *, _python_functionalize: bool = False
-):
+    tensor_pytree: Any, level: int, *, _python_functionalize: bool = False
+) -> Any:
     return tree_map(
         partial(
             lambda x: _maybe_wrap_functional_tensor(
@@ -1439,7 +1540,7 @@ def _wrap_all_tensors_to_functional(
     )
 
 
-def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
+def _maybe_unwrap_functional_tensor(maybe_tensor: Any, *, reapply_views: bool) -> Any:
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
     if isinstance(maybe_tensor, FunctionalTensor):
@@ -1455,7 +1556,9 @@ def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
     return _unwrap_functional_tensor(maybe_tensor, reapply_views)
 
 
-def _unwrap_all_tensors_from_functional(tensor_pytree, *, reapply_views: bool):
+def _unwrap_all_tensors_from_functional(
+    tensor_pytree: Any, *, reapply_views: bool
+) -> Any:
     return tree_map(
         lambda t: _maybe_unwrap_functional_tensor(t, reapply_views=reapply_views),
         tensor_pytree,
@@ -1463,7 +1566,9 @@ def _unwrap_all_tensors_from_functional(tensor_pytree, *, reapply_views: bool):
 
 
 @exposed_in("torch.func")
-def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
+def functionalize(
+    func: Callable[..., Any], *, remove: str = "mutations"
+) -> Callable[..., Any]:
     """
     functionalize is a transform that can be used to remove (intermediate)
     mutations and aliasing from a function, while preserving the function's
@@ -1481,7 +1586,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
     mutations or aliasing operators.
 
     Args:
-        func (Callable): A Python function that takes one or more arguments.
+        func (Callable[..., Any]): A Python function that takes one or more arguments.
         remove (str): An optional string argument, that takes on either
             the value 'mutations' or 'mutations_and_views'.
             If 'mutations' is passed in then all mutating operators
@@ -1632,7 +1737,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
         )
 
     @wraps(func)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
         try:
             func_level = _func_increment_nesting(reapply_views)
             func_args = _wrap_all_tensors_to_functional(args, func_level)
@@ -1677,13 +1782,15 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
 
 
 @exposed_in("torch.func")
-def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
+def linearize(
+    func: Callable[..., Any], *primals: Any
+) -> tuple[Any, Callable[..., Any]]:
     """
     Returns the value of ``func`` at ``primals`` and linear approximation
     at ``primals``.
 
     Args:
-        func (Callable): A Python function that takes one or more arguments.
+        func (Callable[..., Any]): A Python function that takes one or more arguments.
         primals (Tensors): Positional arguments to ``func`` that must all be
             Tensors. These are the values at which the function is linearly approximated.
 
@@ -1731,7 +1838,7 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
     flat_tangents = tuple(p.new_empty(()).expand_as(p) for p in flat_primals)
 
     # function to trace
-    def trace_fn(flat_tangents):
+    def trace_fn(flat_tangents: tuple[torch.Tensor, ...]) -> Any:
         with fwAD.dual_level():
             flat_duals = tuple(
                 fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)
@@ -1754,7 +1861,7 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
     flat_primals_device = tuple(p.device for p in flat_primals)
     flat_primals_dtype = tuple(p.dtype for p in flat_primals)
 
-    def forward_ad_checks(flat_tangents):
+    def forward_ad_checks(flat_tangents: Sequence[torch.Tensor]) -> None:
         for idx, t in enumerate(flat_tangents):
             if t.shape != flat_primals_shape[idx]:
                 msg = (
@@ -1780,10 +1887,10 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
                 )
                 raise RuntimeError(msg)
 
-    # jvp_fn : callable to return
+    # jvp_fn : Callable[..., Any] to return
     #   It takes care of checking the argspec of tangents,
     #   calling the folded fx graph and unflattening fx graph output
-    def jvp_fn(*tangents):
+    def jvp_fn(*tangents: Any) -> Any:
         flat_tangents, tangent_argspec = tree_flatten(tangents)
         if tangent_argspec != primals_argspec:
             raise RuntimeError(
@@ -1791,7 +1898,7 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
                 f"the same argspec as the primals {primals_argspec}"
             )
 
-        forward_ad_checks(flat_tangents)
+        forward_ad_checks(flat_tangents)  # type: ignore[arg-type]
 
         flat_output = const_folded_jvp_graph(*flat_tangents)
         # const folded graph can return flat output,
@@ -1802,7 +1909,7 @@ def linearize(func: Callable, *primals) -> tuple[Any, Callable]:
 
 
 @exposed_in("torch.func")
-def debug_unwrap(tensor: torch.Tensor, *, recurse=True) -> torch.Tensor:
+def debug_unwrap(tensor: torch.Tensor, *, recurse: bool = True) -> torch.Tensor:
     """Unwraps a functorch tensor (e.g. BatchedTensor, GradTrackingTensor) to its underlying tensor.
 
     This function should only be used in a debug setting (e.g. trying to print the
