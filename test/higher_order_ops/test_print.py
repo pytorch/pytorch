@@ -706,7 +706,10 @@ class TestHopPrintDTensor(DTensorTestBase):
             return x
 
         local_doubled = local_shard + local_shard
-        expected = f"tensor: {local_doubled}\n"
+        expected = f"[rank {self.rank}] tensor: {local_doubled}\n"
+
+        # TODO: remove this -- temporary to see actual output
+        f(dtensor)
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f(dtensor)
@@ -725,7 +728,7 @@ class TestHopPrintDTensor(DTensorTestBase):
             torch._higher_order_ops.print("val: {}", x)
             return x
 
-        expected = f"val: {full_tensor * 2}\n"
+        expected = f"[rank {self.rank}] val: {full_tensor * 2}\n"
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             eager_result = f(dtensor)
@@ -762,8 +765,8 @@ class TestHopPrintDTensor(DTensorTestBase):
             f_kw(dtensor)
             kw_output = mock_stdout.getvalue()
 
-        self.assertEqual(pos_output, f"pos: {local_shard}\n")
-        self.assertEqual(kw_output, f"kw: {local_shard}\n")
+        self.assertEqual(pos_output, f"[rank {self.rank}] pos: {local_shard}\n")
+        self.assertEqual(kw_output, f"[rank {self.rank}] kw: {local_shard}\n")
 
     @with_comms
     def test_print_dtensor_mixed_args(self):
@@ -780,7 +783,7 @@ class TestHopPrintDTensor(DTensorTestBase):
             f(dtensor)
             output = mock_stdout.getvalue()
 
-        self.assertEqual(output, f"dt: {local_shard} scalar: 42\n")
+        self.assertEqual(output, f"[rank {self.rank}] dt: {local_shard} scalar: 42\n")
 
     @with_comms
     def test_print_dtensor_multiple_prints(self):
@@ -799,7 +802,8 @@ class TestHopPrintDTensor(DTensorTestBase):
 
         local_added = local_shard + local_shard
         local_mulled = local_added * local_added
-        expected = f"after add: {local_added}\nafter mul: {local_mulled}\n"
+        r = self.rank
+        expected = f"[rank {r}] after add: {local_added}\n[rank {r}] after mul: {local_mulled}\n"
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f(dtensor)
@@ -819,7 +823,7 @@ class TestHopPrintDTensor(DTensorTestBase):
             torch._higher_order_ops.print("result: {x} count: {n}", x=x, n=42)
             return x
 
-        expected = f"result: {local_shard + 1} count: 42\n"
+        expected = f"[rank {self.rank}] result: {local_shard + 1} count: 42\n"
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f(dtensor)
@@ -870,7 +874,7 @@ class TestHopPrintDTensor(DTensorTestBase):
             return x
 
         local_doubled = local_shard + local_shard
-        expected = f"val: {local_doubled}\n"
+        expected = f"[rank {self.rank}] val: {local_doubled}\n"
 
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             eager_result = f(dtensor)
