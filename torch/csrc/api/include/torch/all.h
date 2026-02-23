@@ -21,3 +21,4 @@
 #include <torch/utils.h>
 #include <torch/version.h>
 #include <torch/xpu.h>
+#include <torch/print.h>
