@@ -1228,6 +1228,35 @@ _scaled_nvfp4_nvfp4(
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out, alpha);
 }
 
+// Store implementations that care about swizzling, and how many swizzle arguments
+// they have to have
+std::array<std::tuple<ScaledGemmImplementation, unsigned int>, 4> swizzled_impl = {{
+  // {implementation, # required arguments}
+  {ScaledGemmImplementation::MXFP8_MXFP8, 1},
+  {ScaledGemmImplementation::NVFP4_NVFP4, 2},
+  {ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE, 1},
+  {ScaledGemmImplementation::MXFP4_MXFP4, 1}
+}};
+
+void check_swizzle_lengths(ScaledGemmImplementation impl,
+                           std::vector<SwizzleType>& swizzle_a,
+                           std::vector<SwizzleType>& swizzle_b) {
+#ifdef ROCM
+  // ROCM doesn't swizzle their formats - we don't care what's passed.
+  return;
+#else
+  // Only check MX/NVFP formats on NVIDIA
+  for (auto [check_impl, num_args] : swizzled_impl) {
+    if (impl == check_impl) {
+      TORCH_CHECK_VALUE(swizzle_a.size() == num_args, "swizzle_a must have ", num_args, " values, got ", swizzle_a.size());
+      TORCH_CHECK_VALUE(swizzle_b.size() == num_args, "swizzle_b must have ", num_args, " values, got ", swizzle_b.size());
+
+      // No need to check anything else
+      return;
+    }
+  }
+#endif
+}
 
 // V2: Computes matrix multiply + bias while applying scaling to input and output matrices
 // Scales are only applicable when matrices are of Float8 type and assumed to be equal to 1.0 by default.
@@ -1419,6 +1448,8 @@ _scaled_mm_cuda_v2_out(
   at::native::resize_output(out, {mat_a.size(0), mat_b.size(1)});
 
   auto bias_ = bias.value_or(Tensor());
+
+  check_swizzle_lengths(gemm_impl, swizzle_a_enum, swizzle_b_enum);
 
   // dispatch to appropriate lower-level calls for error checking & execution
   if (gemm_impl == ScaledGemmImplementation::TENSORWISE_TENSORWISE) {
