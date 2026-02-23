@@ -47,7 +47,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import MI350_ARCH, skipIfRocmArch, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -808,6 +808,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -1495,6 +1496,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
+    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
@@ -1700,6 +1702,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model(hidden_states)
         torch.accelerator.synchronize()
 
+    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
@@ -2235,6 +2238,104 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         f(_maybe_wrap_tensor(torch.randn(12)))
 
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_compiled_all_reduce_returns_none(self):
+        def fn(x, w):
+            result = dist.all_reduce(x, async_op=False)
+            assert result is None
+            return x @ w
+
+        x = torch.randn(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        expected = x @ w
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(x, w)
+        self.assertEqual(actual, expected)
+
+    def test_compiled_all_gather_into_tensor_returns_none(self):
+        def fn(output, input, w):
+            result = dist.all_gather_into_tensor(output, input, async_op=False)
+            assert result is None
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+    def test_compiled_reduce_scatter_tensor_returns_none(self):
+        def fn(output, input, w):
+            result = dist.reduce_scatter_tensor(output, input, async_op=False)
+            assert result is None
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+    def test_compiled_all_to_all_single_returns_none(self):
+        def fn(output, input, w):
+            result = dist.all_to_all_single(output, input, async_op=False)
+            assert result is None
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+    def test_compiled_all_gather_returns_none(self):
+        def fn(tensor_list, tensor, w):
+            result = dist.all_gather(tensor_list, tensor, async_op=False)
+            assert result is None
+            return tensor_list[0] @ w
+
+        tensor = torch.randn(4, 4, device=self.device)
+        tensor_list = [torch.empty(4, 4, device=self.device)]
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(tensor_list, tensor, w)
+        self.assertEqual(actual, tensor @ w)
+
+    def test_compiled_reduce_scatter_base_returns_none(self):
+        def fn(output, input, w):
+            result = dist._reduce_scatter_base(output, input, async_op=False)
+            assert result is None
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+    def test_compiled_all_gather_base_returns_none(self):
+        def fn(output, input, w):
+            result = dist._all_gather_base(output, input, async_op=False)
+            assert result is None
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+        input = torch.ones(4, device=self.device)
+        output = torch.empty(4, device=self.device)
+        w = torch.ones(4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
 
 
 if __name__ == "__main__":

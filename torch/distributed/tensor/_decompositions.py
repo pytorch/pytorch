@@ -7,18 +7,17 @@ tracing through its decomposition. The decomposed ops (which do have strategies)
 determine how placements propagate through the original op.
 """
 
+from __future__ import annotations
+
 import itertools
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._decomp import decomposition_table
-from torch._ops import OpOverload
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, RuntimeSchemaInfo
-from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
-from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -61,6 +60,11 @@ def _infer_schema_info_from_op(op: OpOverload) -> RuntimeSchemaInfo:
 
 
 from torch.utils._pytree import tree_any, tree_flatten, tree_map, tree_map_only
+
+
+if TYPE_CHECKING:
+    from torch._ops import OpOverload
+    from torch.distributed.tensor._sharding_prop import ShardingPropagator
 
 
 def _extract_input_specs(op_schema: OpSchema) -> tuple[DTensorSpec | object, ...]:
@@ -109,8 +113,26 @@ class PlacementTrackingMode(TorchDispatchMode):
         else:
             output_sharding = self.sharding_prop.propagate_op_sharding(op_schema)
 
-        if output_sharding.needs_redistribute:  # pyrefly: ignore [missing-attribute]
-            raise RuntimeError(f"Decomposition requires redistribution for {func}")
+        if (
+            output_sharding.needs_redistribute  # pyrefly: ignore [missing-attribute]
+            and (
+                redistribute_schema
+                := output_sharding.redistribute_schema  # pyrefly: ignore [missing-attribute]
+            )
+            is not None
+        ):
+            # a pure .needs_redistribute check is too broad; we want to ban redistribution,
+            # but this flag is set for view ops that convert global shape -> local shape args.
+            # During decomposition tracing on meta tensors at global shape, the shape adjustment
+            # is irrelevant — only reject true redistribution.
+            for orig, desired in zip(
+                op_schema.args_spec,
+                redistribute_schema.args_spec,  # pyrefly: ignore [missing-attribute]
+            ):
+                if orig.placements != desired.placements:
+                    raise RuntimeError(
+                        f"Decomposition requires redistribution for {func}"
+                    )
 
         out = func(*args, **kwargs)
         # pyrefly: ignore [missing-attribute]
@@ -136,24 +158,39 @@ class DecompShardingStrategy:
     single-dimension strategies are then expanded to the full mesh.
     """
 
+    def __init__(self, sharding_prop: ShardingPropagator):
+        self.sharding_prop = sharding_prop
+        # Cache fake meshes per device type to avoid repeated allocation.
+        # A fake size-1 mesh ensures identical strategy computation across all ranks
+        # during decomposition tracing, avoiding potential SPMD divergence.
+        # False negatives are avoided (all sizes % 1 == 0), while false positives
+        # are caught on expansion to the real, multi-dim device mesh.
+        self._fake_meshes: dict[str, DeviceMesh] = {}
+
+    def _get_fake_mesh(self, device_type: str) -> DeviceMesh:
+        fake_mesh = self._fake_meshes.get(device_type)
+        if fake_mesh is None:
+            fake_mesh = DeviceMesh(device_type, [0], _init_backend=False, _rank=0)
+            self._fake_meshes[device_type] = fake_mesh
+        return fake_mesh
+
     @staticmethod
     def has_decomp(op: OpOverload) -> bool:
         # Check if op has a decomposition (explicit or CIA)
         return op in decomposition_table or op._can_decompose()
 
-    @staticmethod
-    def ensure_schema_info(op: OpOverload, sharding_prop: ShardingPropagator) -> None:
+    def ensure_schema_info(self, op: OpOverload) -> None:
         """
         Register schema_info for decomposition op on first invocation.
         Needed for correct shard prop cache key.
         """
-        if op not in sharding_prop.op_to_schema_info:
+        if op not in self.sharding_prop.op_to_schema_info:
             schema_info = _infer_schema_info_from_op(op)
-            sharding_prop.op_to_schema_info[op] = schema_info
+            self.sharding_prop.op_to_schema_info[op] = schema_info
 
-    @staticmethod
     def propagate_strategy(
-        op_schema: OpSchema, sharding_prop: ShardingPropagator
+        self,
+        op_schema: OpSchema,
     ) -> OpStrategy | None:
         if not tree_any(
             lambda x: isinstance(x, DTensorSpec),
@@ -161,29 +198,21 @@ class DecompShardingStrategy:
         ):
             return None
 
-        candidate_placements = DecompShardingStrategy._get_candidate_placements(
-            op_schema
-        )
+        candidate_placements = self._get_candidate_placements(op_schema)
         mesh = try_find_mesh_from_args(
             op_schema.op,
             op_schema.args_schema + tuple(op_schema.kwargs_schema.values()),
         )
 
-        # Create a fake size-1 mesh where all ranks pretend to be rank 0.
-        # This ensures identical strategy computation across all ranks during
-        # decomposition tracing, avoiding potential SPMD divergence.
-        #
-        # Using a fake mesh could potentially cause false negatives/positives
-        # (in terms of valid sharding strategies). The size-1 mesh should theoretically avoid
-        # all false negatives (e.g. no unevenness problems; all sizes % 1 == 0), while false
-        # positives are meant to be caught on expandsion to to the real, multi-dim device mesh.
-        fake_mesh = DeviceMesh(mesh.device_type, [0], _init_backend=False, _rank=0)
+        fake_mesh = self._get_fake_mesh(mesh.device_type)
         single_dim_strategies = []
         output_placements: list[Placement | tuple[Placement, ...]] = []
         for input_placements in candidate_placements:
             try:
-                output = DecompShardingStrategy._propagate_through_decomp(
-                    op_schema, input_placements, fake_mesh, sharding_prop
+                output = self._propagate_through_decomp(
+                    op_schema,
+                    input_placements,
+                    fake_mesh,
                 )
             except NotImplementedError:
                 return None
@@ -205,17 +234,21 @@ class DecompShardingStrategy:
             )
 
         n_outputs = len(output_placements)
-        strategy_schema = sharding_prop._wrap_with_op_strategy(op_schema)
+        strategy_schema = self.sharding_prop._wrap_with_op_strategy(op_schema)
+        # Import here to avoid circular import at module load time
+        from torch.distributed.tensor._ops.utils import (  # noqa: F811
+            expand_to_full_mesh_op_strategy,
+        )
+
         return expand_to_full_mesh_op_strategy(
             mesh, strategy_schema, single_dim_strategies, input_index=n_outputs
         )
 
-    @staticmethod
     def _propagate_through_decomp(
+        self,
         op_schema: OpSchema,
         placement: tuple[Placement | None],
         mesh: DeviceMesh,
-        sharding_prop: ShardingPropagator,
     ) -> Placement | tuple[Placement, ...]:
         op = op_schema.op
         if op in decomposition_table:
@@ -246,7 +279,7 @@ class DecompShardingStrategy:
             args_meta = tree_map(to_meta, op_schema.args_schema)
             kwargs_meta = tree_map(to_meta, op_schema.kwargs_schema)
 
-            with PlacementTrackingMode(sharding_prop, mesh):
+            with PlacementTrackingMode(self.sharding_prop, mesh):
                 output = decomp_fn(*args_meta, **kwargs_meta)
 
         def get_placement(t):
