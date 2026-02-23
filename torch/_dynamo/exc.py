@@ -410,7 +410,7 @@ def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedExc
         observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
-    # pyrefly: ignore [bad-index, index-error]
+    # pyrefly: ignore [bad-index]
     return observed_exception_map[exc_type]
 
 
@@ -427,7 +427,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
-        tx,  # pyrefly: ignore[bad-argument-type]
+        tx,
         [SourcelessBuilder.create(tx, a) for a in args] if args else [],
         kwargs or {},
     )
