@@ -35,16 +35,13 @@ class SymbolicTensor(ir.Value):
 
     @property
     def rank(self) -> int | None:
-        # pyrefly: ignore [missing-attribute]
         if self.shape is None:
             return None
-        # pyrefly: ignore [bad-argument-type]
         return len(self.shape)
 
     # TODO: Implement indexing
 
     def __mod__(self, other):
-        # pyrefly: ignore [missing-attribute]
         if self.dtype in {
             ir.DataType.FLOAT,
             ir.DataType.DOUBLE,

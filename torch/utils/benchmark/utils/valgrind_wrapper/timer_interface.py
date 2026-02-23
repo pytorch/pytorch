@@ -66,7 +66,6 @@ class FunctionCounts:
     def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
         data: FunctionCount | tuple[FunctionCount, ...] = self._data[item]
         return (
-            # pyrefly: ignore [bad-return]
             FunctionCounts(cast(tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
             if isinstance(data, tuple) else data
         )
@@ -450,13 +449,11 @@ class GlobalsBridge:
         load_lines = []
         for name, wrapped_value in self._globals.items():
             if wrapped_value.setup is not None:
-                # pyrefly: ignore [bad-argument-type]
                 load_lines.append(textwrap.dedent(wrapped_value.setup))
 
             if wrapped_value.serialization == Serialization.PICKLE:
                 path = os.path.join(self._data_dir, f"{name}.pkl")
                 load_lines.append(
-                    # pyrefly: ignore [bad-argument-type]
                     f"with open({repr(path)}, 'rb') as f:\n    {name} = pickle.load(f)")
                 with open(path, "wb") as f:
                     pickle.dump(wrapped_value.value, f)
@@ -466,13 +463,11 @@ class GlobalsBridge:
                 # TODO: Figure out if we can use torch.serialization.add_safe_globals here
                 # Using weights_only=False after the change in
                 # https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573
-                # pyrefly: ignore [bad-argument-type]
                 load_lines.append(f"{name} = torch.load({repr(path)}, weights_only=False)")
                 torch.save(wrapped_value.value, path)
 
             elif wrapped_value.serialization == Serialization.TORCH_JIT:
                 path = os.path.join(self._data_dir, f"{name}.pt")
-                # pyrefly: ignore [bad-argument-type]
                 load_lines.append(f"{name} = torch.jit.load({repr(path)})")
                 with open(path, "wb") as f:
                     torch.jit.save(wrapped_value.value, f)  # type: ignore[no-untyped-call]
