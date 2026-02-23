@@ -656,14 +656,14 @@ print(t.is_pinned())
         with self.assertRaisesRegex(RuntimeError, "Unknown input value type."):
             torch.backends.cuda.preferred_blas_library(1.0)
         # check env var override
-        custom_envs_cublaslt = [
-            {"TORCH_BLAS_PREFER_CUBLASLT": "1"},
-            {"TORCH_BLAS_PREFER_HIPBLASLT": "1"},
-            {"TORCH_BLAS_PREFER_CUBLAS": "1"},
-            {"TORCH_BLAS_PREFER_ROCBLAS": "1"},
+        custom_envs = [
+            ({"TORCH_BLAS_PREFER_CUBLASLT": "1"}, "_BlasBackend.Cublaslt"),
+            ({"TORCH_BLAS_PREFER_HIPBLASLT": "1"}, "_BlasBackend.Cublaslt"),
+            ({"TORCH_BLAS_PREFER_CUBLASLT": "0"}, "_BlasBackend.Cublas"),
+            ({"TORCH_BLAS_PREFER_HIPBLASLT": "0"}, "_BlasBackend.Cublas"),
         ]
         test_script = "import torch;print(torch.backends.cuda.preferred_blas_library())"
-        for env_config in custom_envs_cublaslt:
+        for env_config, expected in custom_envs:
             env = os.environ.copy()
             for key, value in env_config.items():
                 env[key] = value
@@ -672,22 +672,7 @@ print(t.is_pinned())
                 .decode("ascii")
                 .strip()
             )
-            self.assertEqual("_BlasBackend.Cublaslt", r)
-        # check CUBLAS/ROCBLAS env var aliases
-        custom_envs_cublas = [
-            {"TORCH_BLAS_PREFER_CUBLAS": "1"},
-            {"TORCH_BLAS_PREFER_ROCBLAS": "1"},
-        ]
-        for env_config in custom_envs_cublas:
-            env = os.environ.copy()
-            for key, value in env_config.items():
-                env[key] = value
-            r = (
-                subprocess.check_output([sys.executable, "-c", test_script], env=env)
-                .decode("ascii")
-                .strip()
-            )
-            self.assertEqual("_BlasBackend.Cublas", r)
+            self.assertEqual(expected, r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally

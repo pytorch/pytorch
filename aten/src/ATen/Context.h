@@ -502,8 +502,8 @@ class TORCH_API Context {
       (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
        c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true) // alias
       ? at::BlasBackend::Cublaslt
-      : (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLAS") == true ||
-         c10::utils::check_env("TORCH_BLAS_PREFER_ROCBLAS") == true) // alias
+      : (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == false ||
+         c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == false) // alias
       ? at::BlasBackend::Cublas
       : at::BlasBackend::Default;
   at::ROCmFABackend rocm_fa_preferred_backend =
