@@ -1974,7 +1974,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # C-level data descriptor (property with C fget, member/getset
         # descriptors, Cython attrs, etc.) — resolve via
         # object.__getattribute__ which is side-effect free.
-        resolved = type(self.value).__getattribute__(self.value, name)
+        # Uninitialized slots raise AttributeError which must be surfaced
+        # as ObservedAttributeError so dynamo's try/except tracing works.
+        try:
+            resolved = type(self.value).__getattribute__(self.value, name)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                ],
+            )
         return VariableTracker.build(tx, resolved, source)
 
     def _resolve_type_attr(
