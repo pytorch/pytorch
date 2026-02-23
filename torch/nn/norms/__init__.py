@@ -5,13 +5,10 @@ Usage::
     import torch.nn.norms
 
     torch.nn.norms.list_norm_impls()
-    # ['cutedsl_layernorm', 'cutedsl_rmsnorm']
+    # ['cutedsl_rmsnorm']
 
     torch.nn.norms.activate_norm_impl("cutedsl_rmsnorm")
     # F.rms_norm / nn.RMSNorm now uses CuteDSL kernels on CUDA
-
-    torch.nn.norms.activate_norm_impl("cutedsl_layernorm")
-    # F.layer_norm / nn.LayerNorm now uses CuteDSL kernels on CUDA
 
     torch.nn.norms.restore_norm_impl()        # back to default
 """

@@ -1,5 +1,8 @@
-# Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
-# CuTE DSL utilities for RMSNorm/LayerNorm kernels.
+'''
+Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
+CuTE DSL utilities for RMSNorm/LayerNorm kernels from Quack.
+'''
+
 
 # pyre-ignore-all-errors
 # ruff: noqa: S101

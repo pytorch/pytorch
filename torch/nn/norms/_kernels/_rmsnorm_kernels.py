@@ -1,5 +1,8 @@
-# Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
-# RMSNorm/LayerNorm CuTE DSL kernel classes and torch.library.custom_op wrappers.
+'''
+Copyright (c) 2025, Wentao Guo, Ted Zadouri, Tri Dao.
+RMSNorm CuTE DSL kernel classes from quack
+'''
+
 
 # pyre-ignore-all-errors
 # ruff: noqa: S101
@@ -40,15 +43,12 @@ _TORCH2CUTE_DTYPE = {
 
 
 class RMSNorm:
-    def __init__(
-        self, dtype: type[cutlass.Numeric], N: int, is_layernorm: bool = False
-    ):
+    def __init__(self, dtype: type[cutlass.Numeric], N: int):
         self.dtype = dtype
         self.N = N
-        self.stage = 2 if is_layernorm else 1
+        self.stage = 1
         self.reduction_dtype = Float32
-        self.is_layernorm = is_layernorm
-        self.reload_from = None if N <= (16384 if is_layernorm else 8192) else "smem"
+        self.reload_from = None if N <= 8192 else "smem"
         self.delay_w_load = False
 
     def _threads_per_row(self):
@@ -99,7 +99,6 @@ class RMSNorm:
         mO: cute.Tensor,
         mResO: Optional[cute.Tensor],
         mRstd: Optional[cute.Tensor],
-        mMean: Optional[cute.Tensor],
         eps: Float32,
         stream: cuda.CUstream,
     ):
@@ -124,10 +123,8 @@ class RMSNorm:
             expand(mT, dim=0, size=tiler_mn[0]) if const_expr(mT is not None) else None
             for mT in (mW, mB)
         ]
-        mRstd, mMean = [
-            expand(mT, dim=1, size=self.N) if const_expr(mT is not None) else None
-            for mT in (mRstd, mMean)
-        ]
+        if const_expr(mRstd is not None):
+            mRstd = expand(mRstd, dim=1, size=self.N)
         self.kernel(
             mX,
             mW,
@@ -136,7 +133,6 @@ class RMSNorm:
             mO,
             mResO,
             mRstd,
-            mMean,
             eps,
             tiler_mn,
             tiled_copy,
@@ -158,7 +154,6 @@ class RMSNorm:
         mO: cute.Tensor,
         mResO: Optional[cute.Tensor],
         mRstd: Optional[cute.Tensor],
-        mMean: Optional[cute.Tensor],
         eps: Float32,
         tiler_mn: cute.Shape,
         tiled_copy: cute.TiledCopy,
@@ -191,9 +186,9 @@ class RMSNorm:
 
         shape = mX.shape
         idX = cute.make_identity_tensor(shape)
-        gX, gRes, gO, gResO, gRstd, gMean, cX = [
+        gX, gRes, gO, gResO, gRstd, cX = [
             cute.local_tile(mT, tiler_mn, (bidx, cluster_y)) if mT is not None else None
-            for mT in (mX, mRes, mO, mResO, mRstd, mMean, idX)
+            for mT in (mX, mRes, mO, mResO, mRstd, idX)
         ]
         gW, gB = [
             cute.local_tile(mT, tiler_mn, (0, cluster_y))
@@ -216,9 +211,6 @@ class RMSNorm:
             tXgResO = thr_copy_X.partition_D(gResO)
         tXrRstd = (
             thr_copy_X.partition_D(gRstd) if const_expr(mRstd is not None) else None
-        )
-        tXrMean = (
-            thr_copy_X.partition_D(gMean) if const_expr(mMean is not None) else None
         )
         tXcX = thr_copy_X.partition_S(cX)[(0, None), None, None]
 
@@ -264,59 +256,17 @@ class RMSNorm:
             if row < shape[0]:
                 copy_(tXrResO, tXgResO)
 
-        mean, rstd = None, None
-        if const_expr(self.is_layernorm):
-            sum_x = row_reduce(
-                x,
-                threads_per_row,
-                reduction_buffer[None, None, 0],
-                mbar_ptr + 0 if const_expr(self.cluster_n > 1) else None,
-                init_val=0.0,
-                hook_fn=cute.arch.cluster_wait
-                if const_expr(self.cluster_n > 1)
-                else None,
-            )
-            mean = sum_x / shape[1]
-            if const_expr(mMean is not None):
-                if (
-                    tXcX[0][1] == 0
-                    and row < shape[0]
-                    and (self.cluster_n == 1 or cute.arch.block_idx_in_cluster() == 0)
-                ):
-                    tXrMean[0] = mean
-            if const_expr(self.reload_from == "smem"):
-                cute.autovec_copy(tXsX, tXrX)
-                x = tXrX.load().to(cute.Float32)
-                if const_expr(mRes is not None):
-                    cute.autovec_copy(tXsRes, tXrRes)
-                    x += tXrRes.load().to(cute.Float32)
-            elif const_expr(self.reload_from == "gmem"):
-                copy_(tXgX, tXrX)
-                x = tXrX.load().to(cute.Float32)
-                if const_expr(mRes is not None):
-                    copy_(tXgRes, tXrRes)
-                    x += tXrRes.load().to(cute.Float32)
-            sum_sq_x_sub_mean = row_reduce(
-                (x - mean) * (x - mean),
-                threads_per_row,
-                reduction_buffer[None, None, 1],
-                mbar_ptr + 1 if const_expr(self.cluster_n > 1) else None,
-                init_val=0.0,
-            )
-            rstd = cute.math.rsqrt(sum_sq_x_sub_mean / shape[1] + eps, fastmath=True)
-        else:
-            mean = const_expr(0.0)
-            sum_sq_x = row_reduce(
-                x * x,
-                threads_per_row,
-                reduction_buffer[None, None, 0],
-                mbar_ptr,
-                init_val=0.0,
-                hook_fn=cute.arch.cluster_wait
-                if const_expr(self.cluster_n > 1)
-                else None,
-            )
-            rstd = cute.math.rsqrt(sum_sq_x / shape[1] + eps, fastmath=True)
+        sum_sq_x = row_reduce(
+            x * x,
+            threads_per_row,
+            reduction_buffer[None, None, 0],
+            mbar_ptr,
+            init_val=0.0,
+            hook_fn=cute.arch.cluster_wait
+            if const_expr(self.cluster_n > 1)
+            else None,
+        )
+        rstd = cute.math.rsqrt(sum_sq_x / shape[1] + eps, fastmath=True)
         if const_expr(mRstd is not None):
             if (
                 tXcX[0][1] == 0
@@ -341,7 +291,7 @@ class RMSNorm:
             x = tXrX.load().to(cute.Float32)
             if const_expr(mRes is not None):
                 x += tXrRes.load().to(cute.Float32)
-        x_hat = (x - mean) * rstd if const_expr(self.is_layernorm) else x * rstd
+        x_hat = x * rstd
         y = x_hat
         if const_expr(mW is not None):
             y *= tXrW.load().to(cute.Float32)
@@ -354,15 +304,14 @@ class RMSNorm:
 
 _FWD_SCHEMA = (
     "(Tensor x, Tensor? weight, Tensor(a2!) out, Tensor? bias,"
-    " Tensor(a4!)? rstd, Tensor(a5!)? mean, Tensor? residual,"
-    " Tensor(a7!)? residual_out, float eps=1e-6,"
-    " bool is_layernorm=False) -> ()"
+    " Tensor(a4!)? rstd, Tensor? residual,"
+    " Tensor(a6!)? residual_out, float eps=1e-6) -> ()"
 )
 
 
 @torch.library.custom_op(
     "cutedsl_norms::_rmsnorm_fwd",
-    mutates_args=("out", "rstd", "mean", "residual_out"),
+    mutates_args=("out", "rstd", "residual_out"),
     device_types="cuda",
     schema=_FWD_SCHEMA,
 )
@@ -372,11 +321,9 @@ def _rmsnorm_fwd(
     out: Tensor,
     bias: Optional[Tensor] = None,
     rstd: Optional[Tensor] = None,
-    mean: Optional[Tensor] = None,
     residual: Optional[Tensor] = None,
     residual_out: Optional[Tensor] = None,
     eps: float = 1e-6,
-    is_layernorm: bool = False,
 ) -> None:
     supported_types = {torch.float16, torch.bfloat16, torch.float32}
     assert x.dtype in supported_types, "Unsupported dtype"
@@ -403,8 +350,6 @@ def _rmsnorm_fwd(
         res_out_dtype,
         N,
         rstd is not None,
-        mean is not None,
-        is_layernorm,
     )
     if compile_key not in _rmsnorm_fwd.compile_cache:
         batch_sym = cute.sym_int()
@@ -425,9 +370,8 @@ def _rmsnorm_fwd(
             fake_tensor(dt, (N,), div) for dt in [weight_dtype, bias_dtype]
         ]
         rstd_cute = fake_tensor(Float32, (batch_sym,)) if rstd is not None else None
-        mean_cute = fake_tensor(Float32, (batch_sym,)) if mean is not None else None
         _rmsnorm_fwd.compile_cache[compile_key] = cute.compile(
-            RMSNorm(dtype, N, is_layernorm=is_layernorm),
+            RMSNorm(dtype, N),
             x_cute,
             weight_cute,
             bias_cute,
@@ -435,13 +379,12 @@ def _rmsnorm_fwd(
             out_cute,
             res_out_cute,
             rstd_cute,
-            mean_cute,
             Float32(0),
             cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
             options="--enable-tvm-ffi",
         )
     _rmsnorm_fwd.compile_cache[compile_key](
-        x, weight, bias, residual, out, residual_out, rstd, mean, eps
+        x, weight, bias, residual, out, residual_out, rstd, eps
     )
 
 

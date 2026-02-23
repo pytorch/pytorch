@@ -1,4 +1,4 @@
-"""CuteDSL norm dispatcher overrides (RMSNorm + LayerNorm)."""
+"""CuteDSL norm dispatcher overrides (RMSNorm)."""
 # mypy: allow-untyped-defs
 
 from __future__ import annotations
@@ -11,15 +11,12 @@ from torch.library import Library
 
 from . import _registry
 from ._kernels.norms import (
-    cutedsl_layernorm_bwd,
-    cutedsl_layernorm_fwd,
     cutedsl_rmsnorm_bwd,
     cutedsl_rmsnorm_fwd,
 )
 
 
 __all__ = [
-    "register_cutedsl_layernorm",
     "register_cutedsl_rmsnorm",
 ]
 
@@ -115,70 +112,7 @@ def _cutedsl_fused_rms_norm_backward_impl(
 
 
 # ---------------------------------------------------------------------------
-# LayerNorm
-# ---------------------------------------------------------------------------
-
-
-def register_cutedsl_layernorm() -> _CuteDSLNormHandle:
-    """Register CuteDSL LayerNorm kernels with the PyTorch dispatcher."""
-    lib = Library("aten", "IMPL", "CUDA")  # noqa: TOR901
-    lib.impl("native_layer_norm", _cutedsl_layer_norm_impl, "CUDA")
-    lib.impl(
-        "native_layer_norm_backward", _cutedsl_layer_norm_backward_impl, "CUDA"
-    )
-    return _CuteDSLNormHandle(lib)
-
-
-def _cutedsl_layer_norm_impl(
-    input: torch.Tensor,
-    normalized_shape: list[int],
-    weight: torch.Tensor | None,
-    bias: torch.Tensor | None,
-    eps: float,
-):
-    error = _support_error(
-        input, _collect_tensors(input, weight, bias), "LayerNorm"
-    )
-    if error is not None:
-        raise RuntimeError(f"CuteDSL LayerNorm forward unsupported: {error}")
-
-    return cutedsl_layernorm_fwd(input, weight, bias, normalized_shape, eps)
-
-
-def _cutedsl_layer_norm_backward_impl(
-    grad_out: torch.Tensor,
-    input: torch.Tensor,
-    normalized_shape: list[int],
-    mean: torch.Tensor,
-    rstd: torch.Tensor,
-    weight: torch.Tensor | None,
-    bias: torch.Tensor | None,
-    output_mask: list[bool],
-):
-    error = _support_error(
-        input, _collect_tensors(grad_out, input, mean, rstd, weight, bias), "LayerNorm"
-    )
-    if error is not None:
-        raise RuntimeError(f"CuteDSL LayerNorm backward unsupported: {error}")
-
-    grad_input, grad_weight, grad_bias = cutedsl_layernorm_bwd(
-        grad_out, input, mean, rstd, weight, bias, normalized_shape
-    )
-
-    if not output_mask[0]:
-        grad_input = None
-    if not output_mask[1]:
-        grad_weight = None
-    if not output_mask[2]:
-        grad_bias = None
-    return grad_input, grad_weight, grad_bias
-
-
-# ---------------------------------------------------------------------------
 # Self-registration
 # ---------------------------------------------------------------------------
 
 _registry.register_norm_impl("cutedsl_rmsnorm", register_fn=register_cutedsl_rmsnorm)
-_registry.register_norm_impl(
-    "cutedsl_layernorm", register_fn=register_cutedsl_layernorm
-)
