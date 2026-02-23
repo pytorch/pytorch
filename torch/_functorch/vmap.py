@@ -241,6 +241,13 @@ def _unwrap_batched(
         else:
             flat_out_dims = broadcast_result
 
+    # Non-tensor leaves were never batched, so override their out_dim to None
+    # to pass them through unchanged rather than raising an error.
+    flat_out_dims = [
+        None if not isinstance(o, torch.Tensor) and out_dim is not None else out_dim
+        for o, out_dim in zip(flat_batched_outputs, flat_out_dims)
+    ]
+
     flat_outputs = [
         _maybe_remove_batch_dim(
             _get_name(func), batched_output, vmap_level, batch_size, out_dim

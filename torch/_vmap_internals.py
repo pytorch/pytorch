@@ -136,18 +136,24 @@ def _unwrap_batched(
     if isinstance(batched_outputs, Tensor):
         out_dim = out_dims_as_tuple[0]
         return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
+
+    if not isinstance(batched_outputs, tuple):
+        # Non-tensor, non-tuple output: pass through unchanged
+        return batched_outputs  # type: ignore[return-value]
+
+    def _remove_or_passthrough(out, out_dim):
+        if not isinstance(out, Tensor):
+            return out
+        return torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
+
     if allow_none_pass_through:
         return tuple(
-            (
-                torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
-                if out is not None
-                else None
-            )
+            _remove_or_passthrough(out, out_dim) if out is not None else None
             for out, out_dim in zip(batched_outputs, out_dims_as_tuple)
         )
     else:
         return tuple(
-            torch._remove_batch_dim(out, vmap_level, batch_size, out_dim)
+            _remove_or_passthrough(out, out_dim)
             for out, out_dim in zip(batched_outputs, out_dims_as_tuple)
         )
 
@@ -160,17 +166,9 @@ def _validate_outputs(outputs: Any, func: Callable) -> None:
     if isinstance(outputs, Tensor):
         return
     if not isinstance(outputs, tuple):
-        raise ValueError(
-            f"vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return "
-            f"Tensors, got type {type(outputs)} as the return."
-        )
-    for idx, output in enumerate(outputs):
-        if isinstance(output, Tensor):
-            continue
-        raise ValueError(
-            f"vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return "
-            f"Tensors, got type {type(output)} for return {idx}."
-        )
+        # Non-tensor scalar outputs pass through unchanged
+        return
+    # Tuples may contain non-tensor leaves; that's fine, they pass through.
 
 
 def _check_out_dims_is_int_or_int_tuple(out_dims: out_dims_t, func: Callable) -> None:

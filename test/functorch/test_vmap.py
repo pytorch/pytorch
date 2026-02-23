@@ -107,15 +107,27 @@ class EnableVmapFallbackWarnings:
 
 @markDynamoStrictTest
 class TestVmapAPI(TestCase):
-    def test_non_tensor_output_raises(self):
-        with self.assertRaisesRegex(ValueError, "got type <class 'float'>"):
-            vmap(lambda x: 3.14)(torch.ones(3))
+    def test_non_tensor_output_passthrough(self):
+        # Non-tensor outputs pass through vmap unchanged
+        result = vmap(lambda x: 3.14)(torch.ones(3))
+        self.assertEqual(result, 3.14)
 
         def multiple_outputs(x):
             return x, 3
 
-        with self.assertRaisesRegex(ValueError, "got type <class 'int'>"):
-            vmap(multiple_outputs)(torch.ones(3))
+        tensor_out, int_out = vmap(multiple_outputs)(torch.ones(3))
+        self.assertEqual(tensor_out, torch.ones(3))
+        self.assertEqual(int_out, 3)
+
+    def test_non_tensor_output_pytree(self):
+        # Non-tensor leaves in pytree outputs pass through unchanged
+        def f(x):
+            return {"tensor": x.sin(), "count": 42, "name": "hello"}
+
+        result = vmap(f)(torch.randn(4, 3))
+        self.assertEqual(result["tensor"].shape, (4, 3))
+        self.assertEqual(result["count"], 42)
+        self.assertEqual(result["name"], "hello")
 
     def test_different_map_dim_size_raises(self):
         x = torch.randn(2)
