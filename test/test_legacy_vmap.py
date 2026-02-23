@@ -97,10 +97,7 @@ class TestVmapAPILegacy(TestCase):
         self.assertEqual(outputs[0], x * x)
         self.assertEqual(outputs[1], x * x * x)
 
-    def test_multiple_outputs_error_cases(self):
-        # This is the same thing as
-        # def returns_tuple_of_tensors(x):
-        #     return x, x
+    def test_multiple_outputs_list(self):
         def returns_tuple_of_tensors(x):
             return (x, x)
 
@@ -112,15 +109,10 @@ class TestVmapAPILegacy(TestCase):
 
         x = torch.randn(3)
 
-        # should not throw
+        # tuples and lists both work
         vmap(returns_tuple_of_tensors)(x)
-
-        # jax supports these, but we don't yet
-        msg = "must only return Tensors, got type <class 'list'>"
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(returns_list_of_two_tensors)(x)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(returns_list_of_one_tensor)(x)
+        vmap(returns_list_of_two_tensors)(x)
+        vmap(returns_list_of_one_tensor)(x)
 
     def test_nested_with_same_map_dim(self):
         x = torch.randn(2, 3, 5)

@@ -245,7 +245,7 @@ def _unwrap_batched(
     # to pass them through unchanged rather than raising an error.
     flat_out_dims = [
         None if not isinstance(o, torch.Tensor) and out_dim is not None else out_dim
-        for o, out_dim in zip(flat_batched_outputs, flat_out_dims)
+        for o, out_dim in zip(flat_batched_outputs, flat_out_dims, strict=True)
     ]
 
     flat_outputs = [

@@ -54,7 +54,7 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
             if all(isinstance(x, torch.Tensor) for x in out_lst):
                 result.append(torch.stack(out_lst))
             else:
-                # Non-tensor outputs pass through unchanged
+                # Non-tensor outputs are assumed constant across batch elements
                 result.append(out_lst[0])
         else:
             # not batched over, result should be the same for all batches

@@ -32,7 +32,7 @@ def _validate_and_get_batch_size(
 
 
 def _num_outputs(batched_outputs: Tensor | tuple[Tensor, ...]) -> int:
-    if isinstance(batched_outputs, tuple):
+    if isinstance(batched_outputs, (tuple, list)):
         return len(batched_outputs)
     return 1
 
@@ -137,7 +137,9 @@ def _unwrap_batched(
         out_dim = out_dims_as_tuple[0]
         return torch._remove_batch_dim(batched_outputs, vmap_level, batch_size, out_dim)  # type: ignore[return-value]
 
-    if not isinstance(batched_outputs, tuple):
+    if isinstance(batched_outputs, list):
+        batched_outputs = tuple(batched_outputs)
+    elif not isinstance(batched_outputs, tuple):
         # Non-tensor, non-tuple output: pass through unchanged
         return batched_outputs  # type: ignore[return-value]
 
@@ -156,19 +158,6 @@ def _unwrap_batched(
             _remove_or_passthrough(out, out_dim)
             for out, out_dim in zip(batched_outputs, out_dims_as_tuple)
         )
-
-
-# Checks that `fn` returned one or more Tensors and nothing else.
-# NB: A python function that return multiple arguments returns a single tuple,
-# so we are effectively checking that `outputs` is a single Tensor or a tuple of
-# Tensors.
-def _validate_outputs(outputs: Any, func: Callable) -> None:
-    if isinstance(outputs, Tensor):
-        return
-    if not isinstance(outputs, tuple):
-        # Non-tensor scalar outputs pass through unchanged
-        return
-    # Tuples may contain non-tensor leaves; that's fine, they pass through.
 
 
 def _check_out_dims_is_int_or_int_tuple(out_dims: out_dims_t, func: Callable) -> None:
@@ -228,8 +217,6 @@ def _vmap(
                 in_dims, args, vmap_level, func
             )
             batched_outputs = func(*batched_inputs)
-            if not allow_none_pass_through:
-                _validate_outputs(batched_outputs, func)
             return _unwrap_batched(
                 batched_outputs,
                 out_dims,
