@@ -380,13 +380,18 @@ class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         # If no Triton kernels found, fall back to GEMM kernels from other backends
         # - "Cijk" prefix: rocBLAS/hipBLASLt GEMM kernels (rocBLAS/Tensile)
         # - Contains "gemm": CK GEMM kernels
+        # - Contains "conv": MIOpen kernels
         # NOTE: This fallback path is not well tested at this time and may need refinement
         if triton_kernel_time_us == 0:
             triton_kernel_time_us = sum(
                 event.device_time_total
                 for event in prof.key_averages()
                 if event.device_type == torch.profiler.DeviceType.CUDA
-                and (event.key.startswith("Cijk") or "gemm" in event.key.lower())
+                and (
+                    event.key.startswith("Cijk")
+                    or "gemm" in event.key.lower()
+                    or "conv" in event.key.lower()
+                )
             )
 
         # Convert to milliseconds and compute the average time per iteration
