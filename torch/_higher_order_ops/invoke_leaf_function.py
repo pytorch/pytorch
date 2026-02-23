@@ -735,18 +735,13 @@ def invoke_leaf_function_functionalization(ctx, *all_args, **kwargs):
 
     from torch._higher_order_ops.effects import handle_effects
 
-    result = handle_effects(
+    return handle_effects(
         ctx.mode._allow_token_discovery,
         ctx.mode._tokens,
         invoke_leaf_function,
         all_args,
         kwargs,
     )
-    if isinstance(result, torch.Tensor):
-        return (result,)
-    if isinstance(result, list):
-        return tuple(result)
-    return result
 
 
 @invoke_leaf_function.py_impl(ProxyTorchDispatchMode)
