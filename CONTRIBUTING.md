@@ -14,6 +14,7 @@ aspects of contributing to PyTorch.
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
+- [AI-Assisted Development](#ai-assisted-development)
 - [Spin](#spin)
   - [Linting](#linting)
     - [default lint](#default-lint)
@@ -277,6 +278,21 @@ dependencies as well as the nightly binaries into the repo directory.
     blobs, etc.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
+
+## AI-Assisted Development
+
+PyTorch is a project developed and reviewed by humans.
+PyTorch encourages the use of AI in its development, however, PyTorch is a large and technically complex project and it is easy for current LLMs,
+if not properly guided, to produce seemingly correct PRs or issues with major flaws. Because of this, to ensure the health
+of the project, we must limit how contributors, especially those new to the project,
+submit PRs and open issues.
+
+All the details on how to contribute (with or without AI assistance) are in the [Ultimate Guide to PyTorch Contributions](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions).
+A couple reminders here though:
+
+- **You are personally responsible for what you send**: If the comments, issues or PRs you send are low quality or consistently overly verbose compared to what is expected, your contributions will not be accepted anymore. You are responsible for reviewing, ensuring the accuracy and the quality of everything you send.
+- **PRs must have an associated "actionable" Issue**: Generally, as a new contributor, you should never send a PR that doesn't have a corresponding issue with the "actionable" label. If you just opened the issue, you must wait for a maintainer to review it and mark it actionable before preparing and sending a PR for it.
+- **New features, utility functions, or core extensions**: Create a short and to the point issue about the problem you're encountering. You should NEVER include AI-generated explanation of how to solve the problem (this will be discussed later once it's decided the feature should be implemented).
 
 ## Spin
 

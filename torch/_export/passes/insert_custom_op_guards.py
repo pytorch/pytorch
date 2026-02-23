@@ -62,12 +62,16 @@ def get_op_profiles(
 
         out_profile = None
         meta = node.meta.get("val")
-        assert meta is not None
+        if meta is None:
+            raise AssertionError("node.meta['val'] must not be None")
         if isinstance(meta, torch.Tensor):
             out_profile = TensorMetadata.maybe_from_tensor(meta)
         elif isinstance(meta, (list, tuple)):
             out_profile = tuple(TensorMetadata.maybe_from_tensor(m) for m in meta)  # type: ignore[assignment]
-        assert out_profile is not None
+        if out_profile is None:
+            raise AssertionError(
+                f"out_profile must not be None for meta type {type(meta)}"
+            )
 
         return OpProfile(args_profile, out_profile)  # type: ignore[arg-type]
 

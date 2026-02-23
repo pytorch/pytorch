@@ -519,6 +519,44 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(replica_grad, global_tensor * self.world_size)
 
     @with_comms
+    def test_to_local_from_local_backward(self):
+        """
+        Test that to_local() followed by from_local() with Partial placement
+        produces correct gradients. This validates the gradient placement mapping:
+        Partial forward → Replicate gradient (see DTensor.from_local docstring).
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Create a sharded tensor [1., 2., ...] across ranks
+        # rank 0 gets [1.], rank 1 gets [2.], etc.
+        global_tensor = torch.arange(
+            1.0, self.world_size + 1, device=self.device_type, requires_grad=True
+        )
+        sharded_tensor = distribute_tensor(global_tensor, device_mesh, [Shard(0)])
+
+        # sum() produces a Partial DTensor
+        out = sharded_tensor.sum()
+
+        # to_local() + from_local() round-trip with same Partial placement
+        out = DTensor.from_local(
+            out.to_local(),
+            out.device_mesh,
+            out.placements,
+            run_check=False,
+        )
+
+        # full_tensor() reduces the Partial, then compute loss
+        loss = out.full_tensor().sum()
+        loss.backward()
+
+        # Expected: each element contributes equally to the sum, so gradient is 1.0
+        # The full gradient should be [1., 1., ...] (world_size elements)
+        expected_grad = torch.ones(self.world_size, device=self.device_type)
+        actual_grad = sharded_tensor.grad.full_tensor()
+
+        self.assertEqual(actual_grad, expected_grad)
+
+    @with_comms
     def test_dtensor_new_empty_strided(self):
         device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(8, 8, requires_grad=True, device=self.device_type)
@@ -750,6 +788,67 @@ class DTensorTest(DTensorTestBase):
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(local_tensor.item(), self.rank)
 
+    @with_comms
+    def test_ops_zero_size_shards(self):
+        # Adding this test to ensure sharding works when tensor size < mesh size.
+        # Tests pointwise & reduction with world size = 4, tensor dim size = 2,
+        # ranks 2 & 3 have empty local shards.
+        mesh = self.build_device_mesh()
+
+        full_tensor = torch.randn(2, 8, device=self.device_type)
+        dt = distribute_tensor(full_tensor, mesh, [Shard(0)])
+
+        # Verify expected local shard sizes
+        if not self.is_local_tensor_enabled:
+            if self.rank < 2:
+                self.assertEqual(dt._local_tensor.shape, (1, 8))
+            else:
+                self.assertEqual(dt._local_tensor.shape, (0, 8))
+
+        # Test add
+        out_add = dt + dt
+        self.assertEqual(out_add.placements, (Shard(0),))
+        self.assertEqual(out_add.full_tensor(), dt.full_tensor() + dt.full_tensor())
+
+        # Test mul
+        out_mul = dt * 2
+        self.assertEqual(out_mul.placements, (Shard(0),))
+        self.assertEqual(out_mul.full_tensor(), dt.full_tensor() * 2)
+
+        # Test sum
+        out_sum = dt.sum()
+        self.assertEqual(out_sum.placements, (Partial(),))
+        self.assertEqual(out_sum.full_tensor(), dt.full_tensor().sum())
+
+        # Test transpose
+        out_t = dt.T
+        self.assertEqual(out_t.placements, (Shard(1),))
+        self.assertEqual(out_t.full_tensor(), dt.full_tensor().T)
+
+    @with_comms
+    def test_autograd_function_without_materialize_grads(self):
+        device_mesh = self.build_device_mesh()
+
+        class MultiOutputFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.set_materialize_grads(False)
+                return (x * 2), (y * 3)
+
+            @staticmethod
+            def backward(ctx, grad_out1, grad_out2):
+                assert grad_out2 is None
+                return grad_out1 * 2, grad_out2
+
+        x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        x = DTensor.from_local(x_local, device_mesh, [Replicate()])
+        y = DTensor.from_local(y_local, device_mesh, [Replicate()])
+
+        out1, _ = MultiOutputFunc.apply(x, y)
+
+        loss = out1.sum()
+        loss.backward()
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,

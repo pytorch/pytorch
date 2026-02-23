@@ -152,8 +152,14 @@ class TestRepr(TestCase):
     @skipIf(TEST_WITH_TORCHDYNAMO, reason="repr differs")
     def test_finfo_repr(self):
         repr_f32 = repr(np.finfo(np.float32))
-        assert "finfo(resolution=1e-06, min=-3.40282e+38," in repr_f32
-        assert "dtype=float32" in repr_f32
+        if "finfo(resolution=1e-06, min=-3.40282e+38," not in repr_f32:
+            raise AssertionError(
+                f"Expected finfo repr to contain expected prefix, got: {repr_f32}"
+            )
+        if "dtype=float32" not in repr_f32:
+            raise AssertionError(
+                f"Expected finfo repr to contain 'dtype=float32', got: {repr_f32}"
+            )
 
 
 def assert_ma_equal(discovered, ma_like):
@@ -200,16 +206,19 @@ class TestMisc(TestCase):
             if (ld_ma.it, ld_ma.maxexp) == (63, 16384) and bytes in (12, 16):
                 # 80-bit extended precision
                 ld_ma.smallest_subnormal
-                assert len(w) == 0
+                if len(w) != 0:
+                    raise AssertionError(f"Expected no warnings, got {len(w)}")
             elif (ld_ma.it, ld_ma.maxexp) == (112, 16384) and bytes == 16:
                 # IEE 754 128-bit
                 ld_ma.smallest_subnormal
-                assert len(w) == 0
+                if len(w) != 0:
+                    raise AssertionError(f"Expected no warnings, got {len(w)}")
             else:
                 # Double double
                 ld_ma.smallest_subnormal
                 # This test may fail on some platforms
-                assert len(w) == 0
+                if len(w) != 0:
+                    raise AssertionError(f"Expected no warnings, got {len(w)}")
 
     @xpassIfTorchDynamo_np  # (reason="None of nmant, minexp, maxexp is implemented.")
     def test_plausible_finfo(self):

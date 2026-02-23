@@ -45,6 +45,7 @@ import time
 import traceback
 import types
 import typing
+import unittest.mock as mock
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,6 +84,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
 from . import config, decorators, exc, graph_break_hints, trace_rules
+from .backends.registry import _is_registered_backend
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
@@ -101,6 +103,7 @@ from .eval_frame import (
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    innermost_backend,
     innermost_fn,
     skip_code,
     TorchPatcher,
@@ -202,6 +205,17 @@ _P = ParamSpec("_P")
 
 class TODO_UNKNOWN:
     pass
+
+
+def _clear_fake_mode_weakrefs(
+    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode],
+) -> None:
+    """Clear WeakIdRef entries from a FakeTensorMode's describer."""
+    if fake_mode is None:
+        return
+    describer = fake_mode.fake_tensor_converter.meta_converter.describer
+    describer.lookup_tensor.clear()
+    describer.lookup_storage.clear()
 
 
 class Tracker:
@@ -898,7 +912,9 @@ class DynamoOutput:
         )
 
     def graph_capture_output(
-        self, argdefs: Optional[tuple[Any, ...]] = None
+        self,
+        argdefs: Optional[tuple[Any, ...]] = None,
+        kwdefaults: Optional[dict[str, Any]] = None,
     ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         assert output_graph is not None
@@ -915,6 +931,7 @@ class DynamoOutput:
             self.bytecode,
             self.tracer_output.closure,
             argdefs,
+            kwdefaults,
             self.tracer_output.f_globals,
         )
 
@@ -944,6 +961,7 @@ class GraphRuntimeEnv:
     used_globals: dict[str, Any]
     closure: Optional[tuple[Any, ...]]
     argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]] = None
     external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
@@ -967,14 +985,18 @@ class GraphRuntimeEnv:
         # check that all external references are available
         self._check_external_refs(f_globals)
 
-        return types.FunctionType(
+        fn = types.FunctionType(
             self.bytecode,
             f_globals,
             closure=self.closure,
             argdefs=self.argdefs,
         )
+        if self.kwdefaults:
+            fn.__kwdefaults__ = self.kwdefaults
+        return fn
 
     def _check_external_refs(self, f_globals: dict[str, Any]) -> None:
+        # pyrefly: ignore [implicit-any]
         missing_refs = []
         for ref in self.external_refs:
             if ref not in f_globals:
@@ -999,6 +1021,7 @@ class GraphCaptureOutput:
     bytecode: CodeType
     closure: Optional[tuple[Any, ...]]
     argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]]
     f_globals: dict[str, Any]
 
     def build_guards(
@@ -1041,6 +1064,7 @@ class GraphCaptureOutput:
             used_globals=used_globals,
             closure=self.closure,
             argdefs=self.argdefs,
+            kwdefaults=self.kwdefaults,
             external_refs=external_refs,
         )
 
@@ -1089,11 +1113,10 @@ class CaptureOutput:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
-        # pyrefly: ignore [bad-assignment, not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
         return runtime_env.forward_callable(
             backend_id,
-            compiled_fn,  # pyrefly: ignore [bad-argument-type]
+            compiled_fn,
             extra_globals=extra_globals,
         )
 
@@ -1113,7 +1136,6 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
 
         resolved_call = mod.__call__
         if hasattr(resolved_call, "__self__"):
-            # pyrefly: ignore [missing-attribute]
             resolved_call = resolved_call.__func__
 
         # Mirrored from NNModuleVariable.call_function:
@@ -1188,6 +1210,7 @@ def _get_frame(
         builtins.__dict__,
         closure=fn.__closure__ or (),  # type: ignore[arg-type]
         argdefs=fn.__defaults__,
+        kwdefaults=fn.__kwdefaults__,
     )
 
 
@@ -1238,6 +1261,7 @@ class FrameInfo:
     builtins: dict[str, object]
     closure: tuple[CellType]
     argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]]
 
 
 def _fullgraph_capture_frame(
@@ -1271,7 +1295,6 @@ def _fullgraph_capture_frame(
             frame.locals,
             frame.builtins,
             frame.closure,
-            # pyrefly: ignore [bad-argument-type]
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
             export_constraints=constraints,  # type: ignore[arg-type]
@@ -1292,9 +1315,31 @@ def _fullgraph_capture_frame(
         raise e.with_traceback(None) from e.__cause__  # User compiler error
 
     return CaptureOutput(
-        dynamo_output.graph_capture_output(frame.argdefs),
+        dynamo_output.graph_capture_output(frame.argdefs, frame.kwdefaults),
         backend_input,
     )
+
+
+# Called by eval_frame_cpp.cpp in order to raise an error if Dynamo attempts to compile_frame
+def get_fail_callback(callback: ConvertFrameProtocol) -> ConvertFrameProtocol:
+    fail_callback = getattr(callback, "_dynamo_fail_callback", None)
+    if fail_callback is not None:
+        return fail_callback
+
+    def compile_frame_error(*args: Any, **kwargs: Any) -> NoReturn:
+        raise RuntimeError(
+            "Dynamo: expected not to compile nested code - this happens because "
+            "a Dynamo callback was triggered and succeeded in compiling "
+            "when running fullgraph=True compiled code."
+        )
+
+    def fail_callback(*args: Any, **kwargs: Any) -> ConvertFrameReturn:
+        with mock.patch(__name__ + ".compile_frame", compile_frame_error):
+            return callback(*args, **kwargs)
+
+    # pyrefly: ignore [missing-attribute]
+    callback._dynamo_fail_callback = fail_callback
+    return fail_callback
 
 
 def compile_frame(  # type: ignore[return]
@@ -1312,6 +1357,7 @@ def compile_frame(  # type: ignore[return]
     frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
+    # pyrefly: ignore [bad-return]
 ) -> DynamoOutput:
     """
     A helper function taking a frame and backend, then return the generated bytecode
@@ -1479,7 +1525,18 @@ def _compile(
             code.co_firstlineno,
             code,
         )
-
+        # Dump the ORIGINAL bytecode of resumption frame into TORCH_TRACE
+        # log file, so that it is parsed by tlparse tool.
+        is_resumption_frame = "torch_dynamo_resume_in" in code.co_name
+        if is_resumption_frame:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": code.co_name + "_ORIGINAL_BYTECODE",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dis.Bytecode(code).dis(),
+            )
         out_code = None
         try:
             dynamo_output = compile_frame(
@@ -1519,6 +1576,17 @@ def _compile(
             code.co_firstlineno,
             out_code,
         )
+        # Dump the MODIFIED bytecode of resumption frame into TORCH_TRACE
+        # log file, so that it is parsed by tlparse tool.
+        if is_resumption_frame:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": code.co_name + "_MODIFIED_BYTECODE",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dis.Bytecode(out_code).dis(),
+            )
 
         for idx, hook in enumerate(_bytecode_hooks.values()):
             with dynamo_timed(f"bytecode_hooks_{idx}", log_pt2_compile_event=True):
@@ -1856,9 +1924,11 @@ def _compile(
             if tracer_output:
                 output = tracer_output.output_graph
             if output:
+                # pyrefly: ignore [implicit-any]
                 output.local_scope = {}
                 # tracer should already be None, keep an extra check here just in case.
                 if tracer := output.root_tx:
+                    # pyrefly: ignore [implicit-any]
                     tracer.f_locals = {}
 
             from .utils import curr_frame
@@ -1881,6 +1951,7 @@ def _compile(
                 shape_env_guard_count = None
                 graph_op_count = None
                 graph_node_count = None
+                # pyrefly: ignore [implicit-any]
                 graph_node_shapes = {}
                 graph_input_count = None
                 non_compliant_ops = set({})
@@ -1945,6 +2016,25 @@ def _compile(
             ):
                 tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
 
+            # Clear WeakIdRef entries that can block swap_tensors after compile.
+            # Determine whether to clear based on config and backend type.
+            should_clear = config.invalidate_compile_context_weakrefs
+            if should_clear is None:
+                # Default: clear for registered backends, don't clear for custom
+                # Unwrap the compiler_fn to get the actual backend function
+                should_clear = _is_registered_backend(innermost_backend(compiler_fn))
+            if should_clear:
+                if tracer_output and tracer_output.output_graph:
+                    tc = tracer_output.output_graph.tracing_context
+                    tc.tensor_to_context.clear()
+                    # Clear both the current fake_mode and the old_fake_mode
+                    # (the original is stored before backend_fake_mode replaces it)
+                    _clear_fake_mode_weakrefs(tc.fake_mode)
+                    if hasattr(tracer_output.output_graph, "_old_fake_mode"):
+                        _clear_fake_mode_weakrefs(
+                            tracer_output.output_graph._old_fake_mode
+                        )
+
 
 class ConvertFrame:
     def __init__(
@@ -1962,7 +2052,6 @@ class ConvertFrame:
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         return lambda backend: convert_frame(
-            # pyrefly: ignore [bad-argument-type]
             backend,
             self._hooks,
         )

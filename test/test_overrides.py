@@ -350,7 +350,8 @@ def generate_tensor_like_torch_implementations():
         "__torch_function__ override does not make sense, add an entry to "
         "the tuple returned by torch._overrides.get_ignored_functions.\n\n{}"
     )
-    assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
+    if len(untested_funcs) != 0:
+        raise AssertionError(msg.format(pprint.pformat(untested_funcs)))
     for func, override in testing_overrides.items():
         # decorate the overrides with implements_tensor_like if it's not a
         # torch.Tensor method
@@ -1087,7 +1088,8 @@ class Wrapper:
                 args_of_this_cls.append(a)
             elif isinstance(a, collections.abc.Sequence):
                 args_of_this_cls.extend(el for el in a if isinstance(el, cls))
-        assert len(args_of_this_cls) > 0
+        if len(args_of_this_cls) <= 0:
+            raise AssertionError("expected args_of_this_cls to be non-empty")
         for a in args_of_this_cls:
             a.used_calls.add(func)
         args = unwrap(tuple(args))
@@ -1644,7 +1646,8 @@ class TestTorchFunctionMode(TestCase):
                 if func is torch.sub:
                     with self:
                         input, other = args
-                        assert not kwargs
+                        if kwargs:
+                            raise AssertionError(f"expected kwargs to be empty, got {kwargs}")
                         return torch.add(input, other, alpha=-1)
                 return func(*args, **kwargs)
 

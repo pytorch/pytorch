@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from datetime import timedelta
 
+import psutil
+
 import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import (
@@ -18,6 +20,7 @@ from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
 from torch.distributed.checkpoint.staging import _ReplicationStager
+from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
 from torch.testing._internal.common_distributed import (
     HAS_ACCELERATOR,
@@ -843,6 +846,45 @@ class TestDTensorStateDictStager(DTensorTestBase):
         )
         self.assertEqual(cpu_state_dict["dtensor"]._spec, dtensor._spec)
         self.assertEqual(cpu_state_dict["dtensor"].size(), dtensor.size())
+
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_async_save_no_memory_leak(self):
+        # repeatedly calling async_save should not cause memory to grow by
+        # the checkpoint size each iteration
+        model_size_mb = 128
+        num_elements = (model_size_mb * 1024 * 1024) // 4
+        tensor = torch.randn(num_elements, device=device_type).to(torch.float32)
+        state_dict = {"weights": tensor}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # warmup - first save may allocate some buffers
+            f = async_save(
+                state_dict, checkpoint_id=os.path.join(temp_dir, "warmup"), no_dist=True
+            )
+            f.result()
+
+            baseline = psutil.Process().memory_info().rss / (1024 * 1024)
+
+            num_saves = 5
+            for i in range(num_saves):
+                f = async_save(
+                    state_dict,
+                    checkpoint_id=os.path.join(temp_dir, f"step_{i}"),
+                    no_dist=True,
+                )
+                f.result()
+
+            final = psutil.Process().memory_info().rss / (1024 * 1024)
+
+            growth = final - baseline
+            max_allowed = model_size_mb * 1.2
+
+            self.assertLess(
+                growth,
+                max_allowed,
+                f"Memory grew {growth:.0f}MB over {num_saves} saves (baseline={baseline:.0f}MB). "
+                f"This indicates a memory leak. Max allowed: {max_allowed:.0f}MB",
+            )
 
 
 class TestReplicationStager(DTensorTestBase):
