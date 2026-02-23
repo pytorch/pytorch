@@ -48,7 +48,7 @@ import re
 import textwrap
 import typing
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NoReturn, Protocol, TypeVar
@@ -1150,6 +1150,7 @@ class ReplacementPatternEntry(PatternEntry):
     """
 
     normalize_args: Callable[..., list[Any]]
+    pattern_name: Optional[str] = None  # Unique identifier for per-pattern telemetry
 
     @staticmethod
     def replace_with_graph(
@@ -1454,6 +1455,7 @@ def register_replacement(
     exclusive_arg_names: Sequence[str] = (),
     search_fn_pattern: PatternExpr | None = None,
     skip_duplicates: bool = False,
+    pattern_name: Union[str, None] = None,
 ) -> bool:
     """
     Create a replacement rule based on example functions that get traced
@@ -1657,6 +1659,7 @@ def register_replacement(
             pattern=pattern,
             extra_check=check_fn,
             normalize_args=normalize_args,
+            pattern_name=pattern_name,
         )
         pattern.register(pass_dicts)
         return pattern.pattern  # type: ignore[return-value]
@@ -1814,6 +1817,7 @@ def gen_register_replacement(
         exclusive_arg_names,
         search_fn_pattern=pat,
         skip_duplicates=skip_duplicates,
+        pattern_name=unique_name,
     )
 
 
@@ -2084,6 +2088,23 @@ class PatternMatcherPass:
                         entry.apply(m, graph, node)
                         counters[backend]["pattern_matcher_count"] += 1
                         counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
+
+                        # Track per-pattern counts for debugging granularity
+                        # Store at top level to avoid interfering with Counter arithmetic
+                        if getattr(entry, 'pattern_name', None):
+                            pattern_name = entry.pattern_name
+                        else:
+                            # Fallback: use pattern class name + operation target
+                            pattern_class = entry.pattern.__class__.__name__
+                            target = str(node.target) if node.target else "unknown"
+                            pattern_name = f"{pattern_class}_{target}"
+
+                        # Use top-level key to avoid Counter subtraction issues
+                        pattern_key = f"{backend}_pattern_matcher_per_pattern"
+                        if pattern_key not in counters:
+                            counters[pattern_key] = Counter()
+
+                        counters[pattern_key][pattern_name] += 1
         return count
 
     def clear(self) -> None:
