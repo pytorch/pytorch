@@ -2809,6 +2809,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
 
+    def test_nn_module_getattribute_simple_delegation(self):
+        # Test that nn.Module with __getattribute__ that overrides a
+        # single attribute name compiles without graph break.
+        class MyMod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = 3.0
+
+            def __getattribute__(self, name):
+                if name == "my_scale":
+                    return super().__getattribute__("scale")
+                return super().__getattribute__(name)
+
+            def forward(self, x):
+                return x * self.my_scale
+
+        mod = MyMod()
+        x = torch.randn(2, 4)
+        expected = mod(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(mod, backend=cnts)
+        result = opt_fn(x)
+        self.assertTrue(same(result, expected))
+
     def test_constant_getattr(self):
         # https://github.com/pytorch/pytorch/issues/97480
         def fn():
