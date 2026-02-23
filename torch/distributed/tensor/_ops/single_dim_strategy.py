@@ -253,8 +253,17 @@ def _expand_single_dim_strategy_to_mesh(
             base_name = op_name.split("::")[1].split(".")[0]
             is_inplace = base_name.endswith("_")
 
+            # For foreach ops with mixed meshes, extract mesh from op_schema instead
+            # of using the captured parent mesh. This ensures each list element uses
+            # its own mesh when the tensors are on different meshes.
+            op_mesh = mesh
+            for arg in op_schema.args_schema:
+                if isinstance(arg, OpStrategy):
+                    op_mesh = arg.mesh
+                    break
+
             return expand_to_full_mesh_op_strategy(
-                mesh,
+                op_mesh,
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
                 output_tensor_meta=output_tensor_meta,
@@ -288,6 +297,10 @@ def _expand_single_dim_strategy_to_mesh(
         """Translate foreach op to per-element version of schema."""
         op_parts = str(op_schema.op).split(".")
         base_op_name = op_parts[-2].replace("_foreach_", "")
+        # For inplace foreach ops (e.g., _foreach_maximum_), strip trailing underscore
+        # to get the base op name (e.g., maximum)
+        if base_op_name.endswith("_"):
+            base_op_name = base_op_name[:-1]
         foreach_variant = op_parts[-1]
 
         # select per-element inputs, outputs
@@ -297,7 +310,14 @@ def _expand_single_dim_strategy_to_mesh(
             (op_schema.args_schema, op_schema.kwargs_schema),
             is_leaf=lambda x: isinstance(x, TupleStrategy),
         )
-        target_output_meta = output_tensor_meta[index]
+        # For inplace ops, output_tensor_meta is None but the per-element op
+        # still returns the modified input. Use the first input's TensorMeta.
+        if output_tensor_meta is not None:
+            target_output_meta = output_tensor_meta[index]
+        else:
+            # Inplace op: output is the first input
+            first_input = target_args[0]
+            target_output_meta = first_input.tensor_meta if hasattr(first_input, 'tensor_meta') else None
 
         # figure out target op variant
         variant_map = {

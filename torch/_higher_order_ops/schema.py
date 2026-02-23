@@ -70,7 +70,11 @@ class CTypeGen:
             return torch._C.SymIntType.get()
         elif isinstance(obj, torch.SymBool):
             return torch._C.SymBoolType.get()
-        elif isinstance(obj, FakeScriptObject) or is_opaque_type(type(obj)):
+        elif isinstance(obj, torch.SymFloat):
+            return torch._C.FloatType.get()
+        elif isinstance(obj, (FakeScriptObject, pytree.TreeSpec)) or is_opaque_type(
+            type(obj)
+        ):
             return torch._C.PyObjectType.get()  # pyrefly: ignore[missing-attribute]
         return torch._C._jit_try_infer_type(obj).type()
 
@@ -111,7 +115,7 @@ class HopSchemaGenerator:
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> None:
-        if callable(example_value):
+        if callable(example_value) and not is_opaque_type(type(example_value)):
             if not isinstance(
                 example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
             ):

@@ -106,7 +106,10 @@ from .exc import (
 )
 from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
-from .graph_id_filter import get_backend_override_for_compile_id
+from .graph_id_filter import (
+    get_backend_override_for_compile_id,
+    get_inductor_config_override_for_compile_id,
+)
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
@@ -116,6 +119,7 @@ from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
+    DictGetItemSource,
     GetItemSource,
     GlobalStateSource,
     is_constant_source,
@@ -191,6 +195,24 @@ RootGuardManager = guards.RootGuardManager
 # as static in case user overrides fn ptr
 og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
+
+
+def _wrap_with_inductor_config(
+    compiler_fn: Any, config_patches: dict[str, Any]
+) -> Callable[..., Any]:
+    """
+    Wrap a compiler function to apply inductor config patches during compilation.
+    """
+    from torch._inductor import config as inductor_config
+
+    def wrapped(gm: Any, example_inputs: Any) -> Any:
+        with inductor_config.patch(config_patches):
+            return compiler_fn(gm, example_inputs)
+
+    # Preserve function metadata for logging
+    wrapped.__name__ = getattr(compiler_fn, "__name__", "<wrapped>")
+    wrapped.__wrapped__ = compiler_fn  # type: ignore[attr-defined]
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -342,6 +364,7 @@ class BytecodeTracingTimings:
     get_fake_value_ns: int = 0
     create_proxy_ns: int = 0
     wrap_to_fake_tensor_and_record_ns: int = 0
+    variable_builder_call_ns: int = 0
 
     def report_and_reset(self) -> None:
         """Flush accumulated timings to the bytecode_tracing chromium event
@@ -687,6 +710,21 @@ class OutputGraph(OutputGraphCommon):
         # Cached variable trackers. This makes symbolic analysis of LOAD_GLOBAL
         # and LOAD_ATTR for same python objects free.
         self.variable_tracker_cache: dict[Source, VariableTracker] = {}
+        # Cache for sources resolved via MRO walk, keyed by id(obj).
+        # When the same descriptor (e.g. property) is reached from multiple
+        # subclasses, we reuse the first source to avoid redundant guards.
+        # We thought of rolling this in variable_tracker_cache but here
+        # different sources point to the same object, we also don't want it to
+        # go through the side effects cache because even though these objects
+        # are same, we dont want OBJECT_ALIASING guards on them. For these
+        # objects, we have DICT_CONTAINS absent guards on the mro walk, so there
+        # is no need of the OBJECT_ALIASING guards.
+        self.mro_source_cache: dict[tuple[int, str], DictGetItemSource] = {}
+        # Tracks (id(klass), attr_name) pairs that already have a
+        # DICT_CONTAINS absent guard installed during MRO walks.  When
+        # multiple subclasses share the same intermediate MRO class, we
+        # only need to guard the absence once per (class, attr) pair.
+        self.guarded_mro_absent_keys: set[tuple[int, str]] = set()
         # Cache for inspect.signature results: function -> VariableTracker
         self.signature_cache: dict[Any, VariableTracker] = {}
         self.unique_var_id = itertools.count()
@@ -1785,13 +1823,11 @@ class OutputGraph(OutputGraphCommon):
             for val, count in pass1.uses.items():
                 # If it's already a local source, no need to cache it
                 if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
-                    # pyrefly: ignore [unsupported-operation]
                     tempvars[val] = None
             pass2 = PyCodegen(
                 self.root_tx,
                 root,
                 graph_output_var,
-                # pyrefly: ignore [bad-argument-type]
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
@@ -2621,6 +2657,15 @@ class OutputGraph(OutputGraphCommon):
             or self.compiler_fn
         )
 
+        # Check for per-graph inductor config override (for debugging/bisecting)
+        inductor_config_override = get_inductor_config_override_for_compile_id(
+            self.dynamo_compile_id, config.debug_inductor_config_override
+        )
+        if inductor_config_override:
+            compiler_fn = _wrap_with_inductor_config(
+                compiler_fn, inductor_config_override
+            )
+
         name = (
             compiler_fn.__name__
             if hasattr(compiler_fn, "__name__")
@@ -2670,7 +2715,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore [unbound-name, bad-return]
+        # pyrefly: ignore [bad-return]
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
@@ -2947,6 +2992,8 @@ class OutputGraph(OutputGraphCommon):
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
         self.variable_tracker_cache.clear()
+        self.mro_source_cache.clear()
+        self.guarded_mro_absent_keys.clear()
         self.signature_cache.clear()
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
@@ -3115,7 +3162,6 @@ def check_pt2_compliant_op(
                 hints=[],
             )
 
-        # pyrefly: ignore [unbound-name]
         op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
@@ -3123,7 +3169,6 @@ def check_pt2_compliant_op(
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
-                # pyrefly: ignore [unbound-name]
                 f"which resolves to the overload ({overload}) that is "
                 f"not PT2 compliant.",
             )
