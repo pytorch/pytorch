@@ -890,5 +890,167 @@ class TestHopPrintDTensor(DTensorTestBase):
         self.assertEqual(compiled_output, expected)
 
 
+@instantiate_parametrized_tests
+class TestHopPrintBackward(TestCase):
+    def test_print_backward_basic(self):
+        """Gradient is printed during backward with [backward] prefix."""
+
+        def f(x):
+            x = torch._higher_order_ops.print("x: {}", x, print_backward=True)
+            return x.sum()
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            loss = f(x)
+            loss.backward()
+            printed_output = mock_stdout.getvalue().strip()
+
+        lines = printed_output.split("\n")
+        self.assertEqual(len(lines), 2)
+        # Forward prints tensor (includes requires_grad=True in repr)
+        self.assertIn("x: tensor([1., 2., 3.]", lines[0])
+        self.assertIn("[backward]", lines[1])
+        self.assertIn("tensor([1., 1., 1.]", lines[1])
+
+    def test_print_backward_gradient_passthrough(self):
+        """Gradients pass through unchanged (identity backward)."""
+
+        def f(x):
+            x = torch._higher_order_ops.print("x: {}", x, print_backward=True)
+            return (x * 2).sum()
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            loss = f(x)
+            loss.backward()
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(x.grad, torch.tensor([2.0, 2.0, 2.0]))
+        bwd_line = printed_output.split("\n")[1]
+        self.assertIn("[backward]", bwd_line)
+        self.assertIn("tensor([2., 2., 2.]", bwd_line)
+
+    def test_print_backward_returns_tensor(self):
+        """print_backward=True returns the input tensor (identity)."""
+
+        def f(x):
+            return torch._higher_order_ops.print("x: {}", x, print_backward=True)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            y = f(x)
+
+        self.assertIsInstance(y, torch.Tensor)
+        self.assertEqual(y, x)
+
+    def test_print_backward_false_returns_none(self):
+        """Default print_backward=False still returns None."""
+
+        def f(x):
+            return torch._higher_order_ops.print("x: {}", x)
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            result = f(x)
+
+        self.assertIsNone(result)
+
+    def test_print_backward_multiple_tensors(self):
+        """Multiple tensor args are returned as a tuple."""
+
+        def f(x, y):
+            out = torch._higher_order_ops.print(
+                "x: {} y: {}", x, y, print_backward=True
+            )
+            return out[0].sum() + out[1].sum()
+
+        x = torch.tensor([1.0], requires_grad=True)
+        y = torch.tensor([2.0], requires_grad=True)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            loss = f(x, y)
+            loss.backward()
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(x.grad, torch.tensor([1.0]))
+        self.assertEqual(y.grad, torch.tensor([1.0]))
+        bwd_line = printed_output.split("\n")[1]
+        self.assertIn("[backward]", bwd_line)
+        self.assertIn("tensor([1.])", bwd_line)
+
+    def test_print_backward_no_tensor_returns_none(self):
+        """print_backward=True with no tensor args returns None."""
+
+        def f():
+            return torch._higher_order_ops.print("val: {}", 42, print_backward=True)
+
+        with patch("sys.stdout", new_callable=io.StringIO):
+            result = f()
+
+        self.assertIsNone(result)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_print_backward_compiled(self, backend):
+        """Test backward gradient printing works under torch.compile."""
+
+        def f(x):
+            x = torch._higher_order_ops.print("x: {}", x, print_backward=True)
+            return (x * 2).sum()
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+
+        opt_f = torch.compile(backend=backend, fullgraph=True)(f)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            loss = opt_f(x)
+            loss.backward()
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(x.grad, torch.tensor([2.0, 2.0, 2.0]))
+        # Forward print
+        self.assertIn("x: tensor([1., 2., 3.]", printed_output)
+        # Backward print with actual gradient values
+        self.assertIn("[backward]", printed_output)
+        self.assertIn("tensor([2., 2., 2.]", printed_output)
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_print_backward_train_step(self, backend):
+        """Test backward gradient printing in a realistic train step."""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3, bias=False)
+                self.linear2 = torch.nn.Linear(3, 3, bias=False)
+
+            def forward(self, x):
+                h1 = self.linear1(x)
+                h1_logged = torch._higher_order_ops.print(
+                    "after linear1: {}", h1, print_backward=True
+                )
+                h2 = self.linear2(h1_logged)
+                h2_logged = torch._higher_order_ops.print(
+                    "after linear2: {}", h2, print_backward=True
+                )
+                return h2_logged
+
+        model = Model()
+        x = torch.randn(2, 3)
+        target = torch.randn(2, 3)
+
+        opt_model = torch.compile(model, backend=backend, fullgraph=True)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            out = opt_model(x)
+            loss = torch.nn.functional.mse_loss(out, target)
+            loss.backward()
+            printed_output = mock_stdout.getvalue().strip()
+
+        # Verify forward and backward prints occurred with actual tensor values
+        self.assertIn("after linear1:", printed_output)
+        self.assertIn("after linear2:", printed_output)
+        self.assertIn("[backward]", printed_output)
+        # Verify gradients were computed
+        self.assertIsNotNone(model.linear1.weight.grad)
+        self.assertIsNotNone(model.linear2.weight.grad)
+
+
 if __name__ == "__main__":
     run_tests()
