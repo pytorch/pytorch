@@ -418,3 +418,8 @@ spin==0.17
 #Description: required for testing spin commands
 #Pinned versions: 0.17
 #test that import: spincli/test_spin.py
+
+uv
+#Description: required for running spin commands via uvx
+#Pinned version:
+#test that import:
