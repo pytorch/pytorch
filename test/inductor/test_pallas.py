@@ -553,7 +553,15 @@ class PallasTestsMixin:
         """Test 2D transposed input patterns."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
 
-        for rows, cols in [(32, 32), (2048, 2048), (64, 32), (5, 8), (3215, 23), (8, 128), (128, 8)]:
+        for rows, cols in [
+            (32, 32),
+            (2048, 2048),
+            (64, 32),
+            (5, 8),
+            (3215, 23),
+            (8, 128),
+            (128, 8),
+        ]:
             with self.subTest(rows=rows, cols=cols):
                 base_2d = torch.randn(rows, cols, device=self.DEVICE)
                 x = base_2d.t()

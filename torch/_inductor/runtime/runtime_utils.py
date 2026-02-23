@@ -358,7 +358,9 @@ _TPU_ALIGN_LAST = 128
 _TPU_ALIGN_SECOND_LAST = 8
 
 
-def _pallas_tile_size(dim: int, alignment: int, max_tile: int = 1024, is_tpu: bool = False) -> int:
+def _pallas_tile_size(
+    dim: int, alignment: int, max_tile: int = 1024, is_tpu: bool = False
+) -> int:
     """Pick the largest aligned tile size <= max_tile for *dim*.
 
     If *dim* is already <= alignment the full dimension is used (no tiling
@@ -366,7 +368,7 @@ def _pallas_tile_size(dim: int, alignment: int, max_tile: int = 1024, is_tpu: bo
     """
     if is_tpu:
         # On TPU, Mosaic requires block dimensions to perfectly align to hardware
-        # registers (128 for inner, 8 for outer). We MUST pad the block spec up to 
+        # registers (128 for inner, 8 for outer). We MUST pad the block spec up to
         # the next alignment boundary (Mosaic handles the OOB masking).
         if dim <= alignment:
             return alignment
@@ -435,18 +437,22 @@ def pallas_compute_tiling(
         """Check if tiling dim to t is valid."""
         if t >= dim:
             # For TPU padding, we allow tiles >= dimension for the aligned axes
-            if is_tpu and (_align(ax) == _TPU_ALIGN_LAST or _align(ax) == _TPU_ALIGN_SECOND_LAST):
+            if is_tpu and (
+                _align(ax) == _TPU_ALIGN_LAST or _align(ax) == _TPU_ALIGN_SECOND_LAST
+            ):
                 return True
             return False
         if exact_only and dim % t != 0:
-            if is_tpu and (_align(ax) == _TPU_ALIGN_LAST or _align(ax) == _TPU_ALIGN_SECOND_LAST):
+            if is_tpu and (
+                _align(ax) == _TPU_ALIGN_LAST or _align(ax) == _TPU_ALIGN_SECOND_LAST
+            ):
                 # TPU DMA `#tpu.element_window` natively masks out-of-bounds remainder tiles
                 return True
             return False
         return True
 
     if transpose and tileable_nd >= 2 and not is_tpu:
-        # For non-TPU platforms (or when alignment isn't critical), square tiles 
+        # For non-TPU platforms (or when alignment isn't critical), square tiles
         # simplify transposed mapping. However, TPU Mosaic requires specific alignments
         # and benefits from large, independent 1D tiles to maximize pipeline throughput
         # (e.g. 1024x128 for a 3215x23 array, leveraging OOB DMA masking).
@@ -454,7 +460,9 @@ def pallas_compute_tiling(
         ax_last = tileable_nd - 1
         ax_second = tileable_nd - 2
         min_dim = min(ref_shape[ax_last], ref_shape[ax_second])
-        t = _pallas_tile_size(min_dim, max(_align(ax_last), _align(ax_second)), is_tpu=is_tpu)
+        t = _pallas_tile_size(
+            min_dim, max(_align(ax_last), _align(ax_second)), is_tpu=is_tpu
+        )
 
         if _can_tile_ax(ax_second, ref_shape[ax_second], t):
             tile[ax_second] = t
@@ -465,7 +473,7 @@ def pallas_compute_tiling(
             tile[ax_last] = t
             axis_to_grid[ax_last] = len(grid_parts)
             grid_parts.append((ref_shape[ax_last] + t - 1) // t)
-            
+
         grid = tuple(grid_parts) if grid_parts else (1,)
         return tuple(tile), grid, axis_to_grid
 
