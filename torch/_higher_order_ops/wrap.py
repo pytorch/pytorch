@@ -24,6 +24,18 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 
 log = logging.getLogger(__name__)
 
+
+class OutputTensorMeta:
+    """Picklable stand-in for FakeTensors in FX graph cache."""
+
+    def __init__(self, shape, stride, dtype, device, requires_grad):
+        self.shape = shape
+        self.stride = stride
+        self.dtype = dtype
+        self.device = device
+        self.requires_grad = requires_grad
+
+
 uid = itertools.count(1)
 
 
@@ -174,10 +186,21 @@ def inductor_compiled_code_fake(func, inputs):
                 "fake prop on inductor compiled code doesn't work with SymInt outputs yet"
             )
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-    return tuple(
-        fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t
-        for t in resolved.fake_outputs
-    )
+    results = []
+    for item in resolved.fake_outputs:
+        if isinstance(item, OutputTensorMeta):
+            # FakeTensorMode intercepts this and produces a FakeTensor
+            t = torch.empty_strided(
+                item.shape, item.stride, dtype=item.dtype, device=item.device
+            )
+            if item.requires_grad:
+                t = t.requires_grad_(True)
+            results.append(t)
+        elif isinstance(item, torch.Tensor):
+            results.append(fake_mode.from_tensor(item))
+        else:
+            results.append(item)
+    return tuple(results)
 
 
 @inductor_compiled_code.py_functionalize_impl

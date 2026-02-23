@@ -13,8 +13,10 @@ from sympy import Expr
 from torch import SymInt
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
+    free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     has_free_unbacked_symbols,
+    IterateExprs,
     ShapeEnv,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -753,7 +755,6 @@ class SizeVarAllocator:
             fallback = config.unbacked_symint_fallback
         assert fallback is not None
 
-        original = expr
         expr = self.simplify(expr)
         result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
@@ -761,6 +762,8 @@ class SizeVarAllocator:
 
         if isinstance(expr, sympy.Expr):
             expr = expr.expand(identity=True)
+
+        original = expr
 
         expr = self.replace_backed_symbols_with_hints(expr)
 
@@ -780,8 +783,14 @@ class SizeVarAllocator:
         if has_free_unbacked_symbols(expr):
             # Make sure to substitute with the factored version
             # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-            # TODO optimize _sub_unbacked_exprs
-            expr = self._sub_unbacked_exprs(sympy.factor(original))
+
+            # Limit sympy.factor() to expressions with <= 200 free symbols,
+            # as factoring polynomials with many variables is expensive.
+            if isinstance(original, sympy.Expr) and len(original.free_symbols) <= 200:
+                expr = self._sub_unbacked_exprs(sympy.factor(original))
+            else:
+                # TODO optimize _sub_unbacked_exprs
+                expr = self._sub_unbacked_exprs(original)
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
@@ -823,6 +832,17 @@ class SizeVarAllocator:
         if fallback is None:
             fallback = config.unbacked_symint_fallback
         return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
+
+    def all_unbacked_explicitly_hinted(self, exprs: IterateExprs) -> bool:
+        """
+        Return True if every unbacked symbol in *exprs* has an explicit
+        user-provided hint in var_to_hint_override.  If there are no
+        unbacked symbols at all, returns True (vacuously).
+        *exprs* can be a single expression or any iterable accepted by
+        free_unbacked_symbols (list, tuple, etc.).
+        """
+        unbacked = free_unbacked_symbols(exprs)
+        return unbacked.issubset(self.var_to_hint_override.keys())
 
     def optimization_hint_with_override(
         self,
@@ -1126,7 +1146,12 @@ class SizeVarAllocator:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
                 break
-            expr = sympy.factor(new_expr)
+            # Skip sympy.factor() for expressions with many free symbols,
+            # as factoring polynomials with many variables is expensive.
+            if len(new_expr.free_symbols) <= 200:
+                expr = sympy.factor(new_expr)
+            else:
+                expr = new_expr
             sub_cnt += 1
         else:
             log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)

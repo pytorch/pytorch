@@ -89,9 +89,10 @@ from .ctx_manager import (
     ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
-from .distributed import DistributedVariable, ProcessGroupVariable
+from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
+from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -598,7 +599,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
-                # pyrefly: ignore[bad-argument-type]
                 self.value,
                 tx,
                 self.source,
@@ -1236,6 +1236,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
+                get_rank,
+                get_world_size,
             )
             from torch.distributed.tensor import DTensor
 
@@ -1245,34 +1247,54 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 get_process_group_ranks,
                 _resolve_group_name_by_ranks_and_tag,
+                get_rank,
+                get_world_size,
             )
             def handle_constant_processgroup_functions(
-                self, tx: "InstructionTranslator", *args: VariableTracker
+                self,
+                tx: "InstructionTranslator",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
             ) -> VariableTracker:
-                # because the input is a "ProcessGroupVariable", we'll be guarding on its
-                # ID_MATCH based on how it was constructed.
-
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
-                if len(args) == 1:
+                if len(args) == 0 and len(kwargs) == 0:
+                    # get_rank() or get_world_size() with no args (uses default group)
+                    pass
+                elif len(args) == 1 and len(kwargs) == 0:
                     # group or group name
-                    assert (
-                        isinstance(args[0], ProcessGroupVariable)
-                        or args[0].is_python_constant()
+                    assert args[0].is_python_constant() or (
+                        isinstance(args[0], TorchScriptObjectVariable)
+                        and args[  # pyrefly: ignore[missing-attribute]
+                            0
+                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
+                        == "torch.distributed.distributed_c10d.ProcessGroup"
                     )
-                elif len(args) == 2:
+                elif len(args) == 2 and len(kwargs) == 0:
                     # ranks + tag
                     assert (
                         isinstance(args[0], ListVariable)
                         and args[1].is_python_constant()
                     )
+                elif len(args) == 0 and len(kwargs) > 0:
+                    # All keyword arguments (e.g., get_world_size(group=...))
+                    pass
                 else:
                     raise AssertionError(
-                        f"Invalid group value ({args}) for constant pg "
+                        f"Invalid group value ({args}, {kwargs}) for constant pg "
                         f"function {self.value}"
                     )
-                args_as_value = [arg.as_python_constant() for arg in args]
-                invocation_result = self.value(*args_as_value)
+
+                def get_arg_value(arg: VariableTracker) -> Any:
+                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # as_python_constant(), so extract real_obj directly
+                    if isinstance(arg, TorchScriptObjectVariable):
+                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
+                    return arg.as_python_constant()
+
+                args_as_value = [get_arg_value(arg) for arg in args]
+                kwargs_as_value = {k: get_arg_value(v) for k, v in kwargs.items()}
+                invocation_result = self.value(*args_as_value, **kwargs_as_value)
 
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
@@ -1478,6 +1500,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return expr
             else:
                 return None
+
+        @register(torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols)
+        def handle_has_free_unbacked_symbols(
+            self, tx: "InstructionTranslator", x: VariableTracker
+        ) -> VariableTracker | None:
+            from .tensor import TensorVariable
+
+            if isinstance(x, TensorVariable):
+                example_value = x.as_proxy().node.meta.get("example_value")
+                if example_value is not None:
+                    return variables.ConstantVariable.create(
+                        torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols(
+                            example_value
+                        )
+                    )
+            return None
 
         @register(torch.fx.experimental.symbolic_shapes.guard_scalar)
         def guard_scalar(
@@ -1737,17 +1775,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
             # need to guard only on no-arg get_device_module
-            # pyrefly: ignore [unbound-name]
             if device is None:
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
             new_source = AttrSource(
                 ImportSource("torch"),
-                # pyrefly: ignore [unbound-name]
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
-            # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, module, new_source)
 
         @register(torch.accelerator.current_stream, torch.cuda.current_stream)
@@ -1863,7 +1898,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                # pyrefly: ignore[missing-attribute]
                 message_eager = message_vt.get_function()
 
                 message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
@@ -1893,7 +1927,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         @register(torch.autograd.grad)
-        # pyrefly: ignore[implicit-any]
         def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
             """
             Handle torch.autograd.grad() calls within compiled regions.
@@ -2447,11 +2480,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
-            func_to_graphable,
             is_graphable_type,
             is_valid_output,
             to_graphable,
         )
+        from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
 
@@ -2560,23 +2593,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 fake_tensor_tls.allow_non_fake_inputs_override = old_val
             return res
 
-        # `flat_apply` wants a TreeSpec for the function input.
-        _, f_spec = func_to_graphable(patched_fn)
+        f_callable = _LeafCallable(patched_fn)
 
-        # TreeSpec isn't graphable, so we register the function and input
-        # specs as attributes on the graph module.
-        f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            f"{fn.__name__}_spec", f_spec
+        f_callable_proxy = tx.output.register_static_attr_and_return_proxy(
+            f"{fn.__name__}_callable", f_callable
         )
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
             # pyrefly: ignore [unbound-name]
             input_spec,
         )
-        f_spec_proxy.node.type = type(f_spec)
+        f_callable_proxy.node.type = type(f_callable)
         # pyrefly: ignore [unbound-name]
         input_spec_proxy.node.type = type(input_spec)
-        all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
+        all_args = (f_callable_proxy, input_spec_proxy, *proxified_flat_args)
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
@@ -2721,8 +2751,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._dynamo.utils import _make_inlined
-        from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import (
+            _LeafCallable,
             invoke_leaf_function,
             make_leaf_function_wrappers,
         )
@@ -2758,17 +2788,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl, fake_impl, captured_out_spec
         )
 
-        _, real_impl_spec = func_to_graphable(wrapped_real_impl)
-        _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
+        real_impl_callable = _LeafCallable(wrapped_real_impl)
+        fake_impl_callable = _LeafCallable(wrapped_fake_impl)
 
-        def make_spec_proxy(name: str, spec: Any) -> Any:
+        def make_callable_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)
             proxy.node.type = type(spec)
             return proxy
 
-        real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
-        fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
-        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
+        real_impl_proxy = make_callable_proxy("real_fn", real_impl_callable)
+        fake_impl_proxy = make_callable_proxy("fake_fn", fake_impl_callable)
+        input_spec_proxy = make_callable_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
@@ -2874,7 +2904,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         # this results in cleaner graphs, but only works for inputs
-        # pyrefly: ignore [missing-attribute]
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
@@ -2895,7 +2924,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if isinstance(
             data,
             TensorWithTFOverrideVariable,
-            # pyrefly: ignore [missing-attribute]
         ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented(
                 gb_type="Attempted to use torch.nn.Parameter constructor with tensor subclass",
@@ -2918,11 +2946,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            # pyrefly: ignore [missing-attribute]
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
-            # pyrefly: ignore [missing-attribute]
             dtype = data.var_getattr(tx, "dtype").as_python_constant()
-            # pyrefly: ignore [missing-attribute]
             device = data.var_getattr(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented(
@@ -2938,12 +2963,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         placeholder = tx.output.synthetic_graph_input(
             new_parameter_placeholder,
-            # pyrefly: ignore [unbound-name]
             (shape, dtype, device, requires_grad),
         )
-        # pyrefly: ignore [missing-attribute]
         if data.requires_grad:
-            # pyrefly: ignore [missing-attribute]
             data = data.call_method(tx, "detach", [], {})
 
         from .builder import wrap_fx_proxy
@@ -2953,7 +2975,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             tx.output.create_proxy(
                 "call_function",
                 tracable_create_parameter,
-                # pyrefly: ignore [missing-attribute]
                 (data.as_proxy(), placeholder.as_proxy()),
                 {},
             ),
