@@ -783,13 +783,11 @@ class DistributedDataParallel(Module, Joinable):
             self.device_ids = None
             self.output_device = None
         else:
-            # pyrefly: ignore [bad-assignment]
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
                 output_device = device_ids[0]
 
-            # pyrefly: ignore [bad-assignment]
             self.output_device = _get_device_index(output_device, True)
 
         self.static_graph = False

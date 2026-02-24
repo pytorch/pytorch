@@ -551,13 +551,6 @@ cudagraph_unsafe_unbacked_ops: list[str] = []
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
-# Whether template autotuning should defer layout freezing until scheduling time for inputs,
-# prioritizing other fusions over choosing the template case. If inputs have a different layout
-# than what was autotuned due to some other fusion, then default to aten.
-max_autotune_defer_layout_freezing: bool = (
-    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_DEFER_LAYOUT_FREEZING", "0") == "1"
-)
-
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
@@ -1533,13 +1526,6 @@ class triton:
     # Specify dynamic shapes to capture cudagraphs and skip cudagraph for other shapes.
     # Default to None, which means we capture cudagraphs for all shapes.
     cudagraph_capture_sizes: Optional[tuple[Union[int, tuple[int, ...]]]] = None
-
-    # Minimum number of nodes (kernels) required for a cudagraph partition.
-    # If a partition has fewer nodes than this threshold, it won't be cudagraphed.
-    # This helps avoid overhead for very small partitions where cudagraph
-    # recording/replay cost outweighs the benefits.
-    # Set to 0 to disable this check.
-    cudagraph_min_partition_size = 0
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
