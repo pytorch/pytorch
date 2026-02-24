@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import _thread
 import contextlib
 import sys
 import unittest
@@ -1898,6 +1899,78 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(inp), opt_fn(inp))
         self.assertGreater(len(counters["graph_break"]), 0)
+
+    def test_rlock_basic(self):
+        def fn(x):
+            lock = _thread.RLock()
+            with lock:
+                return x.sin() + x.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_rlock_with_graph_break(self):
+        def sin(x):
+            return x.sin()
+
+        def cos(x):
+            return x.cos()
+
+        def fn(x):
+            lock = _thread.RLock()
+            with lock:
+                y = sin(x)
+                torch._dynamo.graph_break()
+                z = cos(x)
+            return y + z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 2)  # sin(x) + cos(x)
+
+    def test_rlock_with_graph_break_2(self):
+        def fn(x):
+            lock = _thread.RLock()
+            with lock:
+                y = x.sin()
+                torch._dynamo.graph_break()
+                z = x.cos()
+            return y + z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnts.frame_count, 0)
+
+    def test_rlock_nested(self):
+        def fn(x):
+            lock = _thread.RLock()
+            # Calls __exit__ twice for the same lock
+            with lock:
+                with lock:
+                    return x.sin() + x.cos()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @unittest.expectedFailure  # only `with rlock: ...` stmt for now
+    def test_rlock_methods(self):
+        def fn(x):
+            lock = _thread.RLock()
+            lock.acquire()
+            try:
+                return x.sin() + x.cos()
+            finally:
+                lock.release()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 class ContextlibContextManagerTests(
