@@ -2277,6 +2277,20 @@ class TritonTemplate(KernelTemplate):
 
 
 class ExternKernelChoice:
+    """Represents an external kernel choice for algorithm selection.
+
+    Wraps an external kernel function and provides methods to bind it to
+    specific inputs/layouts for benchmarking and code generation.
+    """
+
+    # Registry of existing choices by name for reuse
+    _registry: dict[str, "ExternKernelChoice"] = {}
+
+    @classmethod
+    def get_existing(cls, name: str) -> Optional["ExternKernelChoice"]:
+        """Get an existing ExternKernelChoice by name if it exists."""
+        return cls._registry.get(name)
+
     def __init__(
         self,
         kernel,
@@ -2299,6 +2313,8 @@ class ExternKernelChoice:
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
+        # Register this choice for reuse
+        ExternKernelChoice._registry[name] = self
         # match the API for KernelTemplate as they can be treated the same
         # There is no src hash for ExternKernelChoice in the traditional sense
         # so we indicate this by returning None
