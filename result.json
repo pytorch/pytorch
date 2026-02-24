@@ -1,0 +1,10 @@
+{
+  "category": "no_repro",
+  "summary": "TL-parse produces empty report for export logs, but no reproducible code snippet provided",
+  "answer": null,
+  "repro_code": null,
+  "repro_output": null,
+  "commit_hash": "965caf0db33d31ae6303d0960f26afd40c083736",
+  "fix_description": null,
+  "patch_file": null
+}
