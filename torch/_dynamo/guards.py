@@ -2207,12 +2207,14 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
         value = self.get(guard)
+
         # Deepcopying SymInts result in an error from copying FakeTensors.
         # Instead we just always assume the metadata is the same.
         class _AnyCompare:
-            def __eq__(self, other: Any) -> bool:
+            def __eq__(self, other: object) -> bool:
                 return True
-            def __ne__(self, other: Any) -> bool:
+
+            def __ne__(self, other: object) -> bool:
                 return False
 
         metadata = value.__tensor_flatten__()[1]
