@@ -41,16 +41,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
   export USE_FBGEMM=0
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
-    # TODO: there is a linking issue when building with UCC using clang,
-    # disable it for now and to be fix later.
-    # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
-    export USE_UCC=1
-    export USE_SYSTEM_UCC=1
-  fi
-fi
-
 if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
@@ -230,10 +220,6 @@ fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
-fi
-
-if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
-    export USE_PRECOMPILED_HEADERS=1
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
