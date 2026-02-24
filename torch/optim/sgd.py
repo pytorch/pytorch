@@ -194,7 +194,7 @@ SGD.__doc__ = (
         lr (float, Tensor, optional): learning rate (default: 1e-3)
         momentum (float, optional): momentum factor (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decay (float, Tensor, optional): weight decay (L2 penalty) (default: 0)
         nesterov (bool, optional): enables Nesterov momentum. Only applicable
             when momentum is non-zero. (default: False)
         {_maximize_doc}
