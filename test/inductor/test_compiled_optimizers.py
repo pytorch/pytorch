@@ -1117,9 +1117,7 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
         and kwargs.get("device") == GPU_TYPE
     ):
         optim_kwargs = {
-            k: v
-            for k, v in kwargs.items()
-            if k not in ("device", "kernel_count")
+            k: v for k, v in kwargs.items() if k not in ("device", "kernel_count")
         }
         setattr(
             CompiledOptimizerTests,
