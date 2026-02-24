@@ -9,7 +9,6 @@ import logging
 import math
 import operator
 import os
-import textwrap
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Sequence
@@ -7847,15 +7846,8 @@ def prepare_softmax_online(x, dim):
         #
         # TODO: does inference need split online_softmax_reduce?
 
-        warnings.warn(
-            textwrap.dedent(
-                """
-            Online softmax is disabled on the fly since Inductor decides to
-            split the reduction. Cut an issue to PyTorch if this is an
-            important use case and you want to speed it up with online
-            softmax.
-            """
-            )
+        log.debug(
+            "Online softmax is disabled on the fly since Inductor decides to split the reduction."
         )
         amax = reduce_amax(x, dim, keepdims=True)
         exp = lowerings[aten.exp](sub(x, amax))
