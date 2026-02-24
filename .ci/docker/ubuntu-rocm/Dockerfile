@@ -126,7 +126,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y git python3 python3-pip python3-setuptools
 RUN git clone https://github.com/ROCm/rocm-libraries.git
 WORKDIR /app/rocm-libraries/shared/origami/python
-RUN . /etc/rocm_env.sh && pip install .
+RUN . /etc/rocm_env.sh && HIP_PLATFORM=amd pip install .
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
