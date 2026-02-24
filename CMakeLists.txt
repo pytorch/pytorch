@@ -373,7 +373,7 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
        "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
 cmake_dependent_option(
-  USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
+  USE_CCACHE "Attempt using [S]CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(
   DEBUG_CUDA
@@ -420,20 +420,23 @@ endif()
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
+  find_program(SCCACHE_EXECUTABLE sccache)
   if(CCACHE_PROGRAM)
-    set(CMAKE_C_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "C compiler launcher")
-    set(CMAKE_CXX_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "CXX compiler launcher")
-    set(CMAKE_CUDA_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "CUDA compiler launcher")
+    foreach(LANG CXX C CUDA)
+      set(CMAKE_${LANG}_COMPILER_LAUNCHER
+          "${CCACHE_PROGRAM}"
+          CACHE STRING "${LANG} compiler launcher")
+    endforeach()
+  elseif(SCCACHE_EXECUTABLE)
+    foreach(LANG CXX C CUDA)
+      set(CMAKE_${LANG}_COMPILER_LAUNCHER
+          "${SCCACHE_EXECUTABLE}"
+          CACHE STRING "${LANG} compiler launcher")
+    endforeach()
   else()
     message(
       STATUS
-        "Could not find ccache. Consider installing ccache to speed up compilation."
+        "Could not find neither ccache nor sccache. Consider installing ccache to speed up compilation."
     )
   endif()
 endif()
