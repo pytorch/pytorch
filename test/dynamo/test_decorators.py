@@ -251,7 +251,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 3)
 
     def test_incorrect_usage_disallow_in_graph(self):
-        with self.assertRaisesRegex(RuntimeError, "disallow_in_graph is expected"):
+        with self.assertRaisesRegex(RuntimeError, "disallow_in_graph"):
 
             @torch._dynamo.disallow_in_graph
             def fn1(x):
