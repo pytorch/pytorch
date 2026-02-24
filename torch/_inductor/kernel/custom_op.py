@@ -8,8 +8,14 @@ from typing import Any, Optional, Union
 
 import torch
 from torch._inductor.codegen.subgraph import SubgraphTemplate
-from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
-from torch._inductor.lowering import lowerings, validate_ir
+from torch._inductor.ir import (
+    Buffer,
+    FixedLayout,
+    ir_node_to_tensor,
+    StorageBox,
+    TensorBox,
+)
+from torch._inductor.lowering import user_lowerings, validate_ir
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -218,13 +224,13 @@ def _extract_tensor_inputs(
     ]
 
     for i, arg in enumerate(args):
-        if isinstance(arg, (TensorBox, Buffer)):
+        if isinstance(arg, (TensorBox, Buffer, StorageBox)):
             tensor_inputs.append(arg)
         else:
             non_tensor_kwargs[param_names[i]] = arg
 
     for key, value in kwargs.items():
-        if isinstance(value, (TensorBox, Buffer)):
+        if isinstance(value, (TensorBox, Buffer, StorageBox)):
             tensor_inputs.append(value)
         else:
             non_tensor_kwargs[key] = value
@@ -406,20 +412,29 @@ def _default_input_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:
 
 def _create_fallback_choice(
     name: str,
-    default_impl: Callable[..., Any],
-    fake_output: torch.Tensor,
+    op_overload: torch._ops.OpOverload,
     kwargs: dict[str, Any],
 ) -> ExternKernelChoice:
-    """Create fallback choice for default implementation."""
+    """Create or get existing fallback choice that calls the op eagerly.
+
+    TODO: Automatically detect and handle out variants (has_out_variant=True)
+    for ops that support them.
+    """
+    fallback_name = f"{name}_fallback"
+
+    # Check if we already have this fallback registered
+    existing = ExternKernelChoice.get_existing(fallback_name)
+    if existing is not None:
+        return existing
 
     def fallback_wrapper(*args: Any) -> Any:
-        return default_impl(*args, **kwargs)
+        return op_overload(*args, **kwargs)
 
     return ExternKernelChoice(
         kernel=fallback_wrapper,
-        name=f"{name}_fallback_default",
+        name=fallback_name,
         has_out_variant=False,
-        op_overload=default_impl,
+        op_overload=op_overload,
         use_fallback_kernel=True,
     )
 
@@ -501,37 +516,29 @@ def autotune_custom_op(
         config_patches_list=config_patches_list,
     )
 
-    # Add default implementation as fallback
-    if op_overload and hasattr(op_overload, "_op"):
-        fallback_name = f"{name}_fallback_default"
-        from torch._inductor.select_algorithm import extern_kernels
+    # Add fallback choice that calls the op eagerly (not through inductor lowering)
+    # This provides a baseline to compare decompositions against
+    fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
 
-        # Skip if extern_kernel already registered to avoid duplicate registration error
-        if not hasattr(extern_kernels, fallback_name):
-            with V.fake_mode:
-                # pyrefly: ignore [no-matching-overload]
-                fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
-                fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
-                fake_output = op_overload(*fake_inputs, **fallback_kwargs)
+    with V.fake_mode:
+        # pyrefly: ignore [no-matching-overload]
+        fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
+        fake_output = op_overload(*fake_inputs, **fallback_kwargs)
 
-            output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
-            output_stride = tuple(
-                convert_symint_to_expr(s) for s in fake_output.stride()
-            )
+    output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
+    output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
 
-            fallback_choice = _create_fallback_choice(
-                name, op_overload, fake_output, fallback_kwargs
-            )
-            fallback_choice.maybe_append_choice(
-                choices=choices,
-                input_nodes=list(inputs),
-                layout=FixedLayout(
-                    device=fake_output.device,
-                    dtype=fake_output.dtype,
-                    size=output_size,
-                    stride=output_stride,
-                ),
-            )
+    fallback_choice = _create_fallback_choice(name, op_overload, fallback_kwargs)
+    fallback_choice.maybe_append_choice(
+        choices=choices,
+        input_nodes=list(inputs),
+        layout=FixedLayout(
+            device=fake_output.device,
+            dtype=fake_output.dtype,
+            size=output_size,
+            stride=output_stride,
+        ),
+    )
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
@@ -616,7 +623,11 @@ def _generate_dynamic_configs(
             f"got {type(configs)}"
         )
     if not configs:
-        raise ValueError(f"config_generator returned empty list for {operation_name}. ")
+        log.info(
+            "config_generator returned empty list for %s, will use default lowering",
+            operation_name,
+        )
+        return []
 
     return list(configs)
 
@@ -678,7 +689,11 @@ def _standard_lowering_fn(
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
 ) -> Any:
-    """Standard autotuning lowering function."""
+    """Standard autotuning lowering function.
+
+    Returns None if no configs/decompositions available, signaling caller to
+    use normal lowering.
+    """
     decompositions, non_tensor_args, config_patches_list = (
         _prepare_configs_and_decompositions(
             processed_configs,
@@ -689,6 +704,10 @@ def _standard_lowering_fn(
             name,
         )
     )
+
+    # If no decompositions, signal caller to use normal lowering
+    if not decompositions:
+        return None
 
     result = autotune_custom_op(
         name=name,
@@ -1052,7 +1071,7 @@ def _create_autotuning_lowering(
 
 
 def register_custom_op_autotuning(
-    custom_op: torch._library.custom_ops.CustomOpDef,
+    custom_op: Union[torch._library.custom_ops.CustomOpDef, torch._ops.OpOverload],
     configs: Optional[Union[list[CustomOpConfig], list[Callable[..., Any]]]] = None,
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
@@ -1070,7 +1089,8 @@ def register_custom_op_autotuning(
     runtime dispatch.
 
     Args:
-        custom_op: Custom operation (decorated function from @torch.library.custom_op)
+        custom_op: Custom operation (CustomOpDef from @torch.library.custom_op) or
+                   OpOverload (e.g., torch.ops.aten.mm.default)
         configs: List of CustomOpConfig objects for static inputs. Mutually exclusive with config_generator.
         config_generator: Dynamic config generator function that takes a dict mapping
                           parameter names to fake tensors, and returns list[CustomOpConfig]
@@ -1089,6 +1109,10 @@ def register_custom_op_autotuning(
             to require 10% speedup over fallback.
         benchmark_with_cudagraphs: If True, benchmark the fallback kernel using CUDA graph
             capture and replay for fair comparison with compiled kernels. Default is False.
+
+    The default/fallback implementation is automatically derived:
+    - For CustomOpDef: Uses the decorated function
+    - For OpOverload: Traces the op call, which falls through to normal inductor lowering
 
     Examples:
         # Static configs
@@ -1142,10 +1166,21 @@ def register_custom_op_autotuning(
     """
     from torch._library.custom_ops import CustomOpDef
 
-    if not isinstance(custom_op, CustomOpDef):
+    # Handle both CustomOpDef and OpOverload - derive impl_fn automatically
+    if isinstance(custom_op, CustomOpDef):
+        op_overload = custom_op._opoverload
+        impl_fn = custom_op._init_fn
+    elif isinstance(custom_op, torch._ops.OpOverload):
+        op_overload = custom_op
+
+        # For OpOverload, the default impl just calls the op itself.
+        # When traced, this creates the op call that falls through to
+        # normal Inductor lowerings (via V.active_user_lowering_ops guard).
+        def impl_fn(*args, **kwargs):
+            return op_overload(*args, **kwargs)
+    else:
         raise TypeError(
-            f"custom_op must be a CustomOpDef (decorated function from @torch.library.custom_op), "
-            f"got {type(custom_op)}."
+            f"custom_op must be a CustomOpDef or OpOverload, got {type(custom_op)}."
         )
 
     # Validate configs and config_generator are mutually exclusive
@@ -1157,9 +1192,6 @@ def register_custom_op_autotuning(
 
     if configs is None and config_generator is None:
         raise ValueError("Must specify either 'configs' or 'config_generator'")
-
-    op_overload = custom_op._opoverload
-    default_impl = custom_op._init_fn
 
     # Process and validate static configs at registration time
     static_configs = None
@@ -1229,7 +1261,7 @@ def register_custom_op_autotuning(
     lowering_fn = _create_autotuning_lowering(
         # pyrefly: ignore [bad-argument-type]
         processed_configs=static_configs,
-        default_impl=default_impl,
+        default_impl=impl_fn,
         name=name,
         op_overload=op_overload,
         input_gen_fns=input_gen_fns,
@@ -1242,4 +1274,6 @@ def register_custom_op_autotuning(
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
-    lowerings[op_overload] = lowering_fn
+    # Register in user_lowerings which takes priority over built-in lowerings
+    # The dispatch in graph.py checks user_lowerings first with recursion guard
+    user_lowerings[op_overload] = lowering_fn
