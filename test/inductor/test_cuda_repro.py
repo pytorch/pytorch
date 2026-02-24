@@ -2720,6 +2720,34 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         # is already float16 and the output is int64.
         self.assertNotIn(".to(tl.float16)", code[0])
 
+    def test_pow_precision(self):
+        # Test that pow(scalar, tensor) matches eager bitwise.
+        # CUDA toolkit libdevice avoids the FTZ (flush-to-zero) instructions
+        # in Triton's bundled libdevice that cause 1-3 ULP differences.
+        def fn(exp):
+            return torch.pow(0.9, exp)
+
+        exp = torch.arange(1, 101, device="cuda", dtype=torch.float32)
+
+        eager_result = fn(exp)
+        compiled_result = torch.compile(fn)(exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    def test_pow_precision_fp64(self):
+        # Test that pow matches eager bitwise for fp64.
+        # libdevice.pow matches CUDA's pow for fp64 (no FTZ issues).
+        def fn(base, exp):
+            return torch.pow(base, exp)
+
+        base = torch.tensor([0.9, 0.999, 0.5, 0.8], device="cuda", dtype=torch.float64)
+        exp = torch.tensor(
+            [50.0, 100.0, 10.0, 20.0], device="cuda", dtype=torch.float64
+        )
+
+        eager_result = fn(base, exp)
+        compiled_result = torch.compile(fn)(base, exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
