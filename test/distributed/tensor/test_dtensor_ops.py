@@ -274,10 +274,8 @@ dtensor_multi_threaded_fails = {
 dtensor_compiled_fails = {
     # View-type ops that decompose into as_strided (at autograd level).
     # DTensor doesn't have a sharding strategy for as_strided.
-    xfail("atleast_1d"),
     xfail("atleast_2d"),
     xfail("atleast_3d"),
-    xfail("broadcast_tensors"),
     xfail("broadcast_to"),
     xfail("diagonal"),
     xfail("dsplit"),
@@ -292,7 +290,6 @@ dtensor_compiled_fails = {
     xfail("permute"),
     xfail("select"),
     xfail("slice"),
-    xfail("t"),
     xfail("transpose_copy"),
     xfail("unsqueeze"),
     xfail("vsplit"),
