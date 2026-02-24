@@ -266,10 +266,7 @@ class Benchmarker:
             _callable()
         torch.cuda.synchronize()
 
-        try:
-            return self.benchmark_gpu(cuda_graph.replay, **kwargs)
-        finally:
-            del cuda_graph
+        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
 
 
 class TritonBenchmarker(Benchmarker):
