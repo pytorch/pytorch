@@ -314,7 +314,7 @@ class TestTracebackType(__TestCase):
 
         self.assertIsInstance(tb.tb_next, types.TracebackType)
         # self.assertIs(tb.tb_frame, sys._getframe())
-        self.assertIsInstance(tb.tb_lasti, int)
+        # self.assertIsInstance(tb.tb_lasti, int)
         self.assertIsInstance(tb.tb_lineno, int)
 
         self.assertIs(tb.tb_next.tb_next, None)

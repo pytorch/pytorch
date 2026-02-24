@@ -10,6 +10,12 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
 
+namespace xpu {
+// Forward-declares at::xpu::LevelZero
+struct LevelZero;
+} // namespace xpu
+
+
 struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
   ~XPUHooksInterface() override = default;
 
@@ -68,6 +74,10 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
 
   bool hasPrimaryContext(DeviceIndex device_index) const override {
     TORCH_CHECK(false, "Cannot query primary context without ATen_xpu library.");
+  }
+
+  virtual const at::xpu::LevelZero& level_zero() const {
+    TORCH_CHECK(false, "Level zero requires XPU.");
   }
 };
 

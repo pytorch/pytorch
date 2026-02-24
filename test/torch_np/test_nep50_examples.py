@@ -105,7 +105,10 @@ class TestNEP50Table(TestCase):
                 new = old
 
             assert_allclose(result, new, atol=1e-16)
-            assert result.dtype == new.dtype
+            if result.dtype != new.dtype:
+                raise AssertionError(
+                    f"Expected result.dtype == {new.dtype}, got {result.dtype}"
+                )
 
 
 # ### Directly compare to numpy ###
@@ -173,8 +176,12 @@ class TestCompareToNumpy(TestCase):
             if dtype is not None:
                 kwargs = {"dtype": getattr(tnp, dtype.__name__)}
             result = tnp.add(scalar, array, **kwargs).tensor.numpy()
-            assert result.dtype == result_numpy.dtype
-            assert result == result_numpy
+            if result.dtype != result_numpy.dtype:
+                raise AssertionError(
+                    f"Expected result.dtype == {result_numpy.dtype}, got {result.dtype}"
+                )
+            if result != result_numpy:
+                raise AssertionError(f"Expected result == {result_numpy}, got {result}")
 
         finally:
             _np._set_promotion_state(state)
@@ -210,7 +217,10 @@ class TestCompareToNumpy(TestCase):
                 result_numpy = None
 
             if result is not None and result_numpy is not None:
-                assert result.tensor.numpy().dtype == result_numpy.dtype
+                if result.tensor.numpy().dtype != result_numpy.dtype:
+                    raise AssertionError(
+                        f"Expected result dtype == {result_numpy.dtype}, got {result.tensor.numpy().dtype}"
+                    )
 
         finally:
             _np._set_promotion_state(state)

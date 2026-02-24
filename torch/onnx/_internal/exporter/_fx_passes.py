@@ -24,7 +24,8 @@ def insert_type_promotion_nodes(
 ) -> None:
     """Inplace pass to insert explicit type promotion nodes, recursively through nested modules."""
     for module in graph_module.modules():
-        assert isinstance(module, torch.fx.GraphModule)
+        if not isinstance(module, torch.fx.GraphModule):
+            raise AssertionError(f"Expected GraphModule, got {type(module)}")
         passes.InsertTypePromotion(module).run()
 
 

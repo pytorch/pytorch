@@ -62,6 +62,7 @@ from torch.testing._internal.common_quantized import (
     generate_jagged_offs,
     pack_uint4,
 )
+from torch._inductor.utils import infer_scale_swizzle
 
 
 _IS_SM8X = False
@@ -70,9 +71,9 @@ if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
-f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
+f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
-mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_FBGEMM_GENAI=1 on SM100+"
+mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -199,70 +200,6 @@ def _pad_128x128_scales(scale: torch.Tensor) -> (torch.Tensor, int):
 
 def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
-
-
-def infer_scale_swizzle(mat, scale):
-    # Tensor-wise
-    if scale.numel() == 1:
-        return ScalingType.TensorWise, SwizzleType.NO_SWIZZLE
-
-    # Row-wise
-    if (scale.shape[0] == mat.shape[0] and scale.shape[1] == 1) or (
-        scale.shape[0] == 1 and scale.shape[1] == mat.shape[1]
-    ):
-        return ScalingType.RowWise, SwizzleType.NO_SWIZZLE
-
-    # deepgemm 1x128 / 128x1
-    if len(scale.shape) > 1:
-        if (
-            (scale.shape[0] == mat.shape[0]
-                and scale.shape[1] == math.ceil(mat.shape[1] // 128))
-            or (scale.shape[1] == mat.shape[1]
-                and scale.shape[0] == math.ceil(mat.shape[0] // 128))
-        ):
-            return ScalingType.BlockWise1x128, SwizzleType.NO_SWIZZLE
-
-        # deepgemm 128x128
-        if scale.shape[0] == math.ceil(mat.shape[0] // 128) and scale.shape[
-            1
-        ] == math.ceil(mat.shape[1] // 128):
-            return ScalingType.BlockWise128x128, SwizzleType.NO_SWIZZLE
-
-    # if we're checking for nvfp4, need to adjust for packed-K
-    K_multiplier = 2 if mat.dtype == torch.float4_e2m1fn_x2 else 1
-    # NVFP4
-    if (
-        (scale.numel()
-            == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 16), 4)
-            or scale.numel()
-            == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 16), 4))
-        and mat.dtype == torch.float4_e2m1fn_x2
-        and scale.dtype == torch.float8_e4m3fn
-    ):
-        return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
-
-    # MX formats
-    if not torch.version.hip:
-        # MX w/swizzle (NVIDIA)
-        if (
-            (scale.numel()
-                == round_up(mat.shape[0], 128) * round_up(math.ceil(K_multiplier * mat.shape[1] // 32), 4)
-                or scale.numel()
-                == round_up(mat.shape[1], 128) * round_up(math.ceil(K_multiplier * mat.shape[0] // 32), 4))
-            and scale.dtype == torch.float8_e8m0fnu
-        ):
-            return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
-
-    else:
-        # MX w/o swizzle (AMD)
-        if (
-            (scale.numel() == math.ceil(mat.shape[0] // 32) * K_multiplier * mat.shape[1]
-                or scale.numel() == math.ceil(K_multiplier * mat.shape[1] // 32) * mat.shape[0])
-            and scale.dtype == torch.float8_e8m0fnu
-        ):
-            return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
-
-    return None, None
 
 
 wrap: bool = True
@@ -715,6 +652,8 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
+    # Skip on XPU due to known oneDNN accuracy issue (#169772)
+    @skipXPU
     def test_float8_basics(self, device) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
@@ -734,8 +673,14 @@ class TestFP8Matmul(TestCase):
 
         if torch.cuda.is_available():
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
-                layouts_supported = (x_cm, y_cm) == (True, False) or torch.cuda.get_device_properties(0).major == 10
+                # SM 10 and 11 support all permutations, SM 12 TT and TN, SM 9 only TN
+                major, minor = torch.cuda.get_device_capability(0)
+                if major in (10, 11):
+                    layouts_supported = True
+                elif major == 12 and (minor == 1 or _get_torch_cuda_version() >= (13, 1)):
+                    layouts_supported = x_cm
+                else:
+                    layouts_supported = (x_cm, y_cm) == (True, False)
                 with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
                     self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
 
@@ -806,8 +751,10 @@ class TestFP8Matmul(TestCase):
             raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
 
         if format == 'nvfp4':
-            assert x_global_scales.numel() == w_global_scales.numel()
-            assert x_global_scales.numel() == G
+            if x_global_scales.numel() != w_global_scales.numel():
+                raise AssertionError(f"scale numel mismatch: {x_global_scales.numel()} != {w_global_scales.numel()}")
+            if x_global_scales.numel() != G:
+                raise AssertionError(f"scale numel should be {G}, got {x_global_scales.numel()}")
 
         # Compute mxfp8 grouped mm output
         y_lp = scaled_grouped_mm_wrap(
@@ -824,7 +771,8 @@ class TestFP8Matmul(TestCase):
         )
 
         # Assert no NaNs
-        assert not y_lp.isnan().any(), "low-precision output contains NaN"
+        if y_lp.isnan().any():
+            raise AssertionError("low-precision output contains NaN")
 
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
@@ -950,8 +898,10 @@ class TestFP8Matmul(TestCase):
             raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
 
         if format == 'nvfp4':
-            assert x_global_scales.numel() == w_global_scales.numel()
-            assert x_global_scales.numel() == G
+            if x_global_scales.numel() != w_global_scales.numel():
+                raise AssertionError(f"scale numel mismatch: {x_global_scales.numel()} != {w_global_scales.numel()}")
+            if x_global_scales.numel() != G:
+                raise AssertionError(f"scale numel should be {G}, got {x_global_scales.numel()}")
 
         # Compute low-precision grouped gemm.
         y_lp = scaled_grouped_mm_wrap(
@@ -976,14 +926,20 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
-    def test_scaled_mm_vs_emulated(self, base_dtype, device="cuda"):
+    @parametrize("x_cm", [True, False])
+    @parametrize("y_cm", [True, False])
+    def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device="cuda"):
+        # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
+        if (x_cm, y_cm) != (True, False) and torch.cuda.get_device_properties(0).major != 10:
+            raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
         compare_type = torch.float32
 
-        x = torch.randn(16, 16, device=device, dtype=base_dtype)
-        y = torch.randn(32, 16, device=device, dtype=base_dtype).t()
+        M, N, K = 16, 32, 16
+        x = torch.randn(M, K, device=device, dtype=base_dtype) if x_cm else torch.randn(K, M, device=device, dtype=base_dtype).t()
+        y = torch.randn(K, N, device=device, dtype=base_dtype) if y_cm else torch.randn(N, K, device=device, dtype=base_dtype).t()
 
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
@@ -1371,7 +1327,7 @@ class TestFP8Matmul(TestCase):
             test()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(not IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling requires SM90 (Hopper)")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
@@ -1424,8 +1380,10 @@ class TestFP8Matmul(TestCase):
             if lhs_block == 1:
                 x_scales = x_scales.t().contiguous().t()
                 lhs_recipe = ScalingType.BlockWise1x128
-                assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
-                assert (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]), f"{x_scales.stride=}"
+                if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{x_scales.shape=}")
+                if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
+                    raise AssertionError(f"{x_scales.stride=}")
                 x_hp = hp_from_1x128(x_fp8, x_scales_original)
             else:
                 lhs_recipe = ScalingType.BlockWise128x128
@@ -1443,8 +1401,10 @@ class TestFP8Matmul(TestCase):
             if rhs_block == 1:
                 y_scales = y_scales.t().contiguous().t()
                 rhs_recipe = ScalingType.BlockWise1x128
-                assert (y_scales.shape[0] == N and y_scales.shape[1] == K // 128), f"{y_scales.shape=}"
-                assert (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]), f"{y_scales.stride=}"
+                if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{y_scales.shape=}")
+                if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
+                    raise AssertionError(f"{y_scales.stride=}")
                 y_hp = hp_from_1x128(y_fp8, y_scales_original)
             else:
                 rhs_recipe = ScalingType.BlockWise128x128
@@ -1598,7 +1558,7 @@ class TestFP8Matmul(TestCase):
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(not IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling requires SM90 (Hopper)")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
@@ -1623,8 +1583,10 @@ class TestFP8Matmul(TestCase):
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
             lhs_recipe = ScalingType.BlockWise1x128
-            assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
-            assert (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]), f"{x_scales.stride=}"
+            if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                raise AssertionError(f"{x_scales.shape=}")
+            if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
+                raise AssertionError(f"{x_scales.stride=}")
         else:
             lhs_recipe = ScalingType.BlockWise128x128
             x_scales, pad_amount = _pad_128x128_scales(x_scales)
@@ -1634,8 +1596,10 @@ class TestFP8Matmul(TestCase):
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
             rhs_recipe = ScalingType.BlockWise1x128
-            assert (y_scales.shape[0] == N and y_scales.shape[1] == K // 128), f"{y_scales.shape=}"
-            assert (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]), f"{y_scales.stride=}"
+            if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
+                raise AssertionError(f"{y_scales.shape=}")
+            if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
+                raise AssertionError(f"{y_scales.stride=}")
         else:
             rhs_recipe = ScalingType.BlockWise128x128
             y_scales, pad_amount = _pad_128x128_scales(y_scales)
@@ -1666,7 +1630,7 @@ class TestFP8Matmul(TestCase):
     @skipIfRocm
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(IS_SM90, "cuBLAS blockwise scaling works on sm90")
+    @unittest.skipIf(IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling works on SM90 (Hopper)")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
@@ -1698,7 +1662,7 @@ class TestFP8Matmul(TestCase):
         else:
             rhs_recipe = ScalingType.BlockWise128x128
 
-        # Verify that actual F8 mm doesn't error
+        # Verify that actual F8 mm raises expected error on non-SM90
         with self.assertRaisesRegex(
             NotImplementedError,
             ".*DeepSeek.*scaling.*only supported in CUDA for SM90.*"
@@ -1885,7 +1849,8 @@ class TestFP8Matmul(TestCase):
         )
 
         sqnr = compute_error(C_ref, C)
-        assert sqnr.item() > approx_match_sqnr_target
+        if sqnr.item() <= approx_match_sqnr_target:
+            raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
@@ -2146,7 +2111,8 @@ class TestFP8Matmul(TestCase):
             torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
         else:
             sqnr = compute_error(C_ref, C)
-            assert sqnr.item() > approx_match_sqnr_target
+            if sqnr.item() <= approx_match_sqnr_target:
+                raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
