@@ -19,7 +19,6 @@ from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
-from torch.export import _restore_state_dict
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.symbolic_shapes import (
@@ -748,9 +747,8 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
 
 
 def dynamo_graph_capture_for_export(
-    mod: Callable[..., Any],
+    fn: Callable[..., Any],
     constraints: Optional[list[Constraint]] = None,
-    restore_state_dict: bool = False,
 ) -> Callable[..., Any]:
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
@@ -762,14 +760,12 @@ def dynamo_graph_capture_for_export(
             dynamo_timed("fullgraph_capture"),
         ):
             out = fullgraph_capture(
-                mod,
+                fn,
                 args,
                 kwargs,
                 constraints=constraints,
             )
-        graph_module = create_fx_graph_from_captured_output(out, mod, args, kwargs)
-        if restore_state_dict:
-            _restore_state_dict(mod, graph_module)
+        graph_module = create_fx_graph_from_captured_output(out, fn, args, kwargs)
         return graph_module
 
     return inner
