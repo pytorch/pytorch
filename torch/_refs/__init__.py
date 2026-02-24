@@ -4359,7 +4359,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         return torch.empty_like(x).index_copy(0, index, x.expand_as(index))
 
     idx = (slice(None),) * dim + (index,)
-    return x[idx].contiguous()
+    return x[idx].contiguous(memory_format=torch._prims_common.suggest_memory_format(x))
 
 
 @register_decomposition(aten.squeeze.dims)
