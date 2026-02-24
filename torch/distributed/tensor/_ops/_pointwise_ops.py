@@ -102,6 +102,40 @@ monotonic_decreasing_unary_ops = [
     aten.special_erfcx.default,
 ]
 
+# All-partial-preserving unary ops: P(x)->P(x) for all x.
+# These ops preserve the exact value for each element, only transforming units/representation.
+all_partial_preserving_unary_ops = [
+    aten.deg2rad.default,
+    aten.deg2rad_.default,
+    aten.nan_to_num.default,
+    aten.nan_to_num_.default,
+    aten.rad2deg.default,
+    aten.rad2deg_.default,
+]
+
+# Binary ops monotonically increasing in both arguments.
+# max-preserving: P(max)+P(max)->P(max) because max(max(a),max(b)) = max(a,b)
+monotonic_max_preserving_binary_ops = [
+    aten.clamp_min.Tensor,
+    aten.fmax.default,
+    aten.maximum.default,
+    prims.fmax.default,
+]
+
+# min-preserving: P(min)+P(min)->P(min) because min(min(a),min(b)) = min(a,b)
+monotonic_min_preserving_binary_ops = [
+    aten.clamp_max.Tensor,
+    aten.fmin.default,
+    aten.minimum.default,
+    prims.fmin.default,
+]
+
+# Monotonic increasing in both args but don't preserve any specific partial type.
+monotonic_binary_ops = [
+    aten.logaddexp.default,
+    aten.logaddexp2.default,
+]
+
 pointwise_ops = (
     [
         # please keep the entries below alphabetically sorted
@@ -211,9 +245,7 @@ pointwise_ops = (
         aten.cosh.default,
         aten.cosh.out,
         aten.cosh_.default,
-        aten.deg2rad.default,
         aten.deg2rad.out,
-        aten.deg2rad_.default,
         aten.digamma.default,
         aten.digamma.out,
         aten.digamma_.default,
@@ -316,9 +348,7 @@ pointwise_ops = (
         aten.log2.out,
         aten.log2_.default,
         aten.log_.default,
-        aten.logaddexp.default,
         aten.logaddexp.out,
-        aten.logaddexp2.default,
         aten.logaddexp2.out,
         aten.logical_and.default,
         aten.logical_and.out,
@@ -343,9 +373,7 @@ pointwise_ops = (
         aten.mvlgamma_.default,
         aten.native_dropout_backward.default,
         aten.native_dropout_backward.out,
-        aten.nan_to_num.default,
         aten.nan_to_num.out,
-        aten.nan_to_num_.default,
         aten.ne.Scalar,
         aten.neg.out,
         aten.nextafter.default,
@@ -366,9 +394,7 @@ pointwise_ops = (
         aten.reciprocal.default,
         aten.reciprocal.out,
         aten.reciprocal_.default,
-        aten.rad2deg.default,
         aten.rad2deg.out,
-        aten.rad2deg_.default,
         aten.remainder.Scalar,
         aten.remainder.Scalar_Tensor,
         aten.remainder.Scalar_out,
@@ -447,6 +473,8 @@ pointwise_ops = (
     ]
     + monotonic_increasing_unary_ops
     + monotonic_decreasing_unary_ops
+    + all_partial_preserving_unary_ops
+    + monotonic_binary_ops
 )
 
 # Linear pointwise ops, split by linearity type.
