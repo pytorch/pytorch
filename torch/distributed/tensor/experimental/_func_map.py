@@ -7,7 +7,6 @@ from typing import cast, Optional, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
-from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.tensor import DeviceMesh, DTensor
@@ -190,6 +189,25 @@ def local_map(
     )
 
 
+def _compute_contiguous_strides(shape: torch.Size) -> tuple[int, ...]:
+    """
+    Compute contiguous (row-major) strides for the given shape.
+
+    This is a simplified version of make_contiguous_strides_for that avoids
+    calling is_nested_int (which is marked as skip by TorchDynamo and would
+    cause a graph break). Since local_map only deals with regular (non-nested)
+    tensors, the is_nested_int check is unnecessary here.
+    """
+    if not shape:
+        return ()
+    strides = []
+    multiplier = 1
+    for l in reversed(shape):
+        strides.append(multiplier)
+        multiplier *= max(l, 1)
+    return tuple(reversed(strides))
+
+
 def _infer_global_shape_local_even_sharding(
     local_tensor: torch.Tensor,
     device_mesh: DeviceMesh,
@@ -220,7 +238,7 @@ def _infer_global_shape_local_even_sharding(
         global_shape[placement.dim] *= device_mesh.size(mesh_dim)
 
     global_shape_tuple = torch.Size(global_shape)
-    return global_shape_tuple, make_contiguous_strides_for(global_shape_tuple)
+    return global_shape_tuple, _compute_contiguous_strides(global_shape_tuple)
 
 
 def _allgather_global_shape_uneven_sharding(
@@ -297,7 +315,7 @@ def _allgather_global_shape_uneven_sharding(
         global_shape[shard_dim] = _sum_sizes(gathered_sizes)
 
     global_shape_tuple = torch.Size(global_shape)
-    return global_shape_tuple, make_contiguous_strides_for(global_shape_tuple)
+    return global_shape_tuple, _compute_contiguous_strides(global_shape_tuple)
 
 
 def _local_map_wrapped(
@@ -436,7 +454,7 @@ def _local_map_wrapped(
                         provided_shape = out_shapes[out_idx]
                         if provided_shape is not None:
                             global_shape = provided_shape
-                            global_stride = make_contiguous_strides_for(provided_shape)
+                            global_stride = _compute_contiguous_strides(provided_shape)
                         else:
                             raise RuntimeError(
                                 f"out_shapes[{out_idx}] is None for a tensor output. "
