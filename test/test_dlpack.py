@@ -30,7 +30,9 @@ from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
 
 
 device_type = (
-    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
 )
 
 # Wraps a tensor, exposing only DLPack methods:
