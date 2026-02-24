@@ -139,7 +139,7 @@ def remove_redundant_precision_casts(loop_body: LoopBody, debug: bool = False) -
         # Key insight: if inner_input produces fp32, then:
         # inner_input(fp32) -> literal_bf16 -> compute_fp32 is pointless
         # We're casting fp32 to bf16 and back to fp32 - just use original fp32
-        processed_nodes: set = OrderedSet()
+        processed_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
         modified = True
         while modified:
             modified = False

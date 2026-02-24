@@ -3468,7 +3468,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
 
     int_max = torch.iinfo(torch.int32).max
     guarding_hint_or_throw = V.graph.sizevars.guarding_hint_or_throw
-    has_hint = V.graph.sizevars.shape_env.has_hint
+    has_guarding_hint = V.graph.sizevars.shape_env.has_guarding_hint
 
     if config.assume_32bit_indexing:
         V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
@@ -3499,7 +3499,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
             return False
 
     # Otherwise, the hint MUST exist and be in range
-    return has_hint(e) and guarding_hint_or_throw(e) <= int_max
+    return has_guarding_hint(e) and guarding_hint_or_throw(e) <= int_max
 
 
 def set_tracing_context_output_strides(

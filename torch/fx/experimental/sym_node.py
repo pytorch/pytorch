@@ -95,7 +95,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float, bool]],
+        hint: HintType | object,
         constant=None,
         fx_node=None,
         optimized_summation=False,

@@ -6928,8 +6928,8 @@ class ShapeEnv:
         """Helper for _sub_unbacked_exprs. Builds a mapping from unbacked expressions
         to canonical equivalents using a union-find algorithm over deferred runtime asserts.
         Used by optimization_hint to resolve unbacked symbols to consistent values."""
-        if self.unbacked_replacements is not None:
-            return self.unbacked_replacements
+        if self._unbacked_replacements is not None:
+            return self._unbacked_replacements
 
         class CanonicalExprFinder:
             """
@@ -7061,7 +7061,7 @@ class ShapeEnv:
                 return b, a
 
         # Build an undirected graph using ShapeEnv's deferred runtime assertions.
-        self.equality_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]] = defaultdict(
+        self._equality_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]] = defaultdict(
             OrderedSet
         )
         for assertions in self.deferred_runtime_asserts.values():
@@ -7072,22 +7072,22 @@ class ShapeEnv:
                     continue
                 lhs = sympy.sympify(assertion.expr.lhs)  # sympify helps with ints
                 rhs = sympy.sympify(assertion.expr.rhs)
-                self.equality_graph[lhs].add(rhs)
-                self.equality_graph[rhs].add(lhs)
+                self._equality_graph[lhs].add(rhs)
+                self._equality_graph[rhs].add(lhs)
 
         # Use the undirected graph to create a DSU data structure, so we can
         # query for a "canonical" expression.
-        uf = CanonicalExprFinder(self.equality_graph)
+        uf = CanonicalExprFinder(self._equality_graph)
 
         # Start building the unbacked replacements mapping using CanonicalExprFinder
         # The mapping is from Expr to its "canonical" Expr.
-        self.unbacked_replacements = {}
-        for expr in self.equality_graph:
+        self._unbacked_replacements = {}
+        for expr in self._equality_graph:
             canonical_expr = uf.find_expr(expr)
             if expr != canonical_expr:
-                self.unbacked_replacements[expr] = canonical_expr
+                self._unbacked_replacements[expr] = canonical_expr
 
-        return self.unbacked_replacements
+        return self._unbacked_replacements
 
     @functools.lru_cache  # noqa: B019
     def _sub_unbacked_exprs(self, expr: sympy.Expr) -> sympy.Expr:

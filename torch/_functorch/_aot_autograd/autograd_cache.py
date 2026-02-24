@@ -52,7 +52,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
 from torch.utils._triton import has_triton_package
 

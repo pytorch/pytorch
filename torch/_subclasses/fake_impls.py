@@ -36,6 +36,7 @@ from torch._subclasses.fake_tensor import (
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
+from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils._stats import count_label
 
@@ -1320,9 +1321,9 @@ def conv(
 
         # Avoid importing sympy at a module level
 
-        all_hinted = all(has_hint(s) for s in new_kwargs["input"].shape) and all(
-            has_hint(s) for s in new_kwargs["weight"].shape
-        )
+        all_hinted = all(
+            has_guarding_hint(s) for s in new_kwargs["input"].shape
+        ) and all(has_guarding_hint(s) for s in new_kwargs["weight"].shape)
 
         if not all_hinted:
             # TODO: We can make this a little more faithful with best effort

@@ -390,7 +390,6 @@ def _broadcast_shapes(*_shapes):
         guard_or_false,
         has_guarding_hint,
         is_nested_int,
-        size_hint,
     )
 
     backed_so = torch.fx.experimental._config.backed_size_oblivious
@@ -3129,7 +3128,6 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
         has_guarding_hint,
-        size_hint,
         sym_or,
     )
 
@@ -3178,8 +3176,8 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
                 and has_guarding_hint(x)
                 and has_guarding_hint(requested_length)
             ):
-                x_hint = size_hint(x)
-                requested_hint = size_hint(requested_length)
+                x_hint = guarding_hint_or_throw(x)
+                requested_hint = guarding_hint_or_throw(requested_length)
                 if x_hint == 1 and requested_hint != 1:
                     torch._check(x == 1)
 

@@ -110,7 +110,11 @@ from torch.compiler._cache import (
 )
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
-from torch.fx.experimental.symbolic_shapes import has_guarding_hint, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    guarding_hint_or_throw,
+    has_guarding_hint,
+    ShapeEnv,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
