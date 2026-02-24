@@ -2779,8 +2779,8 @@ class SIMDScheduling(BaseScheduling):
                 if len(pointwise_tiling) and len(reduction_tiling) > 0:
                     node_tilings.append((pointwise_tiling, reduction_tiling))
 
-            # Each node contributes one pointwise and reduction tiling. We take the
-            # Cartesian product of these, yielding all possible joint tilings.
+            # Each memory dependency contributes one pointwise and reduction tiling. We
+            # take the Cartesian product of these, yielding all possible joint tilings.
             for pointwise_tiling, reduction_tiling in itertools.product(
                 *zip(*node_tilings)
             ):
