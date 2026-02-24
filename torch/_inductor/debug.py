@@ -12,6 +12,7 @@ import os.path
 import pickle
 import pstats
 import shutil
+import tempfile
 import traceback
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any, IO, Optional, Union
@@ -90,6 +91,16 @@ def draw_buffers(
                 group = (group[1],)
             else:
                 group = group[1]
+        elif isinstance(group, str):
+            # extern / template / nop nodes store a string like "extern"
+            # as the group instead of a shape tuple.  Extract the real
+            # output shape from the scheduler node's first output buffer.
+            try:
+                snode = node.meta["fusion_meta"].snode
+                size = snode.get_outputs()[0].node.maybe_get_size()
+                group = tuple(size) if size else ()
+            except Exception:
+                group = ()
 
         # gather meta data
         dtype = None
@@ -97,7 +108,7 @@ def draw_buffers(
             dtype = node.data.dtype
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
-        # pyrefly: ignore [missing-attribute]
+
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -133,6 +144,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     outputs = []
     group: Any = None
     # create call_function node for each Buffer and Kernel
+    # pyrefly: ignore [bad-assignment]
     for snode in snodes:
         if snode.is_extern():
             node_type = "extern"
@@ -649,22 +661,14 @@ class DebugFormatter:
             try:
                 layout = node.get_output_spec()
                 if isinstance(layout, FixedLayout):
-                    offset = 0
-                    try:
-                        offset = int(layout.offset)
-                    except Exception:
-                        try:
-                            offset = V.graph.sizevars.size_hint(
-                                layout.offset, fallback=0
-                            )
-                        except Exception:
-                            pass
                     static_layout = FixedLayout(
                         layout.device,
                         dtype=layout.dtype,
-                        size=[*V.graph.sizevars.size_hints(layout.size)],
-                        stride=[*V.graph.sizevars.size_hints(layout.stride)],
-                        offset=offset,
+                        size=V.graph.sizevars.optimization_hints(layout.size),
+                        stride=V.graph.sizevars.optimization_hints(layout.stride),
+                        offset=V.graph.sizevars.optimization_hint(
+                            layout.offset, fallback=0
+                        ),
                     )
                     node_info["layout"] = str(static_layout)
                 else:
@@ -681,16 +685,20 @@ class DebugFormatter:
                 pass
             try:
                 node_info["stride"] = str(
-                    V.graph.sizevars.size_hints(node.get_stride())
+                    V.graph.sizevars.optimization_hints(node.get_stride())
                 )
             except Exception:
                 pass
             try:
-                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
+                node_info["size"] = str(
+                    V.graph.sizevars.optimization_hints(node.get_size())
+                )  # type: ignore[arg-type]
             except Exception:
                 pass
             try:
-                node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
+                node_info["numel"] = str(
+                    V.graph.sizevars.optimization_hint(node.get_numel())
+                )
             except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
@@ -764,10 +772,10 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
     """Log per-op runtime estimates and output tensor metadata for TLParse."""
 
     try:
-        to_size_hints = V.graph.sizevars.size_hints
+        to_optimization_hints = V.graph.sizevars.optimization_hints
 
         def to_list(x: Optional[Sequence[Any]]) -> list[Any]:
-            return list(to_size_hints(x)) if x is not None else []
+            return list(to_optimization_hints(x)) if x is not None else []
 
         def dtype_to_str(dtype: Any) -> Optional[str]:
             if dtype is None:
@@ -1190,7 +1198,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    folder = "/tmp/inductor_saved_args"
+    folder = os.path.join(tempfile.gettempdir(), "inductor_saved_args")
     if not os.path.exists(folder):
         os.mkdir(folder)
 

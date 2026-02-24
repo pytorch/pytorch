@@ -563,7 +563,19 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI || !is_macOS_15_0_or_newer) {
     auto shape = mpsShape_ ? mpsShape_ : getMPSShape(_tensor);
     check_mps_shape(shape);
-    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf shape:shape dataType:dataType] autorelease];
+    if (!_tensor.storage_offset()) {
+      _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf shape:shape dataType:dataType] autorelease];
+    } else {
+      // initWithMTLBuffer:shape:dataType: has no offset parameter; use MPSNDArray to apply storage_offset.
+      // This arises e.g. for channels_last tensors with a non-zero storage offset (gatherTensorData=false path).
+      MPSNDArrayDescriptor* desc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:shape];
+      desc.preferPackedRows = YES;
+      MPSNDArray* ndArray = [[[MPSNDArray alloc] initWithBuffer:srcBuf
+                                                         offset:_tensor.storage_offset() * _tensor.element_size()
+                                                     descriptor:desc] autorelease];
+      TORCH_INTERNAL_ASSERT(ndArray);
+      _value = [[[MPSGraphTensorData alloc] initWithMPSNDArray:ndArray] autorelease];
+    }
   } else {
     IntArrayRef view_shape;
     if (mpsShape_) {
@@ -860,7 +872,15 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   MTLCompileOptions* options = compile_options;
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
-    [options setLanguageVersion:MTLLanguageVersion3_1];
+    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_26_0_PLUS)) {
+      // Metal-4.0 allows tensor template arguments
+      [options setLanguageVersion:MTLLanguageVersion4_0];
+    } else if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+      // Metal-3.2 allows lambdas in shader code
+      [options setLanguageVersion:MTLLanguageVersion3_2];
+    } else {
+      [options setLanguageVersion:MTLLanguageVersion3_1];
+    }
     if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
       options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
       options.mathFloatingPointFunctions =

@@ -44,6 +44,7 @@ class CodeContextDict:
     def get_context(self, code: types.CodeType) -> dict[str, Any]:
         ctx = self.code_context.get(code)
         if ctx is None:
+            # pyrefly: ignore [implicit-any]
             ctx = {}
             self.code_context[code] = ctx
         return ctx

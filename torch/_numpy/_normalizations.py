@@ -7,6 +7,7 @@ from __future__ import annotations
 import functools
 import inspect
 import operator
+import types
 import typing
 
 import torch
@@ -37,10 +38,9 @@ KeepDims = typing.TypeVar("KeepDims")
 #
 OutArray = typing.TypeVar("OutArray")
 
-try:
-    from typing import NotImplementedType
-except ImportError:
-    NotImplementedType = typing.TypeVar("NotImplementedType")
+NotImplementedType = typing.TypeVar(
+    "NotImplementedType", bound=types.NotImplementedType
+)
 
 
 def normalize_array_like(x, parm=None):  # codespell:ignore

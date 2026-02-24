@@ -279,7 +279,6 @@ extern "C" __m512i __avx512_vnni_chk_kernel_2(__m512i src, __m512i a, __m512i b)
 """
 
     @functools.cache  # noqa: B019
-    # pyrefly: ignore [bad-override]
     def __bool__(self) -> bool:
         if super().__bool__():
             if config.is_fbcode():

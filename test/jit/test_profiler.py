@@ -259,6 +259,13 @@ class TestProfiler(JitTestCase):
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_count(":TensorExprGroup", 2, exactly=True).run(g)
 
+    def test_invalid_fusion_strategy_raises_value_error(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"FusionBehavior.*(STATIC|DYNAMIC).*got:\s*COMPLEX",
+        ):
+            torch.jit.set_fusion_strategy([("STATIC", 2), ("COMPLEX", 3)])
+
     def test_iterative_fusion(self):
         @torch.jit.script
         def foo(a, b, c, d):

@@ -4,6 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/JitLoops.cuh>
+#include <ATen/native/cuda/DeviceAddCmulCdiv.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/PointwiseOps.h>
@@ -84,7 +85,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto alpha = value.to<accscalar_t>();
       gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-        return a + alpha * (static_cast<accscalar_t>(b) * static_cast<accscalar_t>(c));
+        return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::multiplies<accscalar_t>());
       });
     });
   }
@@ -133,7 +134,7 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
       auto c = scalar_tensor2.to<accscalar_t>();
       auto alpha = value.to<accscalar_t>();
       gpu_kernel(iter, [alpha, c]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a + alpha * (static_cast<accscalar_t>(b) * c);
+        return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::multiplies<accscalar_t>());
       });
     });
   }
@@ -178,7 +179,8 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto alpha = value.to<accscalar_t>();
       gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-        return a + alpha * (b / static_cast<accscalar_t>(c));
+        //return a + alpha * (b / static_cast<accscalar_t>(c));
+        return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::divides<accscalar_t>());
       });
     });
   }

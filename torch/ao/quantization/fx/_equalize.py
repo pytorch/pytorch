@@ -483,7 +483,7 @@ def maybe_get_next_equalization_scale(
     In this case, the node given is linear1 and we want to locate the InputEqObs.
     """
     next_inp_eq_obs = maybe_get_next_input_eq_obs(node, modules)
-    # pyrefly: ignore [invalid-argument]
+
     if next_inp_eq_obs:
         if (
             next_inp_eq_obs.equalization_scale.nelement() == 1
