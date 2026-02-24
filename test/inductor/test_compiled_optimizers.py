@@ -1000,7 +1000,6 @@ class CompiledOptimizerBitwiseTests(TestCase):
 
     These tests verify that with the following config options:
     - eager_numerics.division_rounding = True
-    - eager_numerics.pow_precision = True
     - emulate_precision_casts = True
 
     The compiled optimizer step produces results that are bitwise identical
@@ -1097,7 +1096,6 @@ def _make_bitwise_test(optim_cls, **optim_kwargs):
     @config.patch(
         {
             "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
             "emulate_precision_casts": True,
         }
     )
