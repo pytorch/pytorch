@@ -4574,6 +4574,8 @@ def forward(self, x, b, y):
 
         self.assertEqual(ref, res)
 
+
+class ExportTestsSubprocess(torch._dynamo.test_case.TestCase):
     def test_strict_export_under_pythonoptimize(self):
         env = dict(os.environ)
         env["PYTHONOPTIMIZE"] = "1"
