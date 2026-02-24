@@ -357,8 +357,9 @@ def expand_to_full_mesh_op_strategy(
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
     input_index: int = 1,
     inplace_op: bool = False,
+    allow_unbacked_sharding: bool | None = None,
     is_valid_strategy_cb: Callable[
-        [list[DTensorSpec], tuple[DTensorSpec | None, ...]], bool
+        [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
 ) -> OpStrategy:
@@ -398,33 +399,68 @@ def expand_to_full_mesh_op_strategy(
     kwargs_strategy = op_schema.kwargs_strategy
     input_args_strategy = args_strategy + kwargs_strategy
     all_strategies = []
+    # Track input placements if we skip strategies due to inplace placement mismatch
+    blocking_inplace_input_placements: tuple[Placement, ...] | None = None
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
-        spec_index = 0
-        for specs in zip(*strategy_comb):
+        # Track how many non-None output specs we've seen (for output_tensor_meta indexing).
+        # This is needed because output_tensor_meta may contain only non-None entries,
+        # so we can't use position directly when there are None entries in the output.
+        output_spec_count = 0
+        # Track input args separately since not all tensor inputs have OpStrategy
+        # (e.g., philox_seed/offset in SDPA are scalar tensors without OpStrategy)
+        input_strategy_counter = 0
+        for position, specs in enumerate(zip(*strategy_comb, strict=True)):
             if specs[0] is not None:
                 # Populate tensor_meta field for both output and input specs,
                 # including for tuple output cases
                 tensor_meta = None
-                if spec_index < input_index:
+                # Use position to determine output vs input territory
+                # (position includes None entries, unlike the old spec_index)
+                if position < input_index:
+                    # This is an output position
                     if output_tensor_meta is not None:
                         if isinstance(output_tensor_meta, TensorMeta):
                             tensor_meta = output_tensor_meta
                         elif isinstance(output_tensor_meta, (tuple, list)):
-                            if spec_index < len(output_tensor_meta):
-                                tensor_meta = output_tensor_meta[spec_index]
+                            if output_spec_count < len(output_tensor_meta):
+                                tensor_meta = output_tensor_meta[output_spec_count]
+                    output_spec_count += 1
                 else:
-                    input_strategy_index = spec_index - input_index
-                    if input_strategy_index < len(input_args_strategy):
+                    # This is an input position
+                    # Only get tensor_meta if we have a corresponding input_args_strategy entry
+                    if input_strategy_counter < len(input_args_strategy):
                         tensor_meta = input_args_strategy[
-                            input_strategy_index
+                            input_strategy_counter
                         ].tensor_meta
+                        input_strategy_counter += 1
 
                 # pyrefly: ignore [bad-argument-type]
                 spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
-                spec_index += 1
             else:
                 spec_list.append(None)
+
+        # Skip strategy combinations that would create mixed partial types
+        # (except sum+avg which commute with each other).
+        # We check (type, reduce_op) pairs rather than just reduce_op because
+        # Partial subclasses like _MaskPartial have different reduction semantics
+        # even when they share the same reduce_op string.
+        has_mixed_partial = False
+        for spec in spec_list:
+            if spec is not None:
+                partial_kinds = {
+                    (type(p), p.reduce_op)
+                    for p in spec.placements
+                    if isinstance(p, Partial)
+                }
+                if len(partial_kinds) > 1:
+                    reduce_ops = {ro for _, ro in partial_kinds}
+                    types = {t for t, _ in partial_kinds}
+                    if not (len(types) == 1 and reduce_ops == {"sum", "avg"}):
+                        has_mixed_partial = True
+                        break
+        if has_mixed_partial:
+            continue
 
         input_specs: list[DTensorSpec] = [
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
@@ -440,26 +476,46 @@ def expand_to_full_mesh_op_strategy(
         if inplace_op and self_spec.placements != input_specs[0].placements:
             # if it's inplace op, we would only allow the OpSpec to be added when the
             # input_spec matches the first argument's runtime sharding, otherwise we skip
+            if blocking_inplace_input_placements is None:
+                blocking_inplace_input_placements = self_spec.placements
             continue
 
-        output_specs: tuple[DTensorSpec | None, ...]
-        if input_index > 1:
+        # For out= variant ops, output placement must match the "out" kwarg's placement
+        if (
+            op_schema.is_out_variant_op()
+            and "out" in op_schema.kwargs_schema
+            and isinstance(op_schema.kwargs_schema["out"], OpStrategy)
+        ):
+            out_kwarg_spec = op_schema.kwargs_schema["out"].strategies[0].output_spec
+            # spec_list[0] is the output spec for this strategy combination
+            if spec_list[0] is not None:
+                if spec_list[0].placements != out_kwarg_spec.placements:
+                    continue
+
+        output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
+        if input_index == 0:
+            # No outputs (e.g., _linalg_check_errors)
+            output_specs = None
+        elif input_index > 1:
             output_specs = tuple(spec_list[:input_index])
         else:
             if spec_list[0] is not None:
-                output_specs = spec_list[0]  # type: ignore[assignment]
+                output_specs = spec_list[0]
             else:
                 raise RuntimeError("output spec is None")
 
         # check all inputs are shardable
         if not all(
-            is_tensor_shardable(inp.shape, s)
+            is_tensor_shardable(
+                inp.shape, s, allow_unbacked_sharding=allow_unbacked_sharding
+            )
             for inp, s in zip(input_args_strategy, input_specs)
         ):
             continue
 
         # perform additional op-specific filtering
-        if is_valid_strategy_cb is not None:
+        # Skip callback for no-output ops (output_specs is None)
+        if is_valid_strategy_cb is not None and output_specs is not None:
             if not is_valid_strategy_cb(input_specs, output_specs):
                 continue
 
@@ -474,6 +530,18 @@ def expand_to_full_mesh_op_strategy(
             redistribute_cost=redistribute_cost,
         )
         all_strategies.append(strategy)
+
+    # If all strategies were filtered out due to inplace placement mismatch,
+    # raise a clear error message instead of returning an empty OpStrategy
+    # (which would later cause a cryptic "min() arg is an empty sequence" error)
+    if not all_strategies and blocking_inplace_input_placements is not None:
+        raise RuntimeError(
+            f"{op_schema.op}: in-place operations that require placement changes "
+            f"are not supported. The input has placement {blocking_inplace_input_placements}, "
+            f"but no valid strategy preserves this placement. "
+            f"Please use the out-of-place version of this operation instead."
+        )
+
     return OpStrategy(all_strategies)
 
 

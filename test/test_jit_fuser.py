@@ -987,7 +987,8 @@ class TestFuser(JitTestCase):
             # in order for Python 2
             for g in all_backward_graphs(module):
                 if str(g) not in old_plans:
-                    assert backward is None
+                    if backward is not None:
+                        raise AssertionError("backward should be None")
                     backward = g
                     old_plans.add(str(backward))
             num_grads = 1 if i > 0 else 0

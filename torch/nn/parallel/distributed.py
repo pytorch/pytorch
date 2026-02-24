@@ -671,6 +671,7 @@ class DistributedDataParallel(Module, Joinable):
         mixed_precision: _MixedPrecision | None = None,
         device_mesh=None,
         skip_all_reduce_unused_params=False,
+        bucket_cap_mb_list: Optional[list[int]] = None,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -833,6 +834,22 @@ class DistributedDataParallel(Module, Joinable):
             self.bucket_bytes_cap_default = True
         else:
             self.bucket_bytes_cap_default = False
+
+        self.bucket_bytes_cap_list = []
+        if bucket_cap_mb_list:
+            if self._use_python_reducer:
+                raise AssertionError(
+                    "when using bucket_cap_mb_list, python reducer is not supported"
+                )
+            self.bucket_bytes_cap_list = [
+                int(bucket_cap_mb * 1024 * 1024) for bucket_cap_mb in bucket_cap_mb_list
+            ]
+            # This is not supposed to be used later when custom bucket_cap_mb_list is passed,
+            # just a safe placeholder for backward compatibility
+            self.bucket_bytes_cap_default = False
+            bucket_cap_mb = max(bucket_cap_mb_list)
+        if not bucket_cap_mb:
+            raise AssertionError("bucket_cap_mb should be set by now")
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
 
         # Whether to perform input tensor CPU to GPU copies on a side-stream
@@ -940,6 +957,7 @@ class DistributedDataParallel(Module, Joinable):
         if self._use_python_reducer:
             # pyrefly: ignore [bad-assignment]
             torch._inductor.config._fuse_ddp_communication = True
+            # pyrefly: ignore [bad-assignment]
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
             # Directly adding this to the trace rule will disturb the users
             # who are using DDPOptimizer.
@@ -1198,16 +1216,24 @@ class DistributedDataParallel(Module, Joinable):
         # because "bucket rebuild" bucketizes parameters based on its real execution order in backward graph.
 
         # Can remove this branching once #73732 is landed.
-        if static_graph is True or self.find_unused_parameters is False:
-            bucket_size_limits = [sys.maxsize]
+        if self.bucket_bytes_cap_list:
+            bucket_size_limits = self.bucket_bytes_cap_list
+            # When bucket_cap_mb_list is provided, use it for rebuilding buckets
+            bucket_size_limits_for_rebuilding = self.bucket_bytes_cap_list
         else:
-            if self.bucket_bytes_cap_default:
-                bucket_size_limits = [
-                    dist._DEFAULT_FIRST_BUCKET_BYTES,
-                    self.bucket_bytes_cap,
-                ]
+            if static_graph is True or self.find_unused_parameters is False:
+                bucket_size_limits = [sys.maxsize]
             else:
-                bucket_size_limits = [self.bucket_bytes_cap]
+                if self.bucket_bytes_cap_default:
+                    bucket_size_limits = [
+                        dist._DEFAULT_FIRST_BUCKET_BYTES,
+                        self.bucket_bytes_cap,
+                    ]
+                else:
+                    bucket_size_limits = [self.bucket_bytes_cap]
+            # When bucket_cap_mb_list is not provided, pass empty list
+            # to let C++ Reducer use the original logic (first_bucket_bytes_cap_ and bucket_bytes_cap_)
+            bucket_size_limits_for_rebuilding = []
         (
             bucket_indices,
             per_bucket_size_limits,
@@ -1250,6 +1276,7 @@ class DistributedDataParallel(Module, Joinable):
             ),
             self.skip_all_reduce_unused_params,
             self._use_python_reducer,
+            bucket_size_limits_for_rebuilding,
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1938,7 +1965,7 @@ class DistributedDataParallel(Module, Joinable):
                             hook will run _after_ the forward pass.
 
             NOTE: To maximize performance, users can return a
-                List[torch.futures.Future] from their hook, and DDP will
+                list[torch.futures.Future] from their hook, and DDP will
                 install and await these hooks appropriately at the end of
                 the backward pass. This will ensure all buffers are
                 synchronized by the end of the backward pass. If this

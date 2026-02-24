@@ -613,7 +613,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
@@ -636,7 +636,7 @@ def convolution(
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
                     UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,

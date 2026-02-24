@@ -408,7 +408,8 @@ def map_arg(a: ArgumentT, fn: Callable[[Node], Argument]) -> ArgumentT:
     arg may be a list, tuple, slice, or dict with string keys: the return value will
     have the same type and structure.
     """
-    assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
+    if not callable(fn):
+        raise AssertionError("torch.fx.map_arg(a, fn): fn must be a callable")
     return _fx_map_arg(a, fn)
 
 

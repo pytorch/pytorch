@@ -1017,20 +1017,23 @@ def gen_variable_type_func(
                     result[f"type_derived_method_definitions_{key}"] = [type_definition]
                     result[f"wrapper_registrations_{key}"] = [wrapper_registration]
     # See Note [Manual Backend kernels]
-    assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
+    if (name in MANUAL_BACKEND) != f.manual_kernel_registration:
+        raise AssertionError(
+            f"(name in MANUAL_BACKEND) != f.manual_kernel_registration: {name in MANUAL_BACKEND} != {f.manual_kernel_registration}"
+        )
     # If you want to register a kernel to Autograd, you must make the op abstract.
     # In other words, this op must have dispatch section in native_functions.yaml.
     if name in MANUAL_AUTOGRAD_AND_TRACER or (
         fn.info and any(info.has_derivatives for info in fn.info.values())
     ):
-        msg = (
-            f"There's a formula for {name}(or its functional variant) in derivatives.yaml. "
-            f"It's required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA "
-            f"or CompositeExplicitAutograd in native_functions.yaml. Please see "
-            f"https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword "
-            f"for instructions to choose the right dispatch keyword."
-        )
-        assert f.is_abstract, msg
+        if not f.is_abstract:
+            raise AssertionError(
+                f"There's a formula for {name}(or its functional variant) in derivatives.yaml. "
+                f"It's required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA "
+                f"or CompositeExplicitAutograd in native_functions.yaml. Please see "
+                f"https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword "
+                f"for instructions to choose the right dispatch keyword."
+            )
 
     return result
 
@@ -1060,7 +1063,10 @@ _foreach_ops_with_different_arity = {
 def emit_body(
     fn: NativeFunctionWithDifferentiabilityInfo, key: str = "Default"
 ) -> list[str]:
-    assert dispatch_strategy(fn) == "use_derived"
+    if dispatch_strategy(fn) != "use_derived":
+        raise AssertionError(
+            f"dispatch_strategy(fn) is {dispatch_strategy(fn)}, expected 'use_derived'"
+        )
     f = fn.func
     info = fn.info[key] if fn.info else None
     fw_derivatives = fn.fw_derivatives.get(key, []) if fn.fw_derivatives else []
@@ -1079,27 +1085,34 @@ def emit_body(
         refargname2inplace_foreacharg: dict[str, Argument] = {}
         base_name_and_overload_name = (f.func.name.name.base, f.func.name.overload_name)
         if info is None:
-            assert (
+            if (
                 base_name_and_overload_name
-                in _foreach_ops_without_differentiability_info
-            ), (
-                f"{'.'.join(base_name_and_overload_name)} should have a differentiability info"
-            )
+                not in _foreach_ops_without_differentiability_info
+            ):
+                raise AssertionError(
+                    f"{'.'.join(base_name_and_overload_name)} should have a differentiability info"
+                )
         else:
-            assert (
+            if not (
                 len(f.func.arguments.flat_non_out)
                 == len(info.func.func.arguments.flat_non_out)
-            ) or (base_name_and_overload_name in _foreach_ops_with_different_arity), (
-                f"{'.'.join(base_name_and_overload_name)} has {len(f.func.arguments.flat_non_out)} args "
-                f"but the reference has {len(info.func.func.arguments.flat_non_out)}"
-            )
+            ) and (
+                base_name_and_overload_name not in _foreach_ops_with_different_arity
+            ):
+                raise AssertionError(
+                    f"{'.'.join(base_name_and_overload_name)} has {len(f.func.arguments.flat_non_out)} args "
+                    f"but the reference has {len(info.func.func.arguments.flat_non_out)}"
+                )
             for foreach_arg, ref_arg in zip(
                 f.func.arguments.flat_non_out, info.func.func.arguments.flat_non_out
             ):
                 foreach_arg_type = foreach_arg.type
                 if isinstance(foreach_arg_type, ListType):
                     foreach_arg_type = foreach_arg_type.elem
-                assert foreach_arg_type == ref_arg.type
+                if foreach_arg_type != ref_arg.type:
+                    raise AssertionError(
+                        f"foreach_arg_type ({foreach_arg_type}) != ref_arg.type ({ref_arg.type})"
+                    )
                 inplace_foreacharg2refarg[foreach_arg] = ref_arg
                 refargname2inplace_foreacharg[ref_arg.name] = foreach_arg
 
@@ -1188,15 +1201,17 @@ def emit_body(
 
     # note(crcrpar): In-place foreach functions do not support forward AD
     if requires_derivative and len(fw_derivatives) > 0 and not is_inplace_foreach:
-        assert sum(len(derivative.var_names) for derivative in fw_derivatives) == len(
-            differentiable_outputs
-        ), (
-            "Expected the number of forward derivatives implemented to match the "
-            "number of differentiable outputs. NB: This only applies when at least "
-            "one forward derivative is implemented. Not implementing any forward "
-            "derivatives is also okay, and we would require inputs to the op to "
-            "not have associated tangents in that case."
+        num_fw_derivative_var_names = sum(
+            len(derivative.var_names) for derivative in fw_derivatives
         )
+        if num_fw_derivative_var_names != len(differentiable_outputs):
+            raise AssertionError(
+                f"Expected the number of forward derivatives implemented ({num_fw_derivative_var_names}) to match the "
+                f"number of differentiable outputs ({len(differentiable_outputs)}). NB: This only applies when at least "
+                "one forward derivative is implemented. Not implementing any forward "
+                "derivatives is also okay, and we would require inputs to the op to "
+                "not have associated tangents in that case."
+            )
 
     try_jit_decomposition = (
         requires_derivative
@@ -1217,7 +1232,8 @@ def emit_body(
         # We don't want to save tensors if we know that they will never be used
         # when computing the derivative, so we add guards to those statements
         def guard_for(arg: SavedAttribute) -> str | None:
-            assert info is not None
+            if info is None:
+                raise AssertionError("info is None in guard_for")
 
             # It's hard to determine the edge offset if we have TensorLists
             # NOTE(crcrpar): in-place foreach functions' arguments include tensorlist
@@ -1246,7 +1262,8 @@ def emit_body(
             # We want to emit simple guards, so we only allow that if checking one
             # input is enough to determine whether we need that value
             used_in = [d for d in info.derivatives if arg in d.saved_inputs]
-            assert len(used_in) > 0
+            if len(used_in) == 0:
+                raise AssertionError(f"used_in is empty for arg {arg.nctype.name}")
             if len(used_in) != 1:
                 return None
             derivative = used_in[0]
@@ -1264,7 +1281,10 @@ def emit_body(
                     rf"wrap_opt_if\({arg.nctype.name},(.*?)\)",
                     derivative.formula[wrap_opt_if_start:],
                 )
-                assert wrap_opt_if_match is not None
+                if wrap_opt_if_match is None:
+                    raise AssertionError(
+                        f"wrap_opt_if_match is None for {arg.nctype.name} in {derivative.formula}"
+                    )
 
                 # Condition is between 'wrap_opt_if(var_name,' and ')'.
                 condition_slice = slice(len(rf"wrap_opt_if\({arg.nctype.name},"), -1)
@@ -1468,7 +1488,10 @@ def emit_body(
                     src_name = name
                     if "_scalar_type" in src_name:
                         split_src_name = src_name.split("_scalar_type")
-                        assert len(split_src_name) == 2
+                        if len(split_src_name) != 2:
+                            raise AssertionError(
+                                f"expected 2 parts after split, got {len(split_src_name)}: {split_src_name}"
+                            )
                         src_name = split_src_name[0]
                     expr = expr.replace(src_name, name_in_expr)
             if (
@@ -1489,9 +1512,15 @@ def emit_body(
                     self_var = var if not is_inplace_foreach else var + "[i]"
                     stmts_prepend = f"if (!{original_self_var}.has_value()) {original_self_var} = {self_var}.clone()"
                     var = f"{original_self_var}.value()"
-                    assert not is_output
+                    if is_output:
+                        raise AssertionError(
+                            "is_output should be False when var == 'self' and inplace"
+                        )
                 if inplace and is_output:
-                    assert name == "result_"
+                    if name != "result_":
+                        raise AssertionError(
+                            f"expected name to be 'result_' for inplace output, got {name}"
+                        )
                     var = (
                         "self[i]"
                         if is_inplace_foreach or is_foreacharg_list_type
@@ -1512,7 +1541,11 @@ def emit_body(
             ):
                 # See Note [nuanced return type of out-of-place foreach functions]
                 if type == VectorCType(BaseCType(tensorT)):
-                    assert is_foreach and is_output
+                    if not (is_foreach and is_output):
+                        raise AssertionError(
+                            f"VectorCType(BaseCType(tensorT)) requires is_foreach and is_output, "
+                            f"got is_foreach={is_foreach}, is_output={is_output}"
+                        )
                 expr = f"make_saved_variable_list({name}, {str(is_foreach and is_output).lower()})"
                 name += "_"
             elif type == BaseCType(intArrayRefT):
@@ -1572,7 +1605,8 @@ def emit_body(
             rhs_value = var
         else:
             rhs_value = f"std::move({var})"
-        assert rhs_value is not None
+        if rhs_value is None:
+            raise AssertionError("rhs_value is None")
         call += ASSIGN_RETURN_VALUE.substitute(
             return_values=tie_return_values(f), rhs_value=rhs_value
         )
@@ -1628,9 +1662,13 @@ def emit_body(
                     ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg),
                 ]
 
-        assert (stmts_before_call and stmts_after_call) or (
-            not stmts_before_call and not stmts_after_call
-        )
+        if not (
+            (stmts_before_call and stmts_after_call)
+            or (not stmts_before_call and not stmts_after_call)
+        ):
+            raise AssertionError(
+                "stmts_before_call and stmts_after_call must be both empty or both non-empty"
+            )
 
         # Check properties of outputs (enforce (2), (3))
         if f.func.kind() not in (SchemaKind.inplace, SchemaKind.out):
@@ -1644,9 +1682,11 @@ def emit_body(
                 noref_cpp_type = cpp.return_type(ret, symint=True).remove_const_ref()
                 if noref_cpp_type == BaseCType(tensorT):
                     if aliased_arg_name is not None:
-                        assert i == 0, (
-                            "Expect non-CompositeImplicitAutograd view function {base} to return single output"
-                        )
+                        if i != 0:
+                            raise AssertionError(
+                                f"Expect non-CompositeImplicitAutograd view function {base_name} "
+                                f"to return single output, got index {i}"
+                            )
                         stmts_after_call += [
                             ENFORCE_SAME_TENSOR_STORAGE.substitute(
                                 tensor_name=aliased_arg_name, out_tensor_name=ret_name
@@ -1748,7 +1788,10 @@ def emit_body(
 
             call += wrap_output(f, unpacked_bindings, TMP_VAR)
         else:
-            assert not try_jit_decomposition
+            if try_jit_decomposition:
+                raise AssertionError(
+                    "try_jit_decomposition should be False for functions with no return values or that modify arguments"
+                )
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                 base_type_call=base_type_call, guard=guard
             )
@@ -1792,7 +1835,10 @@ def emit_body(
     def emit_any_requires_grad() -> list[str]:
         extra_condition = ""
         if info and info.output_differentiability_conditions:
-            assert len(info.output_differentiability_conditions) == 1
+            if len(info.output_differentiability_conditions) != 1:
+                raise AssertionError(
+                    f"expected 1 output_differentiability_condition, got {len(info.output_differentiability_conditions)}"
+                )
             extra_condition = f"_any_requires_grad &= ({info.output_differentiability_conditions[0]});"
         names_of_args_with_derivatives = [arg.name for arg in args_with_derivatives]
         if is_inplace_foreach and info is not None:
@@ -1819,7 +1865,10 @@ def emit_body(
             for derivative in fw_derivatives:
                 requires_fw_grad = get_any_has_fw_grad_cond(derivative=derivative)
                 if info and info.output_differentiability_conditions:
-                    assert len(info.output_differentiability_conditions) == 1
+                    if len(info.output_differentiability_conditions) != 1:
+                        raise AssertionError(
+                            f"expected 1 output_differentiability_condition, got {len(info.output_differentiability_conditions)}"
+                        )
                     requires_fw_grad = f"({info.output_differentiability_conditions[0]}) && {requires_fw_grad}"
                 content.append(
                     f"[[maybe_unused]] auto {get_any_has_forward_grad_name(derivative.var_names)} = {requires_fw_grad};"
@@ -1885,13 +1934,15 @@ def emit_body(
         for derivative in fw_derivatives:
             res = derivative.var_names
             if f.func.name.name.inplace:
-                assert len(res) == 1, (
-                    "Expected number of outputs to be 1 if function is inplace"
-                )
+                if len(res) != 1:
+                    raise AssertionError(
+                        f"Expected number of outputs to be 1 if function is inplace, got {len(res)}"
+                    )
                 # TODO update this when inplace namings are unified
                 res = ("self",)
 
-            assert derivative.required_inputs_fw_grad is not None
+            if derivative.required_inputs_fw_grad is None:
+                raise AssertionError("derivative.required_inputs_fw_grad is None")
 
             unpacked_arguments = ""
             for inp in differentiable_inputs:
@@ -1971,7 +2022,11 @@ def emit_body(
                             )
                         )
                     else:
-                        assert res[0] == ("result" if not inplace else "self")
+                        expected_res = "result" if not inplace else "self"
+                        if res[0] != expected_res:
+                            raise AssertionError(
+                                f"res[0] is {res[0]}, expected {expected_res}"
+                            )
                         fw_grad_setters.append(
                             FW_DERIVATIVE_SETTER_TENSOR_FOREACH.substitute(
                                 out_arg=res[0], is_inplace=is_inplace_str
@@ -1993,9 +2048,10 @@ def emit_body(
                 isinstance(derivative.var_types[0], ListType)
                 and derivative.var_types[0].is_tensor_like()
             ):
-                assert len(derivative.var_types) == 1, (
-                    "Expected number of outputs to be 1 if function returns ListType"
-                )
+                if len(derivative.var_types) != 1:
+                    raise AssertionError(
+                        f"Expected number of outputs to be 1 if function returns ListType, got {len(derivative.var_types)}"
+                    )
                 if not is_foreach:
                     opt_res_grad_type = OptionalCType(
                         VectorCType(BaseCType(tensorT))
@@ -2113,7 +2169,8 @@ def emit_body(
         else:
             # (2) If derivative is provided, use that information to determine which inputs
             #     to check fw_grad for
-            assert derivative.required_inputs_fw_grad is not None
+            if derivative.required_inputs_fw_grad is None:
+                raise AssertionError("derivative.required_inputs_fw_grad is None")
 
             if len(derivative.required_inputs_fw_grad) == 0:
                 # Handle functions like stack
@@ -2196,8 +2253,11 @@ def emit_body(
         # `inplace` implies that there is exactly one output named `self`,
         # so we can keep the generated code easy. If you need to
         # `reset_grad_accumulator` in an operator that's not `inplace`, you can
-        # remove this assert but the code generation will get more elaborate
-        assert inplace
+        # remove this check but the code generation will get more elaborate
+        if not inplace:
+            raise AssertionError(
+                f"expected inplace=True for {f.func.name.name} which is in RESET_GRAD_ACCUMULATOR"
+            )
         body.append("reset_grad_accumulator(self);")
     if not returns_void:
         body.append(f"return {get_return_value(f)};")

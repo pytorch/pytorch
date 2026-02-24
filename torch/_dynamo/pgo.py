@@ -167,7 +167,6 @@ class CodeId:
 @dataclasses.dataclass
 class CodeState:
     automatic_dynamic: defaultdict[str, FrameStateSizeEntry] = dataclasses.field(
-        # pyrefly: ignore [unbound-name]
         default_factory=lambda: defaultdict(FrameStateSizeEntry)
     )
 

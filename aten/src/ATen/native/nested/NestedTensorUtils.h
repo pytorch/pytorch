@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
@@ -22,6 +23,8 @@
 #include <ATen/ops/tensor.h>
 #endif
 
+#include <cmath>
+#include <limits>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -61,6 +64,17 @@ inline at::Tensor wrap_buffer(
 
 inline at::Tensor get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
+}
+
+// Helper to clamp infinite padding sentinels to dtype min/max for integral types
+template <typename scalar_t>
+inline scalar_t _get_padding_value(double padding_value, bool is_floating_point) {
+  if (std::isinf(padding_value) && !is_floating_point) {
+    return padding_value > 0
+      ? std::numeric_limits<scalar_t>::max()
+      : std::numeric_limits<scalar_t>::lowest();
+  }
+  return static_cast<scalar_t>(padding_value);
 }
 
 /**
