@@ -211,6 +211,11 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
   export CXX=clang++
+  # TODO: Removeme once all the wrappers are gone
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    sudo rm -f /opt/cache/bin/clang++
+  fi
+
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
@@ -368,10 +373,6 @@ else
         sudo rm -rf original
         popd
       fi
-    fi
-
-    if [[ "$BUILD_ENVIRONMENT" == *clang* && "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      sudo rm -f /opt/cache/bin/clang++
     fi
 
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
