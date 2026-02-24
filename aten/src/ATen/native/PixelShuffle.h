@@ -11,7 +11,10 @@ inline void check_pixel_shuffle_shapes(const Tensor& self, int64_t upscale_facto
               "pixel_shuffle expects a positive upscale_factor, but got ",
               upscale_factor);
   int64_t c = self.size(-3);
-  TORCH_CHECK_VALUE(upscale_factor <= std::numeric_limits<decltype(upscale_factor)>::max() / upscale_factor,
+  // Check for overflow before computing upscale_factor^2
+  // sqrt(2^63 - 1) ≈ 3037000499, so if upscale_factor > 3037000499, then upscale_factor^2 will overflow
+  constexpr int64_t max_sqrt = 3037000499; // floor(sqrt(2^63 - 1))
+  TORCH_CHECK_VALUE(upscale_factor <= max_sqrt,
         "upscale factor is too large, (upscale_factor)^2 overflowed: upscale_factor=", upscale_factor);
   int64_t upscale_factor_squared = upscale_factor * upscale_factor;
   TORCH_CHECK(c % upscale_factor_squared == 0,

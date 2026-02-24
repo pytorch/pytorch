@@ -7652,6 +7652,16 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    # Check for overflow when squaring upscale_factor
+    INT64_MAX = torch.iinfo(torch.int64).max
+    torch._check(
+        upscale_factor <= INT64_MAX // upscale_factor,
+        lambda: f"pixel_shuffle upscale_factor is too large, (upscale_factor)^2 would overflow: upscale_factor={upscale_factor}",
+    )
     if not (
         len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
     ):
