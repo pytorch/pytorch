@@ -201,7 +201,11 @@ class CUDAGraph(_CUDAGraph):
             if meminfo["device"] != device:
                 continue
             for block in meminfo["blocks"]:
-                if block["address"] == tensor_ptr and "active" in block["state"]:
+                addr = block["address"]
+                if (
+                    addr <= tensor_ptr < addr + block["size"]
+                    and "active" in block["state"]
+                ):
                     return True
         return False
 
@@ -475,6 +479,7 @@ def make_graphed_callables(
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
     pool: _POOL_HANDLE | None = None,
+    check_input_liveness: bool = False,
 ) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
@@ -508,6 +513,12 @@ def make_graphed_callables(
         pool (optional): Token (returned by :func:`~torch.cuda.graph_pool_handle` or
             :meth:`other_Graph_instance.pool()<torch.cuda.CUDAGraph.pool>`) that hints this graph may share memory
             with the indicated pool.  See :ref:`Graph memory management<graph-memory-management>`.
+        check_input_liveness (bool): If ``True``, tracks external tensor inputs during both
+            forward and backward graph captures and raises an error on replay if any are
+            deallocated. Useful for debugging "use after free" errors where input tensors are
+            garbage collected between capture and replay. Tensors whose memory belongs to the
+            graph's capture pool are automatically excluded. Default: ``False``.
+
     .. note::
         The ``requires_grad`` state of each Tensor in ``sample_args`` must match the state
         that's expected for the corresponding real input in the training loop.
@@ -638,7 +649,9 @@ def make_graphed_callables(
     per_callable_static_outputs = []
     per_callable_output_unflatten_spec = []
     for func, args, fwd_graph in zip(callables, _sample_args, fwd_graphs):
-        with torch.cuda.graph(fwd_graph, pool=mempool):
+        with torch.cuda.graph(
+            fwd_graph, pool=mempool, check_input_liveness=check_input_liveness
+        ):
             func_outputs = func(*args)
 
         flatten_outputs, spec = torch.utils._pytree.tree_flatten(func_outputs)
@@ -662,7 +675,9 @@ def make_graphed_callables(
         outputs_grad = tuple(o for o in static_outputs if o.requires_grad)
         grad_inputs = None
         if len(outputs_grad) > 0:
-            with torch.cuda.graph(bwd_graph, pool=mempool):
+            with torch.cuda.graph(
+                bwd_graph, pool=mempool, check_input_liveness=check_input_liveness
+            ):
                 grad_inputs = torch.autograd.grad(
                     outputs=outputs_grad,
                     inputs=tuple(i for i in static_input_surface if i.requires_grad),
