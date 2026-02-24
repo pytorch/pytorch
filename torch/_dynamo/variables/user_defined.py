@@ -423,8 +423,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.GetAttrVariable(self, name, None, source=source)
 
         # User-defined descriptor with Python __get__.
+        # For torch-internal classes or attributes in the class's own __dict__,
+        # defer descriptor invocation to runtime via VariableTracker.build to
+        # avoid compile-time side effects (e.g. deprecation warnings from
+        # _ClassPropertyDescriptor on torch.FloatStorage.dtype).
         get_fn = inspect.getattr_static(type(cls_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
+            if source and (
+                name in getattr(self.value, "__dict__", {})
+                or self.value.__module__.startswith("torch.")
+                or self.value.__module__ == "torch"
+            ):
+                return VariableTracker.build(tx, cls_attr, source)
             return self._invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
         # C-level descriptors (WrapperDescriptor, MethodDescriptor, etc.)
