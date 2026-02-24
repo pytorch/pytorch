@@ -261,6 +261,19 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     int threads{2};
+
+    bool operator==(const Options& other) const noexcept {
+      if (!(static_cast<const Backend::Options&>(*this) ==
+            static_cast<const Backend::Options&>(other)))
+        return false;
+      if (devices.size() != other.devices.size())
+        return false;
+      for (size_t i = 0; i < devices.size(); ++i) {
+        if (devices[i].get() != other.devices[i].get())
+          return false;
+      }
+      return threads == other.threads;
+    }
   };
 
   const std::string getBackendName() const override {
@@ -494,5 +507,20 @@ class TORCH_API ProcessGroupGloo : public Backend {
 };
 
 } // namespace c10d
+
+namespace std {
+template <>
+struct hash<c10d::ProcessGroupGloo::Options> {
+  size_t operator()(
+      const c10d::ProcessGroupGloo::Options& opts) const noexcept {
+    size_t h = hash<c10d::Backend::Options>{}(opts);
+    for (const auto& dev : opts.devices) {
+      h = c10d::hash_combine(h, hash<void*>{}(dev.get()));
+    }
+    h = c10d::hash_combine(h, hash<int>{}(opts.threads));
+    return h;
+  }
+};
+} // namespace std
 
 #endif // USE_C10D_GLOO

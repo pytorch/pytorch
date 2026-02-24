@@ -1167,6 +1167,77 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(dp_cp_mesh.get_group(), mesh_3d["dp_cp"].get_group())
         self.assertEqual(dp_cp_mesh.get_group(), mesh_3d.get_group(mesh_dim="dp_cp"))
 
+    @skip_if_lt_x_gpu(8)
+    @with_comms
+    def test_unflatten_mesh_3d_with_pg_cache(self):
+        global_mesh = init_device_mesh(
+            self.device_type,
+            (8,),
+            mesh_dim_names=("world",),
+        )
+        non_ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
+        ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
+        # Same layouts should yield identical PG objects (cache hit)
+        self.assertIs(non_ep_mesh["dp"].get_group(), ep_mesh["dp"].get_group())
+        self.assertIs(non_ep_mesh["cp"].get_group(), ep_mesh["ep"].get_group())
+        self.assertIs(non_ep_mesh["tp"].get_group(), ep_mesh["ep_tp"].get_group())
+
+    @skip_if_lt_x_gpu(8)
+    @with_comms
+    def test_unflatten_pg_cache_with_backend_override(self):
+        if not _NCCL_AVAILABLE:
+            return
+        global_mesh = init_device_mesh(
+            self.device_type,
+            (8,),
+            mesh_dim_names=("world",),
+        )
+        opts1 = dist.ProcessGroupNCCL.Options()
+        opts1._timeout = timedelta(seconds=30)
+        mesh_a = global_mesh._unflatten(
+            0,
+            (2, 2, 2),
+            ("dp", "cp", "tp"),
+            backend_override={"tp": ("nccl", opts1)},
+        )
+        # Create a second, distinct Options object with the same parameters.
+        opts2 = dist.ProcessGroupNCCL.Options()
+        opts2._timeout = timedelta(seconds=30)
+        self.assertIsNot(opts1, opts2)
+        mesh_b = global_mesh._unflatten(
+            0,
+            (2, 2, 2),
+            ("dp", "ep", "ep_tp"),
+            backend_override={"ep_tp": ("nccl", opts2)},
+        )
+        # Cache should hit: same layout + same options yields the same PG.
+        self.assertIs(mesh_a["tp"].get_group(), mesh_b["ep_tp"].get_group())
+
+    @skip_if_lt_x_gpu(8)
+    @with_comms
+    def test_device_mesh_pickle_unpickle(self):
+        import pickle
+
+        global_mesh = init_device_mesh(
+            self.device_type,
+            (8,),
+            mesh_dim_names=("world",),
+        )
+        non_ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
+        ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
+        # Pickle and unpickle; expect a warning about non-portable PG state
+        data = pickle.dumps((non_ep_mesh, ep_mesh))
+        with self.assertWarnsRegex(UserWarning, "not safe for checkpointing"):
+            restored_non_ep, restored_ep = pickle.loads(data)
+        # Verify mesh structure preserved
+        self.assertEqual(restored_non_ep.mesh_dim_names, non_ep_mesh.mesh_dim_names)
+        self.assertEqual(restored_ep.mesh_dim_names, ep_mesh.mesh_dim_names)
+        self.assertEqual(restored_non_ep.mesh, non_ep_mesh.mesh)
+        self.assertEqual(restored_ep.mesh, ep_mesh.mesh)
+        # Verify PGs can be looked up after unpickle
+        self.assertIsNotNone(restored_non_ep["dp"].get_group())
+        self.assertIsNotNone(restored_ep["ep_tp"].get_group())
+
 
 class TestMeshEnv(DTensorTestBase):
     @property
