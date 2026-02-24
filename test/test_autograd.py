@@ -48,7 +48,6 @@ from torch.autograd.profiler_util import (
     FunctionEventAvg,
 )
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -15494,7 +15493,9 @@ class TestAutogradMultipleDispatch(TestCase):
             else:
                 torch._test_autograd_multiple_dispatch(dual_input)
 
-    @skipIfXpu(msg="Skip due to AssertionError: Tensor-likes are not close!, https://github.com/intel/torch-xpu-ops/issues/2914")
+    @skipIfXpu(
+        msg="Skip due to AssertionError: Tensor-likes are not close!, https://github.com/intel/torch-xpu-ops/issues/2914"
+    )
     def test_view_copy(self, device):
         # tests that view_copy derivative formulas are also generated per dispatch key
         # from their respective view ops in derivatives.yaml
