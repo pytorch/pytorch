@@ -32,7 +32,14 @@ from .graph_capture_wrappers import (
     fn_prepped_for_autograd,
     handle_effect_tokens_fn,
 )
-from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
+from .schemas import (
+    AOTConfig,
+    FxValue,
+    populate_descs_from_graph,
+    SubclassMeta,
+    TraceFn,
+    ViewAndMutationMeta,
+)
 from .streams import (
     assign_backward_streams,
     assign_epilogue_copy_streams,
@@ -266,6 +273,8 @@ def aot_dispatch_base_graph(
         aot_config=aot_config,
     )
 
+    populate_descs_from_graph(fw_module.graph, fw_metadata)
+
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # We update metadata to consider any assigned buffers as buffer mutations.
         i = len(dict(mod_when_exporting_non_strict.named_parameters()))
@@ -485,6 +494,8 @@ def aot_dispatch_autograd_graph(
         updated_joint_inputs_descs,
         aot_config=aot_config,
     )
+
+    populate_descs_from_graph(fx_g.graph, fw_metadata)
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

@@ -440,6 +440,13 @@ class ViewAndMutationMeta:
     # (need to default it to not break internal)
     is_train: bool = False
 
+    # Parallel to input_info — the "logical" (pre-subclass-unwrapping) descriptor
+    # for each input. Used by sync_metadata_from_graph_descriptors for descriptor-based matching.
+    input_descs: list[AOTInput] = field(default_factory=list)
+
+    # Parallel to output_info — the "logical" descriptor for each user output.
+    output_descs: list[AOTOutput] = field(default_factory=list)
+
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
     # At runtime, we don't keep the traced_tangents around since they're not serializable.
@@ -1455,3 +1462,347 @@ class JointWithDescriptors:
         from hashlib import sha256
 
         return sha256(str(self).encode("utf-8")).hexdigest()
+
+
+def _assert_graph_has_descriptors(graph: torch.fx.Graph) -> None:
+    """Assert that all placeholder and output nodes in the graph have 'desc' metadata."""
+    for n in graph.nodes:
+        if n.op in ("placeholder", "output"):
+            assert "desc" in n.meta, (
+                f"Graph node {n.name!r} (op={n.op!r}) is missing 'desc' metadata. "
+                f"sync_metadata_from_graph_descriptors and populate_descs_from_graph "
+                f"require all placeholder and output nodes to have AOTAutograd descriptors."
+            )
+
+
+def _unwrap_subclass_desc(
+    desc: AOTInput | AOTOutput,
+) -> AOTInput | AOTOutput:
+    """Unwrap SubclassGetAttr/Size/Stride wrappers to get the logical descriptor."""
+    from .descriptors import (
+        SubclassGetAttrAOTInput,
+        SubclassGetAttrAOTOutput,
+        SubclassSizeAOTInput,
+        SubclassSizeAOTOutput,
+        SubclassStrideAOTInput,
+        SubclassStrideAOTOutput,
+    )
+
+    while isinstance(
+        desc,
+        (
+            SubclassGetAttrAOTInput,
+            SubclassSizeAOTInput,
+            SubclassStrideAOTInput,
+            SubclassGetAttrAOTOutput,
+            SubclassSizeAOTOutput,
+            SubclassStrideAOTOutput,
+        ),
+    ):
+        desc = desc.base
+    return desc
+
+
+def populate_descs_from_graph(
+    graph: torch.fx.Graph, metadata: ViewAndMutationMeta
+) -> None:
+    """Populate input_descs and output_descs on metadata by reading graph descriptors.
+
+    input_descs[i] corresponds to input_info[i] and subclass_inp_meta[i].
+    output_descs[i] corresponds to output_info[i].
+
+    We use id()-based dedup because subclass-unwrapped descriptors sharing
+    the same logical input are the exact same frozen dataclass object.
+    """
+    from .descriptors import (
+        DifferentiableAOTInput,
+        IntermediateBaseAOTOutput,
+        MetadataMutationAOTOutput,
+        PlainAOTOutput,
+    )
+
+    _assert_graph_has_descriptors(graph)
+
+    # Extract unique logical input descriptors (non-tangent, non-token, etc.)
+    seen_input_descs: list[AOTInput] = []
+    seen_set: set[int] = set()
+    for n in graph.nodes:
+        if n.op == "placeholder":
+            logical = _unwrap_subclass_desc(n.meta["desc"])
+            if isinstance(logical, DifferentiableAOTInput) and not logical.is_tangent():
+                if id(logical) not in seen_set:
+                    seen_set.add(id(logical))
+                    seen_input_descs.append(logical)
+
+    # Extract user output descriptors from output node
+    output_node = next(n for n in graph.nodes if n.op == "output")
+    out_descs_flat = output_node.meta["desc"]
+    seen_output_descs: list[AOTOutput] = []
+    seen_out_set: set[int] = set()
+    for d in out_descs_flat:
+        logical = _unwrap_subclass_desc(d)
+        if isinstance(logical, (PlainAOTOutput, MetadataMutationAOTOutput)):
+            if id(logical) not in seen_out_set:
+                seen_out_set.add(id(logical))
+                seen_output_descs.append(logical)
+
+    assert len(seen_input_descs) == len(metadata.input_info), (
+        f"Expected {len(metadata.input_info)} input descs, got {len(seen_input_descs)}"
+    )
+    assert len(seen_output_descs) == len(metadata.output_info), (
+        f"Expected {len(metadata.output_info)} output descs, got {len(seen_output_descs)}"
+    )
+    metadata.input_descs = seen_input_descs
+    metadata.output_descs = seen_output_descs
+
+
+def sync_metadata_from_graph_descriptors(
+    graph: torch.fx.Graph,
+    old_metadata: ViewAndMutationMeta,
+) -> ViewAndMutationMeta:
+    """Sync a ViewAndMutationMeta from a graph's current descriptors and fake tensors.
+
+    When a graph transformation (e.g. autoparallel sharding) changes tensor shapes
+    or removes/reorders inputs/outputs on the graph, the ViewAndMutationMeta becomes
+    stale. This function uses descriptor-based matching to produce a fresh
+    ViewAndMutationMeta that is consistent with the graph's current state.
+
+    Descriptor-based matching means we use the AOTAutograd descriptors (stored on
+    node.meta["desc"]) to match old metadata entries to new graph nodes by identity,
+    rather than by position. This handles removal, reordering, and shape changes.
+
+    New inputs/outputs that don't exist in old_metadata will raise an error, since
+    we can't infer mutation/aliasing info for brand-new graph nodes.
+    """
+    from .descriptors import (
+        DifferentiableAOTInput,
+        IntermediateBaseAOTOutput,
+        MetadataMutationAOTOutput,
+        PlainAOTOutput,
+    )
+    from .subclass_utils import create_subclass_meta
+
+    _assert_graph_has_descriptors(graph)
+
+    # If input_descs/output_descs were never populated (e.g. old code path),
+    # fall back to the simple positional sync that only handles tangents.
+    if not old_metadata.input_descs or not old_metadata.output_descs:
+        return _sync_metadata_from_graph_descriptors_positional(graph, old_metadata)
+
+    # ── 4a. Extract new descriptors from graph ──────────────────────
+
+    # New logical input descriptors (deduped by identity)
+    new_input_descs: list[AOTInput] = []
+    new_input_vals: list[Any] = []
+    seen_inp: set[int] = set()
+    # New tangent descriptors + vals
+    tangent_vals: list[Any] = []
+    tangent_descs: list[AOTInput] = []
+
+    for n in graph.nodes:
+        if n.op != "placeholder":
+            continue
+        desc = n.meta["desc"]
+        logical = _unwrap_subclass_desc(desc)
+        if isinstance(logical, DifferentiableAOTInput) and not logical.is_tangent():
+            if id(logical) not in seen_inp:
+                seen_inp.add(id(logical))
+                new_input_descs.append(logical)
+                new_input_vals.append(n.meta["val"])
+        elif desc.is_tangent():
+            tangent_vals.append(n.meta["val"])
+            tangent_descs.append(desc)
+
+    # New output descriptors + intermediate base count
+    output_node = next(n for n in graph.nodes if n.op == "output")
+    out_descs_flat = output_node.meta["desc"]
+    new_output_descs: list[AOTOutput] = []
+    seen_out: set[int] = set()
+    num_intermediate_bases = 0
+    for d in out_descs_flat:
+        logical = _unwrap_subclass_desc(d)
+        if isinstance(logical, (PlainAOTOutput, MetadataMutationAOTOutput)):
+            if id(logical) not in seen_out:
+                seen_out.add(id(logical))
+                new_output_descs.append(logical)
+        elif isinstance(logical, IntermediateBaseAOTOutput):
+            # Count unique intermediate bases
+            if id(logical) not in seen_out:
+                seen_out.add(id(logical))
+                num_intermediate_bases += 1
+
+    # ── 4b. Match inputs via descriptor ─────────────────────────────
+
+    # Build old_desc → (position, InputAliasInfo, subclass_inp_meta_entry)
+    old_inp_by_id: dict[int, tuple[int, InputAliasInfo, Any]] = {}
+    for i, (desc, info) in enumerate(
+        zip(old_metadata.input_descs, old_metadata.input_info)
+    ):
+        subclass_meta_entry = (
+            old_metadata.subclass_inp_meta[i]
+            if i < len(old_metadata.subclass_inp_meta)
+            else None
+        )
+        old_inp_by_id[id(desc)] = (i, info, subclass_meta_entry)
+
+    new_input_info: list[InputAliasInfo] = []
+    new_subclass_inp_meta: list[Any] = []
+    old_to_new_inp_pos: dict[int, int] = {}  # old position → new position
+    for new_pos, desc in enumerate(new_input_descs):
+        entry = old_inp_by_id.get(id(desc))
+        if entry is None:
+            raise RuntimeError(
+                f"sync_metadata_from_graph_descriptors: new input descriptor {desc.expr()} "
+                f"not found in old metadata. Cannot infer mutation/aliasing info "
+                f"for brand-new inputs."
+            )
+        old_pos, info, subclass_meta_entry = entry
+        old_to_new_inp_pos[old_pos] = new_pos
+        new_input_info.append(info)
+        if subclass_meta_entry is not None:
+            new_subclass_inp_meta.append(subclass_meta_entry)
+
+    # ── 4c. Match outputs via descriptor ────────────────────────────
+
+    old_out_by_id: dict[int, tuple[int, OutputAliasInfo]] = {}
+    for i, (desc, info) in enumerate(
+        zip(old_metadata.output_descs, old_metadata.output_info)
+    ):
+        old_out_by_id[id(desc)] = (i, info)
+
+    new_output_info: list[OutputAliasInfo] = []
+    for desc in new_output_descs:
+        entry = old_out_by_id.get(id(desc))
+        if entry is None:
+            raise RuntimeError(
+                f"sync_metadata_from_graph_descriptors: new output descriptor {desc.expr()} "
+                f"not found in old metadata. Cannot infer aliasing info "
+                f"for brand-new outputs."
+            )
+        old_pos, info = entry
+        # Remap base_idx when inputs are reordered
+        if info.base_idx is not None and info.output_type in (
+            OutputType.alias_of_input,
+            OutputType.is_input,
+        ):
+            new_base_idx = old_to_new_inp_pos.get(info.base_idx)
+            if new_base_idx is None:
+                raise RuntimeError(
+                    f"sync_metadata_from_graph_descriptors: output {desc.expr()} aliases "
+                    f"input at old position {info.base_idx}, but that input was "
+                    f"removed from the graph."
+                )
+            if new_base_idx != info.base_idx:
+                info = replace(info, base_idx=new_base_idx)
+        new_output_info.append(info)
+
+    # ── 4d. Rebuild tangent fields ──────────────────────────────────
+
+    new_subclass_tangent_meta = create_subclass_meta(tangent_vals)
+
+    # ── 4e. Rebuild subclass_fw_graph_out_meta ──────────────────────
+    # This covers [mutated_inputs, user_outputs, intermediate_bases].
+    # Carry forward from old_metadata since subclass structure doesn't change
+    # during graph transformations.
+    new_subclass_fw_graph_out_meta = old_metadata.subclass_fw_graph_out_meta
+
+    # ── 4f. Rebuild index-based fields ──────────────────────────────
+
+    def _remap_indices(old_indices: list[int]) -> list[int]:
+        return [
+            old_to_new_inp_pos[i]
+            for i in old_indices
+            if i in old_to_new_inp_pos
+        ]
+
+    new_static_input_indices = _remap_indices(old_metadata.static_input_indices)
+    new_indices_of_inputs_that_requires_grad_with_mutations_in_bw = _remap_indices(
+        old_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw
+    )
+
+    new_mutated_inp_stream_indices: list[Any] | None = None
+    if old_metadata.mutated_inp_stream_indices is not None:
+        # mutated_inp_stream_indices is parallel to mutated_inp_runtime_indices,
+        # which is recomputed by __post_init__. We carry forward the old values
+        # since the stream assignments are still valid.
+        new_mutated_inp_stream_indices = old_metadata.mutated_inp_stream_indices
+
+    # ── 4g. Construct new ViewAndMutationMeta ───────────────────────
+
+    return ViewAndMutationMeta(
+        input_info=new_input_info,
+        output_info=new_output_info,
+        num_intermediate_bases=num_intermediate_bases,
+        keep_input_mutations=old_metadata.keep_input_mutations,
+        traced_tangents=tangent_vals,
+        traced_tangents_descs=tangent_descs,
+        input_descs=new_input_descs,
+        output_descs=new_output_descs,
+        subclass_inp_meta=new_subclass_inp_meta,
+        subclass_fw_graph_out_meta=new_subclass_fw_graph_out_meta,
+        subclass_tangent_meta=new_subclass_tangent_meta,
+        is_train=old_metadata.is_train,
+        traced_tangent_metas=old_metadata.traced_tangent_metas,
+        num_symints_saved_for_bw=old_metadata.num_symints_saved_for_bw,
+        num_tensors_saved_with_no_vc_check=old_metadata.num_tensors_saved_with_no_vc_check,
+        num_opaque_objects_saved_for_bw=old_metadata.num_opaque_objects_saved_for_bw,
+        grad_enabled_mutation=old_metadata.grad_enabled_mutation,
+        deterministic=old_metadata.deterministic,
+        static_input_indices=new_static_input_indices,
+        tokens=old_metadata.tokens,
+        indices_of_inputs_that_requires_grad_with_mutations_in_bw=new_indices_of_inputs_that_requires_grad_with_mutations_in_bw,
+        bw_donated_idxs=old_metadata.bw_donated_idxs,
+        num_backward_tokens=old_metadata.num_backward_tokens,
+        num_graphsafe_rng_states=old_metadata.num_graphsafe_rng_states,
+        graphsafe_rng_state_index=old_metadata.graphsafe_rng_state_index,
+        mutated_inp_stream_indices=new_mutated_inp_stream_indices,
+    )
+
+
+def _sync_metadata_from_graph_descriptors_positional(
+    graph: torch.fx.Graph,
+    old_metadata: ViewAndMutationMeta,
+) -> ViewAndMutationMeta:
+    """Fallback positional sync when input_descs/output_descs are not populated.
+
+    Only syncs tangent-related fields; all other fields are copied from old_metadata.
+    """
+    from .subclass_utils import create_subclass_meta
+
+    tangent_vals: list[Any] = []
+    tangent_descs: list[AOTInput] = []
+    for n in graph.nodes:
+        if n.op == "placeholder":
+            desc = n.meta["desc"]
+            if desc.is_tangent():
+                tangent_vals.append(n.meta["val"])
+                tangent_descs.append(desc)
+
+    new_subclass_tangent_meta = create_subclass_meta(tangent_vals)
+
+    return ViewAndMutationMeta(
+        input_info=old_metadata.input_info,
+        output_info=old_metadata.output_info,
+        num_intermediate_bases=old_metadata.num_intermediate_bases,
+        keep_input_mutations=old_metadata.keep_input_mutations,
+        traced_tangents=tangent_vals,
+        traced_tangents_descs=tangent_descs,
+        subclass_inp_meta=old_metadata.subclass_inp_meta,
+        subclass_fw_graph_out_meta=old_metadata.subclass_fw_graph_out_meta,
+        subclass_tangent_meta=new_subclass_tangent_meta,
+        is_train=old_metadata.is_train,
+        traced_tangent_metas=old_metadata.traced_tangent_metas,
+        num_symints_saved_for_bw=old_metadata.num_symints_saved_for_bw,
+        num_tensors_saved_with_no_vc_check=old_metadata.num_tensors_saved_with_no_vc_check,
+        num_opaque_objects_saved_for_bw=old_metadata.num_opaque_objects_saved_for_bw,
+        grad_enabled_mutation=old_metadata.grad_enabled_mutation,
+        deterministic=old_metadata.deterministic,
+        static_input_indices=old_metadata.static_input_indices,
+        tokens=old_metadata.tokens,
+        indices_of_inputs_that_requires_grad_with_mutations_in_bw=old_metadata.indices_of_inputs_that_requires_grad_with_mutations_in_bw,
+        bw_donated_idxs=old_metadata.bw_donated_idxs,
+        num_backward_tokens=old_metadata.num_backward_tokens,
+        num_graphsafe_rng_states=old_metadata.num_graphsafe_rng_states,
+        graphsafe_rng_state_index=old_metadata.graphsafe_rng_state_index,
+        mutated_inp_stream_indices=old_metadata.mutated_inp_stream_indices,
+    )

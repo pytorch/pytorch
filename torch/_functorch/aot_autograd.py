@@ -128,6 +128,8 @@ from ._aot_autograd.schemas import (  # noqa: F401
     SerializableAOTDispatchCompiler,
     SubclassCreationMeta,
     SubclassMeta,
+    sync_metadata_from_graph_descriptors,
+    populate_descs_from_graph,
     TensorAlias,
     ViewAndMutationMeta,
 )
