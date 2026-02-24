@@ -56,9 +56,14 @@ from .schemas import (
     MutationType,
     OutputAliasInfo,
     OutputType,
+    SubclassCreationMeta,
     ViewAndMutationMeta,
 )
-from .subclass_utils import create_subclass_meta
+from .subclass_utils import (
+    collect_needed_opaques,
+    compute_shared_opaque_guard_keys,
+    create_subclass_meta,
+)
 from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 
 
@@ -875,6 +880,15 @@ from a multi-output view call"
             with_memory_format=True,
         )
 
+        # Compute identity guard pairs for shared reference-type opaques
+        needed_opaque_srcs: set[tuple[int, ...]] = set()
+        for meta in subclass_fw_graph_out_meta:
+            if isinstance(meta, SubclassCreationMeta):
+                collect_needed_opaques(meta, needed_opaque_srcs)
+        shared_opaque_guard_keys = compute_shared_opaque_guard_keys(
+            input_opaques, needed_opaque_srcs
+        )
+
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
@@ -889,6 +903,7 @@ from a multi-output view call"
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
             tokens=mode._tokens,
+            shared_opaque_guard_keys=shared_opaque_guard_keys,
         )
         return metadata
 

@@ -153,6 +153,7 @@ from .source import (
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
     SubclassAttrListSource,
+    SubclassMetadataSource,
     TorchFunctionModeStackSource,
     TupleIteratorGetItemSource,
     TypeDictSource,
@@ -1658,6 +1659,14 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x.__tensor_flatten__()[0],
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, SubclassMetadataSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: x.__tensor_flatten__()[1],
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

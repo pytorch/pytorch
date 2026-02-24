@@ -189,6 +189,80 @@ def _extract_runtime_opaques(
                 _extract_runtime_opaques(prefix + (attr_idx,), inner, attr_meta, out)
 
 
+def compute_shared_opaque_guard_keys(
+    input_opaques: dict[tuple[int, ...], OpaqueType],
+    needed_opaque_srcs: set[tuple[int, ...]],
+) -> list[tuple[tuple[int, ...], tuple[int, ...]]]:
+    """Compute pairs of source keys that need identity guards.
+
+    Returns all pairs for shared reference-type opaques where at least
+    one key appears in needed_opaque_srcs (i.e. is used in an output
+    remapping).
+    """
+    from torch._library.fake_class_registry import FakeScriptObject
+    from torch._library.opaque_object import is_opaque_value_type
+
+    # Group source keys by opaque identity key
+    identity_to_keys: dict[Any, list[tuple[int, ...]]] = {}
+    for src_key, opaque in input_opaques.items():
+        ident = _get_opaque_identity_key(opaque)
+        identity_to_keys.setdefault(ident, []).append(src_key)
+
+    pairs: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    for keys in identity_to_keys.values():
+        if len(keys) < 2:
+            continue
+        # Value types don't need identity guards (equality suffices)
+        sample = input_opaques[keys[0]]
+        real = sample.real_obj if isinstance(sample, FakeScriptObject) else sample
+        if is_opaque_value_type(type(real)):
+            continue
+        # Guard if any occurrence is used in an output remapping
+        if not any(k in needed_opaque_srcs for k in keys):
+            continue
+        for i, key_a in enumerate(keys):
+            for key_b in keys[i + 1 :]:
+                pairs.append((key_a, key_b))
+
+    return pairs
+
+
+def _source_for_opaque_key(
+    src_key: tuple[int, ...],
+    arg_pos_to_source: Sequence[Any],
+    subclass_inp_meta: Sequence[Any],
+) -> Any:
+    """Convert an opaque source key into a composed dynamo Source.
+
+    src_key format: (arg_idx, *attr_indices, meta_idx).
+    For non-nested subclass: (arg_idx, meta_idx)
+    For nested: (arg_idx, attr_idx_0, ..., meta_idx)
+    """
+    from torch._dynamo.source import AttrSource, GetItemSource, SubclassMetadataSource
+
+    from .schemas import SubclassCreationMeta
+
+    arg_idx = src_key[0]
+    path = src_key[1:-1]
+    meta_idx = src_key[-1]
+
+    source = arg_pos_to_source[arg_idx]
+
+    # Walk through nested subclass attrs
+    current_meta = subclass_inp_meta[arg_idx]
+    for attr_idx in path:
+        if not isinstance(current_meta, SubclassCreationMeta):
+            raise AssertionError(
+                f"Expected SubclassCreationMeta at attr_idx={attr_idx}, "
+                f"got {type(current_meta)}"
+            )
+        attr_items = list(current_meta.attrs.items())
+        attr_name, current_meta = attr_items[attr_idx]
+        source = AttrSource(source, attr_name)
+
+    return GetItemSource(SubclassMetadataSource(source), meta_idx)
+
+
 def requires_subclass_dispatch(
     args: FakifiedFlatArgs, fw_metadata: ViewAndMutationMeta
 ) -> bool:

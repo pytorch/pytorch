@@ -3,7 +3,6 @@
 import contextlib
 import gc
 import random
-import unittest
 from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Optional
@@ -2012,7 +2011,6 @@ class GraphModule(torch.nn.Module):
         self.assertIs(out2._counter, counter2)
         self.assertIs(out2._size_store, size2)
 
-    @unittest.expectedFailure
     def test_shared_opaque_identity_guard(self):
         """When inputs share an opaque at trace time, breaking that sharing
         should trigger recompilation.

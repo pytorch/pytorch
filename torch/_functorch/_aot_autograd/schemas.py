@@ -471,6 +471,14 @@ class ViewAndMutationMeta:
 
     # Number of opaque objects saved for backward
     num_opaque_objects_saved_for_bw: Optional[int] = None
+
+    # Pairs of opaque source keys that were the same object at trace time and
+    # are used in output remappings.  Each pair (key_a, key_b) means the opaques
+    # at those positions must remain identical at runtime; if not, we recompile.
+    shared_opaque_guard_keys: list[tuple[tuple[int, ...], tuple[int, ...]]] = field(
+        default_factory=list
+    )
+
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
