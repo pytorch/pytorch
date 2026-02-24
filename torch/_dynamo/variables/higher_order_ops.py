@@ -25,6 +25,7 @@ import itertools
 import logging
 import types
 import warnings
+import weakref
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
@@ -5182,13 +5183,213 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         return body_name
 
+    @staticmethod
+    def _extract_is_pure_and_config(fn_var):
+        config = None
+        if hasattr(fn_var, "get_function"):
+            try:
+                fn = fn_var.get_function()
+                config = getattr(fn, "__marked_compile_region_config__", None)
+            except Exception:
+                log.warning(
+                    "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
+                    exc_info=True,
+                )
+                raise
+        is_pure = isinstance(config, NestedCompileRegionOptions) and config.is_pure
+        return is_pure, config
+
+    @staticmethod
+    def _flatten_arg_vts(fn_args_vt, kwargs):
+        """Flatten fn_args_vt and kwargs into proxyable leaf VTs and all sourced VTs.
+
+        Returns (flat_proxyable, all_sourced):
+          - flat_proxyable: leaf tensor/symnode VTs for proxy matching
+          - all_sourced: all VTs with a source attribute, for building the
+            source replacement dict (includes non-tensor VTs like modules)
+        """
+        flat_proxyable: list[VariableTracker] = []
+        all_sourced: list[VariableTracker] = []
+
+        def _collect(vt: VariableTracker) -> None:
+            if vt.is_tensor() or isinstance(vt, SymNodeVariable):
+                flat_proxyable.append(vt)
+            if getattr(vt, "source", None) is not None:
+                all_sourced.append(vt)
+
+        all_vts: list[VariableTracker] = list(fn_args_vt) + list(kwargs.values())
+        VariableTracker.visit(_collect, all_vts)
+        return flat_proxyable, all_sourced
+
+    @staticmethod
+    def _get_fn_id(fn_var):
+        if isinstance(fn_var, UserFunctionVariable):
+            return id(fn_var.get_function())
+        elif isinstance(fn_var, UnspecializedNNModuleVariable):
+            return id(fn_var.value.forward.__func__)  # type: ignore[attr-defined]
+        return None
+
+    def _get_pure_cache(self, tx, fn_var):
+        from torch._guards import InvokeSubgraphCache
+
+        invoke_subgraph_cache = (
+            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+                torch._higher_order_ops.invoke_subgraph
+            )
+        )
+        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+            return None
+        fn_id = self._get_fn_id(fn_var)
+        if fn_id is None:
+            return None
+        return invoke_subgraph_cache.get_pure_cache_entry(fn_id)
+
+    def _save_pure_cache(
+        self, tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r
+    ):
+        from torch._guards import InvokeSubgraphCache, PureSubgraphCacheEntry
+
+        invoke_subgraph_cache = (
+            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+                torch._higher_order_ops.invoke_subgraph
+            )
+        )
+        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+            return
+
+        fn_id = self._get_fn_id(fn_var)
+        if fn_id is None:
+            return
+
+        # Flatten fn_args_vt and kwargs into leaf proxyable VTs (for proxy
+        # matching) and all sourced VTs (for source replacement on cache hit).
+        flat_proxyable, all_sourced = self._flatten_arg_vts(fn_args_vt, kwargs)
+
+        # Build freevar_mapping: for each lifted arg in p_args[2:] (skipping
+        # body_node and body_name), determine if it came from a flattened user
+        # arg or is a captured variable.
+        #
+        # For captured variables (e.g. module weights), we store the Source
+        # object from the outer graph node so we can re-derive the correct
+        # proxy on cache hit (different module instances have different
+        # weight proxies but the same source structure).
+        freevar_mapping: list[tuple[int, Any]] = []
+        for outer_proxy in p_args[2:]:
+            matched_idx = -1
+            for i, arg_vt in enumerate(flat_proxyable):
+                if arg_vt.as_proxy().node is outer_proxy.node:
+                    matched_idx = i
+                    break
+            if matched_idx >= 0:
+                freevar_mapping.append((matched_idx, None))
+            else:
+                grapharg = outer_proxy.node.meta.get("grapharg", None)
+                source = grapharg.source if grapharg is not None else None
+                assert source is not None, (
+                    f"is_pure freevar has no source: node.op={outer_proxy.node.op} "
+                    f"node.name={outer_proxy.node.name} — this likely means a "
+                    f"function argument was not included in the proxy matching"
+                )
+                freevar_mapping.append((-1, source))
+
+        single_tensor_output = isinstance(body_r, TensorVariable)
+
+        # Record sources of all sourced VTs (including non-tensor ones like
+        # modules) so we can build a replacement dict on cache hit.
+        arg_sources = [getattr(vt, "source", None) for vt in all_sourced]
+
+        entry = PureSubgraphCacheEntry(
+            body_name=body_name,
+            body_gmod=body_gmod,
+            config=config,
+            freevar_mapping=freevar_mapping,
+            single_tensor_output=single_tensor_output,
+            arg_sources=arg_sources,
+        )
+        invoke_subgraph_cache.add_pure_cache_entry(fn_id, entry)
+
+    def _stamp_out_cached_subgraph(self, tx, fn_args_vt, kwargs, cached):
+        from .builder import VariableBuilder
+
+        flat_proxyable, all_sourced = self._flatten_arg_vts(fn_args_vt, kwargs)
+
+        # Build a replacement dict: old arg source → new arg source.
+        # This lets us rewrite captured variable sources (which are rooted
+        # at one of the arg sources) for the current invocation.
+        # pyrefly: ignore[implicit-any]
+        source_replacement = {}
+        if cached.arg_sources:
+            for old_source, new_vt in zip(cached.arg_sources, all_sourced):
+                new_source = getattr(new_vt, "source", None)
+                if (
+                    old_source is not None
+                    and new_source is not None
+                    and old_source != new_source
+                ):
+                    source_replacement[old_source] = new_source
+
+        # Rebuild proxy args from the cached freevar mapping
+        new_lifted_args = []
+        for user_arg_idx, data in cached.freevar_mapping:
+            if user_arg_idx >= 0:
+                new_lifted_args.append(flat_proxyable[user_arg_idx].as_proxy())
+            else:
+                # Captured variable: rewrite the source to point to the
+                # current invocation's args, then use VariableBuilder to
+                # create a VT with the correct outer-graph proxy.
+                source = data
+                new_source = source
+                if source_replacement:
+                    new_source = source.clone(lambda s: source_replacement.get(s, s))
+
+                root_tx = tx.output.root_tx
+                value = new_source.get_value(
+                    {"G": root_tx.f_globals, "L": root_tx.f_locals},
+                    {},
+                    weakref.WeakKeyDictionary(),
+                )
+                vt = VariableBuilder(tx, new_source)(value)
+                new_lifted_args.append(vt.as_proxy())
+
+        # Compute example_value by running the cached body_gmod on fake inputs
+        # TODO - This might be expensive to run everytime - lets cache the metadata
+        # Missing - symints
+        fake_inputs = []
+        for arg in new_lifted_args:
+            fake_inputs.append(arg.node.meta["example_value"])
+        example_value = cached.body_gmod(*fake_inputs)
+
+        body_node = make_attr(tx, cached.body_name)
+        p_args = (body_node, cached.body_name, *new_lifted_args)
+        flat_variable = add_call_function(
+            tx,
+            torch._higher_order_ops.invoke_subgraph,
+            tuple(p_args),
+            {},
+            example_value,
+            cached.config,
+        )
+
+        if cached.single_tensor_output:
+            return flat_variable.items[0]  # type: ignore[attr-defined]
+        return flat_variable
+
     def _call_function(
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # This flattens the kwargs into lifted args
+        fn_var = args[0]
+        fn_args_vt = args[1:]
+
+        is_pure, config = self._extract_is_pure_and_config(fn_var)
+        if is_pure:
+            cached = self._get_pure_cache(tx, fn_var)
+            if cached is not None:
+                return self._stamp_out_cached_subgraph(tx, fn_args_vt, kwargs, cached)
+
+        # Normal path: trace the subgraph
         assert self._HOP_NAME is not None
         (
             p_args,
@@ -5198,7 +5399,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             body_gmod,
             body_name,
             body_graph_output_vts,
-        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, self._HOP_NAME)
+        ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
 
         if len(p_kwargs) > 0:
             unimplemented(
@@ -5210,30 +5411,21 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 ],
             )
 
-        # Extract nested compile config and store in node meta
-        # This will be used in regional_inductor_invoke_subgraph
-        config = None
-        fn_var = args[0]
-        if hasattr(fn_var, "get_function"):
-            try:
-                fn = fn_var.get_function()
-
-                if hasattr(fn, "__marked_compile_region_config__"):
-                    config = fn.__marked_compile_region_config__
-                    if config is not None:
-                        body_gmod.meta["nested_region_config"] = config
-            except Exception:
-                log.warning(
-                    "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
-                    exc_info=True,
-                )
-                raise
+        # Store config in the body graph module meta
+        if config is not None:
+            body_gmod.meta["nested_region_config"] = config
 
         p_args = (
             p_args[0],
             body_name,
             *p_args[1:],
         )
+
+        if is_pure:
+            self._save_pure_cache(
+                tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r
+            )
+
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
             tx,
             torch._higher_order_ops.invoke_subgraph,

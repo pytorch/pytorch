@@ -737,6 +737,22 @@ class HopSubgraphCache:
     ) -> tuple[torch.fx.GraphModule | None, int | None]: ...
 
 
+@dataclass
+class PureSubgraphCacheEntry:
+    body_name: str
+    body_gmod: Any  # GraphModule
+    config: Any  # NestedCompileRegionOptions | None
+    # Per lifted freevar (in subgraph input order):
+    #   idx >= 0 → came from flat_proxyable[idx]; data is None
+    #   idx == -1 → captured variable; data is the Source object
+    freevar_mapping: list[tuple[int, Any]]
+    single_tensor_output: bool
+    # Sources of all fn_args_vt from the first trace. On cache hit, we build
+    # a replacement dict mapping old arg sources → new arg sources so that
+    # captured variable sources can be rewritten for the current invocation.
+    arg_sources: list[Any] | None = None  # list[Source | None]
+
+
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
@@ -748,6 +764,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
+        self.pure_subgraph_cache: dict[int, PureSubgraphCacheEntry] = {}
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
         self.dynamo_installed_submodules[fn_id].append(identifier)
@@ -801,6 +818,12 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_effects(self, identifier: str) -> set | None:
         """Retrieve the effect types for a given invoke_subgraph identifier."""
         return self.effects_cache.get(identifier, None)
+
+    def add_pure_cache_entry(self, fn_id: int, entry: PureSubgraphCacheEntry) -> None:
+        self.pure_subgraph_cache[fn_id] = entry
+
+    def get_pure_cache_entry(self, fn_id: int) -> PureSubgraphCacheEntry | None:
+        return self.pure_subgraph_cache.get(fn_id, None)
 
 
 class HopDispatchSetCache:

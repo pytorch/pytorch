@@ -658,7 +658,11 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
+def nested_compile_region(
+    fn=None,
+    options: NestedCompileRegionOptions | None = None,
+    is_pure: bool = False,
+):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
@@ -688,12 +692,26 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
         options: Optional backend to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        is_pure: When True, asserts that repeated calls to the same function
+            always produce the same subgraph, allowing Dynamo to skip tracing
+            on subsequent calls.
     """
 
     if options is not None:
         from torch._dynamo import config as dynamo_config
 
-        if not dynamo_config.enable_invoke_subgraph_regional_compile:
+        # Only gate the regional compile check on the compiler fields,
+        # not on is_pure alone.
+        has_compiler_fields = (
+            options.fw_compiler is not None
+            or options.bw_compiler is not None
+            or options.partitioner is not None
+            or options.decompositions is not None
+        )
+        if (
+            has_compiler_fields
+            and not dynamo_config.enable_invoke_subgraph_regional_compile
+        ):
             raise RuntimeError(
                 "nested_compile_region config is an experimental feature for testing only."
             )
@@ -702,7 +720,7 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
         mark_compile_region as _mark_compile_region,
     )
 
-    return _mark_compile_region(fn, options=options)
+    return _mark_compile_region(fn, options=options, is_pure=is_pure)
 
 
 def load_compiled_function(

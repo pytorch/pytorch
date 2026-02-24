@@ -76,6 +76,11 @@ class NestedCompileRegionOptions:
     # Otherwise, the nested region will use this decompositions.
     decompositions: Optional[dict[str, Any]] = None
 
+    # When True, the user asserts that repeated calls to the same function
+    # always produce the same subgraph. Dynamo can skip tracing on the 2nd+
+    # call and directly reuse the previously cached subgraph.
+    is_pure: bool = False
+
 
 def _extract_nested_region_config(fn):
     """
@@ -264,7 +269,11 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] = None):
+def mark_compile_region(
+    fn=None,
+    options: Optional[NestedCompileRegionOptions] = None,
+    is_pure: bool = False,
+):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -278,7 +287,21 @@ def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] =
         options: Optional config to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        is_pure: When True, asserts that repeated calls produce the same
+            subgraph, allowing Dynamo to skip tracing on subsequent calls.
     """
+
+    if is_pure:
+        if options is None:
+            options = NestedCompileRegionOptions(is_pure=True)
+        else:
+            options = NestedCompileRegionOptions(
+                fw_compiler=options.fw_compiler,
+                bw_compiler=options.bw_compiler,
+                partitioner=options.partitioner,
+                decompositions=options.decompositions,
+                is_pure=True,
+            )
 
     def wrap(func):
         def inner(*args, **kwargs):
