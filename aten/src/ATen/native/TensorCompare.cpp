@@ -1,3 +1,4 @@
+#include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
@@ -826,15 +827,18 @@ TORCH_IMPL_FUNC(clamp_out)
  const OptionalScalarRef max,
  const Tensor& result) {
   using at::native::detail::ClampLimits;
-  if (min && max) {
-    if (min.get().toDouble() != min.get().toDouble() ||
-        max.get().toDouble() != max.get().toDouble()) {
-      at::fill_(
-          const_cast<Tensor&>(result),
-          std::numeric_limits<double>::quiet_NaN());
-    } else {
-      clamp_scalar_stub(device_type(), *this, min.get(), max.get());
-    }
+
+  // If either scalar bound is NaN, the result should be all NaNs
+  const bool min_is_nan =
+      min.has_value() && (min.get().toDouble() != min.get().toDouble());
+  const bool max_is_nan =
+      max.has_value() && (max.get().toDouble() != max.get().toDouble());
+
+  if (min_is_nan || max_is_nan) {
+    at::fill_(
+        const_cast<Tensor&>(result), std::numeric_limits<double>::quiet_NaN());
+  } else if (min && max) {
+    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
     clamp_max_scalar_stub(device_type(), *this, max.get());
   } else if (min) {
