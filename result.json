@@ -1,0 +1,10 @@
+{
+  "category": "question",
+  "summary": "User asks if torch._dynamo.export not supporting nn.GRU is an intentional limitation or a bug",
+  "answer": "This is a known, intentional limitation. `torch._dynamo.export` does not support `nn.RNN`, `nn.GRU`, or `nn.LSTM` modules. The error message explicitly states this: \"Dynamo does not support RNN, GRU, or LSTM.\"\n\nNote that `torch._dynamo.export` is a legacy/deprecated API. The recommended modern alternative is `torch.export.export`, which does support GRU and other RNN modules. You can use it like this:\n\n```python\nimport torch\nimport torch.nn as nn\n\nclass SimpleGRU(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.gru = nn.GRU(\n            input_size=80,\n            hidden_size=64,\n            num_layers=2,\n            batch_first=True,\n            bidirectional=True,\n        )\n\n    def forward(self, x):\n        out, h = self.gru(x)\n        return out, h\n\nmodel = SimpleGRU()\nsample_input = torch.randn(2, 5, 80)\n\nexported = torch.export.export(model, (sample_input,))\n```\n\nIf you must use `torch._dynamo.export` for some reason, you can work around this by decomposing the GRU into basic tensor operations manually, but using `torch.export.export` is strongly recommended instead.",
+  "repro_code": "import torch\nimport torch.nn as nn\nimport torch._dynamo as dynamo\n\nclass SimpleGRU(nn.Module):\n    def __init__(self):\n        super().__init__()\n        self.gru = nn.GRU(\n            input_size=80,\n            hidden_size=64,\n            num_layers=2,\n            batch_first=True,\n            bidirectional=True,\n        )\n\n    def forward(self, x):\n        out, h = self.gru(x)\n        return out, h\n\nmodel = SimpleGRU()\nsample_input = torch.randn(2, 5, 80)\n\nexported = dynamo.export(model)(sample_input)",
+  "repro_output": null,
+  "commit_hash": "965caf0db33d31ae6303d0960f26afd40c083736",
+  "fix_description": null,
+  "patch_file": null
+}
