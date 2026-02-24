@@ -1084,90 +1084,6 @@ class CompiledOptimizerBitwiseTests(TestCase):
                         msg=f"State '{key}' differs",
                     )
 
-    @config.patch(
-        {
-            "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
-            "emulate_precision_casts": True,
-        }
-    )
-    def test_adam_bitwise(self):
-        """Test Adam with foreach=True, capturable=True is bitwise equal."""
-        self._test_optimizer_bitwise(self, Adam)
-
-    @config.patch(
-        {
-            "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
-            "emulate_precision_casts": True,
-        }
-    )
-    def test_adam_bitwise_amsgrad(self):
-        """Test Adam with amsgrad=True is bitwise equal."""
-        self._test_optimizer_bitwise(self, Adam, amsgrad=True)
-
-    @config.patch(
-        {
-            "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
-            "emulate_precision_casts": True,
-        }
-    )
-    def test_adamw_bitwise(self):
-        """Test AdamW with foreach=True, capturable=True is bitwise equal."""
-        self._test_optimizer_bitwise(self, AdamW)
-
-    @config.patch(
-        {
-            "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
-            "emulate_precision_casts": True,
-        }
-    )
-    def test_adamw_bitwise_with_weight_decay(self):
-        """Test AdamW with weight_decay is bitwise equal."""
-        self._test_optimizer_bitwise(self, AdamW, weight_decay=0.01)
-
-    @config.patch(
-        {
-            "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
-            "emulate_precision_casts": True,
-        }
-    )
-    def test_adamw_bitwise_amsgrad(self):
-        """Test AdamW with amsgrad=True is bitwise equal."""
-        self._test_optimizer_bitwise(self, AdamW, amsgrad=True)
-
-    @config.patch(
-        {
-            "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
-            "emulate_precision_casts": True,
-        }
-    )
-    def test_adamw_bitwise_maximize(self):
-        """Test AdamW with maximize=True is bitwise equal."""
-        self._test_optimizer_bitwise(self, AdamW, maximize=True)
-
-    @config.patch(
-        {
-            "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
-            "emulate_precision_casts": True,
-        }
-    )
-    def test_adamw_bitwise_all_options(self):
-        """Test AdamW with all options enabled is bitwise equal."""
-        self._test_optimizer_bitwise(
-            self,
-            AdamW,
-            weight_decay=0.1,
-            amsgrad=True,
-            maximize=True,
-            betas=(0.95, 0.99),
-        )
-
 
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
     setattr(
@@ -1175,6 +1091,42 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
         name,
         make_test(optim_cls, scheduler_cls=scheduler_cls, **kwargs),
     )
+
+
+def _make_bitwise_test(optim_cls, **optim_kwargs):
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.pow_precision": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_fn(self):
+        CompiledOptimizerBitwiseTests._test_optimizer_bitwise(
+            self, optim_cls, **optim_kwargs
+        )
+
+    return test_fn
+
+
+for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
+    if (
+        optim_cls in (Adam, AdamW)
+        and kwargs.get("foreach", False)
+        and kwargs.get("capturable", False)
+        and kwargs.get("device") == GPU_TYPE
+    ):
+        optim_kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k not in ("device", "kernel_count")
+        }
+        setattr(
+            CompiledOptimizerTests,
+            name.replace("test_", "test_bitwise_"),
+            _make_bitwise_test(optim_cls, **optim_kwargs),
+        )
+
 
 instantiate_device_type_tests(
     CompiledOptimizerParityTests, globals(), allow_xpu=True, except_for="cpu"
