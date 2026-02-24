@@ -1976,19 +1976,6 @@ class DunderDictVariable(ConstDictVariable):
         super().__init__({}, **kwargs)
         self.items = SideEffectsProxyDict(vt, side_effects)
 
-    @classmethod
-    def create(
-        cls, tx: "InstructionTranslator", vt: VariableTracker
-    ) -> "DunderDictVariable":
-        mutation = ValueMutationExisting() if vt.source else ValueMutationNew()
-        source = vt.source and AttrSource(vt.source, "__dict__")
-        return cls(
-            vt,
-            side_effects=tx.output.side_effects,
-            mutation_type=mutation,
-            source=source,
-        )
-
     def setitem(self, name: str, value: VariableTracker) -> None:
         self.items[name] = value
 
