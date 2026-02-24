@@ -122,7 +122,7 @@ class SymNode:
         #   computation, but we don't know what it actually is because we
         #   haven't actually run the tensor computation.
         #
-        # If _guarding_hint is None, we will query maybe_evaluate_static(compute_hint=True)
+        # If _hint is None, we will query maybe_evaluate_static(compute_hint=True)
         # in hopes that we've learned enough about the unbacked symints to
         # discharge the hint; otherwise, you're likely to just error out.
         #

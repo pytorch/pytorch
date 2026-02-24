@@ -9,8 +9,12 @@ import sympy
 from sympy import Expr
 
 from torch import SymInt
-from torch.fx.experimental.symbolic_shapes import (
+from torch.fx.experimental.size_hinting import (
+    _guarding_hint_or_throw_base,
     _maybe_realize_expr,
+    _optimization_hint_base,
+)
+from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
     IterateExprs,
@@ -672,8 +676,8 @@ class SizeVarAllocator:
                 f"guarding_hint_or_throw expects a sympy Expr or int, not {type(expr)}. "
                 "Use expr.expr to extract the sympy expression from a SymNode."
             )
-        return self.shape_env._guarding_hint_or_throw_base(
-            expr, self.precomputed_replacements
+        return _guarding_hint_or_throw_base(
+            self.shape_env, expr, self.precomputed_replacements
         )
 
     def optimization_hint(
@@ -695,8 +699,8 @@ class SizeVarAllocator:
         - Infinity (int_oo, sympy.oo): returns sys.maxsize.
         - NaN (sympy.nan): returns the fallback value.
         """
-        return self.shape_env._optimization_hint_base(
-            expr, self.precomputed_replacements, fallback
+        return _optimization_hint_base(
+            self.shape_env, expr, self.precomputed_replacements, fallback
         )
 
     def optimization_hints(
