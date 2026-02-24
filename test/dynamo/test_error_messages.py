@@ -1872,7 +1872,6 @@ from user code:
 
         x = torch.randn(4, 4)
         y = torch.randn(10, 10)
-        torch._dynamo.mark_dynamic(x, 2)
         torch._dynamo.mark_dynamic(y, 1)
 
         def post_munge(s):
