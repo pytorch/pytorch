@@ -269,7 +269,7 @@ def _expand_single_dim_strategy_to_mesh(
                 op_mesh,
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
-                output_tensor_meta=output_tensor_meta,
+                output_tensor_meta=output_tensor_meta,  # pyrefly: ignore[unbound-name]
                 inplace_op=is_inplace,
                 input_index=num_outputs,
                 allow_unbacked_sharding=strategy_info.allow_unbacked_sharding,
@@ -296,8 +296,10 @@ def _expand_single_dim_strategy_to_mesh(
             return _create_expanded_strategy_impl(op_schema, output_tensor_meta)
 
     def _translate_list_op_schema(
-        op_schema: OpSchema, output_tensor_meta: Sequence[TensorMeta], index: int
-    ) -> tuple[OpSchema, TensorMeta]:
+        op_schema: OpSchema,
+        output_tensor_meta: Sequence[TensorMeta | None] | None,
+        index: int,
+    ) -> tuple[OpSchema, TensorMeta | None]:
         """Translate foreach op to per-element version of schema."""
         op_parts = str(op_schema.op).split(".")
         base_op_name = op_parts[-2].replace("_foreach_", "")
@@ -384,7 +386,7 @@ def _expand_single_dim_strategy_to_mesh(
         for tensorlist_i in range(tensorlist_len):
             per_index_schema, per_index_output_meta = _translate_list_op_schema(
                 op_schema,
-                output_tensor_meta,  # type: ignore[arg-type]
+                output_tensor_meta,
                 tensorlist_i,
             )
             per_index_strategy = _create_expanded_strategy(
