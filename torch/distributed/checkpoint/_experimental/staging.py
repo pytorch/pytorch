@@ -147,14 +147,12 @@ class DefaultStager(CheckpointStager):
         self._staging_stream = None
 
         if self._config.use_async_staging:
-            # pyrefly: ignore [bad-assignment]
             self._staging_executor = ThreadPoolExecutor(max_workers=1)
             if torch.accelerator.is_available():
                 # Note: stream needs to be initialized on the main thread after default cuda
                 # stream is setup/used to avoid the risk of accidentally reusing the main
                 # compute stream or in other cases kernels actually launching from the
                 # main thread.
-                # pyrefly: ignore [bad-assignment]
                 self._staging_stream = torch.Stream()
 
         if self._config.use_non_blocking_copy:
