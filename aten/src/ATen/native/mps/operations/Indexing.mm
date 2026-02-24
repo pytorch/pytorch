@@ -719,6 +719,43 @@ static inline ReductionType index_reduce_type(const std::string_view& reduce) {
   }
 }
 
+template <typename scalar_t>
+static inline scalar_t highest_value() {
+  if constexpr (std::numeric_limits<scalar_t>::has_infinity) {
+    return std::numeric_limits<scalar_t>::infinity();
+  } else {
+    return std::numeric_limits<scalar_t>::max();
+  }
+}
+
+template <typename scalar_t>
+static inline scalar_t lowest_value() {
+  if constexpr (std::numeric_limits<scalar_t>::has_infinity) {
+    return -std::numeric_limits<scalar_t>::infinity();
+  } else {
+    return std::numeric_limits<scalar_t>::lowest();
+  }
+}
+
+template <typename scalar_t>
+static inline scalar_t index_reduce_init_value(ReductionType reduction_type) {
+  if (reduction_type == ReductionType::PROD) {
+    std::cout << "reduction_type=PROD" << std::endl;
+    return 1;
+  } else if (reduction_type == ReductionType::MEAN) {
+    std::cout << "reduction_type=MEAN" << std::endl;
+    return 0;
+  } else if (reduction_type == ReductionType::MAX) {
+    std::cout << "reduction_type=MAX" << std::endl;
+    return lowest_value<scalar_t>();
+  } else if (reduction_type == ReductionType::MIN) {
+    std::cout << "reduction_type=MIN" << std::endl;
+    return highest_value<scalar_t>();
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "reduction type not supported");
+  }
+}
+
 TORCH_IMPL_FUNC(index_reduce_mps_out)
 (const Tensor& self,
  int64_t dim,
@@ -755,59 +792,38 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
                                result.scalar_type(),
                                "index_reduce_func_mps_exclude_input_init",
                                [&] {
-                                 scalar_t init_val;
-                                 switch (reduction_type) {
-                                   case ReductionType::PROD:
-                                     init_val = (scalar_t)1;
-                                     break;
-                                   case ReductionType::MAX:
-                                     init_val = std::numeric_limits<scalar_t>::has_infinity
-                                         ? -std::numeric_limits<scalar_t>::infinity()
-                                         : std::numeric_limits<scalar_t>::min();
-                                     break;
-                                   case ReductionType::MIN:
-                                     init_val = std::numeric_limits<scalar_t>::has_infinity
-                                         ? std::numeric_limits<scalar_t>::infinity()
-                                         : std::numeric_limits<scalar_t>::max();
-                                     break;
-                                   default:
-                                     init_val = (scalar_t)0;
-                                     break;
-                                 }
-                                 // index_fill_ requires index to be a LongTensor
+                                 scalar_t init_val = index_reduce_init_value<scalar_t>(reduction_type);
+                                 std::cout << "init_val=" << init_val << std::endl;
                                  result.index_fill_(dim, index.to(at::ScalarType::Long), init_val);
                                });
   }
 
   std::cout << "result=" << result << std::endl;
 
-  Tensor self_ = (result.dim() == 0) ? result.view(1) : result;
-  Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
-
   IndexReduceParams params;
   params.index_stride = index.stride(0);
   params.reduce_dim = dim;
-  params.ndim = self_.dim();
+  params.ndim = result.dim();
 
-  for (const auto dim : c10::irange(self_.dim())) {
-    params.self_strides[dim] = self_.stride(dim);
-    params.self_sizes[dim] = self_.size(dim);
-    params.source_strides[dim] = source_.stride(dim);
-    params.source_sizes[dim] = source_.size(dim);
+  for (const auto dim : c10::irange(result.dim())) {
+    params.self_strides[dim] = result.stride(dim);
+    params.self_sizes[dim] = result.size(dim);
+    params.source_strides[dim] = source.stride(dim);
+    params.source_sizes[dim] = source.size(dim);
   }
 
   MPSStream* stream = getCurrentMPSStream();
 
-  auto num_threads = source_.numel();
+  auto num_threads = source.numel();
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
-          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(self_), mps::scalarToMetalTypeString(index)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {self_, index, source_});
+          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source});
       [compute_encoder setComputePipelineState:pipeline_state];
-      mps::mtl_setArgs(compute_encoder, self_, index, source_, params);
+      mps::mtl_setArgs(compute_encoder, result, index, source, params);
       mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
       getMPSProfiler().endProfileKernel(pipeline_state);
     }
@@ -816,13 +832,13 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   std::cout << "result=" << result << std::endl;
 
   if (reduction_type == ReductionType::MEAN) {
-    auto counts = include_self ? at::ones_like(self_) : at::zeros_like(self_);
-    counts.index_add_(dim, index, at::ones_like(source_));
+    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+    counts.index_add_(dim, index, at::ones_like(source));
     counts.masked_fill_(counts.eq(0), 1);
-    if (self_.is_floating_point() || self_.is_complex()) {
-      self_.div_(counts);
+    if (result.is_floating_point() || result.is_complex()) {
+      result.div_(counts);
     } else {
-      self_.div_(counts, "floor");
+      result.div_(counts, "floor");
     }
     std::cout << "counts=" << counts << std::endl;
     std::cout << "result=" << result << std::endl;
