@@ -251,6 +251,8 @@ autosummary_filename_map = {
 }
 
 coverage_ignore_functions = [
+    "main", # utility script
+    "run", # utility script
     # torch.distributions.constraints
     "is_dependent",
     # torch.hub

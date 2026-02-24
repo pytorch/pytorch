@@ -1,6 +1,6 @@
 ---
 name: document-public-apis
-description: Document undocumented public APIs in PyTorch by removing functions from coverage_ignore_functions and coverage_ignore_classes in docs/source/conf.py, running Sphinx coverage, and adding the appropriate autodoc directives to the correct .md or .rst doc files. Use when a user asks to document public APIs, remove functions from conf.py ignore lists, fix documentation coverage, or add missing API docs.
+description: Document undocumented public APIs in PyTorch by removing functions from coverage_ignore_functions and coverage_ignore_classes in docs/source/conf.py, running Sphinx coverage, and adding the appropriate autodoc directives to the correct .md or .rst doc files. Use when a user asks to remove functions from conf.py ignore lists.
 ---
 
 # Document Public APIs
@@ -13,15 +13,15 @@ This skill documents undocumented public APIs in PyTorch by removing entries fro
 
 `docs/source/conf.py` contains two lists that suppress Sphinx coverage warnings for undocumented APIs:
 
-- `coverage_ignore_functions` (line ~253): undocumented functions
-- `coverage_ignore_classes` (line ~1342): undocumented classes
+- `coverage_ignore_functions`: undocumented functions
+- `coverage_ignore_classes`: undocumented classes
 
 Entries are organized by **module comment groups**. Each group has a module label comment followed by the function/class names that belong to that module:
 
 ```python
 coverage_ignore_functions = [
     # torch.ao.quantization.fx.convert              <-- module label comment
-    "convert",                                       <-- entries belonging to this module
+    "convert",                                       # <-- entries belonging to this module
     "convert_custom_module",
     "convert_standalone_module",
     "convert_weighted_module",
@@ -67,6 +67,7 @@ Work through the lists top-to-bottom. Choose enough groups to make meaningful pr
 - `# documented as <other_name>` — Already documented under a different name. Leave it.
 - `# looks unintentionally public` — Probably not meant to be public API. Leave it.
 - `# legacy helper for ...` — Same as deprecated. Leave it.
+- `# utility function` - Leave it.
 
 If a module group has a **mix** of regular entries and entries with inline comments, still process the group — but only comment out the regular entries. Leave entries with inline comments untouched in the ignore list.
 
@@ -136,30 +137,7 @@ For each function listed in `python.txt`, use the **module label comment** from 
 
 #### Finding the correct doc file
 
-The module comment maps to a doc source file in `docs/source/`. The naming convention generally follows the module path:
-
-| Module path | Doc file |
-|---|---|
-| `torch.foo` | `docs/source/torch.rst` |
-| `torch.accelerator.foo` | `docs/source/accelerator.md` |
-| `torch.backends.foo` | `docs/source/backends.md` |
-| `torch.cuda.foo` | `docs/source/cuda.md` |
-| `torch.nn.foo` | `docs/source/nn.rst` |
-| `torch.nn.functional.foo` | `docs/source/nn.functional.rst` |
-| `torch.distributed.foo` | `docs/source/distributed.md` |
-| `torch.distributed.elastic.foo` | `docs/source/distributed.elastic.md` |
-| `torch.distributed.checkpoint.foo` | `docs/source/distributed.checkpoint.md` |
-| `torch.distributed.tensor.parallel.foo` | `docs/source/distributed.tensor.parallel.md` |
-| `torch.ao.quantization.foo` | `docs/source/quantization.rst` |
-| `torch.fx.foo` | `docs/source/fx.rst` |
-| `torch.onnx.foo` | `docs/source/onnx.rst` |
-| `torch.optim.foo` | `docs/source/optim.rst` |
-| `torch.profiler.foo` | `docs/source/profiler.rst` |
-| `torch.distributions.foo` | `docs/source/distributions.rst` |
-| `torch.signal.foo` | `docs/source/signal.rst` |
-| `torch.library.foo` | `docs/source/library.rst` |
-
-**This table is not exhaustive.** When unsure, search for other functions from the same module:
+The module comment maps to a doc source file in `docs/source/`. When unsure, search for other functions from the same module:
 
 ```bash
 grep -rn "torch.module_name" docs/source/*.md docs/source/*.rst
@@ -175,16 +153,7 @@ If no doc file exists for a submodule, check whether a parent module's doc file 
 
 #### Adding the directives
 
-**Read the target doc file first** and match the exact patterns already used there. Do not invent new patterns or use bare `autofunction` with fully qualified names — always use the proper hierarchical structure with `automodule`, `currentmodule`, and short names.
-
-**Never do this:**
-
-```rst
-.. autofunction:: torch.utils.benchmark.examples.compare.main
-.. autofunction:: torch.utils.benchmark.examples.fuzzer.main
-```
-
-This does not properly document the functions. Always use the hierarchical structure shown below.
+**Read the target doc file first** and match the exact patterns already used there. Do not invent new patterns or use bare `autofunction` with fully qualified names — always use the proper hierarchical structure with `automodule`, `currentmodule`, and short names. Do not use `. py:module::` since that just suppresses errors and doesn't actually document the function. Look at other files that match the target file's format (e.g., `.md` vs. `.rst`) under `docs/source/` to see examples.
 
 There are two file formats. Match the one used in the target file.
 
