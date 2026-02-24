@@ -2424,6 +2424,7 @@ class TestFP8Matmul(TestCase):
 
 instantiate_device_type_tests(TestFP8Matmul, globals(), except_for="cpu", allow_xpu=True)
 
+
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
     run_tests()
