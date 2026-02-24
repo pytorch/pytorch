@@ -98,6 +98,24 @@ class RangeImplGroup:
         return self.impl_config.kwargs
 
 
+def _is_triton_op_overload(target: torch._ops.OpOverload) -> bool:
+    """Check if an OpOverload was created by @triton_op.
+
+    @triton_op registers a FunctionalTensorMode torch_dispatch override,
+    so we check for that key. Falls back to a name-based heuristic if the
+    dispatch key check is inconclusive.
+    """
+    try:
+        if hasattr(target, "py_kernels"):
+            from torch._subclasses.functional_tensor import FunctionalTensorMode
+
+            if FunctionalTensorMode in target.py_kernels:
+                return True
+    except Exception:
+        pass
+    return "triton" in str(target).lower()
+
+
 def _graph_contains_triton_op(gm: torch.fx.GraphModule) -> bool:
     """Check if graph contains triton_op calls (torch.ops.*.* from @triton_op).
 
@@ -108,11 +126,11 @@ def _graph_contains_triton_op(gm: torch.fx.GraphModule) -> bool:
     for node in gm.graph.nodes:
         if node.op == "call_function":
             target = node.target
-            if isinstance(target, torch._ops.OpOverload):
-                op_name = str(target)
-                if "triton" in op_name.lower():
-                    log.debug("Found triton_op in graph: %s", op_name)
-                    return True
+            if isinstance(target, torch._ops.OpOverload) and _is_triton_op_overload(
+                target
+            ):
+                log.debug("Found triton_op in graph: %s", target)
+                return True
     return False
 
 
@@ -426,7 +444,7 @@ def _create_fallback_choice(
         name=f"{name}_fallback_default",
         has_out_variant=False,
         op_overload=default_impl,
-      use_fallback_kernel=True,
+        use_fallback_kernel=True,
     )
 
 
@@ -449,10 +467,10 @@ class _ReusedExternKernelChoice:
         self.has_out_variant = False
         self.op_overload = op_overload
         self.use_fallback_kernel = True
-        self.src_hash = None
         self.gm = None
         self.cpp_kernel_name = None
         self._kernel = getattr(extern_kernels, name)
+        self.src_hash = self.hash_key()
 
     def to_callable(self) -> Callable[..., Any]:
         return self._kernel

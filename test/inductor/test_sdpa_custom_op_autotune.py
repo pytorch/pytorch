@@ -108,7 +108,9 @@ class TestCustomOpAutotuneSDPA(TestCase):
                 attn = torch.matmul(query * scale, key.transpose(-2, -1))
                 if is_causal:
                     L, S = attn.shape[-2], attn.shape[-1]
-                    mask = torch.ones(L, S, dtype=torch.bool, device=query.device).tril()
+                    mask = torch.ones(
+                        L, S, dtype=torch.bool, device=query.device
+                    ).tril()
                     attn = attn.masked_fill(~mask, float("-inf"))
                 attn = torch.softmax(attn, dim=-1)
                 return torch.matmul(attn, value)
@@ -147,9 +149,7 @@ class TestCustomOpAutotuneSDPA(TestCase):
             key = torch.randn(B, H, L, D, device=self.device, dtype=self.dtype)
             value = torch.randn(B, H, L, D, device=self.device, dtype=self.dtype)
 
-            expected = F.scaled_dot_product_attention(
-                query, key, value, is_causal=True
-            )
+            expected = F.scaled_dot_product_attention(query, key, value, is_causal=True)
 
             self._run_sdpa_autotune_test(
                 sdpa_op, (query, key, value), expected, "SDPA_math_backend"
