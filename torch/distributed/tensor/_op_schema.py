@@ -109,7 +109,8 @@ class OpSpec:
 
     # output_specs and input_specs are related: for this op, given these input_specs,
     # this is the way the output would look
-    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...]
+    # Note: output_specs can be None for ops that don't return tensors (e.g., _linalg_check_errors)
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...] | None
     input_specs: Sequence[DTensorSpec] | None = None
 
     """
@@ -161,6 +162,12 @@ class OpSpec:
             out_spec = self.output_specs[0]
             assert isinstance(out_spec, DTensorSpec)
             return out_spec.mesh
+        elif self.output_specs is None:
+            # For no-output ops, get mesh from input_specs
+            assert self.input_specs is not None and len(self.input_specs) > 0, (
+                "Cannot determine mesh: output_specs is None and input_specs is empty"
+            )
+            return self.input_specs[0].mesh
         else:
             raise ValueError(
                 f"function output_spec expects a single DTensorSpec or a tuple of DTensorSpec but got: {self.output_specs}"
@@ -181,6 +188,24 @@ class OpSpec:
             input_specs_str = ""
         output_spec_str = _pretty_print_spec(self.output_specs)
         return f"{input_specs_str}{output_spec_str}"
+
+    def __hash__(self) -> int:
+        if self.output_specs is None:
+            output_hash = hash(None)
+        elif isinstance(self.output_specs, DTensorSpec):
+            output_hash = hash(self.output_specs)
+        else:
+            output_hash = hash(tuple(self.output_specs))
+        input_hash = hash(tuple(self.input_specs)) if self.input_specs else 0
+        return hash((output_hash, input_hash))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, OpSpec):
+            return False
+        return (
+            self.output_specs == other.output_specs
+            and self.input_specs == other.input_specs
+        )
 
 
 class StrategyType:
@@ -235,6 +260,12 @@ class OpStrategy(StrategyType):
         assert self.strategies[0].output_spec.tensor_meta is not None
         return self.strategies[0].output_spec.tensor_meta
 
+    def __hash__(self) -> int:
+        return hash(tuple(self.strategies))
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, OpStrategy) and self.strategies == other.strategies
+
 
 class TupleStrategy(StrategyType):
     """
@@ -280,6 +311,12 @@ class TupleStrategy(StrategyType):
             [f"{str(strat)}" for idx, strat in enumerate(self.children)]
         )
         return f"TupleStrategy({child_strategies_str})"
+
+    def __hash__(self) -> int:
+        return hash(tuple(self.children))
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, TupleStrategy) and self.children == other.children
 
 
 try:
@@ -475,7 +512,9 @@ class OpSchema:
         return_types = self.op._schema.returns
         # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
         # return types, so this check is enough for tensor like types
-        return isinstance(return_types[0].type, torch.TensorType)
+        return len(return_types) > 0 and isinstance(
+            return_types[0].type, torch.TensorType
+        )
 
     def get_mesh_from_args(self, validate: bool = True) -> DeviceMesh:
         """
@@ -490,18 +529,23 @@ class OpSchema:
             - for foreach like ops we need to check "zipped" inputs are on the same mesh
               for each index.
         """
-        first_arg = self.args_schema[0]
-        if isinstance(first_arg, (DTensorSpec, OpStrategy)):
-            mesh = first_arg.mesh
-        elif isinstance(first_arg, (list, tuple, TupleStrategy)):
-            first_elem = (
-                first_arg.children[0]
-                if isinstance(first_arg, TupleStrategy)
-                else first_arg[0]
-            )
-            assert isinstance(first_elem, (DTensorSpec, OpStrategy))
-            mesh = first_elem.mesh
-        else:
+        mesh = None
+        # Scan all args to find the first DTensorSpec/OpStrategy (not just the first arg)
+        for arg in self.args_schema:
+            if isinstance(arg, (DTensorSpec, OpStrategy)):
+                mesh = arg.mesh
+                break
+            elif isinstance(arg, (list, tuple, TupleStrategy)):
+                # Scan all elements in the list/tuple, not just the first one,
+                # to handle cases like List[Optional[Tensor]] where first elem may be None
+                elems = arg.children if isinstance(arg, TupleStrategy) else arg
+                for elem in elems:
+                    if isinstance(elem, (DTensorSpec, OpStrategy)):
+                        mesh = elem.mesh
+                        break
+                if mesh is not None:
+                    break
+        if mesh is None:
             raise ValueError(f"Cannot find device mesh from args for op : {self.op}.")
 
         if validate:

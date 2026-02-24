@@ -11,6 +11,7 @@ import torch._functorch.config
 from functorch.compile import (
     aot_function,
     default_decompositions,
+    default_partition,
     min_cut_rematerialization_partition,
 )
 from torch._dynamo.graph_bytecode_inputs import reset_user_object_tracking
@@ -298,6 +299,170 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         ):
             x_compile = [x.detach().clone().requires_grad_(True) for x in x_larger]
             compiled_fn = torch.compile(self.fn, backend="aot_eager")
+            out_compiled = compiled_fn(x_compile)
+            out_compiled.sum().backward()
+            grads_compiled = [inp.grad for inp in x_compile]
+
+        # Verify gradients match between reference and compiled versions
+        for grad_ref, grad_compiled in zip(grads_ref, grads_compiled):
+            torch.testing.assert_close(
+                grad_compiled,
+                grad_ref,
+                rtol=1e-5,
+                atol=1e-5,
+            )
+
+
+@unittest.skipIf(not HAS_GPU, "requires GPU")
+class DefaultPartitionerActivationOffloadingTests(TestCase):
+    """Tests activation offloading with the default partitioner.
+
+    Note: The default partitioner saves intermediate tensors (like add results)
+    and recomputes derived values (like cos) in backward. This differs from
+    min-cut partitioner which may save the derived values directly.
+    Therefore, we mark 'add_1' for offloading instead of 'cos_1'.
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        def fn(x):
+            return (x[0] + x[1]).sin() + (x[2] + x[3]).sin() + (x[4] + x[5]).sin()
+
+        # Mark add_1 for offloading - this IS saved in forward with default partitioner
+        def mark_add_for_offloading(gm, joint_inputs):
+            for node in gm.graph.nodes:
+                if node.name == "add_1":
+                    node.meta["should_offload"] = True
+            return gm
+
+        dim = 10
+        self.x = [
+            torch.randn(dim, dim, requires_grad=True, device=GPU_TYPE) for _ in range(6)
+        ]
+        self.fn = fn
+        self.joint_custom_pass = mark_add_for_offloading
+
+    def test_default_partitioner_offload(self):
+        """Test basic offloading with default partitioner"""
+        torch._dynamo.reset()
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            fw_graph, bw_graph = get_fw_bw_graph(
+                self.fn, [self.x], partitioner=default_partition
+            )
+
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6):
+    add = torch.ops.aten.add.Tensor(primals_1, primals_2);  primals_1 = primals_2 = None
+    sin = torch.ops.aten.sin.default(add)
+    add_1 = torch.ops.aten.add.Tensor(primals_3, primals_4);  primals_3 = primals_4 = None
+    sin_1 = torch.ops.aten.sin.default(add_1)
+    cpu_offload_add_1 = torch.ops.prims.device_put.default(add_1, device(type='cpu'), non_blocking = True);  add_1 = None
+    add_2 = torch.ops.aten.add.Tensor(sin, sin_1);  sin = sin_1 = None
+    add_3 = torch.ops.aten.add.Tensor(primals_5, primals_6);  primals_5 = primals_6 = None
+    sin_2 = torch.ops.aten.sin.default(add_3)
+    add_4 = torch.ops.aten.add.Tensor(add_2, sin_2);  add_2 = sin_2 = None
+    return (add_4, add, cpu_offload_add_1, add_3)""",
+        )
+
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, add, cpu_offload_add_1, add_3, tangents_1):
+    cos = torch.ops.aten.cos.default(add_3);  add_3 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, cos);  cos = None
+    gpu_reload_add_1 = torch.ops.prims.device_put.default(cpu_offload_add_1, device(type='GPU_TYPE', index=0), non_blocking = True);  cpu_offload_add_1 = None
+    cos_1 = torch.ops.aten.cos.default(gpu_reload_add_1);  gpu_reload_add_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, cos_1);  cos_1 = None
+    cos_2 = torch.ops.aten.cos.default(add);  add = None
+    mul_2 = torch.ops.aten.mul.Tensor(tangents_1, cos_2);  tangents_1 = cos_2 = None
+    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
+        )
+
+    def test_default_partitioner_offload_sep_stream(self):
+        """Test offloading with separate streams using default partitioner"""
+        reset_user_object_tracking()
+        torch._dynamo.reset()
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            activation_offload_separate_stream=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            fw_graph, bw_graph = get_fw_bw_graph(
+                self.fn, [self.x], partitioner=default_partition
+            )
+
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6):
+    add = torch.ops.aten.add.Tensor(primals_1, primals_2);  primals_1 = primals_2 = None
+    sin = torch.ops.aten.sin.default(add)
+    add_1 = torch.ops.aten.add.Tensor(primals_3, primals_4);  primals_3 = primals_4 = None
+    sin_1 = torch.ops.aten.sin.default(add_1)
+    record_event_default = torch.ops.streams.record_event.default(2, 0);  record_event_default = None
+    stream_in_cpu_offload_add_1 = torch.ops.streams.fork.default(0, 1);  stream_in_cpu_offload_add_1 = None
+    wait_event_default = torch.ops.streams.wait_event.default(2, 1);  wait_event_default = None
+    record_stream_add_1 = torch.ops.streams.record_stream.default(add_1, 1);  record_stream_add_1 = None
+    cpu_offload_add_1 = torch.ops.prims.device_put.default(add_1, device(type='cpu'), non_blocking = True);  add_1 = None
+    record_event_default_1 = torch.ops.streams.record_event.default(3, 1);  record_event_default_1 = None
+    stream_out_cpu_offload_add_1 = torch.ops.streams.join.default(1, 0);  stream_out_cpu_offload_add_1 = None
+    wait_event_default_1 = torch.ops.streams.wait_event.default(3, 0);  wait_event_default_1 = None
+    add_2 = torch.ops.aten.add.Tensor(sin, sin_1);  sin = sin_1 = None
+    add_3 = torch.ops.aten.add.Tensor(primals_5, primals_6);  primals_5 = primals_6 = None
+    sin_2 = torch.ops.aten.sin.default(add_3)
+    add_4 = torch.ops.aten.add.Tensor(add_2, sin_2);  add_2 = sin_2 = None
+    return (add_4, add, cpu_offload_add_1, add_3)""",
+        )
+
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, add, cpu_offload_add_1, add_3, tangents_1):
+    cos = torch.ops.aten.cos.default(add_3);  add_3 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, cos);  cos = None
+    stream_in_gpu_reload_add_1 = torch.ops.streams.fork.default(4, 5);  stream_in_gpu_reload_add_1 = None
+    wait_stream_default = torch.ops.streams.wait_stream.default(5, 4);  wait_stream_default = None
+    gpu_reload_add_1 = torch.ops.prims.device_put.default(cpu_offload_add_1, device(type='GPU_TYPE', index=0), non_blocking = True);  cpu_offload_add_1 = None
+    record_event_default = torch.ops.streams.record_event.default(6, 5);  record_event_default = None
+    stream_out_gpu_reload_add_1 = torch.ops.streams.join.default(5, 4);  stream_out_gpu_reload_add_1 = None
+    wait_event_default = torch.ops.streams.wait_event.default(6, 4);  wait_event_default = None
+    cos_1 = torch.ops.aten.cos.default(gpu_reload_add_1);  gpu_reload_add_1 = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, cos_1);  cos_1 = None
+    cos_2 = torch.ops.aten.cos.default(add);  add = None
+    mul_2 = torch.ops.aten.mul.Tensor(tangents_1, cos_2);  tangents_1 = cos_2 = None
+    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
+        )
+
+    def test_default_partitioner_offload_accuracy(self):
+        """Test that offloading with default partitioner produces correct gradients"""
+        # Run without compilation to get reference gradients
+        x_ref = [x.detach().clone().requires_grad_(True) for x in self.x]
+        out_ref = self.fn(x_ref)
+        out_ref.sum().backward()
+        grads_ref = [inp.grad for inp in x_ref]
+
+        # Run with aot_eager compilation and offloading enabled using default partitioner
+        reset_user_object_tracking()
+        torch._dynamo.reset()
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            activation_offload_separate_stream=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            x_compile = [x.detach().clone().requires_grad_(True) for x in self.x]
+            compiled_fn = aot_function(
+                self.fn,
+                fw_compiler=lambda g, _: g,
+                bw_compiler=lambda g, _: g,
+                partition_fn=default_partition,
+                decompositions=default_decompositions,
+            )
             out_compiled = compiled_fn(x_compile)
             out_compiled.sum().backward()
             grads_compiled = [inp.grad for inp in x_compile]

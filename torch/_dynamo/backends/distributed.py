@@ -85,6 +85,7 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
 def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
     headers = ("Index", "Size (b)", "Param Names")
     rows: list[tuple[Optional[int], Optional[int], str]] = []
+    # pyrefly: ignore [implicit-any]
     extended_buckets = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
@@ -489,7 +490,7 @@ class DDPOptimizer:
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
-        to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
+        to compile each subgraph. Finally, stitches compiled graphs into one graphmodule
         and returns its callable.
         """
         # 1: compute the partition map according to DDP bucket logic

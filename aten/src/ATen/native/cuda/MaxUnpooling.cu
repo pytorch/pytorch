@@ -175,7 +175,7 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
   output.zero_();
 
   auto count = self.numel();
-  if (count != 0) {
+  if (count != 0 && oheight != 0 && owidth != 0) {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16,
         self.scalar_type(), "max_unpooling2d_forward_kernel", ([&] {
           max_unpooling2d_forward_kernel<<<
@@ -353,6 +353,10 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
   }
 
   if (self.numel() == 0) {
+    return output;
+  }
+
+  if (oT == 0 || oH == 0 || oW == 0) {
     return output;
   }
 

@@ -22,6 +22,7 @@ from ..utils import (
     use_ck_gemm_template,
     use_cpp_bmm_template,
     use_cutlass_template,
+    use_nv_universal_gemm_template,
     use_triton_template,
 )
 from ..virtualized import ops, V
@@ -201,7 +202,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         and use_cutlass_template(layout, m, n, k)
         and _use_cutlass_for_op(name)
     ):
-        from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
+        from ..codegen.cutlass.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, kernel_inputs.nodes()
@@ -218,6 +219,11 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
+
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2):
+        from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
+
+        add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
 
     return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
 

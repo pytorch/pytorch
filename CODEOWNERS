@@ -107,14 +107,18 @@ test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 torch/fx/proxy.py @zou3519
 
 # HOPs
-torch/_higher_order_ops/*.py @zou3519
-torch/_dynamo/variables/higher_order_ops.py @zou3519
-test/test_hop_infra.py @zou3519
-torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4
+torch/_higher_order_ops/*.py @zou3519 @aorenste
+torch/_dynamo/variables/higher_order_ops.py @zou3519 @aorenste
+test/test_hop_infra.py @zou3519 @aorenste
+torch/testing/_internal/hop_db.py @tugsbayasgalan @zou3519 @ydwu4 @aorenste
 
 # AOTAutograd
-torch/_functorch/_aot_autograd/*.py @bdhirsh
-torch/_functorch/aot_autograd.py @bdhirsh
+torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
+torch/_functorch/aot_autograd.py @bdhirsh @aorenste
+
+# FakeTensor
+torch/_subclasses/fake_tensor.py @aorenste
+torch/_subclasses/fake_utils.py @aorenste
 
 # torch MPS
 test/test_mps.py @kulinseth @malfet
@@ -171,6 +175,9 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
 /torch/fx/experimental/sym_node.py @bobrenjc93 @laithsakka
 /torch/fx/experimental/recording.py @bobrenjc93 @laithsakka
+
+# ProxyTorchDispatchMode
+torch/fx/experimental/proxy_tensor.py @aorenste
 
 # serialization-related files
 /aten/src/ATen/MapAllocator* @mikaylagawarecki

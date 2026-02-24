@@ -3,21 +3,23 @@
 set -ex
 
 install_ubuntu() {
-  echo "Preparing to build sccache from source"
-  apt-get update
-  # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
-  # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
-  apt-get install -y cargo
+  echo "Installing pkg-config and libssl-dev"
+  apt-get update && apt-get install -y pkg-config libssl-dev curl
+  echo "Installing rust"
+  curl https://sh.rustup.rs -sSf | sh -s -- -y
   echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.10.0
+  git clone https://github.com/mozilla/sccache -b v0.13.0
   cd sccache
+  echo "Patch dist build on aarch64"
+  sed -i '/all(target_os = "linux", target_arch = "x86_64"),/{ p; s/x86_64/aarch64/; }' src/bin/sccache-dist/main.rs
   echo "Building sccache"
-  cargo build --release
+  . "$HOME/.cargo/env" && cargo build --release --features="dist-client dist-server"
   cp target/release/sccache /opt/cache/bin
+  cp target/release/sccache-dist /opt/cache/bin
   echo "Cleaning up"
   cd ..
-  rm -rf sccache
-  apt-get remove -y cargo rustc
+  rm -rf sccache .cargo
+  apt-get remove -y pkg-config libssl-dev
   apt-get autoclean && apt-get clean
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"

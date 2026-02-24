@@ -59,6 +59,10 @@ void binary_op_kernel(const std::string func_name,
 
 } // namespace mps
 
+static void atan2_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "atan2");
+}
+
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     lib.exec_binary_kernel(iter, "fmax");
@@ -222,6 +226,13 @@ static void hypot_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hypot");
 }
 
+static void gcd_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isIntegralType(iter.common_dtype(), false), "gcd_mps not implemented for ", iter.common_dtype());
+  lib.exec_binary_kernel(iter, "gcd");
+}
+
+REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(maximum_stub, &maximum_mps_kernel)
@@ -254,4 +265,5 @@ REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
 REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
+REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
 } // namespace at::native
