@@ -342,6 +342,12 @@ class GraphModule(torch.nn.Module):
 
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
+        # On Python 3.10, dynamo names the >= node after the op ("ge")
+        # rather than the variable name ("mask").  Normalize so the
+        # expected string works on every Python version.
+        import re
+
+        actual = re.sub(r"\bge\b", "mask", actual)
 
         self.assertExpectedInline(
             actual,
