@@ -4,7 +4,7 @@ import functools
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 from torch._inductor.codegen.subgraph import SubgraphTemplate
@@ -35,7 +35,7 @@ class RangeBounds:
     """Inclusive range [start, end] for dimension-based dispatch."""
 
     start: int
-    end: Union[int, float]  # float('inf') for unbounded
+    end: int | float  # float('inf') for unbounded
 
     def __post_init__(self) -> None:
         if self.start < 1:
@@ -374,7 +374,7 @@ def _create_range_input_gen_fn(
     base_gen_fn: Callable[[torch.Tensor], torch.Tensor],
     dim_index: int,
     range_start: int,
-    range_end: Union[int, float],
+    range_end: int | float,
     range_upper_bound: int,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     """Create input generator that modifies target dimension to top of range.
@@ -452,7 +452,7 @@ def autotune_custom_op(
     return_choice: bool = False,
     min_speedup_threshold: float = 1.0,
     benchmark_with_cudagraphs: bool = False,
-) -> Union[TensorBox, Any, tuple[Any, Any]]:
+) -> TensorBox | Any | tuple[Any, Any]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
     Currently supports SINGLE OUTPUT custom ops only.
@@ -789,7 +789,7 @@ def _range_based_lowering_fn(
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],
     tensor_name: str,
     dim_index: int,
-    ranges: list[tuple[int, Union[int, float]]],
+    ranges: list[tuple[int, int | float]],
     tensor_inputs: list[Any],
     runtime_kwargs: dict[str, Any],
     range_upper_bound: int,
@@ -1071,8 +1071,8 @@ def _create_autotuning_lowering(
 
 
 def register_custom_op_autotuning(
-    custom_op: Union[torch._library.custom_ops.CustomOpDef, torch._ops.OpOverload],
-    configs: Optional[Union[list[CustomOpConfig], list[Callable[..., Any]]]] = None,
+    custom_op: torch._library.custom_ops.CustomOpDef | torch._ops.OpOverload,
+    configs: Optional[list[CustomOpConfig] | list[Callable[..., Any]]] = None,
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     ] = None,

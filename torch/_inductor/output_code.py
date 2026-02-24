@@ -26,7 +26,7 @@ import dataclasses
 import logging
 import os
 from functools import partial
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias
 
 import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
@@ -196,7 +196,7 @@ def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
-    constants: dict[str, Union[torch.Tensor, type]],
+    constants: dict[str, torch.Tensor | type],
     boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     """
@@ -272,7 +272,7 @@ def cudagraph_partition_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
-    constants: dict[str, Union[torch.Tensor, type]],
+    constants: dict[str, torch.Tensor | type],
     boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     """
@@ -395,7 +395,7 @@ class CompiledFxGraphConstants:
     the value of constants directly off of the original saved object.
     """
 
-    def unwrap(self, g: CompiledFxGraph) -> dict[str, Union[torch.Tensor, type]]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor | type]:
         assert g.constants is not None
         return {**g.constants, **g.opaque_value_type_classes}
 
@@ -412,7 +412,7 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.gm = gm
 
-    def unwrap(self, g: CompiledFxGraph) -> dict[str, Union[torch.Tensor, type]]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor | type]:
         frozen_params = {
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
@@ -857,7 +857,7 @@ class CompiledAOTI(OutputCode):
     Class holding an AOTInductor compiled so.
     """
 
-    filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
+    filename: str | list[str | Weights] | torch.fx.GraphModule
     device_type: str
     current_callable: Optional[Callable[..., Any]] = None
     _cached_files: dict[str, bytes] = dataclasses.field(default_factory=dict)

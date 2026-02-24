@@ -5,7 +5,7 @@ import operator
 import textwrap
 from collections import Counter
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import sympy
 
@@ -93,13 +93,13 @@ class SymbolBuffer(CodegenSymbol):
     def get_name(self) -> str:
         return str(self.symbol)
 
-    def get_example(self) -> Union[torch.Tensor, torch.SymInt]:
+    def get_example(self) -> torch.Tensor | torch.SymInt:
         sym_int = convert_to_symint(self.symbol)
         assert isinstance(sym_int, torch.SymInt)
         return sym_int
 
 
-CodegenBuffer = Union[BufferLike, SymbolBuffer]
+CodegenBuffer = BufferLike | SymbolBuffer
 
 
 @dataclasses.dataclass
@@ -165,7 +165,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             self.codegen_subgraph_common(subgraph)
 
     def define_subgraph_launcher_fn(
-        self, name: str, subgraph_code: Union[ValueWithLineMap, FileBackedGraphModule]
+        self, name: str, subgraph_code: ValueWithLineMap | FileBackedGraphModule
     ) -> None:
         """
         Record subgms as they're generated.
@@ -180,7 +180,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
 
     def get_fx_graph_inputs(
         self,
-    ) -> dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr, None]]:
+    ) -> dict[str, ir.TensorBox | ir.TorchBindObject | sympy.Expr | None]:
         """
         Get the input nodes corresponding to FX graph placeholders.
         """
@@ -273,7 +273,7 @@ class FxConverter:
 
     lines: list[Line]
     prologue: str
-    graph_inputs: dict[str, Union[ir.TensorBox, ir.TorchBindObject, sympy.Expr, None]]
+    graph_inputs: dict[str, ir.TensorBox | ir.TorchBindObject | sympy.Expr | None]
     graph_outputs: list[ir.IRNode]
     subgms: dict[str, torch.fx.GraphModule]
     is_subgraph: bool
@@ -315,7 +315,7 @@ class FxConverter:
         input_node: torch.fx.Node,
         size: tuple[Any, ...],
         stride: tuple[Any, ...],
-        offset: Union[int, sympy.Expr],
+        offset: int | sympy.Expr,
     ) -> torch.fx.Node:
         return self.gm.graph.call_function(
             torch.as_strided,
@@ -335,7 +335,7 @@ class FxConverter:
         assert node not in self.buffer_to_node
         self.buffer_to_node[buffer.get_name()] = node
 
-    def _free(self, buffer: Union[CodegenBuffer, ir.TorchBindObject]) -> None:
+    def _free(self, buffer: CodegenBuffer | ir.TorchBindObject) -> None:
         """
         Removes the buffer from the symbol table.
         """
@@ -410,7 +410,7 @@ class FxConverter:
         """
 
         def _codegen_symbol(
-            sym_or_exp: Union[sympy.Symbol, sympy.Expr],
+            sym_or_exp: sympy.Symbol | sympy.Expr,
             base_node: torch.fx.Node,
             target: torch._ops.OpOverload,
             dim: int,
@@ -538,7 +538,7 @@ class FxConverter:
 
     def _generate_outputs(
         self,
-    ) -> Union[Optional[torch.fx.Node], list[Optional[torch.fx.Node]]]:
+    ) -> Optional[torch.fx.Node] | list[Optional[torch.fx.Node]]:
         """
         Generate FX IR for graph outputs.
         """
@@ -643,9 +643,7 @@ class FxConverter:
         )
         return self.expr_to_proxy[expr]
 
-    def _generate_sym_node(
-        self, s: Union[int, sympy.Expr]
-    ) -> Union[int, torch.fx.Node]:
+    def _generate_sym_node(self, s: int | sympy.Expr) -> int | torch.fx.Node:
         if isinstance(s, (int, sympy.Integer)):
             return int(s)
         elif isinstance(s, sympy.Symbol):
@@ -664,7 +662,7 @@ class FxConverter:
 
     def _generate_sym_nodes(
         self, shape: Sequence[sympy.Expr]
-    ) -> list[Union[int, torch.fx.Node]]:
+    ) -> list[int | torch.fx.Node]:
         return [self._generate_sym_node(s) for s in shape]
 
     def _generate_allocate(self, line: WrapperLine) -> None:
@@ -888,7 +886,7 @@ class FxConverter:
         ir_node = line.node
 
         def generate_buffer_or_none(
-            x: Union[ir.IRNode, Sequence[ir.IRNode], None],
+            x: ir.IRNode | Sequence[ir.IRNode] | None,
         ) -> Optional[torch.fx.Node]:
             """
             Handles None before calling _generate_buffer.
@@ -954,10 +952,10 @@ class FxConverter:
                 for dynamic shapes.
                 """
 
-                def to_size_hint_sympy_int(arg: Union[sympy.Expr, int]) -> int:
+                def to_size_hint_sympy_int(arg: sympy.Expr | int) -> int:
                     return V.graph.sizevars.optimization_hint(arg)
 
-                def to_size_hint_list(arg: list[Union[torch.SymInt, int]]) -> list[int]:
+                def to_size_hint_list(arg: list[torch.SymInt | int]) -> list[int]:
                     args_sympy = [
                         x.node.expr if isinstance(x, torch.SymInt) else x for x in arg
                     ]

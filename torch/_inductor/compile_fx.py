@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -165,12 +165,9 @@ if TYPE_CHECKING:
         GraphSignature,
     )
 
-    CompileFxOutput = Union[
-        Callable[[list[object]], Sequence[torch.Tensor]],
-        str,
-        list[str],
-        Weights,
-    ]
+    CompileFxOutput = (
+        Callable[[list[object]], Sequence[torch.Tensor]] | str | list[str] | Weights
+    )
 
 
 class FxCompileMode(enum.Enum):
@@ -407,7 +404,7 @@ def _unlift_graph(
 
     _resolve_name_collision(mod, gm)
 
-    state_dict: dict[str, Union[torch.nn.parameter.Parameter, torch.Tensor]] = {}
+    state_dict: dict[str, torch.nn.parameter.Parameter | torch.Tensor] = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
         state_dict[name] = param
         _assign_attr(
@@ -456,7 +453,7 @@ def _unlift_graph(
     user_input_mutations = graph_signature.user_inputs_to_mutate
     output_tokens = graph_signature.output_tokens
     for idx, out in enumerate(outputs):
-        value: Optional[Union[FQN, GraphInputName]] = None
+        value: Optional[FQN | GraphInputName] = None
 
         if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
             name = GraphOutputName(out.name)
@@ -743,7 +740,7 @@ def fake_tensor_prop(
 
 # pass config dict back to user
 def get_patched_config_dict(
-    config_patches: Optional[Union[str, dict[str, Any]]] = None,
+    config_patches: Optional[str | dict[str, Any]] = None,
 ) -> dict[str, Any]:
     with config.patch(config_patches):
         return config.get_config_copy()
@@ -1998,7 +1995,7 @@ def compile_fx_aot(
     example_inputs_: list[InputType],
     inner_compile: _CompileFxCallable = compile_fx_inner,
     config_patches: Optional[dict[str, Any]] = None,
-) -> Union[list[Union[str, Weights]], str, GraphModule]:
+) -> list[str | Weights] | str | GraphModule:
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
@@ -2963,7 +2960,7 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
 
 def _aoti_flatten_inputs(
     gm: torch.fx.GraphModule,
-    args: Union[list[Any], tuple[Any, ...]],
+    args: list[Any] | tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,

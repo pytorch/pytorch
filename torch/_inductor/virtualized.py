@@ -59,7 +59,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -122,7 +122,7 @@ class Virtualized(Generic[T]):
     store other things, like booleans.
     """
 
-    def __init__(self, vname: str, default: Union[Callable[[], T], type[NullHandler]]):
+    def __init__(self, vname: str, default: Callable[[], T] | type[NullHandler]):
         self._vname = vname
         self._key: str = f"__torchinductor_{vname}"
         self._default = default

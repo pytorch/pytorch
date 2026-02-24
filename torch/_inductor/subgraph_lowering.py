@@ -5,7 +5,7 @@ import operator
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -22,8 +22,8 @@ T = TypeVar("T")
 _P = ParamSpec("_P")
 
 OpOverload = torch._ops.OpOverload
-LoweringDict = dict[Union[OpOverload, str], Callable[..., Any]]
-TargetType = Union[Callable[..., Any], str]
+LoweringDict = dict[OpOverload | str, Callable[..., Any]]
+TargetType = Callable[..., Any] | str
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -158,9 +158,7 @@ def lower_pointwise_subgraph(
     subgraph: ir.Subgraph, inputs: list[InputDescriptor]
 ) -> Callable[_P, Any]:
     # Lower subgraph to ir.Pointwise nodes
-    def fake_inner_fn(
-        loop_idx: int, input_idx: int
-    ) -> Union[ir.Expr, ir.TensorBox, None]:
+    def fake_inner_fn(loop_idx: int, input_idx: int) -> ir.Expr | ir.TensorBox | None:
         return ops.placeholder(input_idx)
 
     graph_inputs = [

@@ -48,7 +48,6 @@ from typing import (
     TypeAlias,
     TypeGuard,
     TypeVar,
-    Union,
 )
 from typing_extensions import dataclass_transform, ParamSpec, Self
 from unittest import mock
@@ -138,7 +137,7 @@ log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
-InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
+InputType = Optional[torch.Tensor | int | torch.SymInt]
 
 XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
@@ -435,7 +434,7 @@ def has_torchvision_roi_align() -> bool:
         return False
 
 
-def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
+def decode_device(device: Optional[torch.device] | str) -> torch.device:
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
@@ -459,9 +458,7 @@ def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
 
-def ceildiv(
-    number: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
-) -> Union[int, sympy.Expr]:
+def ceildiv(number: int | sympy.Expr, denom: int | sympy.Expr) -> int | sympy.Expr:
     if isinstance(number, sympy.Expr) or isinstance(denom, sympy.Expr):
         return CeilDiv(sympy.sympify(number), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
@@ -512,7 +509,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
 
 
 def convert_shape_to_inductor(
-    lst: Iterable[Union[int, torch.SymInt]],
+    lst: Iterable[int | torch.SymInt],
 ) -> list[sympy.Expr]:
     """
     Gets the shape and stride of a tensor. For non-symbolic tensors, this is
@@ -522,7 +519,7 @@ def convert_shape_to_inductor(
     return [sympy.sympify(i) for i in lst]
 
 
-def convert_symint_to_expr(val: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
+def convert_symint_to_expr(val: int | torch.SymInt) -> int | sympy.Expr:
     """
     Convert SymInt to sympy.Expr, leave int as is.
 
@@ -534,7 +531,7 @@ def convert_symint_to_expr(val: Union[int, torch.SymInt]) -> Union[int, sympy.Ex
     return val
 
 
-def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
+def convert_to_symint(i: int | sympy.Expr) -> int | torch.SymInt:
     """
     Like convert_shape_to_symint, but operates on a single expression.
     """
@@ -552,8 +549,8 @@ def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
 
 
 def convert_shape_to_symint(
-    lst: Iterable[Union[int, sympy.Expr]],
-) -> list[Union[int, torch.SymInt]]:
+    lst: Iterable[int | sympy.Expr],
+) -> list[int | torch.SymInt]:
     """
     Takes a list of shapes from Inductor and converts them into symints (or just
     ints if all shapes are static).
@@ -674,7 +671,7 @@ def cmp(a: int, b: int) -> int:
     return int(a > b) - int(a < b)
 
 
-def pad_listlike(x: Union[int, Sequence[int]], size: int) -> Sequence[int]:
+def pad_listlike(x: int | Sequence[int], size: int) -> Sequence[int]:
     if isinstance(x, int):
         return [x] * size
     if len(x) == 1:
@@ -798,7 +795,7 @@ def cache_on_self_and_args(
 
 
 def aggregate_origins(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
 ) -> OrderedSet[Node]:
     from . import ir
 
@@ -875,7 +872,7 @@ def get_fused_kernel_name(
 
 
 def get_kernel_metadata(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
 ) -> tuple[str, str]:
     """
@@ -954,7 +951,7 @@ def get_kernel_metadata(
             from .virtualized import V
 
             def get_buffer_info(
-                buffer: Union[ir.TensorBox, ir.Buffer, ir.TorchBindObject], rw_name: str
+                buffer: ir.TensorBox | ir.Buffer | ir.TorchBindObject, rw_name: str
             ) -> tuple[str, ir.Layout | None]:
                 if isinstance(buffer, ir.TensorBox) and isinstance(
                     buffer.data, ir.StorageBox
@@ -1176,9 +1173,7 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
     have the same replaced expression integer and nonnegative properties.
     """
 
-    def to_symbol(
-        replaced: sympy.Expr, replacement: Union[sympy.Expr, str]
-    ) -> sympy.Symbol:
+    def to_symbol(replaced: sympy.Expr, replacement: sympy.Expr | str) -> sympy.Symbol:
         assert isinstance(replaced, sympy.Expr)
         if isinstance(replacement, str):
             return sympy.Symbol(
@@ -1195,7 +1190,7 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
     )
 
 
-def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
+def is_symbolic(a: Any) -> TypeGuard[torch.SymInt | torch.Tensor]:
     return isinstance(a, torch.SymInt) or (
         isinstance(a, torch.Tensor) and a._has_symbolic_sizes_strides
     )
@@ -1426,7 +1421,7 @@ def argsort(seq: Sequence[Any], *, reverse: bool = False) -> list[int]:
 
 def argsort_sym(
     shape_env: ShapeEnv,
-    seq: Sequence[Union[int, torch.SymInt, sympy.Expr]],
+    seq: Sequence[int | torch.SymInt | sympy.Expr],
     *,
     reverse: bool = False,
 ) -> list[int]:
@@ -1434,7 +1429,7 @@ def argsort_sym(
         a_idx, a_val = a
         b_idx, b_val = b
 
-        def evaluate(expr: Union[bool, torch.SymInt, sympy.Expr]) -> bool:
+        def evaluate(expr: bool | torch.SymInt | sympy.Expr) -> bool:
             if isinstance(expr, bool):
                 return expr
             return shape_env.evaluate_expr(expr, size_oblivious=True)
@@ -1486,7 +1481,7 @@ class IndentedBuffer:
     tabwidth = 4
 
     def __init__(self, initial_indent: int = 0) -> None:
-        self._lines: list[Union[DeferredLineBase, LineContext, str]] = []
+        self._lines: list[DeferredLineBase | LineContext | str] = []
         self._indent = initial_indent
 
     @contextlib.contextmanager
@@ -1553,7 +1548,7 @@ class IndentedBuffer:
     def newline(self) -> None:
         self.writeline("\n")
 
-    def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None:
+    def writeline(self, line: LineContext | DeferredLineBase | str) -> None:
         if isinstance(line, LineContext):
             self._lines.append(line)
         elif isinstance(line, DeferredLineBase):
@@ -1563,9 +1558,7 @@ class IndentedBuffer:
         else:
             self._lines.append("")
 
-    def writelines(
-        self, lines: Sequence[Union[LineContext, DeferredLineBase, str]]
-    ) -> None:
+    def writelines(self, lines: Sequence[LineContext | DeferredLineBase | str]) -> None:
         for line in lines:
             self.writeline(line)
 
@@ -1586,9 +1579,7 @@ class IndentedBuffer:
     def do_unindent(self, offset: int = 1) -> None:
         self._indent -= offset
 
-    def splice(
-        self, other_code: Union[IndentedBuffer, str], strip: bool = False
-    ) -> None:
+    def splice(self, other_code: IndentedBuffer | str, strip: bool = False) -> None:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
 
@@ -1628,7 +1619,7 @@ class IndentedBuffer:
         res.writelines(other._lines)
         return res
 
-    def contains(self, new_line: Union[DeferredLineBase, LineContext, str]) -> bool:
+    def contains(self, new_line: DeferredLineBase | LineContext | str) -> bool:
         return new_line in self._lines
 
 
@@ -1664,7 +1655,7 @@ class DeferredLineBase:
             line = ""
         self.line = line
 
-    def __call__(self) -> Union[str, None]:
+    def __call__(self) -> str | None:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
         raise NotImplementedError
 
@@ -1678,7 +1669,7 @@ class DeferredLineBase:
     def lstrip(self) -> Self:
         return self._new_line(self.line.lstrip())
 
-    def __getitem__(self, index: Union[int, slice]) -> Self:
+    def __getitem__(self, index: int | slice) -> Self:
         return self._new_line(self.line[index])
 
     def __bool__(self) -> bool:
@@ -1704,7 +1695,7 @@ class DelayReplaceLine(DeferredLineBase):
 
 
 @functools.cache
-def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
+def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
@@ -1856,7 +1847,7 @@ def can_use_tma(
 
     from .virtualized import V
 
-    def _aligned(expr_bytes: Union[int, sympy.Expr]) -> bool:
+    def _aligned(expr_bytes: int | sympy.Expr) -> bool:
         return V.graph.sizevars.statically_known_multiple_of(expr_bytes, TMA_ALIGNMENT)
 
     def _is_tma_compatible_layout(layout: Optional[Layout]) -> bool:
@@ -2217,7 +2208,7 @@ def _use_cutlass_for_op(op_name: str) -> bool:
     return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
 
 
-_IntLike: TypeAlias = Union[int, sympy.Expr]
+_IntLike: TypeAlias = int | sympy.Expr
 
 
 @functools.cache
@@ -2425,7 +2416,7 @@ def _use_template_for_cpu(layout: Layout) -> bool:
 
 
 def use_cpp_bmm_template(
-    layout: Layout, mat1: Union[ReinterpretView, Buffer], mat2: IRNode
+    layout: Layout, mat1: ReinterpretView | Buffer, mat2: IRNode
 ) -> bool:
     from .ir import Layout
 
@@ -2955,7 +2946,7 @@ def pass_execution_and_save(
         )
 
 
-def is_multi_outputs_template(input_buf: Optional[Union[Buffer, Operation]]) -> bool:
+def is_multi_outputs_template(input_buf: Optional[Buffer | Operation]) -> bool:
     """
     Check if input buffer is a multi-outputs template buffer
     """
@@ -2968,7 +2959,7 @@ def is_multi_outputs_template(input_buf: Optional[Union[Buffer, Operation]]) -> 
 
 
 def is_output_of_multi_outputs_template(
-    input_buf: Optional[Union[Buffer, Operation]],
+    input_buf: Optional[Buffer | Operation],
 ) -> bool:
     """
     Check if input buffer is a output of multi-outputs template buffer
@@ -2983,7 +2974,7 @@ def is_output_of_multi_outputs_template(
 
 
 def is_collective(
-    node: Optional[Union[Node, Operation]],
+    node: Optional[Node | Operation],
     op: Optional[torch._ops.OperatorBase] = None,
 ) -> bool:
     if node is None:
@@ -3020,7 +3011,7 @@ def is_collective(
     )
 
 
-def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
+def is_wait(node: Optional[IRNode | Operation]) -> bool:
     from . import ir
 
     return type(node) is ir._WaitKernel
@@ -3049,7 +3040,7 @@ def contains_wait(snode: BaseSchedulerNode) -> bool:
 
 def is_fallback_op(
     node: Optional[Operation],
-    op: Union[torch._ops.OpOverload, Collection[torch._ops.OpOverload]],
+    op: torch._ops.OpOverload | Collection[torch._ops.OpOverload],
 ) -> bool:
     from . import ir
 
@@ -3162,7 +3153,7 @@ class BoxedBool:
         return self.value
 
     @staticmethod
-    def disable(obj: Any) -> Union[BoxedBool, bool]:
+    def disable(obj: Any) -> BoxedBool | bool:
         if isinstance(obj, BoxedBool):
             obj.value = False
             return obj
@@ -3529,7 +3520,7 @@ def set_tracing_context_output_strides(
                 if ctx := torch._guards.TracingContext.try_get():
                     fakify_first_call = ctx.fakify_first_call
 
-                def map_expr(e: Any) -> Union[float, int, SymInt, SymFloat, SymBool]:
+                def map_expr(e: Any) -> float | int | SymInt | SymFloat | SymBool:
                     if shape_env is None:
                         return int(e)
                     if fakify_first_call:

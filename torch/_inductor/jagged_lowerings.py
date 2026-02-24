@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import Optional
 
 import sympy
 
@@ -24,7 +24,7 @@ def dense_idx_to_jagged_idx(batch_idx, seq_idx, offsets_loader, jagged_len):
 
 def get_inverse_offsets(
     offsets: TensorBox,
-    jagged_len: Union[int, sympy.Expr],
+    jagged_len: int | sympy.Expr,
     realize: bool = True,
 ) -> TensorBox:
     """
@@ -92,8 +92,8 @@ def jagged_idx_to_dense_idx(
     jagged_idx,  # pyre-ignore[2]
     inverse_offsets_loader,  # pyre-ignore[2]
     offsets_loader,  # pyre-ignore[2]
-    batch_size: Union[int, sympy.Expr],
-    max_seq_len: Union[int, sympy.Expr],
+    batch_size: int | sympy.Expr,
+    max_seq_len: int | sympy.Expr,
     offsets_dtype: torch.dtype,
 ) -> tuple[sympy.Expr, sympy.Expr]:
     batch_idx = ops.indirect_indexing(

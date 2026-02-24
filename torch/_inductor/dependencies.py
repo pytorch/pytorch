@@ -4,7 +4,7 @@ import itertools
 import logging
 import re
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -445,7 +445,7 @@ class ReadWrites:
             self.var_ranges,
         )
 
-    def with_read(self, dep: Union[Dep, OrderedSet[Dep]]) -> "ReadWrites":
+    def with_read(self, dep: Dep | OrderedSet[Dep]) -> "ReadWrites":
         assert isinstance(dep, (WeakDep, StarDep, OrderedSet))
         if not isinstance(dep, OrderedSet):
             dep = OrderedSet([dep])
@@ -517,7 +517,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     @staticmethod
     def drop_unused_symbols(
-        index: Union[int, sympy.Expr],
+        index: int | sympy.Expr,
         var_names: list[sympy.Expr],
         sizes: list[sympy.Expr],
     ) -> None:
@@ -833,7 +833,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
     def indirect_indexing(
         self,
         index_var: Any,
-        size: Union[int, sympy.Expr],
+        size: int | sympy.Expr,
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
@@ -859,8 +859,8 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[None, tuple[None, ...]],
-    ) -> Union[None, tuple[None, ...]]:
+        value: None | tuple[None, ...],
+    ) -> None | tuple[None, ...]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 

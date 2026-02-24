@@ -460,7 +460,7 @@ class SubprocMain:
         return pickler.dumps(result)
 
 
-AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
+AnyPool = ProcessPoolExecutor | SubprocPool
 
 
 def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:

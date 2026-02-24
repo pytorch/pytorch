@@ -12,7 +12,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeGuard, TypeVar, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -110,7 +110,7 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 )
 
 log = logging.getLogger(__name__)
-lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
+lowerings: dict[Callable[..., Any] | str, Callable[..., Any]] = {}
 # User-registered lowerings that take priority over built-in lowerings.
 user_lowerings: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
@@ -202,11 +202,9 @@ def assert_nyi(cond: bool, msg: str) -> None:
 
 
 def add_needs_realized_inputs(
-    fn: Union[
-        Collection[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]],
-        torch._ops.OpOverload,
-        torch._ops.OpOverloadPacket,
-    ],
+    fn: Collection[torch._ops.OpOverload | torch._ops.OpOverloadPacket]
+    | torch._ops.OpOverload
+    | torch._ops.OpOverloadPacket,
 ) -> Optional[list[Any]]:
     if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
         # pyrefly: ignore [bad-argument-type]
@@ -221,7 +219,7 @@ def add_needs_realized_inputs(
 
 
 def add_layout_constraint(
-    fn: Union[torch._ops.OpOverloadPacket, torch._ops.OpOverload],
+    fn: torch._ops.OpOverloadPacket | torch._ops.OpOverload,
     constraint: Callable[..., tuple[Any, Any]],
 ) -> None:
     if isinstance(fn, torch._ops.OpOverloadPacket):
@@ -275,7 +273,7 @@ DTYPE_ID_LOOKUP = {
 }
 
 
-def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
+def decode_dtype(dtype: int | torch.dtype) -> torch.dtype:
     if not isinstance(dtype, int):
         return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
@@ -284,7 +282,7 @@ def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
     return dtype
 
 
-def is_integer_type(x: Any) -> TypeGuard[Union[TensorBox, sympy.Expr, int]]:
+def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
@@ -293,7 +291,7 @@ def is_integer_type(x: Any) -> TypeGuard[Union[TensorBox, sympy.Expr, int]]:
         return isinstance(x, int)
 
 
-def is_boolean_type(x: Any) -> TypeGuard[Union[TensorBox, bool]]:
+def is_boolean_type(x: Any) -> TypeGuard[TensorBox | bool]:
     if isinstance(x, TensorBox):
         return is_boolean_dtype(x.get_dtype())
     else:
@@ -337,7 +335,7 @@ def get_overloads(aten_fn):
 
 
 def in_namespace(
-    op: Union[Any, torch._ops.OpOverloadPacket, torch._ops.OpOverload], namespace: str
+    op: Any | torch._ops.OpOverloadPacket | torch._ops.OpOverload, namespace: str
 ) -> bool:
     if isinstance(op, torch._ops.OpOverloadPacket):
         return namespace in op._qualified_op_name
@@ -480,7 +478,7 @@ def _register_lowering(
     broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
-    lowering_dict: dict[Union[Callable[..., Any], str], Callable[..., Any]],
+    lowering_dict: dict[Callable[..., Any] | str, Callable[..., Any]],
 ):
     """
     Add a lowering to lowerings dict
@@ -1852,7 +1850,7 @@ def cat(inputs, dim=0):
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
 
-    def unwrap_tensor(x: Union[TensorBox, ir.StorageBox]) -> ir.IRNode:
+    def unwrap_tensor(x: TensorBox | ir.StorageBox) -> ir.IRNode:
         if isinstance(x, TensorBox):
             if isinstance(x.data, ir.BaseView):
                 return x.data.unwrap_view()
@@ -4669,7 +4667,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     )
 
 
-def range_mask_low(i: sympy.Expr, low: Union[sympy.Expr, int]):
+def range_mask_low(i: sympy.Expr, low: sympy.Expr | int):
     return ops.ge(
         ops.index_expr(i, torch.int64),
         ops.index_expr(sympy.Integer(low), torch.int64),
@@ -4899,10 +4897,10 @@ def _low_memory_max_pool_with_offsets(
 
 def _pool_offsets_to_indices(
     offsets: TensorBox,
-    kernel_size: Sequence[Union[int, torch.SymInt]],
-    input_size: Sequence[Union[int, torch.SymInt]],
+    kernel_size: Sequence[int | torch.SymInt],
+    input_size: Sequence[int | torch.SymInt],
     increments_to_index: Callable[
-        [Sequence[Union[int, torch.SymInt]], Sequence[Union[int, torch.SymInt]]],
+        [Sequence[int | torch.SymInt], Sequence[int | torch.SymInt]],
         torch._inductor.virtualized.OpsValue,
     ],
 ) -> TensorBox:
@@ -7496,7 +7494,7 @@ def triton_kernel_wrap_(
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
 def cond(
     pred, true_fn, false_fn, operands
-) -> list[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]]:
+) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
     # TODO: when graph_partition is enabled, skip - partitioning handles control flow
     # we run into memory cleanup issue
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):

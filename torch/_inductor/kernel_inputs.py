@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch._inductor.config
@@ -27,7 +27,7 @@ class KernelInputs(ABC):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[dict[str, Union[float, int]]] = None,
+        scalars: Optional[dict[str, float | int]] = None,
         out_dtype: Optional[torch.dtype] = None,
     ):
         """
@@ -183,7 +183,7 @@ class KernelInputs(ABC):
             The output dtype
         """
 
-    def get_scalar(self, name: str) -> Union[float, int]:
+    def get_scalar(self, name: str) -> float | int:
         """
         Get the scalar value for a given name.
 
@@ -216,7 +216,7 @@ class MMKernelInputs(KernelInputs):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[dict[str, Union[float, int]]] = None,
+        scalars: Optional[dict[str, float | int]] = None,
         out_dtype: Optional[torch.dtype] = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,

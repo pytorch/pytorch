@@ -1,7 +1,7 @@
 import os
 import sys
 from collections.abc import Callable
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -399,12 +399,10 @@ reorder_for_compute_comm_overlap = False
 #     "reorder_communication_preserving_peak_memory",
 # ]
 reorder_for_compute_comm_overlap_passes: list[
-    Union[
-        str,
-        Callable[
-            [list["torch._inductor.scheduler.BaseSchedulerNode"]],
-            list["torch._inductor.scheduler.BaseSchedulerNode"],
-        ],
+    str
+    | Callable[
+        [list["torch._inductor.scheduler.BaseSchedulerNode"]],
+        list["torch._inductor.scheduler.BaseSchedulerNode"],
     ]
 ] = []
 
@@ -984,7 +982,7 @@ _fuse_ddp_bucket_size = 25
 # overlapping. At this moment, this pass performs better than
 # reorder_for_compute_comm_overlap_passes but we will add the logic of
 # "schedule_comm_wait" in the future and remove the one here.
-_fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
+_fuse_ddp_communication_passes: list[Callable[..., None] | str] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
@@ -1525,7 +1523,7 @@ class triton:
 
     # Specify dynamic shapes to capture cudagraphs and skip cudagraph for other shapes.
     # Default to None, which means we capture cudagraphs for all shapes.
-    cudagraph_capture_sizes: Optional[tuple[Union[int, tuple[int, ...]]]] = None
+    cudagraph_capture_sizes: Optional[tuple[int | tuple[int, ...]]] = None
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True

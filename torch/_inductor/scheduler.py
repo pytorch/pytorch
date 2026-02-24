@@ -16,7 +16,7 @@ import traceback
 import typing
 from collections import Counter, defaultdict
 from concurrent.futures import as_completed, Future
-from typing import Any, Generic, Optional, TYPE_CHECKING, TypeAlias, TypeVar, Union
+from typing import Any, Generic, Optional, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
@@ -474,7 +474,7 @@ class SchedulerBuffer:
             hasattr(V.kernel, "args")
             and self.get_name() in V.kernel.inplace_update_buffers
         ):
-            input_buffer: Union[ir.DonatedBuffer, ir.Buffer]
+            input_buffer: ir.DonatedBuffer | ir.Buffer
             input_buffer_name = V.kernel.inplace_update_buffers[self.get_name()]
             if input_buffer_name in self.scheduler.name_to_donated_buffer:
                 input_buffer = self.scheduler.name_to_donated_buffer[
@@ -882,7 +882,7 @@ class BaseSchedulerNode:
                 continue
 
             for read in self.read_writes.reads:
-                input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
+                input_buf: Optional[SchedulerBuffer | SchedulerDonatedBuffer]
                 if read.name in self.scheduler.name_to_donated_buffer:
                     input_buf = self.scheduler.name_to_donated_buffer[read.name]
                 else:
@@ -1103,7 +1103,7 @@ class BaseSchedulerNode:
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
-            buf: Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]
+            buf: ir.Buffer | ir.TensorBox | ir.TorchBindObject
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
             elif buf_name in V.graph.graph_inputs:
@@ -1112,7 +1112,7 @@ class BaseSchedulerNode:
                 continue
 
             def get_buf_bytes(
-                buf: Optional[Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject]],
+                buf: Optional[ir.Buffer | ir.TensorBox | ir.TorchBindObject],
             ) -> int:
                 if not buf:
                     return 0
@@ -1500,7 +1500,7 @@ class SchedulerNode(BaseSchedulerNode):
     def __init__(
         self,
         scheduler: Scheduler,
-        node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
+        node: ir.ComputedBuffer | ir.TemplateBuffer,
     ) -> None:
         super().__init__(scheduler)
         self._init_from_node(node)
@@ -1824,7 +1824,7 @@ class SchedulerNode(BaseSchedulerNode):
 
 
 def refresh_group_node_dependencies(
-    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode],
+    group_snode: FusedSchedulerNode | GroupedSchedulerNode,
 ) -> None:
     snodes = group_snode.snodes
     group_snode.set_read_writes(
@@ -1842,7 +1842,7 @@ def refresh_group_node_dependencies(
 
 
 def init_group_node(
-    group_snode: Union[FusedSchedulerNode, GroupedSchedulerNode],
+    group_snode: FusedSchedulerNode | GroupedSchedulerNode,
     scheduler: Scheduler,
     snodes: list[BaseSchedulerNode],
 ) -> None:
@@ -2774,7 +2774,7 @@ def _estimate_fused_epilogue_runtime(node1, node2, epilogue_runtime) -> float:
 
 @dataclasses.dataclass
 class NodeUser:
-    node: Union[BaseSchedulerNode, OutputNode]
+    node: BaseSchedulerNode | OutputNode
     can_inplace: bool = False
 
     # A weak user must be scheduled after a given node, but doesn't actually
@@ -3253,7 +3253,7 @@ class Scheduler:
         def add_user(
             # pyrefly: ignore [not-a-type]
             used_by_name: str,
-            user_node: Union[BaseSchedulerNode, OutputNode],
+            user_node: BaseSchedulerNode | OutputNode,
             can_inplace: bool = False,
             is_weak: bool = False,
         ) -> None:
@@ -4950,7 +4950,7 @@ class Scheduler:
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        common_buf_names: Union[tuple[str, ...], OrderedSet[str]],
+        common_buf_names: tuple[str, ...] | OrderedSet[str],
     ) -> str:
         """
         Try to decide reasons why fusion fail due to no shared memory even though
@@ -5371,7 +5371,7 @@ class Scheduler:
         # race condition
         def has_reusable_buffer(node: BaseSchedulerNode) -> bool:
             for read in node.read_writes.reads:
-                input_buf: Optional[Union[SchedulerBuffer, SchedulerDonatedBuffer]]
+                input_buf: Optional[SchedulerBuffer | SchedulerDonatedBuffer]
                 if read.name in self.name_to_donated_buffer:
                     input_buf = self.name_to_donated_buffer[read.name]
                 else:
@@ -6064,12 +6064,12 @@ class Scheduler:
 
     def get_name_to_nodes(
         self,
-    ) -> dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]]:
+    ) -> dict[str, ir.IRNode | ir.TorchBindObject | sympy.Expr]:
         """
         Return a mapping from name strings to the corresponding graph inputs or
         base scheduler node outputs.
         """
-        name_to_node: dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]] = {}
+        name_to_node: dict[str, ir.IRNode | ir.TorchBindObject | sympy.Expr] = {}
         name_to_node.update(V.graph.graph_inputs)
 
         for node in self.nodes:
@@ -6122,7 +6122,7 @@ class Scheduler:
     def get_graph_partition_symbol_inputs(
         self,
         partition: PartitionType,
-        input_nodes: dict[str, Union[ir.IRNode, ir.TorchBindObject, sympy.Expr]],
+        input_nodes: dict[str, ir.IRNode | ir.TorchBindObject | sympy.Expr],
     ) -> OrderedSet[sympy.Symbol]:
         """
         Returns all symbol inputs which are required to be in scope to successfully
@@ -6133,7 +6133,7 @@ class Scheduler:
         """
 
         def get_input_node_symbols(
-            node: Union[ir.IRNode, sympy.Expr, ir.TorchBindObject],
+            node: ir.IRNode | sympy.Expr | ir.TorchBindObject,
         ) -> OrderedSet[sympy.Symbol]:
             """
             Gets symbols used in input node shapes, strides, and offsets.
@@ -7089,7 +7089,7 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         raise NotImplementedError
 
-    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
+    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
         """
         Generate a kernel given a list of pre-fused nodes.
         """

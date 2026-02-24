@@ -643,7 +643,7 @@ def try_get_buf_size(buf_name: str) -> Optional[int]:
     return V.graph.sizevars.optimization_hint(sympy_product(buf.get_size()))
 
 
-def get_hint(v: Union[sympy.Expr, int]) -> int:
+def get_hint(v: sympy.Expr | int) -> int:
     if isinstance(v, int):
         return v
     else:

@@ -8,7 +8,7 @@ high-performance GEMM kernels for NVIDIA GPUs.
 
 import itertools
 from enum import auto, Enum
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 from torch._inductor import config
@@ -65,8 +65,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
         kernel,  # cutlass_api.Kernel object
         accumulator_type: torch.dtype,
         variant: GemmVariant,

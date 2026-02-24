@@ -5,7 +5,7 @@ import math
 from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -18,7 +18,7 @@ from torch.utils._pytree import tree_map, tree_map_only
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda_combined_scheduling import _IntLike
 else:
-    _IntLike = Union[int, sympy.Expr]
+    _IntLike = int | sympy.Expr
 
 
 from ...ir import (
@@ -46,7 +46,7 @@ from ...select_algorithm import realize_inputs
 from ...utils import load_template
 
 
-SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
+SubgraphResults = list[Optional[ComputedBuffer]] | Optional[ComputedBuffer]
 
 
 def zeros_and_scatter_lowering(shape: list[int], indices, values):

@@ -11,7 +11,7 @@ import tempfile
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, TypeGuard, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeGuard
 from typing_extensions import final, override, Self
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -321,7 +321,7 @@ class _LoggerState:
         self.loggers = {}
 
         def filter(
-            logger: Union[logging.Logger, logging.PlaceHolder],
+            logger: logging.Logger | logging.PlaceHolder,
         ) -> TypeGuard[logging.Logger]:
             if not isinstance(logger, logging.Logger):
                 # Assume that Placeholders propagate

@@ -8,7 +8,7 @@ This module generates Python code that calls cutlass_api to execute GEMM operati
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
     IndentedBuffer,
@@ -243,7 +243,7 @@ class NVUniversalGemmKernel(Kernel):
 
         call_args: list[str] = []
         arg_types: list[Any] = []
-        raw_args: list[Union[Buffer, ReinterpretView, None]] = []
+        raw_args: list[Buffer | ReinterpretView | None] = []
 
         for _, input_node in self._template_input_args:
             reinterpret_view = self._get_reinterpret_view(input_node)

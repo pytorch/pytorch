@@ -5,7 +5,7 @@ import itertools
 import logging
 import sys
 from collections.abc import Callable, Iterable
-from typing import Optional, Union
+from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -35,7 +35,7 @@ class CppTemplate(KernelTemplate):
         super().__init__(name)
         self.input_nodes = input_nodes
         self.index = next(self.index_counter)
-        self.output_node: Union[ir.Buffer, list[ir.Buffer]] = ir.Buffer(
+        self.output_node: ir.Buffer | list[ir.Buffer] = ir.Buffer(
             name=f"buf_out{self.index}", layout=layout
         )
         self.layout = layout

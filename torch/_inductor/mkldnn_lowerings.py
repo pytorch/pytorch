@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -224,7 +224,7 @@ def register_onednn_fusion_ops():
             kernel_creator=mkldnn_ir.QLinearPointwiseBinaryPT2E.create,
         )
         cpu_needs_realized_inputs: list[
-            Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+            torch._ops.OpOverload | torch._ops.OpOverloadPacket
         ] = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,

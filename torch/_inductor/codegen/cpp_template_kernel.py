@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Callable, Iterable
-from typing import Any, Optional, Union
+from typing import Any, Optional
 from unittest.mock import patch
 
 import sympy
@@ -574,7 +574,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
         info_kwargs: Optional[
-            dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]
+            dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]
         ] = None,
     ):
         super().__init__(name, input_nodes, layout, description="")
@@ -605,7 +605,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def info_dict(
         self,
-    ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
+    ) -> dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
     def output_node(self) -> ir.TensorBox:

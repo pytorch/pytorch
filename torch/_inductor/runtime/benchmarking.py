@@ -5,7 +5,7 @@ from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate, Optional, Union
+from typing import Any, Concatenate, Optional
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -136,7 +136,7 @@ class Benchmarker:
         fn: Callable[..., Any],
         fn_args: Optional[tuple[Any, ...]] = None,
         fn_kwargs: Optional[dict[str, Any]] = None,
-        device: Optional[Union[str, torch.device]] = None,
+        device: Optional[str | torch.device] = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the

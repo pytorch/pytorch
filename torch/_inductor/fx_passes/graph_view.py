@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import itertools
 import re
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch.fx as fx  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
@@ -209,7 +209,7 @@ def make_graph_view(
 
 
 def get_subgraph_by_path(
-    graph_view: GraphView, paths: Union[str, list[str]]
+    graph_view: GraphView, paths: str | list[str]
 ) -> list[fx.Node]:
     """
     Get subgraph by path(s).

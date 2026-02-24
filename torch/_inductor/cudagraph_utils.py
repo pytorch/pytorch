@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
@@ -25,7 +25,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = list[Optional[Union[int, torch.Tensor]]]
+OutputType = list[Optional[int | torch.Tensor]]
 ModelType = Callable[[list[InputType]], OutputType]
 
 
@@ -113,7 +113,7 @@ def format_default_skip_message(reason: str) -> str:
 
 def get_mutation_stack_trace(
     placeholders: Sequence[PlaceholderInfo],
-    mutation_indices: Union[AbstractSet[int], Sequence[int]],
+    mutation_indices: AbstractSet[int] | Sequence[int],
 ) -> str:
     stack_trace: Optional[str] = ""
 

@@ -3,7 +3,7 @@ import functools
 import hashlib
 import itertools
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
@@ -180,8 +180,8 @@ class CUTLASSTemplate(KernelTemplate):
         description: str,
         input_key: str,
         layout_repr: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
         **kwargs,
     ) -> CUTLASSTemplateCaller:
         """

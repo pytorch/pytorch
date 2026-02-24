@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING
 from typing_extensions import TypeVar
 
 import sympy
@@ -352,7 +352,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def constant_repr(value: Union[int, float]) -> str:
+def constant_repr(value: int | float) -> str:
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
@@ -1068,9 +1068,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         raise NotImplementedError("NYI: call_kernel")
 
     @contextlib.contextmanager
-    def mask_loads(
-        self, mask: Union[str, OpsWrapper], value: Union[int, float]
-    ) -> Iterator[str]:
+    def mask_loads(self, mask: str | OpsWrapper, value: int | float) -> Iterator[str]:
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         prior_val = self._load_other
@@ -1818,7 +1816,7 @@ class SIMDScheduling(BaseScheduling):
         )
 
     def codegen_node(
-        self, node: Union[scheduler.FusedSchedulerNode, scheduler.SchedulerNode]
+        self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
     ):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
@@ -1845,9 +1843,7 @@ class SIMDScheduling(BaseScheduling):
     @staticmethod
     def can_use_32bit_indexing(
         numel: sympy.Expr,
-        buffers: Iterable[
-            Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject, ir.IRNode]
-        ],
+        buffers: Iterable[ir.Buffer | ir.TensorBox | ir.TorchBindObject | ir.IRNode],
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
 
@@ -1946,7 +1942,7 @@ class SIMDScheduling(BaseScheduling):
             kernel.code_hash = code_hash(src_code)
         del kernel
 
-        final_kernel: Union[SIMDKernel, MultiKernel]
+        final_kernel: SIMDKernel | MultiKernel
         if len(kernels) > 1:
             final_kernel = MultiKernel(kernels)
         else:

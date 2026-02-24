@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import typing
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -149,7 +149,7 @@ class InductorChoices:
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> list[KernelTemplateChoice]:
@@ -180,7 +180,7 @@ class InductorChoices:
     def get_ktc(
         self,
         kernel_inputs: KernelInputs,
-        template: Union[KernelTemplate, ExternKernelChoice],
+        template: KernelTemplate | ExternKernelChoice,
         op_name: str,
         kwarg_overrides: Optional[dict[str, Any]] = None,
     ) -> Generator[KernelTemplateChoice, None, None]:
@@ -275,7 +275,7 @@ class InductorChoices:
     def get_template_configs(
         self,
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> list[ChoiceCaller]:

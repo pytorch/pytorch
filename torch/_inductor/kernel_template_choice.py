@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 from .template_heuristics.params import DictKernelTemplateParams
 
@@ -25,7 +25,7 @@ class KernelTemplateChoice:
 
     def __init__(
         self,
-        template: Union[KernelTemplate, ExternKernelChoice],
+        template: KernelTemplate | ExternKernelChoice,
         params: KernelTemplateParams,
         extra_kwargs: dict[str, Any],
         layout: Layout,
@@ -65,7 +65,7 @@ class KernelTemplateChoice:
 
 
 def make_ktc_generator(
-    template: Union[KernelTemplate, ExternKernelChoice],
+    template: KernelTemplate | ExternKernelChoice,
     cs: Generator[KernelTemplateParams, None, None],
     extra_kwargs: dict[str, Any],
     overrides: dict[str, Any],

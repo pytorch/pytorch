@@ -51,7 +51,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, NoReturn, Optional, Protocol, TypeVar, Union
+from typing import Any, NoReturn, Optional, Protocol, TypeVar
 from typing_extensions import Self, TypeIs
 
 import torch
@@ -85,7 +85,7 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 Constant = Any
-NodeOrConstant = Union[Constant, torch.fx.Node]
+NodeOrConstant = Constant | torch.fx.Node
 
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
@@ -102,14 +102,14 @@ class ReplaceFn(Protocol):
 
 class TraceFn(Protocol):
     def __call__(
-        self, fn: Union[SearchFn, ReplaceFn], *args: Any, **kwargs: Any
+        self, fn: SearchFn | ReplaceFn, *args: Any, **kwargs: Any
     ) -> torch.fx.GraphModule: ...
 
 
 T = TypeVar("T")
 
 # What's a better name for this?
-FnsType = Union[torch.fx.node.Target, str]
+FnsType = torch.fx.node.Target | str
 
 
 class Multiple:
@@ -376,7 +376,7 @@ class FailedMatch(RuntimeError):
         return False
 
 
-MatchResult = Union[Match, FailedMatch]
+MatchResult = Match | FailedMatch
 
 
 def is_match(m: MatchResult) -> TypeIs[Match]:
@@ -544,7 +544,7 @@ class _TargetExpr(PatternExpr):
     fns_set: OrderedSet[FnsType]
 
     def __init__(
-        self, fns: Union[FnsType, Sequence[FnsType]], users: Union[Multiple, int] = 1
+        self, fns: FnsType | Sequence[FnsType], users: Multiple | int = 1
     ) -> None:
         super().__init__()
         fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
@@ -627,9 +627,9 @@ class _TargetArgsExpr(_TargetExpr):
 
     def __init__(
         self,
-        fns: Union[torch.fx.node.Target, str, Sequence[Any]],
+        fns: torch.fx.node.Target | str | Sequence[Any],
         *args: Any,
-        _users: Union[int, Multiple] = 1,
+        _users: int | Multiple = 1,
         **kwargs: Any,
     ) -> None:
         super().__init__(fns, _users)
@@ -647,7 +647,7 @@ class _TargetArgsExpr(_TargetExpr):
     @staticmethod
     def simple_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
-    ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
+    ) -> tuple[Sequence[Any], _SimpleSpec | pytree.TreeSpec]:
         values = (*args, *kwargs.values())
         spec = (len(args), *kwargs.keys())
         return values, spec
@@ -655,7 +655,7 @@ class _TargetArgsExpr(_TargetExpr):
     @staticmethod
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
-    ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
+    ) -> tuple[Sequence[Any], _SimpleSpec | pytree.TreeSpec]:
         type_mapping: dict[type, type] = {
             immutable_list: tuple,
             list: tuple,
@@ -912,7 +912,7 @@ class MultiOutputPattern(PatternExpr):
         self.op = outputs[0].op
 
     @property
-    def fns(self) -> Union[Callable[..., Any], str, Sequence[Any]]:
+    def fns(self) -> Callable[..., Any] | str | Sequence[Any]:
         # This cast is checked above in __init__()
         output = typing.cast(_TargetExpr, self.outputs[0])
         return output.fns
@@ -1085,8 +1085,8 @@ class PatternEntry:
 
     def register(
         self,
-        pass_dicts: Union[_PassDictsType, Sequence[_PassDictsType]],
-        target: Union[torch.fx.node.Target, None] = None,
+        pass_dicts: _PassDictsType | Sequence[_PassDictsType],
+        target: torch.fx.node.Target | None = None,
         prepend: bool = False,
     ) -> None:
         if target is None:
@@ -1144,7 +1144,7 @@ class ReplacementPatternEntry(PatternEntry):
     def replace_with_graph(
         match: Match,
         graph: torch.fx.Graph,
-        replacement_graph: Union[torch.fx.Graph, torch.fx.GraphModule],
+        replacement_graph: torch.fx.Graph | torch.fx.GraphModule,
         args: Sequence[torch.fx.Node],
     ) -> None:
         """
@@ -1266,8 +1266,8 @@ class ReplacementPatternEntry(PatternEntry):
                 return node.args[1]
 
             def replace(
-                old: Union[torch.fx.Node, None],
-                new: Union[torch.fx.Node, Sequence[torch.fx.Node], None],
+                old: torch.fx.Node | None,
+                new: torch.fx.Node | Sequence[torch.fx.Node] | None,
             ) -> None:
                 def filter_nodes_in_newly_added_nodes(node: torch.fx.Node) -> bool:
                     # Do not replace the use of a node if it is being used by
@@ -1427,11 +1427,11 @@ def register_replacement(
     replace_fn: ReplaceFn,
     example_inputs: Iterable[Any],
     trace_fn: TraceFn,
-    pass_dicts: Union[_PassDictsType, Sequence[_PassDictsType]],
+    pass_dicts: _PassDictsType | Sequence[_PassDictsType],
     extra_check: Callable[[Match], bool] = _return_true,
-    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
+    scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
-    search_fn_pattern: Union[PatternExpr, None] = None,
+    search_fn_pattern: PatternExpr | None = None,
     skip_duplicates: bool = False,
 ) -> bool:
     """
@@ -1649,7 +1649,7 @@ def _serialize_pattern(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
     trace_fn: TraceFn,
-    scalar_workaround: Union[dict[str, Union[float, int]], None],
+    scalar_workaround: dict[str, float | int] | None,
 ) -> PatternExpr:
     def get_file_template() -> str:
         auto_generated_msg = textwrap.dedent(
@@ -1746,9 +1746,9 @@ def gen_register_replacement(
     replace_fn: ReplaceFn,
     example_inputs: Iterable[Any],
     trace_fn: TraceFn,
-    pass_dicts: Union[_PassDictsType, Sequence[_PassDictsType]],
+    pass_dicts: _PassDictsType | Sequence[_PassDictsType],
     extra_check: Callable[[Match], bool] = _return_true,
-    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
+    scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
     skip_duplicates: bool = False,
 ) -> None:
@@ -1801,7 +1801,7 @@ def gen_pattern_and_search_gm(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
     trace_fn: TraceFn,
-    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
+    scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
 ) -> tuple[PatternExpr, torch.fx.GraphModule]:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
@@ -1835,7 +1835,7 @@ def gen_pattern(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
     trace_fn: TraceFn,
-    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
+    scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
 ) -> PatternExpr:
     return gen_pattern_and_search_gm(
@@ -2000,7 +2000,7 @@ class PatternMatcherPass:
     def __getitem__(self, item: tuple[str, torch.fx.node.Target]) -> list[PatternEntry]:
         return self.patterns[item]
 
-    def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
+    def apply(self, gm: torch.fx.GraphModule | torch.fx.Graph) -> int:
         if not self.patterns:
             return 0
         if isinstance(gm, torch.fx.GraphModule):
@@ -2074,10 +2074,10 @@ def _not_implemented(*args: Any, **kwargs: Any) -> NoReturn:
 
 
 def fx_to_pattern(
-    gm: Union[torch.fx.GraphModule, torch.fx.Graph],
+    gm: torch.fx.GraphModule | torch.fx.Graph,
     ignore_types: Sequence[type[Any]] = (),
     argnames: Sequence[str] = (),
-    scalar_workaround: Union[dict[str, Union[float, int]], None] = None,
+    scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
 ) -> PatternExpr:
     """
@@ -2092,7 +2092,7 @@ def fx_to_pattern(
 
     def process_arg(
         x: T, ignore_types_override: Optional[Sequence[type[Any]]] = None
-    ) -> Union[T, KeywordArg, Ignored]:
+    ) -> T | KeywordArg | Ignored:
         current_ignore_types = (
             ignore_types_override if ignore_types_override is not None else ignore_types
         )
@@ -2120,7 +2120,7 @@ def fx_to_pattern(
             target: str,  # type: ignore[override]
             args: Sequence[Any],
             kwargs: Mapping[str, Any],
-        ) -> Union[ExclusiveKeywordArg, KeywordArg]:
+        ) -> ExclusiveKeywordArg | KeywordArg:
             n = next(argnum)
             if n < len(argnames):
                 name = argnames[n]
@@ -2151,7 +2151,7 @@ def fx_to_pattern(
                     ignore_types_override: Optional[Sequence[type[Any]]] = tuple(
                         t for t in ignore_types if t is not int
                     ),
-                ) -> Union[T, KeywordArg, Ignored]:
+                ) -> T | KeywordArg | Ignored:
                     return process_arg(x, ignore_types_override)
 
                 process_arg_fn = process_arg_fn_impl

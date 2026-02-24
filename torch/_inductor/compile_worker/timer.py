@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from threading import Lock, Thread
 from time import monotonic, sleep
-from typing import Optional, Union
+from typing import Optional
 
 
 class Timer:
@@ -11,7 +11,7 @@ class Timer:
 
     def __init__(
         self,
-        duration: Union[int, float],  # Duration in seconds
+        duration: int | float,  # Duration in seconds
         call: Callable[[], None],  # Function to call when we expire
     ) -> None:
         # We don't start the background thread until we actually get an event.

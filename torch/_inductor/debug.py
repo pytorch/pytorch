@@ -15,7 +15,7 @@ import shutil
 import tempfile
 import traceback
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, IO, Optional, Union
+from typing import Any, IO, Optional
 from unittest.mock import patch
 
 import torch
@@ -174,7 +174,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
             kwargs = {"device": snode.get_device()}
         fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
-        def in_output(snode: Union[BaseSchedulerNode, FusedSchedulerNode]) -> bool:
+        def in_output(snode: BaseSchedulerNode | FusedSchedulerNode) -> bool:
             if isinstance(snode, FusedSchedulerNode):
                 return any(in_output(x) for x in snode.snodes)
             return any(
@@ -739,7 +739,7 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
-def _dump_collective_schedule(schedule: list[Union[str, None]]) -> None:
+def _dump_collective_schedule(schedule: list[str | None]) -> None:
     try:
         trace_structured(
             "artifact",
@@ -1112,7 +1112,7 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     kernel_name: str,
     is_extern: bool = False,
 ) -> Optional[int]:

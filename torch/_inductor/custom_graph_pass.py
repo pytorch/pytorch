@@ -2,7 +2,7 @@ import hashlib
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from functools import lru_cache
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias
 
 import torch.fx.graph
 
@@ -103,7 +103,7 @@ class CustomInferenceAwareGraphPass(CustomGraphPass):
 
 
 CustomGraphPassType: TypeAlias = Optional[
-    Union[CustomGraphPass, Callable[[torch.fx.graph.Graph], None]]
+    CustomGraphPass | Callable[[torch.fx.graph.Graph], None]
 ]
 
 

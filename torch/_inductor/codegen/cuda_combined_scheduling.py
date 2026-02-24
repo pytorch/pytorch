@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING
 
 from ..scheduler import (
     BaseSchedulerNode,
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
     from .common import BackendFeature
 
-    _IntLike: TypeAlias = Union[int, Expr]
+    _IntLike: TypeAlias = int | Expr
 
 
 class CUDACombinedScheduling(BaseScheduling):
@@ -148,7 +148,7 @@ class CUDACombinedScheduling(BaseScheduling):
     def codegen_mix_order_reduction(self, node):
         return self._triton_scheduling.codegen_mix_order_reduction(node)
 
-    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
+    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
         return self._triton_scheduling.codegen_node(node)
 
     def codegen_sync(self) -> None:

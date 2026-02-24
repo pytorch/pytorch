@@ -4,7 +4,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 from torch._inductor.analysis.device_info import DeviceInfo, lookup_device_info
@@ -44,7 +44,7 @@ def parse_list(lst: str) -> list[int]:
 
 
 def register_adapter(
-    aten: Union[str, list[str]],
+    aten: str | list[str],
 ) -> Callable[
     [AdapterType],
     AdapterType,
@@ -403,7 +403,7 @@ class JsonProfile:
         self,
         path: str,
         benchmark_name: Optional[str] = None,
-        dtype: Optional[Union[torch.dtype, str]] = None,
+        dtype: Optional[torch.dtype | str] = None,
     ):
         """
         Convenience class for running common operations on chrome/perfetto json traces.

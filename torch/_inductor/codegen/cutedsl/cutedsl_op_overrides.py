@@ -7,7 +7,7 @@ template kernels, particularly for flex attention modifications.
 """
 
 import math
-from typing import Optional, Union
+from typing import Optional
 
 import sympy
 
@@ -17,7 +17,7 @@ from torch._inductor.virtualized import OpsValue, V
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
-CuteDSLArg = Union[CSEVariable, str, bool, float, int]
+CuteDSLArg = CSEVariable | str | bool | float | int
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
@@ -216,7 +216,7 @@ class CuteDSLOpOverrides(OpOverrides):
         return op_format.format(x=x)
 
     @staticmethod
-    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> str:
+    def constant(value: bool | float | int, dtype: torch.dtype) -> str:
         """Generate CuteDSL constant representation."""
         if value == float("-inf"):
             return "float('-inf')"
