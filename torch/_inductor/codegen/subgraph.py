@@ -93,7 +93,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     self.benchmark_inputs.append(input_gen_fns[i](inp))
                 else:
                     self.benchmark_inputs.append(
-                        ir_node_to_tensor(inp, guard_shape=False)
+                        ir_node_to_tensor(inp, replace_symbols_with_hints=True)
                     )
 
         # Trace with symbolic inputs for guard detection

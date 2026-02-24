@@ -266,7 +266,6 @@ def _adapt_user_input_gen_fns(
     """Convert user input generators from name-based to index-based format.
     Inductor autotune's input_gen_fns expects index of arg_names as key.
     """
-
     arg_names = [arg.name for arg in op_overload._schema.arguments]
     name_to_index = {name: i for i, name in enumerate(arg_names)}
     index_based_fns = {}
@@ -769,12 +768,11 @@ def _lower_single_impl(
     tensor_inputs: list[Any],
     name: str,
     config_patches: Optional[dict[str, Any]] = None,
-    default_impl: Optional[Callable[..., Any]] = None,
 ) -> Any:
     """Lower a single implementation by tracing and inlining it.
 
     Uses error_on_new_guards() during tracing to detect if the impl adds guards.
-    If it does and default_impl is provided, falls back to default_impl.
+    Returns None if the impl adds guards, signaling caller to skip this choice.
     """
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
     from torch.fx.experimental.proxy_tensor import make_fx
@@ -784,11 +782,8 @@ def _lower_single_impl(
 
     merged_kwargs = _merge_config_and_runtime_kwargs(impl_kwargs, runtime_kwargs)
 
-    def make_impl_wrapper(fn):
-        def impl_wrapper(*tensors):
-            return fn(*tensors, **merged_kwargs)
-
-        return impl_wrapper
+    def impl_wrapper(*tensors):
+        return impl(*tensors, **merged_kwargs)
 
     shape_env = V.fake_mode.shape_env
 
@@ -796,44 +791,33 @@ def _lower_single_impl(
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
 
-        # Try tracing with error_on_new_guards; fall back to default_impl if guards are added
-        impl_to_use = impl
-        if shape_env is not None and impl != default_impl and default_impl is not None:
-            try:
-                with shape_env.error_on_new_guards():
-                    impl_gm = make_fx(
-                        make_impl_wrapper(impl),
-                        decomposition_table=decomposition_table,
-                        tracing_mode="symbolic",
-                    )(*fake_inputs)
-            except (_ShapeEnvGuardError, AssertionError) as e:
-                # _ShapeEnvGuardError may be wrapped in AssertionError by dynamo
-                is_guard_error = isinstance(e, _ShapeEnvGuardError) or (
-                    isinstance(e, AssertionError)
-                    and "Guard attempted while ShapeEnv guards are frozen" in str(e)
-                )
-                if not is_guard_error:
-                    raise
-                log.info(
-                    "Implementation %s adds guards, falling back to %s",
-                    impl.__name__,
-                    default_impl.__name__,
-                )
-                counters["inductor"]["custom_op_decomp_guard_skips"] += 1
-                impl_to_use = default_impl
+        context = (
+            shape_env.error_on_new_guards
+            if shape_env is not None
+            else contextlib.nullcontext
+        )
+        try:
+            with context():
                 impl_gm = make_fx(
-                    make_impl_wrapper(default_impl),
+                    impl_wrapper,
                     decomposition_table=decomposition_table,
                     tracing_mode="symbolic",
                 )(*fake_inputs)
-        else:
-            impl_gm = make_fx(
-                make_impl_wrapper(impl),
-                decomposition_table=decomposition_table,
-                tracing_mode="symbolic",
-            )(*fake_inputs)
+        except (_ShapeEnvGuardError, AssertionError) as e:
+            is_guard_error = isinstance(e, _ShapeEnvGuardError) or (
+                isinstance(e, AssertionError)
+                and "Guard attempted while ShapeEnv guards are frozen" in str(e)
+            )
+            if not is_guard_error:
+                raise
+            log.info(
+                "Implementation %s adds guards, skipping custom op lowering",
+                impl.__name__,
+            )
+            counters["inductor"]["custom_op_decomp_guard_skips"] += 1
+            return None
 
-    log.info("Inlining implementation: %s", impl_to_use.__name__)
+    log.info("Inlining implementation: %s", impl.__name__)
     ops_before = len(V.graph.operations)
     result = inline_subgraph_to_ir_nodes(impl_gm, tensor_inputs, name)
 
@@ -967,7 +951,6 @@ def _range_based_lowering_fn(
             tensor_inputs,
             name,
             config_patches=group.config_patches,
-            default_impl=default_impl,
         )
 
     def dispatch_fn(*fake_tensors):
