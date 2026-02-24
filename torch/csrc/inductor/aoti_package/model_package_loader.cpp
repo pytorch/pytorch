@@ -149,7 +149,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
 
   std::string source_args;
   for (const std::string& source : sources) {
-    source_args += normalize_path_separator(source) + ' ';
+    source_args += normalize_path_separator(source) + " ";
   }
 
   std::string file_ext =
@@ -166,43 +166,43 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
     // [Windows compiler need it] convert first char arg to std::string, for
     // following plus(+) strings.
     cflags_args += std::string(_is_windows_os() ? "/" : "-") +
-        arg.get<std::string>() + ' ';
+        arg.get<std::string>() + " ";
   }
 
   std::string definitions_args;
   for (auto& arg : compile_options["definitions"]) {
     definitions_args += std::string(_is_windows_os() ? "/D" : "-D ") +
-        arg.get<std::string>() + ' ';
+        arg.get<std::string>() + " ";
   }
 
   std::string include_dirs_args;
   for (auto& arg : compile_options["include_dirs"]) {
     include_dirs_args += std::string(_is_windows_os() ? "/I" : "-I") +
-        arg.get<std::string>() + ' ';
+        arg.get<std::string>() + " ";
   }
 
   std::string ldflags_args;
   for (auto& arg : compile_options["ldflags"]) {
     ldflags_args += std::string(_is_windows_os() ? "/" : "-") +
-        arg.get<std::string>() + ' ';
+        arg.get<std::string>() + " ";
   }
 
   std::string libraries_dirs_args;
   for (auto& arg : compile_options["libraries_dirs"]) {
     if (_is_windows_os()) {
       libraries_dirs_args +=
-          fmt::format("/LIBPATH:\"{}\"", arg.get<std::string>()) + ' ';
+          fmt::format("/LIBPATH:\"{}\"", arg.get<std::string>()) + " ";
     } else {
-      libraries_dirs_args += "-L" + arg.get<std::string>() + ' ';
+      libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
     }
   }
 
   std::string libraries_args;
   for (auto& arg : compile_options["libraries"]) {
     if (_is_windows_os()) {
-      libraries_args += fmt::format("{}.lib", arg.get<std::string>()) + ' ';
+      libraries_args += fmt::format("{}.lib", arg.get<std::string>()) + " ";
     } else {
-      libraries_args += "-l" + arg.get<std::string>() + ' ';
+      libraries_args += "-l" + arg.get<std::string>() + " ";
     }
   }
 
@@ -213,7 +213,7 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   for (auto& arg : compile_options["passthrough_args"]) {
     std::string arg_str =
         std::regex_replace(arg.get<std::string>(), script_regex, replacement);
-    passthrough_parameters_args += arg_str + ' ';
+    passthrough_parameters_args += arg_str + " ";
   }
 
   std::string output_flags = get_output_flags(compile_only);
@@ -472,7 +472,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     std::string prefix1 = found_filenames[1].substr(0, pos);
 
     if (!prefix0.empty() && !prefix1.empty() && prefix0 == prefix1) {
-      file_prefix = prefix0 + '/';
+      file_prefix = prefix0 + "/";
     }
   }
 
@@ -497,12 +497,12 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
   if (metadata_filename.empty()) {
     std::string found_filenames_str;
     for (const std::string& filename : found_filenames) {
-      found_filenames_str += filename + '\n';
+      found_filenames_str += filename + "\n";
     }
     std::string model_names_str;
     for (const std::string& model_name_tmp :
          find_model_names(found_filenames)) {
-      model_names_str += model_name_tmp + '\n';
+      model_names_str += model_name_tmp + "\n";
     }
 
     TORCH_CHECK(
@@ -740,12 +740,12 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   if (cpp_filename.empty() && so_filename.empty()) {
     std::string found_filenames_str;
     for (const std::string& filename : found_filenames) {
-      found_filenames_str += filename + '\n';
+      found_filenames_str += filename + "\n";
     }
     std::string model_names_str;
     for (const std::string& model_name_tmp :
          find_model_names(found_filenames)) {
-      model_names_str += model_name_tmp + '\n';
+      model_names_str += model_name_tmp + "\n";
     }
 
     TORCH_CHECK(
