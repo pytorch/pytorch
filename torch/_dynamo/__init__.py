@@ -34,6 +34,7 @@ from .decorators import (
     graph_break,
     is_dynamo_disable_recursive,
     mark_dynamic,
+    mark_dynamic_dict,
     mark_static,
     mark_static_address,
     maybe_mark_dynamic,
@@ -93,6 +94,7 @@ __all__ = [
     "list_backends",
     "lookup_backend",
     "mark_dynamic",
+    "mark_dynamic_dict",
     "maybe_mark_dynamic",
     "mark_static",
     "mark_static_address",
@@ -161,6 +163,10 @@ def reset() -> None:
         TensorifyState.clear()
         torch._dynamo.utils.warn_once_cache.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
+
+        from .decorators import _dynamic_dict_ids
+
+        _dynamic_dict_ids.clear()
 
         # Reset cudagraph trees unconditionally since they are global state
         # not tied to a specific backend instance
