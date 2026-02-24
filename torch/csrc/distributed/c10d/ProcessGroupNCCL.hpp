@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <deque>
 #include <future>
 #include <iostream>
@@ -553,6 +554,23 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
     int split_color{-2};
 #endif
+
+    bool operator==(const Options& other) const noexcept {
+      if (!(static_cast<const Backend::Options&>(*this) ==
+            static_cast<const Backend::Options&>(other)))
+        return false;
+      if (is_high_priority_stream != other.is_high_priority_stream)
+        return false;
+      if (split_color != other.split_color)
+        return false;
+      if (split_from.get() != other.split_from.get())
+        return false;
+#ifdef NCCL_HAS_CONFIG
+      if (std::memcmp(&config, &other.config, sizeof(ncclConfig_t)) != 0)
+        return false;
+#endif
+      return true;
+    }
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -1531,5 +1549,25 @@ typedef bool (*gil_checker_t)();
 
 TORCH_API gil_checker_t& get_gil_checker();
 } // namespace c10d
+
+namespace std {
+template <>
+struct hash<c10d::ProcessGroupNCCL::Options> {
+  size_t operator()(
+      const c10d::ProcessGroupNCCL::Options& opts) const noexcept {
+    size_t h = hash<c10d::Backend::Options>{}(opts);
+    h = c10d::hash_combine(h, hash<bool>{}(opts.is_high_priority_stream));
+    h = c10d::hash_combine(h, hash<int>{}(opts.split_color));
+    h = c10d::hash_combine(h, hash<void*>{}(opts.split_from.get()));
+#ifdef NCCL_HAS_CONFIG
+    const auto* p = reinterpret_cast<const char*>(&opts.config);
+    for (size_t i = 0; i < sizeof(ncclConfig_t); ++i) {
+      h = c10d::hash_combine(h, hash<char>{}(p[i]));
+    }
+#endif
+    return h;
+  }
+};
+} // namespace std
 
 #endif // USE_C10D_NCCL

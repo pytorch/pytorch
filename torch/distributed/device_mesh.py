@@ -71,26 +71,6 @@ else:
     BackendConfig = tuple[str | None, C10dBackend.Options | None]
     torch.serialization.add_safe_globals([_MeshLayout])
 
-    def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup:
-        """
-        This method allows us to torch.compile through DeviceMesh and lift its
-        PGs a inputs to the graph since all PGs will have a source from the
-        DeviceMesh through the `_pg_registry`.
-        This will be moved to the DeviceMesh backend object once we separate
-        DeviceMesh into the frontend and backend.
-        """
-        if torch.compiler.is_compiling():
-            pg = mesh._pg_registry.get(name, None)
-            if pg is None:
-                raise RuntimeError(
-                    f"PG {name} was not found while torch.compile tracing "
-                    "This is probably because we pickle/unpickled a device mesh "
-                    "before the PGs were created."
-                )
-            return pg
-        else:
-            return _resolve_process_group(name)  # pyrefly: ignore[bad-argument-type]
-
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: list[DeviceMesh] = []
@@ -148,6 +128,263 @@ else:
         """
         return getattr(torch, device_type, None)
 
+    def _setup_world_group_and_device(device_type: str, layout_numel: int) -> None:
+        default_initialized = is_initialized()
+        if not default_initialized:
+            init_process_group()
+
+        world_size = get_world_size()
+        if layout_numel > world_size:
+            raise RuntimeError(
+                f"Mesh should not be bigger than default world size {world_size}, "
+                f"but found {layout_numel} ranks!"
+            )
+
+        backend = get_backend()
+        if backend == "fake":
+            return
+
+        device_handle = _get_device_handle(device_type)
+        if device_handle and not device_handle.is_initialized():
+            if "LOCAL_RANK" in os.environ:
+                local_rank = int(os.environ["LOCAL_RANK"])
+                logger.info(
+                    "Setting default device for the current process based on LOCAL_RANK=%s",
+                    local_rank,
+                )
+                device_handle.set_device(local_rank)
+            else:
+                num_devices_per_host = device_handle.device_count()
+                if num_devices_per_host == 0:
+                    return
+                warnings.warn(
+                    "It seems like you did not set/select the default device for "
+                    "the current process before the DeviceMesh initialization or "
+                    "use a launcher (i.e. torchrun) which populates `LOCAL_RANK` "
+                    "environment variable. It is recommended to set the current "
+                    "device for the process BEFORE the DeviceMesh initialization "
+                    "so that the underlying communicator (i.e. NCCL) can be "
+                    "initialized properly. Given that the current process has no "
+                    "default device selected, DeviceMesh will use a heuristic to "
+                    "set the device_id via `global_rank % num_devices_per_host`, "
+                    "assuming homogeneous hardware cluster. ",
+                    stacklevel=2,
+                )
+                if (
+                    world_size > num_devices_per_host
+                    and world_size % num_devices_per_host != 0
+                ):
+                    raise RuntimeError(
+                        f"DeviceMesh only support homogeneous hardware, but found "
+                        f"{world_size} ranks and {num_devices_per_host} "
+                        f"{device_type} devices!"
+                    )
+                device_handle.set_device(get_rank() % num_devices_per_host)
+
+    class _DeviceMeshUniverse:
+        """
+        Centralizes backend management for a mesh hierarchy. Shared across all meshes
+        derived from the same root mesh. Handles backend creation, caching (to avoid
+        duplicate backends when the same layout+backend option is requested multiple
+        times), and registry for torch.compile tracing.
+
+        NOTE: This object is shared (by reference) across all DeviceMesh instances
+        in the same universe. Its dict fields (_pg_registry, _pg_cache) are not
+        thread-safe; concurrent mutation from multiple threads may race. This
+        mirrors the pre-existing threading assumptions of DeviceMesh.
+        """
+
+        _device_type: str
+        # Caches PG references so torch.compile can trace pg lookup without
+        # invoking c10d at tracing time.
+        _pg_registry: dict[str, ProcessGroup]
+        _pg_cache: dict[tuple[_MeshLayout, BackendConfig], GroupName | None]
+
+        def __init__(self, device_type: str) -> None:
+            self._device_type = device_type
+            self._pg_registry = {}
+            self._pg_cache = {}
+
+        def get_pg_from_name(self, name: str) -> ProcessGroup:
+            if torch.compiler.is_compiling():
+                pg = self._pg_registry.get(name, None)
+                if pg is None:
+                    raise RuntimeError(
+                        f"PG {name} was not found while torch.compile tracing "
+                        "This is probably because we pickle/unpickled a device mesh "
+                        "before the PGs were created."
+                    )
+                return pg
+            else:
+                # pyrefly: ignore[bad-argument-type]
+                return _resolve_process_group(name)
+
+        def register_pg(self, name: str, pg: ProcessGroup) -> None:
+            self._pg_registry[name] = pg
+
+        @staticmethod
+        def _create_process_group(
+            sub_layout: _MeshLayout,
+            rank_map: torch.Tensor,
+            dim_name: str,
+            backend_override: BackendConfig,
+        ) -> GroupName | None:
+            pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
+            backend, pg_options = backend_override
+            timeout = pg_options._timeout if pg_options else None
+            group_desc = f"mesh_{dim_name}"
+
+            default_group = _get_default_group()
+
+            if sub_layout.numel() == get_world_size() and backend_override == (
+                None,
+                None,
+            ):
+                ranks = list(range(get_world_size()))
+                dim_group = (
+                    new_group(
+                        backend=backend,
+                        ranks=ranks,
+                        group_desc="mesh_default",
+                    )
+                    if torch.cuda.is_available()
+                    and get_backend(default_group) == "gloo"
+                    else default_group
+                )
+                return dim_group.group_name  # type: ignore[union-attr]
+
+            if (
+                (
+                    getattr(default_group, "bound_device_id", None) is not None
+                    or dist_config.use_torchcomms
+                )
+                and torch.cuda.is_available()
+                and (
+                    backend is None
+                    or default_group._get_backend(torch.device("cuda")).name()
+                    == backend
+                )
+            ):
+                dim_group = split_group(
+                    parent_pg=default_group,
+                    timeout=timeout,
+                    pg_options=pg_options,
+                    split_ranks=pg_ranks_by_dim.tolist(),
+                    group_desc=group_desc,
+                )
+                if dim_group is None:
+                    return None
+                return dim_group.group_name
+
+            pg_name = None
+            for dim_mesh in pg_ranks_by_dim:
+                subgroup_ranks = dim_mesh.tolist()
+                dim_group = new_group(
+                    ranks=subgroup_ranks,
+                    timeout=timeout,
+                    backend=backend,
+                    pg_options=pg_options,
+                    group_desc=group_desc,
+                )
+
+                if get_rank() in subgroup_ranks:
+                    if pg_name is not None:
+                        raise RuntimeError(
+                            f"Each device mesh dimension should get only one process group, "
+                            f"but got {get_rank()} in {subgroup_ranks}!"
+                        )
+                    pg_name = dim_group.group_name
+            return pg_name
+
+        def init_one_process_group(
+            self,
+            sub_layout: _MeshLayout,
+            rank_map: torch.Tensor,
+            dim_name: str,
+            backend_override: BackendConfig,
+        ) -> GroupName | None:
+            # NOTE: Backend.Options.__eq__/__hash__ include group_name.
+            # Callers should either leave group_name at its default or ensure
+            # all Options with the same config use the same group_name;
+            # mismatched group_names on otherwise identical configs will miss
+            # the cache.
+            cache_key = (sub_layout, backend_override)
+            if cache_key in self._pg_cache:
+                return self._pg_cache[cache_key]
+
+            pg_name = self._create_process_group(
+                sub_layout, rank_map, dim_name, backend_override
+            )
+            self._pg_cache[cache_key] = pg_name
+            if pg_name is not None:
+                pg = _resolve_process_group(pg_name)
+                if pg is not None:
+                    self._pg_registry[pg_name] = pg
+            return pg_name
+
+        def init_process_groups(
+            self,
+            layout: _MeshLayout,
+            rank_map: torch.Tensor,
+            mesh_dim_names: tuple[str, ...] | None,
+            backend_override: tuple[BackendConfig, ...],
+        ) -> list[GroupName]:
+            dim_group_names: list[GroupName | None] = []
+            for dim in range(len(layout)):
+                dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
+                dim_group_names.append(
+                    self.init_one_process_group(
+                        layout[dim],
+                        rank_map,
+                        dim_name,
+                        backend_override[dim],
+                    )
+                )
+            dim_non_none_group_names = [n for n in dim_group_names if n is not None]
+            assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
+                dim_group_names
+            )
+            return dim_non_none_group_names
+
+        def is_threaded_backend(self) -> bool:
+            return is_initialized() and get_backend() == "threaded"
+
+        def __getstate__(self) -> dict:
+            state = self.__dict__.copy()
+            state["_pg_group_names"] = list(state.pop("_pg_registry").keys())
+            state.pop("_pg_cache", None)
+            return state
+
+        def __setstate__(self, state: dict) -> None:
+            warnings.warn(
+                "Deserializing DeviceMesh is not safe for checkpointing. "
+                "Process group state is not portable across sessions; "
+                "PG lookups may fail or return stale references.",
+                stacklevel=2,
+            )
+            pg_group_names = state.pop("_pg_group_names", [])
+            state["_pg_registry"] = {}
+            # _pg_cache is not restored because BackendConfig contains C++
+            # Options objects that are not picklable. Subsequent _unflatten
+            # and _flatten calls will re-populate the cache lazily but can
+            # create duplicated PG. Actions that rely on _pg_cache may also
+            # fail. Stay away from pickling a DeviceMesh if possible.
+            state["_pg_cache"] = {}
+            self.__dict__.update(state)
+            for name in pg_group_names:
+                try:
+                    pg = _resolve_process_group(name)
+                    if pg is not None:
+                        self._pg_registry[name] = pg
+                except RuntimeError:
+                    logger.warning(
+                        "It seems like pickling/unpickling of the DeviceMesh "
+                        "occurred before the PGs were created. This will cause PG "
+                        "lookup to fail when torch.compile is enabled"
+                    )
+
+    torch.serialization.add_safe_globals([_DeviceMeshUniverse])
+
     class DeviceMesh:
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
@@ -204,8 +441,7 @@ else:
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
-        # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
-        _pg_registry: dict[str, ProcessGroup]
+        _universe: _DeviceMeshUniverse
 
         def __init__(
             self,
@@ -289,8 +525,11 @@ else:
             self._thread_id = None
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
-            # Initialize process group registry
-            self._pg_registry = {}
+            # Create or inherit the universe for PG management
+            if _root_mesh is not None:
+                self._universe = _root_mesh._universe
+            else:
+                self._universe = _DeviceMeshUniverse(device_type)
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -299,26 +538,17 @@ else:
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
-                    self._setup_world_group_and_device()
-                    self._dim_group_names = self._init_process_groups(
+                    _setup_world_group_and_device(
+                        self._device_type, self._layout.numel()
+                    )
+                    self._dim_group_names = self._universe.init_process_groups(
                         self._layout,
                         self._rank_map,
                         self._mesh_dim_names,
                         backend_override,
                     )
-                    # Populate the process group registry
-                    # If we have a root mesh, add to root's registry for lookups
-                    target_registry = (
-                        self._root_mesh._pg_registry
-                        if self._root_mesh is not None
-                        else self._pg_registry
-                    )
-                    for name in self._dim_group_names:
-                        pg = _resolve_process_group(name)
-                        if pg is not None:
-                            target_registry[name] = pg
 
-                if is_initialized() and get_backend() == "threaded":
+                if self._universe.is_threaded_backend():
                     self._thread_id = threading.get_ident()
 
                 # Now that the process group is initialized, we can get the rank
@@ -363,30 +593,6 @@ else:
             # calculate the coordinates of the current global rank on the mesh
             return self._compute_coordinates_from_mesh(self.mesh, self._rank)
 
-        def __getstate__(self) -> dict:
-            # Exclude _pg_registry from pickle since ProcessGroup objects can't be pickled
-            state = self.__dict__.copy()
-            state.pop("_pg_registry", None)
-            return state
-
-        def __setstate__(self, state: dict) -> None:
-            self.__dict__.update(state)
-            # Reconstruct _pg_registry from _dim_group_names
-            self._pg_registry = {}
-            if hasattr(self, "_dim_group_names"):
-                for name in self._dim_group_names:
-                    try:
-                        pg = _resolve_process_group(name)
-                        if pg is not None:
-                            self._pg_registry[name] = pg
-                    except RuntimeError:
-                        # Note: process groups may not exist if loading in a different process
-                        logger.warning(
-                            "It seems like pickling/unpickling of the DeviceMesh "
-                            "occurred before the PGs were created. This will cause PG "
-                            "lookup to fail when torch.compile is enabled"
-                        )
-
         @property
         def device_type(self) -> str:
             """Returns the device type of the mesh."""
@@ -422,194 +628,6 @@ else:
         def mesh_dim_names(self) -> tuple[str, ...] | None:
             """Returns the names of mesh dimensions."""
             return self._mesh_dim_names
-
-        def _setup_world_group_and_device(self):
-            default_initialized = is_initialized()
-            if not default_initialized:
-                init_process_group()
-
-            world_size = get_world_size()
-            if self._layout.numel() > world_size:
-                raise RuntimeError(
-                    f"Mesh should not be bigger than default world size {world_size}, but found {self._layout.numel()} ranks!"
-                )
-
-            # Skip device setup for fake backend (cross-compilation mode).
-            # The fake backend is used to simulate distributed training on a
-            # single process without actual devices, enabling compilation of
-            # GPU programs on CPU-only machines.
-            backend = get_backend()
-            if backend == "fake":
-                return _get_default_group()
-
-            # ONLY set the device if the current device is not initialized, if user already
-            # set the device before DeviceMesh init, we respect the user's choice.
-            device_handle = _get_device_handle(self._device_type)
-            if device_handle and not device_handle.is_initialized():
-                # auto set the cuda/cuda-like device only if user has not set it, if there's LOCAL_RANK
-                # env variable from launchers, we use it to set the device.
-                if "LOCAL_RANK" in os.environ:
-                    local_rank = int(os.environ["LOCAL_RANK"])
-                    logger.info(
-                        "Setting default device for the current process based on LOCAL_RANK=%s",
-                        local_rank,
-                    )
-                    device_handle.set_device(local_rank)
-                else:
-                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
-                    # NOTE: This device selection would only work for homogeneous hardware.
-                    num_devices_per_host = device_handle.device_count()
-                    # Skip device setup if no devices are available (cross-compilation mode)
-                    if num_devices_per_host == 0:
-                        return _get_default_group()
-                    warnings.warn(
-                        "It seems like you did not set/select the default device for the current process before the DeviceMesh "
-                        "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
-                        "It is recommended to set the current device for the process BEFORE the DeviceMesh initialization so that "
-                        "the underlying communicator (i.e. NCCL) can be initialized properly. "
-                        "Given that the current process has no default device selected, DeviceMesh will use a heuristic to set the "
-                        "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. ",
-                        stacklevel=2,
-                    )
-                    if (
-                        world_size > num_devices_per_host
-                        and world_size % num_devices_per_host != 0
-                    ):
-                        raise RuntimeError(
-                            f"DeviceMesh only support homogeneous hardware, but found "
-                            f"{world_size} ranks and {num_devices_per_host} {self._device_type} devices!"
-                        )
-                    device_handle.set_device(get_rank() % num_devices_per_host)
-
-            return _get_default_group()
-
-        @staticmethod
-        def _init_one_process_group(
-            sub_layout: _MeshLayout,
-            rank_map: torch.Tensor,
-            dim_name: str,
-            backend_override: BackendConfig,
-        ) -> GroupName | None:
-            # Generate a 2D global mesh tensor for the current dim for PG creation.
-            pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
-            backend, pg_options = backend_override
-            # We need to explicitly pass in timeout when specified in option, otherwise
-            # the default timeout will be used to override the timeout set in option.
-            # TODO: remove this once we have fixed inside c10d level.
-            timeout = pg_options._timeout if pg_options else None
-
-            # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
-            # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
-            # If the mesh doesn't have a mesh_dim_names, then the group description of the
-            # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
-            group_desc = f"mesh_{dim_name}"
-
-            dim_group = None
-            default_group = _get_default_group()
-
-            # Early return if there is only one sub_layout in the mesh layout.
-            if sub_layout.numel() == get_world_size() and backend_override == (
-                None,
-                None,
-            ):
-                # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
-                # Otherwise, create new pg.
-                ranks = list(range(get_world_size()))
-                dim_group = (
-                    new_group(
-                        backend=backend,
-                        ranks=ranks,
-                        group_desc="mesh_default",
-                    )
-                    if torch.cuda.is_available()
-                    and get_backend(default_group) == "gloo"
-                    else default_group
-                )
-                return dim_group.group_name  # type: ignore[union-attr]
-
-            # If bound_device_id exists, it means the nccl communicator has been eagerly initialized
-            # so that we can use `split_group` to create subgroups through `ncclCommSplit`.
-            # In this case, we only need to make one API call (`split_group``) for the subgroup creation
-            # for each mesh dimension. In a 2 * 4 mesh, we only need to make two API calls per ranks to create
-            # all the subgroups.
-            # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
-            # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
-            # mesh, we need to make two API calls per ranks to create all the subgroups.
-            if (
-                (
-                    getattr(default_group, "bound_device_id", None) is not None
-                    or dist_config.use_torchcomms
-                )
-                and torch.cuda.is_available()
-                and (
-                    backend is None
-                    or default_group._get_backend(torch.device("cuda")).name()
-                    == backend
-                )
-            ):
-                dim_group = split_group(
-                    parent_pg=default_group,
-                    timeout=timeout,
-                    pg_options=pg_options,
-                    split_ranks=pg_ranks_by_dim.tolist(),
-                    group_desc=group_desc,
-                )
-                if dim_group is None:
-                    return None
-                return dim_group.group_name
-
-            # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
-            # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
-            # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
-            # along with appending information to the `dim_group_names` list whenever necessary.
-            pg_name = None
-            for dim_mesh in pg_ranks_by_dim:
-                subgroup_ranks = dim_mesh.tolist()
-                dim_group = new_group(
-                    ranks=subgroup_ranks,
-                    timeout=timeout,
-                    backend=backend,
-                    pg_options=pg_options,
-                    group_desc=group_desc,
-                )
-
-                # only add to dim_groups if the current rank in the subgroup
-                if get_rank() in subgroup_ranks:
-                    if pg_name is not None:
-                        raise RuntimeError(
-                            f"Each device mesh dimension should get only one process group, but got {get_rank()} "
-                            f"in {subgroup_ranks}!"
-                        )
-                    pg_name = dim_group.group_name
-            return pg_name
-
-        @staticmethod
-        def _init_process_groups(
-            layout: _MeshLayout,
-            rank_map: torch.Tensor,
-            mesh_dim_names: tuple[str, ...] | None,
-            backend_override: tuple[BackendConfig, ...],
-        ) -> list[GroupName]:
-            # group_name associated with each mesh dimension, each
-            # mesh dimension should have one sub-group per rank
-            dim_group_names: list[GroupName | None] = []
-            # create sub pgs base on the mesh argument specified
-            for dim in range(len(layout)):
-                dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
-                dim_group_names.append(
-                    DeviceMesh._init_one_process_group(
-                        layout[dim],
-                        rank_map,
-                        dim_name,
-                        backend_override[dim],
-                    )
-                )
-            # Filter out None values. If any are None then they should all be None.
-            dim_non_none_group_names = [n for n in dim_group_names if n is not None]
-            assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
-                dim_group_names
-            )
-            return dim_non_none_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
             return self._root_mesh if self._root_mesh else self
@@ -759,14 +777,16 @@ else:
 
             # Quick return if the current device_mesh is a 1D mesh.
             if len(self._layout) == 1 and mesh_dim is None:
-                return not_none(_get_pg_from_name(root_mesh, self._dim_group_names[0]))
+                return not_none(
+                    self._universe.get_pg_from_name(self._dim_group_names[0])
+                )
 
             root_to_flatten_mapping = root_mesh._flatten_mapping
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
                 dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
                 ]._dim_group_names[0]
-                return not_none(_get_pg_from_name(root_mesh, dim_group_name))
+                return not_none(self._universe.get_pg_from_name(dim_group_name))
             else:
                 mesh_dim = (
                     self._get_mesh_dim_by_name(mesh_dim)
@@ -778,7 +798,7 @@ else:
                         f"mesh_dim must be an int, got {type(mesh_dim)}"
                     )
                 return not_none(
-                    _get_pg_from_name(root_mesh, self._dim_group_names[mesh_dim])
+                    self._universe.get_pg_from_name(self._dim_group_names[mesh_dim])
                 )
 
         def get_all_groups(self) -> list[ProcessGroup]:
@@ -1085,7 +1105,7 @@ else:
                     _init_backend=False,
                 )
                 device_mesh._dim_group_names = [group.group_name]
-                device_mesh._pg_registry[group.group_name] = group
+                device_mesh._universe.register_pg(group.group_name, group)
                 return device_mesh
 
             # nD scenario
@@ -1117,7 +1137,7 @@ else:
             )
             device_mesh._dim_group_names = [group.group_name for group in groups]
             for group in groups:
-                device_mesh._pg_registry[group.group_name] = group
+                device_mesh._universe.register_pg(group.group_name, group)
             return device_mesh
 
         def size(self, mesh_dim: int | None = None) -> int:
@@ -1306,7 +1326,7 @@ else:
             # per dim backend init.
             if hasattr(self, "_dim_group_names"):
                 dim_group_names = self._dim_group_names.copy()
-                new_group_names = self._init_process_groups(
+                new_group_names = self._universe.init_process_groups(
                     partial_layout,
                     root_mesh._rank_map,
                     mesh_dim_names,
@@ -1314,11 +1334,6 @@ else:
                 )
                 dim_group_names[dim : dim + 1] = new_group_names
                 res_mesh._dim_group_names = dim_group_names
-                # Populate root mesh's pg registry with new groups
-                for name in new_group_names:
-                    pg = _resolve_process_group(name)
-                    if pg is not None:
-                        root_mesh._pg_registry[name] = pg
 
             return res_mesh
 
