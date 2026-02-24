@@ -54,11 +54,15 @@ jobs:
           tag_or_branch="${tag_or_branch#refs/heads/}"
           # replace directory separators with _ in branch name
           tag_or_branch="${tag_or_branch//\//_}"
+          PYTORCH_BUILD_VERSION=${tag_or_branch}
+          PYTORCH_BUILD_NUMBER=0
           torch_version="$(python -c 'from tools.generate_torch_version import get_torch_version; print(get_torch_version())')"
           {
             echo "PT_RELEASE_NAME=pytorch-$tag_or_branch";
             echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz";
             echo "PT_PEP517_RELEASE_FILE=torch-${torch_version}.tar.gz";
+            echo "PYTORCH_BUILD_VERSION=$PYTORCH_BUILD_VERSION";
+            echo "PYTORCH_BUILD_NUMBER=$PYTORCH_BUILD_NUMBER";
           } >> "$GITHUB_ENV"
       - name: Checkout optional submodules
         run: python3 tools/optional_submodules.py
