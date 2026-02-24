@@ -25,7 +25,6 @@ import itertools
 import logging
 import types
 import warnings
-import weakref
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
@@ -5184,42 +5183,38 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         return body_name
 
     @staticmethod
-    def _extract_is_pure_and_config(fn_var):
-        config = None
-        if hasattr(fn_var, "get_function"):
-            try:
-                fn = fn_var.get_function()
-                config = getattr(fn, "__marked_compile_region_config__", None)
-            except Exception:
-                log.warning(
-                    "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
-                    exc_info=True,
-                )
-                raise
-        is_pure = isinstance(config, NestedCompileRegionOptions) and config.is_pure
-        return is_pure, config
+    def _flatten_args_and_kwargs(fn_args_vt, kwargs):
+        """Flatten fn_args_vt and kwargs into proxyable leaf VTs and arg sources.
 
-    @staticmethod
-    def _flatten_arg_vts(fn_args_vt, kwargs):
-        """Flatten fn_args_vt and kwargs into proxyable leaf VTs and all sourced VTs.
+        Walks through all positional and keyword arguments using
+        VariableTracker.visit to collect leaf tensors/symnodes for proxy
+        matching, and sources for building the replacement dict on cache hit.
 
-        Returns (flat_proxyable, all_sourced):
-          - flat_proxyable: leaf tensor/symnode VTs for proxy matching
-          - all_sourced: all VTs with a source attribute, for building the
-            source replacement dict (includes non-tensor VTs like modules)
+        Returns (proxy_node_to_idx, arg_sources):
+          - proxy_node_to_idx: dict mapping fx.Node → index for O(1) lookup.
+            Deduplicates nodes (only first occurrence is kept).
+          - arg_sources: list of Source objects from all VTs with a source
+            (includes non-tensor VTs like modules)
+
+        TODO: support pytree registered objects — VariableTracker.visit may
+        not be sufficient for those.
         """
-        flat_proxyable: list[VariableTracker] = []
-        all_sourced: list[VariableTracker] = []
+        # Maps fx.Node → index for O(1) freevar matching and natural dedup.
+        proxy_node_to_idx: dict[torch.fx.Node, int] = {}
+        arg_sources: list[Source] = []
 
         def _collect(vt: VariableTracker) -> None:
             if vt.is_tensor() or isinstance(vt, SymNodeVariable):
-                flat_proxyable.append(vt)
-            if getattr(vt, "source", None) is not None:
-                all_sourced.append(vt)
+                node = vt.as_proxy().node
+                if node not in proxy_node_to_idx:
+                    proxy_node_to_idx[node] = len(proxy_node_to_idx)
+            source = getattr(vt, "source", None)
+            if source is not None:
+                arg_sources.append(source)
 
         all_vts: list[VariableTracker] = list(fn_args_vt) + list(kwargs.values())
         VariableTracker.visit(_collect, all_vts)
-        return flat_proxyable, all_sourced
+        return proxy_node_to_idx, arg_sources
 
     @staticmethod
     def _get_fn_id(fn_var):
@@ -5228,6 +5223,36 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         elif isinstance(fn_var, UnspecializedNNModuleVariable):
             return id(fn_var.value.forward.__func__)  # type: ignore[attr-defined]
         return None
+
+    @staticmethod
+    def _build_freevar_mapping(p_args, proxy_node_to_idx):
+        """Map each lifted freevar in p_args to a user arg index or a Source.
+
+        For each lifted arg in p_args[2:] (skipping body_node and body_name),
+        if its fx.Node matches a node in proxy_node_to_idx, it came from a
+        user argument. Otherwise it's a captured variable (e.g. module weight)
+        and we store its Source so we can re-derive the correct proxy on
+        cache hit.
+
+        Returns list of (idx, data) tuples:
+          - idx >= 0, data=None: came from flat user arg at that index
+          - idx == -1, data=Source: captured variable
+        """
+        freevar_mapping: list[tuple[int, Any]] = []
+        for outer_proxy in p_args[2:]:
+            matched_idx = proxy_node_to_idx.get(outer_proxy.node, -1)
+            if matched_idx >= 0:
+                freevar_mapping.append((matched_idx, None))
+            else:
+                grapharg = outer_proxy.node.meta.get("grapharg", None)
+                source = grapharg.source if grapharg is not None else None
+                assert source is not None, (
+                    f"is_pure freevar has no source: node.op={outer_proxy.node.op} "
+                    f"node.name={outer_proxy.node.name} — this likely means a "
+                    f"function argument was not included in the proxy matching"
+                )
+                freevar_mapping.append((-1, source))
+        return freevar_mapping
 
     def _get_pure_cache(self, tx, fn_var):
         from torch._guards import InvokeSubgraphCache
@@ -5245,7 +5270,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         return invoke_subgraph_cache.get_pure_cache_entry(fn_id)
 
     def _save_pure_cache(
-        self, tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r
+        self, tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r, example_value
     ):
         from torch._guards import InvokeSubgraphCache, PureSubgraphCacheEntry
 
@@ -5261,42 +5286,29 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         if fn_id is None:
             return
 
-        # Flatten fn_args_vt and kwargs into leaf proxyable VTs (for proxy
-        # matching) and all sourced VTs (for source replacement on cache hit).
-        flat_proxyable, all_sourced = self._flatten_arg_vts(fn_args_vt, kwargs)
-
-        # Build freevar_mapping: for each lifted arg in p_args[2:] (skipping
-        # body_node and body_name), determine if it came from a flattened user
-        # arg or is a captured variable.
-        #
-        # For captured variables (e.g. module weights), we store the Source
-        # object from the outer graph node so we can re-derive the correct
-        # proxy on cache hit (different module instances have different
-        # weight proxies but the same source structure).
-        freevar_mapping: list[tuple[int, Any]] = []
-        for outer_proxy in p_args[2:]:
-            matched_idx = -1
-            for i, arg_vt in enumerate(flat_proxyable):
-                if arg_vt.as_proxy().node is outer_proxy.node:
-                    matched_idx = i
-                    break
-            if matched_idx >= 0:
-                freevar_mapping.append((matched_idx, None))
-            else:
-                grapharg = outer_proxy.node.meta.get("grapharg", None)
-                source = grapharg.source if grapharg is not None else None
-                assert source is not None, (
-                    f"is_pure freevar has no source: node.op={outer_proxy.node.op} "
-                    f"node.name={outer_proxy.node.name} — this likely means a "
-                    f"function argument was not included in the proxy matching"
-                )
-                freevar_mapping.append((-1, source))
+        proxy_node_to_idx, arg_sources = self._flatten_args_and_kwargs(
+            fn_args_vt, kwargs
+        )
+        freevar_mapping = self._build_freevar_mapping(p_args, proxy_node_to_idx)
 
         single_tensor_output = isinstance(body_r, TensorVariable)
 
-        # Record sources of all sourced VTs (including non-tensor ones like
-        # modules) so we can build a replacement dict on cache hit.
-        arg_sources = [getattr(vt, "source", None) for vt in all_sourced]
+        # Validate output types: single tensor, or tuple/list of tensors.
+        if single_tensor_output:
+            assert isinstance(body_r, TensorVariable)
+        else:
+            assert isinstance(body_r, (TupleVariable, ListVariable)), (
+                f"is_pure: expected single tensor or tuple/list output, got {type(body_r)}"
+            )
+            for item in body_r.items:
+                assert isinstance(item, TensorVariable), (
+                    f"is_pure: sequence output contains non-tensor: {type(item)}"
+                )
+
+        # Cache output metadata (list of FakeTensors) so we avoid re-running
+        # body_gmod on cache hit. example_value is always a tuple from auto
+        # output flattening.
+        output_metadata = list(example_value)
 
         entry = PureSubgraphCacheEntry(
             body_name=body_name,
@@ -5304,6 +5316,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             config=config,
             freevar_mapping=freevar_mapping,
             single_tensor_output=single_tensor_output,
+            output_metadata=output_metadata,
             arg_sources=arg_sources,
         )
         invoke_subgraph_cache.add_pure_cache_entry(fn_id, entry)
@@ -5311,28 +5324,33 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     def _stamp_out_cached_subgraph(self, tx, fn_args_vt, kwargs, cached):
         from .builder import VariableBuilder
 
-        flat_proxyable, all_sourced = self._flatten_arg_vts(fn_args_vt, kwargs)
+        proxy_node_to_idx, new_arg_sources = self._flatten_args_and_kwargs(
+            fn_args_vt, kwargs
+        )
+        # Invert proxy_node_to_idx for index-based lookup on cache hit.
+        idx_to_node: dict[int, torch.fx.Node] = {
+            v: k for k, v in proxy_node_to_idx.items()
+        }
 
         # Build a replacement dict: old arg source → new arg source.
-        # This lets us rewrite captured variable sources (which are rooted
-        # at one of the arg sources) for the current invocation.
+        # Captured variable sources (e.g. L['self'].linear.weight) form a
+        # Source tree rooted at one of the top-level arg sources (e.g.
+        # L['self']). When the same function is called with a different module
+        # instance, the root source changes (e.g. L['self'] on call 1 vs
+        # L['self'].layers[1] on call 2). We map old roots to new roots so
+        # Source.clone() can rewrite the entire tree.
         # pyrefly: ignore[implicit-any]
         source_replacement = {}
-        if cached.arg_sources:
-            for old_source, new_vt in zip(cached.arg_sources, all_sourced):
-                new_source = getattr(new_vt, "source", None)
-                if (
-                    old_source is not None
-                    and new_source is not None
-                    and old_source != new_source
-                ):
-                    source_replacement[old_source] = new_source
+        for old_source, new_source in zip(cached.arg_sources, new_arg_sources):
+            if old_source != new_source:
+                source_replacement[old_source] = new_source
 
         # Rebuild proxy args from the cached freevar mapping
         new_lifted_args = []
         for user_arg_idx, data in cached.freevar_mapping:
             if user_arg_idx >= 0:
-                new_lifted_args.append(flat_proxyable[user_arg_idx].as_proxy())
+                node = idx_to_node[user_arg_idx]
+                new_lifted_args.append(Proxy(node))
             else:
                 # Captured variable: rewrite the source to point to the
                 # current invocation's args, then use VariableBuilder to
@@ -5342,22 +5360,13 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 if source_replacement:
                     new_source = source.clone(lambda s: source_replacement.get(s, s))
 
-                root_tx = tx.output.root_tx
-                value = new_source.get_value(
-                    {"G": root_tx.f_globals, "L": root_tx.f_locals},
-                    {},
-                    weakref.WeakKeyDictionary(),
-                )
+                value = tx.output.resolve_source_value(new_source)
                 vt = VariableBuilder(tx, new_source)(value)
                 new_lifted_args.append(vt.as_proxy())
 
-        # Compute example_value by running the cached body_gmod on fake inputs
-        # TODO - This might be expensive to run everytime - lets cache the metadata
-        # Missing - symints
-        fake_inputs = []
-        for arg in new_lifted_args:
-            fake_inputs.append(arg.node.meta["example_value"])
-        example_value = cached.body_gmod(*fake_inputs)
+        # The invoke_subgraph HOP always returns a flat tuple of tensors
+        # (via auto output flattening), so example_value must be a tuple.
+        example_value = tuple(cached.output_metadata)
 
         body_node = make_attr(tx, cached.body_name)
         p_args = (body_node, cached.body_name, *new_lifted_args)
@@ -5383,7 +5392,21 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         fn_var = args[0]
         fn_args_vt = args[1:]
 
-        is_pure, config = self._extract_is_pure_and_config(fn_var)
+        # Extract config and is_pure from the marked function.
+        config = None
+        is_pure = False
+        if hasattr(fn_var, "get_function"):
+            try:
+                fn = fn_var.get_function()
+                config = getattr(fn, "__marked_compile_region_config__", None)
+                is_pure = getattr(fn, "__marked_compile_region_is_pure__", False)
+            except Exception:
+                log.warning(
+                    "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
+                    exc_info=True,
+                )
+                raise
+
         if is_pure:
             cached = self._get_pure_cache(tx, fn_var)
             if cached is not None:
@@ -5412,7 +5435,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             )
 
         # Store config in the body graph module meta
-        if config is not None:
+        if isinstance(config, NestedCompileRegionOptions):
             body_gmod.meta["nested_region_config"] = config
 
         p_args = (
@@ -5423,7 +5446,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         if is_pure:
             self._save_pure_cache(
-                tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r
+                tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r, example_value
             )
 
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]

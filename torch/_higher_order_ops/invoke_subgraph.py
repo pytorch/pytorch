@@ -76,10 +76,6 @@ class NestedCompileRegionOptions:
     # Otherwise, the nested region will use this decompositions.
     decompositions: Optional[dict[str, Any]] = None
 
-    # When True, the user asserts that repeated calls to the same function
-    # always produce the same subgraph. Dynamo can skip tracing on the 2nd+
-    # call and directly reuse the previously cached subgraph.
-    is_pure: bool = False
 
 
 def _extract_nested_region_config(fn):
@@ -291,18 +287,6 @@ def mark_compile_region(
             subgraph, allowing Dynamo to skip tracing on subsequent calls.
     """
 
-    if is_pure:
-        if options is None:
-            options = NestedCompileRegionOptions(is_pure=True)
-        else:
-            options = NestedCompileRegionOptions(
-                fw_compiler=options.fw_compiler,
-                bw_compiler=options.bw_compiler,
-                partitioner=options.partitioner,
-                decompositions=options.decompositions,
-                is_pure=True,
-            )
-
     def wrap(func):
         def inner(*args, **kwargs):
             # Get the innermost function to avoid nested compile regions
@@ -313,6 +297,7 @@ def mark_compile_region(
 
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
         func.__marked_compile_region_config__ = options  # type: ignore[attr-defined]
+        func.__marked_compile_region_is_pure__ = is_pure  # type: ignore[attr-defined]
 
         return inner
 

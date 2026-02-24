@@ -743,14 +743,18 @@ class PureSubgraphCacheEntry:
     body_gmod: Any  # GraphModule
     config: Any  # NestedCompileRegionOptions | None
     # Per lifted freevar (in subgraph input order):
-    #   idx >= 0 → came from flat_proxyable[idx]; data is None
+    #   idx >= 0 → came from flat_arg_sources[idx]; data is None
     #   idx == -1 → captured variable; data is the Source object
     freevar_mapping: list[tuple[int, Any]]
     single_tensor_output: bool
-    # Sources of all fn_args_vt from the first trace. On cache hit, we build
-    # a replacement dict mapping old arg sources → new arg sources so that
-    # captured variable sources can be rewritten for the current invocation.
-    arg_sources: list[Any] | None = None  # list[Source | None]
+    # Fake tensor metadata for each output, cached from the first trace
+    # so we don't need to re-run body_gmod on cache hit.
+    output_metadata: list[Any]  # list[FakeTensor]
+    # Sources of all flattened args/kwargs (positional + keyword) from the
+    # first trace. On cache hit, we build a replacement dict mapping old arg
+    # sources → new arg sources so that captured variable sources can be
+    # rewritten for the current invocation.
+    arg_sources: list[Any]  # list[Source]
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
