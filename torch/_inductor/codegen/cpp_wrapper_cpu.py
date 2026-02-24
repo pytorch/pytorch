@@ -19,6 +19,7 @@ import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
@@ -1491,8 +1492,68 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
+    def _extract_divisors_from_expr(
+        self, expr: sympy.Expr
+    ) -> list[tuple[sympy.Expr, str]]:
+        """
+        Walk the sympy expression and extract all divisors/modulos from
+        FloorDiv, CleanDiv, Mod, and ModularIndexing nodes.
+
+        Returns a list of (divisor_expr, operation_name) tuples for divisors
+        that are not constant positive integers (which cannot be zero).
+        """
+        divisors: list[tuple[sympy.Expr, str]] = []
+        seen: OrderedSet[str] = OrderedSet()
+
+        def is_constant_nonzero(e: sympy.Expr) -> bool:
+            """Check if expression is a constant that cannot be zero."""
+            if isinstance(e, sympy.Integer):
+                return int(e) != 0
+            if isinstance(e, sympy.Number):
+                return float(e) != 0
+            return False
+
+        def maybe_add_divisor(divisor: sympy.Expr, op_name: str) -> None:
+            """Add divisor to list if it could potentially be zero."""
+            if not is_constant_nonzero(divisor):
+                key = str(divisor)
+                if key not in seen:
+                    seen.add(key)
+                    divisors.append((divisor, op_name))
+
+        def walk(e: sympy.Expr) -> None:
+            if isinstance(e, (FloorDiv, CleanDiv)):
+                _, div = e.args
+                maybe_add_divisor(div, "floor division")
+            elif isinstance(e, Mod):
+                _, mod = e.args
+                maybe_add_divisor(mod, "modulo")
+            elif isinstance(e, ModularIndexing):
+                _, div, mod = e.args
+                maybe_add_divisor(div, "modular indexing division")
+                maybe_add_divisor(mod, "modular indexing modulo")
+
+            # Recurse into arguments
+            if hasattr(e, "args"):
+                for arg in e.args:
+                    if isinstance(arg, sympy.Expr):
+                        walk(arg)
+
+        walk(expr)
+        return divisors
+
     def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
-        return cexpr(V.graph.sizevars.simplify(x) if simplify else x)
+        maybe_simplified_x = V.graph.sizevars.simplify(x) if simplify else x
+        # In AOT mode, emit runtime checks for potential division/modulo by zero
+        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
+        if V.graph.aot_mode:
+            divisors = self._extract_divisors_from_expr(maybe_simplified_x)
+            for divisor, op_name in divisors:
+                divisor_str = cexpr(divisor)
+                self.writeline(
+                    f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
+                )
+        return cexpr(maybe_simplified_x)
 
     def codegen_sizevar(self, x: sympy.Expr) -> str:
         return self.codegen_cpp_sizevar(x)
