@@ -157,11 +157,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
         with V.set_graph_handler(bm_graph_lowering):
-            # Don't bother autotuning on Triton here
+            # Disable nested autotuning to prevent recursion,
+            # but allow Triton backend for accurate benchmarking of Triton vs ATen
             with config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
+                # Removed: max_autotune_gemm_backends="ATEN"
             ):
                 bm_graph_lowering.run(*self.example_inputs)
                 return bm_graph_lowering.compile_to_module()
@@ -342,10 +343,25 @@ class SubgraphTemplate(KernelTemplate):
 
                 decomposition_table = select_decomp_table()
 
-                return make_fx(
-                    functools.partial(decomp, **decomp_kwargs),
-                    decomposition_table=decomposition_table,
-                )(*args)
+                # Temporarily allow non-fake inputs in the active FakeTensorMode.
+                # CompositeImplicitAutograd kernels (e.g. _scaled_dot_product_attention_math)
+                # may create intermediate real tensors (like scalar_tensor(-inf) for causal
+                # masks) during decomposition. Since make_fx detects and reuses the existing
+                # FakeTensorMode from args, we must patch it directly.
+                fake_mode = torch._dynamo.utils.detect_fake_mode(args)
+                old_allow = None
+                if fake_mode is not None:
+                    old_allow = fake_mode.allow_non_fake_inputs
+                    fake_mode.allow_non_fake_inputs = True
+                try:
+                    return make_fx(
+                        functools.partial(decomp, **decomp_kwargs),
+                        decomposition_table=decomposition_table,
+                        _allow_non_fake_inputs=True,
+                    )(*args)
+                finally:
+                    if fake_mode is not None and old_allow is not None:
+                        fake_mode.allow_non_fake_inputs = old_allow
 
             # Generate descriptive name for this variant
             variant_name = self._generate_variant_name(decomp, decomp_kwargs)
@@ -435,9 +451,13 @@ class SubgraphTemplate(KernelTemplate):
                     fake_tensor = input_gen_fns[i](inp)
                 else:
                     raw_shape = inp.get_size()
-                    concrete_shape = V.graph.sizevars.optimization_hints(raw_shape)
+                    concrete_shape = V.graph.sizevars.size_hints(
+                        raw_shape, fallback=config.unbacked_symint_fallback
+                    )
                     raw_stride = inp.get_stride()
-                    concrete_stride = V.graph.sizevars.optimization_hints(raw_stride)
+                    concrete_stride = V.graph.sizevars.size_hints(
+                        raw_stride, fallback=config.unbacked_symint_fallback
+                    )
                     fake_tensor = torch.empty_strided(
                         concrete_shape,
                         concrete_stride,
