@@ -2209,6 +2209,12 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard)
         # Deepcopying SymInts result in an error from copying FakeTensors.
         # Instead we just always assume the metadata is the same.
+        class _AnyCompare:
+            def __eq__(self, other: Any) -> bool:
+                return True
+            def __ne__(self, other: Any) -> bool:
+                return False
+
         metadata = value.__tensor_flatten__()[1]
         original_metadata = deepcopy(
             pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
