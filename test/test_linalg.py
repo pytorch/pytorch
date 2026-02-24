@@ -3771,11 +3771,14 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
     def test_tensorinv(self, device, dtype):
+        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
 
         def run_test(a_shape, ind):
-            a = torch.randn(a_shape, dtype=dtype, device=device)
+            n = 1
+            for s in a_shape[:ind]:
+                n *= s
+            a = make_fullrank(n, n, dtype=dtype, device=device).reshape(a_shape)
             a_numpy = a.cpu().numpy()
             result = torch.linalg.tensorinv(a, ind=ind)
             expected = np.linalg.tensorinv(a_numpy, ind=ind)
@@ -3788,7 +3791,15 @@ class TestLinalg(TestCase):
             self.assertEqual(ans, result)
 
         # compare to NumPy output
-        run_test((12, 3, 4), ind=1)
+        if not torch.version.hip:
+            # https://github.com/pytorch/pytorch/issues/174913
+            # Skip one config due to regression on ROCm 7.2 for hipSolver.
+            # Rather than skip entire unit test using @skipIfRocm
+            # This happened on MI355, MI300, and MI200.
+            # Mismatched elements: 1 / 144 (0.7%)
+            # Greatest absolute difference: 0.00130462646484375 at index (1, 3, 6) (up to 0.001 allowed)
+            # Greatest relative difference: 1.5133813576539978e-05 at index (1, 3, 6) (up to 1.3e-06 allowed)
+            run_test((12, 3, 4), ind=1)
         run_test((3, 8, 24), ind=2)
         run_test((18, 3, 3, 2), ind=1)
         run_test((1, 4, 2, 2), ind=2)

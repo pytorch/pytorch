@@ -5542,6 +5542,50 @@ class GraphModule(torch.nn.Module):
 
         _ = f(query, key, value)
 
+    @supported_platform
+    @skip_on_cpu
+    def test_flex_attention_always_freezes_layout(self, device):
+        """Test that flex attention always freezes FlexibleLayout inputs.
+
+        When always_freeze_layout=True on flex attention templates,
+        get_stride_and_maybe_freeze_layout should freeze FlexibleLayout
+        immediately rather than using layout constraints.
+        """
+        from torch._inductor import ir
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        B, H, S, D = 2, 4, 128, 64
+        dtype = torch.float16
+
+        query = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        key = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        value = torch.randn(B, H, S, D, device=device, dtype=dtype)
+
+        flexible_layout_called = False
+        orig_stride_call = TritonTemplateKernel.get_stride_and_maybe_freeze_layout
+
+        def tracking_get_stride(self, node):
+            nonlocal flexible_layout_called
+            flexible_layout = isinstance(node.data.layout, ir.FlexibleLayout)
+            result = orig_stride_call(self, node)
+            if flexible_layout:
+                flexible_layout_called = True
+                assert isinstance(node.data.layout, ir.FixedLayout)
+            return result
+
+        with patch.object(
+            TritonTemplateKernel,
+            "get_stride_and_maybe_freeze_layout",
+            tracking_get_stride,
+        ):
+            compiled_flex = torch.compile(flex_attention, fullgraph=True)
+            compiled_flex(query, key, value)
+
+        self.assertTrue(
+            flexible_layout_called,
+            "get_stride_and_maybe_freeze_layout should be called with FlexibleLayout nodes",
+        )
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
