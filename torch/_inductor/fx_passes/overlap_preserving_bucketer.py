@@ -164,7 +164,7 @@ class OverlapPreservingBucketer:
         self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
 
         # Build timelines and add constraints to aug_graph
-        self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
+        self.pg_to_timeline_head: dict[str, PGEvent | None] = self.build_timelines()
         self._add_hiding_interval_constraints()
 
     def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
@@ -191,20 +191,20 @@ class OverlapPreservingBucketer:
 
         return node_ancestors
 
-    def build_timelines(self) -> dict[str, Optional[PGEvent]]:
+    def build_timelines(self) -> dict[str, PGEvent | None]:
         "Construct each process groups ordered series of event"
         all_pgs: OrderedSet[str] = OrderedSet()
         for start in self.collective_info:
             pg = get_group_name(start)
             all_pgs.add(pg)
 
-        pg_timeline: dict[str, Optional[PGEvent]] = {}
+        pg_timeline: dict[str, PGEvent | None] = {}
         for pg in all_pgs:
             pg_timeline[pg] = self.build_timeline(pg)
 
         return pg_timeline
 
-    def build_timeline(self, pg: str) -> Optional[PGEvent]:
+    def build_timeline(self, pg: str) -> PGEvent | None:
         """
         Build a timeline of important events (starts, waits, hiding compute) for this process group
         and constrain this ordering in the augmented graph.
@@ -568,7 +568,7 @@ class OverlapPreservingBucketer:
 
     def _get_intervals(
         self, event: PGEvent
-    ) -> tuple[Optional[tuple[int, int]], list[tuple[int, int]]]:
+    ) -> tuple[tuple[int, int] | None, list[tuple[int, int]]]:
         """Get (execution_interval, hiding_intervals) for a collective event.
 
         Returns:
@@ -725,9 +725,7 @@ class OverlapPreservingBucketer:
 
         return True
 
-    def remove_from_event(
-        self, node: fx.Node
-    ) -> tuple[Optional[PGEvent], Optional[PGEvent]]:
+    def remove_from_event(self, node: fx.Node) -> tuple[PGEvent | None, PGEvent | None]:
         """Remove node from timeline and return (prev_event, next_event)."""
         event = self.node_to_event[node]
         assert not event.is_compute, "Cannot remove compute events from timeline"
@@ -749,8 +747,8 @@ class OverlapPreservingBucketer:
     def restore_to_event(
         self,
         node: fx.Node,
-        prev_event: Optional[PGEvent],
-        next_event: Optional[PGEvent],
+        prev_event: PGEvent | None,
+        next_event: PGEvent | None,
     ) -> None:
         """Restore node to timeline after failed merge attempt."""
         event = self.node_to_event[node]

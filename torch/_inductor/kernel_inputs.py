@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._inductor.config
@@ -27,8 +27,8 @@ class KernelInputs(ABC):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[dict[str, Union[float, int]]] = None,
-        out_dtype: Optional[torch.dtype] = None,
+        scalars: dict[str, float | int] | None = None,
+        out_dtype: torch.dtype | None = None,
     ):
         """
         Initialize with a tuple of input nodes.
@@ -38,12 +38,12 @@ class KernelInputs(ABC):
             out_dtype: Optional output dtype to store
         """
         self._input_nodes = input_nodes
-        self._device_name: Optional[str] = None
+        self._device_name: str | None = None
         self._scalars = scalars if scalars is not None else {}
         self._out_dtype = out_dtype
         assert len(input_nodes) > 0, "Expected at least one input node"
 
-    def nodes(self, reorder: Optional[Sequence[int]] = None) -> list[Any]:
+    def nodes(self, reorder: Sequence[int] | None = None) -> list[Any]:
         """
         Return the stored input nodes, optionally reordered.
 
@@ -72,7 +72,7 @@ class KernelInputs(ABC):
         return len(self._input_nodes)
 
     @property
-    def device_type(self) -> Optional[str]:
+    def device_type(self) -> str | None:
         """
         Get the device type of the first node.
 
@@ -91,7 +91,7 @@ class KernelInputs(ABC):
         """
         return self._input_nodes[0].get_device()
 
-    def device_name(self) -> Optional[str]:
+    def device_name(self) -> str | None:
         """
         Get the device name information.
 
@@ -177,7 +177,7 @@ class KernelInputs(ABC):
             The output dtype
         """
 
-    def get_scalar(self, name: str) -> Union[float, int]:
+    def get_scalar(self, name: str) -> float | int:
         """
         Get the scalar value for a given name.
 
@@ -210,8 +210,8 @@ class MMKernelInputs(KernelInputs):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[dict[str, Union[float, int]]] = None,
-        out_dtype: Optional[torch.dtype] = None,
+        scalars: dict[str, float | int] | None = None,
+        out_dtype: torch.dtype | None = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
     ):

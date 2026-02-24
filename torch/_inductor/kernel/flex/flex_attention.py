@@ -8,7 +8,7 @@ import math
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
@@ -565,7 +565,7 @@ class JointOutputResult:
 
     grad_input: ComputedBuffer
     captured_grads_compute: list[ComputedBuffer]
-    captured_grads: list[Optional[TensorBox]]
+    captured_grads: list[TensorBox | None]
     mutated_grads: list[TensorBox]
 
 
@@ -1056,7 +1056,7 @@ def get_bwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults,
     mask_graph_buffer: SubgraphResults,
     joint_outputs: JointOutputResult,
-) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
+) -> list[ComputedBuffer | TensorBox | None]:
     subgraph_buffer = (
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
