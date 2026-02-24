@@ -7640,6 +7640,32 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         finally:
             torch._C._dynamo.eval_frame._set_lru_cache(True)
 
+    def test_patch_forward_inside_compiled_region_eager_backend(self):
+        """Test patching nn.Module.forward inside a compiled region."""
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x - 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(mod, x, y):
+            # Patch instance forward inside compiled region
+            def patch(z):
+                return z + y
+
+            mod.forward = patch
+            return mod(x)
+
+        x = torch.ones(3)
+        y = torch.ones(3)
+        mod = SimpleModule()
+
+        out = fn(mod, x, y)
+        # Compiled path should respect the patched forward
+        self.assertTrue(torch.allclose(out, x + y))
+        # And the mutation should persist for eager
+        self.assertTrue(torch.allclose(mod(x), x + y))
+
     def test_patch_track_step_called_skipped(self):
         # Regression test for patch_track_step_called being ignored by dynamo
         # We need to clear FORCE_SKIP_FILES to test that the function name check
