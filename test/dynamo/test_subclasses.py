@@ -1867,6 +1867,37 @@ s50 > 3""",
             lambda: torch.compile(lambda x: x * x)(x),
         )
 
+    def test_tensor_subclass_metadata_with_symint(self):
+        # TENSOR_SUBCLASS_METADATA_MATCH replaces SymInts in metadata with
+        # _AnyCompare sentinels so that (a) deepcopy doesn't pull in the
+        # ShapeEnv, (b) dynamic dims aren't over-guarded, and (c) unbacked
+        # SymInts don't cause errors.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        sym_ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC],
+        )
+        fake_t = fake_mode.from_tensor(torch.randn(8), symbolic_context=sym_ctx)
+        sym_int = fake_t.shape[0]  # SymInt with hint 8
+
+        # Construct a real tensor whose metadata contains a SymInt.
+        x1 = CtxSubclassTensor(torch.randn(8, 8), sym_int)
+
+        @torch.compile(backend="eager", dynamic=True, fullgraph=True)
+        def f(x):
+            return x * x
+
+        f(x1)
+
+        # Without the fix, the guard stores the SymInt's hint value (8)
+        # and recompiles when it sees a different constant. With the fix,
+        # the SymInt position is replaced by _AnyCompare so the guard
+        # passes for any constant value.
+        x2 = CtxSubclassTensor(torch.randn(8, 8), 3)
+        _check_recompiles(self, f, (x1,), (x2,), False)
+
     def test_subclass_constructor_proxying(self):
         import dataclasses
         from collections import namedtuple
