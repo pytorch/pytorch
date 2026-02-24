@@ -420,8 +420,8 @@ struct ExpandableSegment {
       return map(range);
     }
 
-    while (end > handles_.size()) {
-      handles_.emplace_back(std::nullopt);
+    if (end > handles_.size()) {
+      handles_.resize(end);
     }
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
@@ -729,9 +729,11 @@ struct ExpandableSegment {
     trimHandles();
   }
   void trimHandles() {
-    while (!handles_.empty() && !handles_.back()) {
-      handles_.pop_back();
-    }
+    auto it = std::find_if(
+        handles_.rbegin(),
+        handles_.rend(),
+        [](const std::optional<Handle>& opt) { return opt.has_value(); });
+    handles_.erase(it.base(), handles_.end());
   }
   void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
     size_t start = 0;

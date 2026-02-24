@@ -153,7 +153,6 @@ class _RNGStateTracker:
     """
 
     def __init__(self, device: torch.device):
-        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
