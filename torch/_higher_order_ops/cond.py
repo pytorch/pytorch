@@ -167,9 +167,10 @@ def cond(
             (Note: in-place tensor operations such as `add_` for intermediate results
             are allowed in a branch)
 
-          - The function can perform in-place mutations on its input tensors.
-            However, outputs will always be new tensors that do not share object
-            identity with the original inputs.
+          - The function can perform in-place mutations on its input tensors during inference (i.e.,
+            when `torch.is_grad_enabled()` is False).
+            Note: When using `torch.compile()` with a non-constant predicate, the outputs will always
+            be new tensors that do not share object identity with the original inputs.
 
             Example::
 
@@ -177,8 +178,17 @@ def cond(
                     return x.sin_()
 
 
-                x = torch.randn(4)
-                result = cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+                def false_fn(x):
+                    return x + 1
+
+
+                def f(x):
+                    return cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+
+                x = torch.ones(4)
+                with torch.no_grad():
+                    result = torch.compile(f)(x)
                 assert result is not x  # result is a new tensor, not the original x
 
     """

@@ -468,8 +468,11 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
-        if not V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2)):
+        if not V.graph.sizevars.statically_known_equals(
+            s1, s2
+        ) and V.graph.sizevars.symbolic_hint(s1) != V.graph.sizevars.symbolic_hint(s2):
             return False
+
     return True
 
 
@@ -1316,13 +1319,8 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        # TODO Laith support unbacked!
-        reduction_numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            reduction_numel
-        )
-        numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            sympy_product(ranges)
-        )
+        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
+        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
@@ -1375,10 +1373,8 @@ class Reduction(Loops):
                         new_reduction_ranges,
                     ) = extract_input_node_reduction_ranges(input_node)
                 if new_ranges is not None and new_reduction_ranges is not None:
-                    extracted_numel_hint = (
-                        V.graph.sizevars.replace_backed_symbols_with_hints(
-                            sympy_product(new_ranges + new_reduction_ranges)
-                        )
+                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
+                        sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         log.debug(
@@ -9104,16 +9100,8 @@ class Conditional(ExternKernel):
         fx_operands: Argument = V.graph.current_node.args[-1]
 
         assert isinstance(fx_operands, Sequence), type(fx_operands)
-        # Build fake_operands from FX nodes' metadata
-        # For FX Nodes, get the fake tensor from meta["val"]
-        # For non-Nodes (e.g., symbolic integers from sym_size lowering), pass directly
-        fake_operands: list[Any] = []
-        for fx_op in fx_operands:
-            if isinstance(fx_op, Node):
-                fake_operands.append(fx_op.meta["val"])
-            else:
-                # Symbolic integer or constant - pass directly
-                fake_operands.append(fx_op)
+        assert all(isinstance(n, Node) for n in fx_operands)
+        fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
         fake_outputs = V.graph.current_node.meta["val"]
 
         def _require_exact_strides(
