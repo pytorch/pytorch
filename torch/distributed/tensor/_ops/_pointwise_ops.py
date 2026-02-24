@@ -78,10 +78,6 @@ pointwise_ops = [
     aten.acosh.out,
     aten.asin.default,
     aten.asin_.default,
-    aten.asinh.default,
-    aten.asinh_.default,
-    aten.atan.default,
-    aten.atan_.default,
     aten.add.Scalar,
     aten.add.out,
     aten.add_.Scalar,
@@ -147,9 +143,7 @@ pointwise_ops = [
     aten.clamp_.default,
     aten.clamp_.Tensor,
     aten.clamp_min.default,
-    aten.clamp_min.Tensor,
     aten.clamp_max.default,
-    aten.clamp_max.Tensor,
     aten.clip.default,
     aten.clip.out,
     aten.clip_.default,
@@ -181,20 +175,12 @@ pointwise_ops = [
     aten.eq.Scalar,
     aten.eq.Scalar_out,
     aten.erf.out,
-    aten.erfc.default,
     aten.erfc.out,
-    aten.erfc_.default,
     aten.erfinv.default,
     aten.erfinv_.default,
     aten.erfinv.out,
-    aten.exp.default,
-    aten.exp_.default,
     aten.exp.out,
-    aten.exp2.default,
-    aten.exp2_.default,
     aten.exp2.out,
-    aten.expm1.default,
-    aten.expm1_.default,
     aten.expm1.out,
     aten.float_power.Scalar,
     aten.float_power.Scalar_out,
@@ -221,12 +207,10 @@ pointwise_ops = [
     aten.ge.Scalar,
     aten.ge.Tensor,
     aten.gelu.default,
-    aten.gt.Tensor,
-    aten.gt.Tensor_out,
     aten.gt.Scalar,
     aten.gt.Scalar_out,
-    aten.gt.Scalar,
     aten.gt.Tensor,
+    aten.gt.Tensor_out,
     aten.heaviside.default,
     aten.heaviside.out,
     aten.hypot.default,
@@ -331,23 +315,15 @@ pointwise_ops = [
     aten.remainder.Tensor_out,
     aten.remainder_.Scalar,
     aten.remainder_.Tensor,
-    aten.round.decimals,
     aten.round.decimals_out,
-    aten.round.default,
     aten.round.out,
-    aten.round_.decimals,
-    aten.round_.default,
     aten.rsqrt.default,
     aten.rsqrt_.default,
     aten.rsqrt.out,
     aten.rsub.Scalar,
-    aten.sgn.default,
     aten.sgn.out,
-    aten.sgn_.default,
     aten.sigmoid.out,
-    aten.sign.default,
     aten.sign.out,
-    aten.sign_.default,
     aten.signbit.default,
     aten.signbit.out,
     aten.silu.default,
@@ -359,7 +335,6 @@ pointwise_ops = [
     aten.sinc.out,
     aten.sinc_.default,
     aten.sinh.out,
-    aten.special_erfcx.default,
     aten.special_erfcx.out,
     aten.sqrt.default,
     aten.sqrt_.default,
@@ -421,12 +396,14 @@ binary_additive_ops = [
     aten.sub_.Tensor,
 ]
 
-binary_multiplicative_ops = [
-    aten.div.Tensor,
-    aten.div_.Tensor,
-    aten.mul.Tensor,
-    aten.mul_.Tensor,
-]
+# Maps op -> whether R, P(x) -> P(x) is valid (linear in second arg).
+# True for mul (bilinear), False for div (only linear in numerator).
+binary_multiplicative_ops: dict[OpOverload, bool] = {
+    aten.div.Tensor: False,
+    aten.div_.Tensor: False,
+    aten.mul.Tensor: True,
+    aten.mul_.Tensor: True,
+}
 
 # Scalar multiplicative ops: unary linear rules
 scalar_multiplicative_ops = [
@@ -441,16 +418,34 @@ scalar_multiplicative_ops = [
 # Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
 # because P(max) offsets can push inputs outside the valid domain.
 monotone_increasing_unary_ops = [
+    aten.asinh.default,
+    aten.asinh_.default,
+    aten.atan.default,
+    aten.atan_.default,
     aten.ceil.default,
     aten.ceil_.default,
     aten.erf.default,
     aten.erf_.default,
+    aten.exp.default,
+    aten.exp_.default,
+    aten.exp2.default,
+    aten.exp2_.default,
+    aten.expm1.default,
+    aten.expm1_.default,
     aten.floor.default,
     aten.floor_.default,
     aten.relu.default,
     aten.relu_.default,
+    aten.round.decimals,
+    aten.round.default,
+    aten.round_.decimals,
+    aten.round_.default,
+    aten.sgn.default,
+    aten.sgn_.default,
     aten.sigmoid.default,
     aten.sigmoid_.default,
+    aten.sign.default,
+    aten.sign_.default,
     aten.sinh.default,
     aten.sinh_.default,
     aten.tanh.default,
@@ -461,7 +456,11 @@ monotone_increasing_unary_ops = [
 
 # Monotone decreasing unary ops: P(max)->P(min), P(min)->P(max)
 # Note: acos excluded due to domain constraints [-1,1] causing validation failures
-monotone_decreasing_unary_ops: list[OpOverload] = []
+monotone_decreasing_unary_ops: list[OpOverload] = [
+    aten.erfc.default,
+    aten.erfc_.default,
+    aten.special_erfcx.default,
+]
 
 # All-partial-preserving unary ops: P(x)->P(x) for all x
 # These ops preserve the exact value for each element, only transforming units/representation
@@ -476,6 +475,8 @@ all_partial_preserving_unary_ops = [
 
 # Monotone binary ops: maps op -> which partial to preserve (max, min, or None)
 monotone_binary_ops: dict[torch._ops.OpOverload, str | None] = {
+    aten.clamp_max.Tensor: "min",
+    aten.clamp_min.Tensor: "max",
     aten.fmax.default: "max",
     aten.fmin.default: "min",
     aten.logaddexp.default: None,
@@ -501,12 +502,13 @@ _UNARY_LINEAR_RULES: list[list[Placement]] = [
 _BINARY_ADDITIVE_RULES: list[list[Placement]] = [
     [Partial("sum"), Partial("sum"), Partial("sum")],
     [Partial("avg"), Partial("avg"), Partial("avg")],
-]
-
-_BINARY_MULTIPLICATIVE_RULES: list[list[Placement]] = [
-    [Partial("sum"), Partial("sum"), Replicate()],
-    [Partial("sum"), Replicate(), Partial("sum")],
+    # P(x), R -> P(x): adding/subtracting a replicated value preserves partial type
+    # (the replicated value is constant across ranks, so reduce order is unaffected)
     [Partial("avg"), Partial("avg"), Replicate()],
+    [Partial("max"), Partial("max"), Replicate()],
+    [Partial("min"), Partial("min"), Replicate()],
+    # R, P(avg) -> P(avg): avg is linear so this holds for any alpha
+    # (R, P(max/min) excluded: negative alpha would flip the ordering)
     [Partial("avg"), Replicate(), Partial("avg")],
 ]
 
@@ -804,14 +806,23 @@ for op in binary_additive_ops:
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(_make_partial_strategy(extra_rules=_BINARY_ADDITIVE_RULES))
 
-for op in binary_multiplicative_ops:
+# _UNARY_LINEAR_RULES handles the scalar promotion case: Python's __mul__/__truediv__
+# promote scalars to 0-dim tensors, so aten.mul.Scalar dispatches as aten.mul.Tensor
+# with n_tensors=1, matching the length-2 unary rules.
+for op, linear_in_second_arg in binary_multiplicative_ops.items():
+    rules: list[list[Placement]] = [
+        [Partial("sum"), Partial("sum"), Replicate()],
+        [Partial("avg"), Partial("avg"), Replicate()],
+    ]
+    if linear_in_second_arg:
+        # pyrefly: ignore[bad-assignment]
+        rules += [
+            [Partial("sum"), Replicate(), Partial("sum")],
+            [Partial("avg"), Replicate(), Partial("avg")],
+        ]
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _make_partial_strategy(
-            extra_rules=_UNARY_LINEAR_RULES + _BINARY_MULTIPLICATIVE_RULES
-        )
-    )
+    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES + rules))
 
 # Scalar multiplicative ops: unary linear rules
 # Scalar multiplicative ops: unary linear rules
