@@ -164,5 +164,25 @@ c10::FunctionSchema class_base::withNewArguments(
   return schema.cloneWithArguments(std::move(new_args));
 }
 
+c10::FunctionSchema class_base::withNewArgumentsStatic(
+    const c10::FunctionSchema& schema,
+    std::initializer_list<arg> default_args) {
+  const auto& old_args = schema.arguments();
+  std::vector<c10::Argument> new_args;
+  new_args.reserve(old_args.size());
+
+  size_t argIdx = 0;
+  for (const auto& default_arg : default_args) {
+    auto& old_arg = old_args[argIdx++];
+    new_args.emplace_back(
+        default_arg.name_,
+        old_arg.type(),
+        old_arg.real_type(),
+        old_arg.N(),
+        default_arg.value_);
+  }
+  return schema.cloneWithArguments(std::move(new_args));
+}
+
 } // namespace detail
 } // namespace torch

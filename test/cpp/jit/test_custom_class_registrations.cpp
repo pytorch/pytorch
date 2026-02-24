@@ -71,6 +71,12 @@ struct _StaticMethod : torch::CustomClassHolder {
   static int64_t staticMethod(int64_t input) {
     return 2 * input;
   }
+  static int64_t staticMethodWithDefault(int64_t input, std::optional<int64_t> scale) {
+      if (scale)
+          return (*scale) * input;
+      else
+          return 2 * input;
+  }
 };
 
 struct FooGetterSetter : torch::CustomClassHolder {
@@ -469,7 +475,12 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
 
   m.class_<_StaticMethod>("_StaticMethod")
       .def(torch::init<>())
-      .def_static("staticMethod", &_StaticMethod::staticMethod);
+      .def_static("staticMethod", &_StaticMethod::staticMethod)
+      .def_static(
+          "staticMethodWithDefault",
+          &_StaticMethod::staticMethodWithDefault,
+          "",
+          {torch::arg("input"), torch::arg("scale") = torch::arg::none()});
 
   m.class_<DefaultArgs>("_DefaultArgs")
       .def(torch::init<int64_t>(), "", {torch::arg("start") = 3})
