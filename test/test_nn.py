@@ -7700,6 +7700,24 @@ class TestConstantPadNd(TestCase):
         nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
+    def test_constant_pad_nd_int_value(self):
+        # pad_scalar (new C++ API) accepts int value for int64 tensor (Fixes #170536).
+        # F.pad will switch to this after FC window; see pad_scalar_symint.
+        x = torch.tensor([[1, 2], [3, 4]], dtype=torch.int64)
+        fill = torch.iinfo(torch.long).max
+        out = torch._C._nn.pad_scalar(x, (1, 1, 1, 1), "constant", fill)
+        self.assertEqual(out.dtype, torch.int64)
+        self.assertEqual(out[0, 0], fill)
+        self.assertEqual(out[0, 1], fill)
+        self.assertEqual(out[0, 3], fill)
+        self.assertEqual(out[2, 0], fill)
+        self.assertEqual(out[1, 0], fill)
+        self.assertEqual(out[1, 3], fill)
+        self.assertEqual(out[1, 1], 1)
+        self.assertEqual(out[1, 2], 2)
+        self.assertEqual(out[2, 1], 3)
+        self.assertEqual(out[2, 2], 4)
+
 
 class TestAddRelu(TestCase):
     def test_add_relu(self):
