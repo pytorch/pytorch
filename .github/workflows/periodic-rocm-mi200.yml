@@ -1,13 +1,13 @@
 name: periodic-rocm-mi200
 
 on:
-  schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  #schedule:
+    #- cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
   push:
     tags:
       - ciflow/periodic-rocm-mi200/*
-    branches:
-      - release/*
+    #branches:
+      #- release/*
   workflow_dispatch:
 
 concurrency:
@@ -55,9 +55,9 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.2", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
