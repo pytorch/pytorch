@@ -12,6 +12,8 @@ from torch.distributed._local_tensor import (
     LocalTensor,
     LocalTensorMode,
     maybe_disable_local_tensor_mode,
+    rank_map,
+    tensor_map,
 )
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -252,9 +254,25 @@ class TestLocalTensorWorld2(LocalTensorWorldTest):
         self.assertFalse(bool(sym_true & False))
         self.assertTrue(bool(sym_true | False))
 
+    def test_standalone_rank_map_and_tensor_map(self):
+        with LocalTensorMode(self.world_size):
+            lt = rank_map(lambda r: torch.full((2, 3), float(r)))
+            scaled = tensor_map(lt, lambda r, t: t * 2)
+        for r in range(self.world_size):
+            self.assertEqual(lt._local_tensors[r], torch.full((2, 3), float(r)))
+            self.assertEqual(scaled._local_tensors[r], torch.full((2, 3), float(r) * 2))
+
 
 class TestLocalTensorRankWorld2(LocalTensorRankTest):
     world_size = 2
+
+    def test_standalone_rank_map_and_tensor_map(self):
+        # Real-dist path: rank_map should call cb with dist.get_rank()
+        t = rank_map(lambda r: torch.full((2, 3), float(r)))
+        self.assertNotIsInstance(t, LocalTensor)
+        self.assertEqual(t, torch.full((2, 3), float(self.rank)))
+        t2 = tensor_map(t, lambda r, t: t + 1)
+        self.assertEqual(t2, torch.full((2, 3), float(self.rank) + 1))
 
     def test_flatten_unflatten(self):
         """Test that LocalTensor can be flattened and unflattened correctly."""

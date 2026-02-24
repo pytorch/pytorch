@@ -1773,22 +1773,11 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
-        # Notice that // in triton behaves as truncdiv instead of floordiv.
-        #
-        # We avoid feeding negative values into Triton's // operator because
-        # Triton's AxisInfo analysis incorrectly deduplicates signed division
-        # results for contiguous inputs (triton-lang/triton#XXXX). Instead we
-        # use bitwise complement (~) to make the dividend non-negative:
-        #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
-        # For negative b we negate both operands first.
-        zero = ops.constant(0, torch.int32)
-        b_neg = ops.lt(b, zero)
-        a = ops.where(b_neg, ops.sub(zero, a), a)
-        b = ops.where(b_neg, ops.sub(zero, b), b)
-        a_neg = ops.lt(a, zero)
-        a = ops.where(a_neg, ops.bitwise_not(a), a)
-        quot = ops.truncdiv(a, b)
-        return ops.where(a_neg, ops.bitwise_not(quot), quot)
+        # Similar to div_floor_kernel_cuda in pytorch core.
+        # Notice that // in triton behaves as truncdiv instead of floordiv
+        quot = f"{a} // {b}"
+        rem = f"{a} % {b}"
+        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
 
     @staticmethod
     def sign(x):
@@ -3924,7 +3913,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         original_dtype = dtype
         if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
-            pytree.tree_map_(maybe_upcast, value)
+            value = pytree.tree_map(maybe_upcast, value)
             src_dtype = torch.float32 if should_upcast(src_dtype) else src_dtype
             dtype = torch.float32 if should_upcast(dtype) else dtype
 
@@ -5031,15 +5020,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         # Subtract any advancements made in the previous loop level.
                         if level < len(loop_trees) - 1:
                             prev_tree = loop_trees[level + 1]
-                            prev_advancement = self.pointer_advancements[
+                            prev_advancements = self.pointer_advancements[
                                 prev_tree.symt
-                            ][block_ptr]
-                            prev_block = TritonSymbols.get_block_size(prev_tree)
-                            prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
-                            advancement = [
-                                cur - prev * prev_num_iter
-                                for cur, prev in zip(advancement, prev_advancement)
                             ]
+                            # block_ptr may not exist in the inner loop's advancements
+                            # if its advancement was identity (zero) and was skipped
+                            if block_ptr in prev_advancements:
+                                prev_advancement = prev_advancements[block_ptr]
+                                prev_block = TritonSymbols.get_block_size(prev_tree)
+                                prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
+                                advancement = [
+                                    cur - prev * prev_num_iter
+                                    for cur, prev in zip(advancement, prev_advancement)
+                                ]
 
                         self.body.writeline(
                             DeferredLine(
