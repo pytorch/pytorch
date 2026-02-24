@@ -3328,7 +3328,6 @@ THIRDPARTY_SKIPLIST = (
     "onnxruntime",
     "onnx_tf",
     "pandas",
-    "scipy",
     "sklearn",
     "tabulate",
     "tensorflow",
