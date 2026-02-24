@@ -473,13 +473,11 @@ def expand_to_full_mesh_op_strategy(
             )
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
-        if inplace_op and (
-            self_spec.placements != input_specs[0].placements
-            or (
-                spec_list[0] is not None
-                and spec_list[0].placements != self_spec.placements
-            )
-        ):
+        redistribute_input = self_spec.placements != input_specs[0].placements
+        mismatching_input_output = (
+            spec_list[0] is not None and spec_list[0].placements != self_spec.placements
+        )
+        if inplace_op and (redistribute_input or mismatching_input_output):
             # For inplace ops, both the proposed input[0] and the output must
             # match self's runtime placement: input[0] because self can't be
             # redistributed, output because the result IS self.
@@ -511,8 +509,10 @@ def expand_to_full_mesh_op_strategy(
             else:
                 raise RuntimeError("output spec is None")
 
-        # check all inputs are shardable (skip check if input already has
-        # the proposed placement, since data is already distributed that way)
+        # check all inputs are shardable. The placement equality short-circuit
+        # is required: is_tensor_shardable rejects shapes smaller than the mesh
+        # (e.g. dim=2 on 4 ranks), but if the input is already at that placement
+        # no redistribution occurs, so the check is irrelevant.
         if not all(
             inp.strategies[0].output_spec.placements == s.placements
             or is_tensor_shardable(

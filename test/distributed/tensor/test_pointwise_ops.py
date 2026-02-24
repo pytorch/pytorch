@@ -938,9 +938,9 @@ class TestPointwiseRuleValidation(TestCase):
         representative_ops = [
             ("mul", "binary_multiplicative (bilinear)"),
             ("div", "binary_multiplicative (numerator-only)"),
-            ("sigmoid", "monotone_increasing_unary"),
-            ("erfc", "monotone_decreasing_unary"),
-            ("maximum", "monotone_binary"),
+            ("sigmoid", "monotonic_increasing_unary"),
+            ("erfc", "monotonic_decreasing_unary"),
+            ("maximum", "monotonic_binary"),
             ("nan_to_num", "all_partial_preserving_unary"),
             ("neg", "linear + monotone_decreasing"),
         ]
