@@ -370,6 +370,10 @@ else
       fi
     fi
 
+    if [[ "$BUILD_ENVIRONMENT" == *clang* && "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+      sudo rm -f /opt/cache/bin/clang++
+    fi
+
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
     CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
     CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
