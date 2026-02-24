@@ -2752,6 +2752,12 @@ def _coalescing_manager(
         # - coalesced `all_gather_into_tensor`
         # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
+        if any(op.op is not op0 for op in op_list):
+            raise RuntimeError(
+                "Coalescing manager requires all collectives to be the same type, "
+                f"but got mixed types: {set(op.op.__name__ for op in op_list)}"  # noqa: C401
+            )
+
         if op0 is all_reduce:
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
@@ -2766,7 +2772,9 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             all_gather_opts = AllgatherOptions()
             all_gather_opts.asyncOp = async_ops
-            work = group.allgather_into_tensor_coalesced(outputs, inputs)
+            work = group.allgather_into_tensor_coalesced(
+                outputs, inputs, all_gather_opts
+            )
         elif op0 is reduce_scatter_tensor:
             inputs = []
             outputs = []
