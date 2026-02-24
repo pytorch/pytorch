@@ -90,6 +90,15 @@ NodeOrConstant = Constant | torch.fx.Node
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
 
+def _should_debug_node(node_name: str) -> bool:
+    debug_env = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG")
+    if not debug_env:
+        return False
+    if debug_env == "all":
+        return True
+    return node_name in debug_env.split(",")
+
+
 class SearchFn(Protocol):
     __name__: str
 
@@ -1589,7 +1598,7 @@ def register_replacement(
             assert node is not None
             specific_pattern_match = specific_pattern.match(node)
 
-            if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+            if _should_debug_node(node.name):
                 log.warning(
                     "Specific pattern match: %s%s %s %s",
                     node,
@@ -2080,7 +2089,7 @@ class PatternMatcherPass:
                         != 1
                     ):
                         continue
-                    if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+                    if _should_debug_node(node.name):
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
 
                     if is_match(m) and guard_or_false(entry.extra_check(m)):

@@ -2177,6 +2177,102 @@ class TestPatternMatcherLogging(LoggingTestCase):
             specific_record.getMessage(),
         )
 
+    @make_logging_test()
+    def test_pattern_match_debug_multiple_nodes(self, records):
+
+        def pattern_add(x, y):
+            return x + y
+
+        def replacement_add(x, y):
+            return x * y
+
+        def pattern_sub(x, y):
+            return x - y
+
+        def replacement_sub(x, y):
+            return x * y
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(
+            pattern_add, replacement_add, inputs, fwd_only, my_patterns
+        )
+        register_replacement(
+            pattern_sub, replacement_sub, inputs, fwd_only, my_patterns
+        )
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x, y):
+            return (x + y) + (x - y)
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        # Debug both "add" and "sub" nodes
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "add,sub"}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            result = compiled_fn(x, y)
+
+
+        self.assertTrue(self.hasRecord(records, "Specific pattern match: add"))
+        self.assertTrue(self.hasRecord(records, "Specific pattern match: sub"))
+
+    @make_logging_test()
+    def test_pattern_match_debug_all_nodes(self, records):
+
+        def pattern_add(x, y):
+            return x + y
+
+        def replacement_add(x, y):
+            return x * y
+
+        def pattern_sub(x, y):
+            return x - y
+
+        def replacement_sub(x, y):
+            return x * y
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(
+            pattern_add, replacement_add, inputs, fwd_only, my_patterns
+        )
+        register_replacement(
+            pattern_sub, replacement_sub, inputs, fwd_only, my_patterns
+        )
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x, y):
+            return (x + y) + (x - y)
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "all"}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            result = compiled_fn(x, y)
+
+        self.assertTrue(self.hasRecord(records, "Specific pattern match: add"))
+        self.assertTrue(self.hasRecord(records, "Specific pattern match: sub"))
+
     def test_gumbel_max_trick(self):
         counters.clear()
 
