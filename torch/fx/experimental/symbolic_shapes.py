@@ -6824,11 +6824,6 @@ class ShapeEnv:
     def guarding_hint_or_throw(self, expr: Union[sympy.Expr, int]) -> int:
         return _guarding_hint_or_throw_base(self, expr, {})
 
-    # lru_cache is fine here (no need for version-aware caching) because:
-    # whether an expr has free unbacked symbols is a property of the expr itself
-    # and doesn't change as ShapeEnv evolves. guarding_hint_or_throw either
-    # succeeds (all symbols are backed) or throws (unbacked symbols present),
-    # and that outcome is stable for a given expr.
     @lru_cache(256)
     def has_guarding_hint(self, expr: sympy.Expr) -> bool:
         try:
