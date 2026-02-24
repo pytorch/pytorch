@@ -762,3 +762,63 @@ def invoke_leaf_function_dense(
             _validate_outputs_match(fake_output, real_output)
 
     return real_output
+
+
+def _invoke_leaf_function_dtensor(
+    real_fn_spec, fake_fn_spec, input_spec, *flat_args, requires_grad_indices=()
+):
+    """DTensor dispatch for invoke_leaf_function.
+
+    Unwraps DTensors to local tensors and re-dispatches so that mode handlers
+    (ProxyTorchDispatchMode, FakeTensorMode) can capture the call as a graph
+    node.  The outputs are rewrapped as DTensors using the input specs, which
+    is correct for identity-like leaf functions (e.g. compile_safe_hooks).
+    """
+    from torch.distributed.tensor import DTensor
+
+    dtensor_specs = {}
+    local_flat_args = []
+    for i, arg in enumerate(flat_args):
+        if isinstance(arg, DTensor):
+            dtensor_specs[i] = arg._spec
+            local_flat_args.append(arg._local_tensor)
+        else:
+            local_flat_args.append(arg)
+
+    local_result = invoke_leaf_function(
+        real_fn_spec,
+        fake_fn_spec,
+        input_spec,
+        *local_flat_args,
+        requires_grad_indices=requires_grad_indices,
+    )
+
+    # Rewrap outputs as DTensors using the input specs (valid for identity fns).
+    def _rewrap(result: object) -> object:
+        if not isinstance(result, torch.Tensor) or isinstance(result, DTensor):
+            return result
+        for spec in dtensor_specs.values():
+            return DTensor(result, spec, requires_grad=result.requires_grad)
+        return result
+
+    if isinstance(local_result, (tuple, list)):
+        specs_iter = iter(dtensor_specs.values())
+        rewrapped = []
+        for r in local_result:
+            if isinstance(r, torch.Tensor) and not isinstance(r, DTensor):
+                spec = next(specs_iter, None)
+                if spec is not None:
+                    rewrapped.append(DTensor(r, spec, requires_grad=r.requires_grad))
+                else:
+                    rewrapped.append(r)
+            else:
+                rewrapped.append(r)
+        return type(local_result)(rewrapped)
+
+    return _rewrap(local_result)
+
+
+def _register_dtensor_dispatch() -> None:
+    from torch.distributed.tensor import DTensor
+
+    invoke_leaf_function.py_impl(DTensor)(_invoke_leaf_function_dtensor)
