@@ -12,7 +12,6 @@ import warnings
 from collections.abc import Callable
 from enum import Enum
 from typing import Any, Literal, NamedTuple, TypeAlias
-from typing_extensions import NotRequired, TypedDict
 
 import torch
 from torch import Tensor
@@ -21,6 +20,7 @@ from torch._higher_order_ops.utils import setup_compilation_env
 from torch._prims_common import DeviceLikeType
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import GetAttrKey, tree_map_only
+from typing_extensions import NotRequired, TypedDict
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -435,6 +435,36 @@ def _closure_contents(fn: object) -> tuple[object, ...]:
     return tuple(cell.cell_contents for cell in closure)
 
 
+def _closure_contents_equal(fn1: object, fn2: object) -> bool:
+    """Compare closure contents of two functions, handling tensor values.
+
+    During AOT autograd tracing, closure-captured tensors may be FakeTensors
+    (no actual data). In that case torch.equal raises DataDependentOutputException,
+    so we fall back to comparing tensor metadata (shape, dtype, device).
+    """
+    contents1 = _closure_contents(fn1)
+    contents2 = _closure_contents(fn2)
+    if len(contents1) != len(contents2):
+        return False
+    for a, b in zip(contents1, contents2):
+        if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
+            if a is b:
+                continue
+            if a.shape != b.shape or a.dtype != b.dtype or a.device != b.device:
+                return False
+            try:
+                if not torch.equal(a, b):
+                    return False
+            except RuntimeError:
+                pass
+        elif isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
+            return False
+        else:
+            if a != b:
+                return False
+    return True
+
+
 class _MaskModWrapper:
     """Wraps a mask_mod function with value-based equality.
 
@@ -461,7 +491,7 @@ class _MaskModWrapper:
             inspect.isfunction(self.fn)
             and inspect.isfunction(other.fn)
             and self.fn.__code__ == other.fn.__code__
-            and _closure_contents(self.fn) == _closure_contents(other.fn)
+            and _closure_contents_equal(self.fn, other.fn)
         ):
             return True
         # For callable objects (not plain functions), delegate to their __eq__

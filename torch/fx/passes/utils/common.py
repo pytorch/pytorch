@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import torch
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
@@ -74,8 +75,17 @@ def lift_subgraph_as_module(
         leaf_node = getattr(orig_gm, leaf_node_name)
 
         orig_to_split_fqn_mapping[target] = f"{comp_name}.{target}"
-        # Relies on custom __setattr__ magic.
-        setattr(curr, leaf_node_name, leaf_node)
+        # Properly register the attribute on the submodule. Tensor constants
+        # must be registered as buffers so that named_buffers() can discover
+        # them. This is important for aot_autograd (prepare_aot_module_simplified)
+        # which relies on named_parameters()/named_buffers() to find all
+        # tensors that need to be prepended to the runtime args.
+        if isinstance(leaf_node, torch.Tensor) and not isinstance(
+            leaf_node, torch.nn.Parameter
+        ):
+            curr.register_buffer(leaf_node_name, leaf_node)
+        else:
+            setattr(curr, leaf_node_name, leaf_node)
 
     return GraphModule(submodule, subgraph, class_name), orig_to_split_fqn_mapping
 
