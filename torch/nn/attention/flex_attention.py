@@ -435,6 +435,46 @@ def _closure_contents(fn: object) -> tuple[object, ...]:
     return tuple(cell.cell_contents for cell in closure)
 
 
+def _tensor_eq(t1: torch.Tensor, t2: torch.Tensor) -> bool:
+    return t1.shape == t2.shape and t1.dtype == t2.dtype and t1.device == t2.device
+
+
+def _code_closure_eq(item1: object, item2: object) -> bool:
+    """Compare items by code and closure for functions, metadata for tensors, else ==."""
+    if item1 is item2:
+        return True
+    if inspect.isfunction(item1) and inspect.isfunction(item2):
+        return (
+            item1.__code__ == item2.__code__
+            and len(c1 := _closure_contents(item1))
+            == len(c2 := _closure_contents(item2))
+            and all(_code_closure_eq(a, b) for a, b in zip(c1, c2))
+        )
+    if isinstance(item1, (list, tuple)) and isinstance(item2, (list, tuple)):
+        return len(item1) == len(item2) and all(
+            _code_closure_eq(a, b) for a, b in zip(item1, item2)
+        )
+    if isinstance(item1, torch.Tensor) and isinstance(item2, torch.Tensor):
+        return _tensor_eq(item1, item2)
+    if isinstance(item1, torch.Tensor) or isinstance(item2, torch.Tensor):
+        return False
+    result = item1 == item2
+    return item1 is item2 if isinstance(result, torch.Tensor) else bool(result)
+
+
+def _functions_eq(fn1: object, fn2: object) -> bool:
+    """Value-based function comparison by code object and closure contents.
+
+    Needed for AOT autograd retracing: when mask functions are defined in forward(),
+    each trace creates new function objects at different addresses. Python's default
+    function.__eq__ uses identity, causing TreeSpec comparison to fail.
+
+    Recursively compares __code__ and closure contents. Tensors in closures are
+    compared by shape/dtype/device since they represent the same symbolic value.
+    """
+    return fn1 is fn2 or _code_closure_eq(fn1, fn2)
+
+
 class _MaskModWrapper:
     """Wraps a mask_mod function with value-based equality.
 
@@ -457,13 +497,9 @@ class _MaskModWrapper:
             return False
         if self.fn is other.fn:
             return True
-        if (
-            inspect.isfunction(self.fn)
-            and inspect.isfunction(other.fn)
-            and self.fn.__code__ == other.fn.__code__
-            and _closure_contents(self.fn) == _closure_contents(other.fn)
-        ):
-            return True
+        # Use recursive function comparison to handle nested closures
+        if inspect.isfunction(self.fn) and inspect.isfunction(other.fn):
+            return _functions_eq(self.fn, other.fn)
         # For callable objects (not plain functions), delegate to their __eq__
         if not inspect.isfunction(self.fn) and not inspect.isfunction(other.fn):
             return self.fn == other.fn
