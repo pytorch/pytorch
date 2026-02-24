@@ -156,9 +156,9 @@ def is_cython_function(obj: object) -> bool:
 
 # Types whose instances are data descriptors (have __get__ + (__set__ or __delete__)).
 # CPython invokes data descriptors found on the type MRO *before* checking
-# the instance __dict__.  This set is used by _is_data_descriptor for a fast
+# the instance __dict__.  This set is used by is_data_descriptor for a fast
 # O(1) check before falling back to the generic hasattr probe.
-_KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
+KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
     {
         property,
         _collections._tuplegetter,
@@ -168,10 +168,10 @@ _KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
 )
 
 
-def _is_data_descriptor(obj: object) -> bool:
+def is_data_descriptor(obj: object) -> bool:
     """Return True if *obj* is a data descriptor (has __get__ and (__set__ or __delete__))."""
     tp = type(obj)
-    if tp in _KNOWN_DATA_DESCRIPTOR_TYPES:
+    if tp in KNOWN_DATA_DESCRIPTOR_TYPES:
         return True
     return hasattr(tp, "__get__") and (
         hasattr(tp, "__set__") or hasattr(tp, "__delete__")
@@ -1563,8 +1563,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._looked_up_attrs[name] = subobj
         return subobj
 
-    def _lookup_type_attr(self, name: str) -> object:
-        """Walk type(obj).__mro__ only (not the metaclass chain) to find *name*."""
+    def lookup_class_mro_attr(self, name: str) -> object:
+        """Walk type(obj).__mro__ to find *name* in the class hierarchy.
+
+        This only searches the class chain (type(obj).__mro__), NOT the
+        metaclass chain (type(type(obj)).__mro__).  The distinction matters
+        because inspect.getattr_static conflates both chains — it can return
+        metaclass descriptors (e.g. type.__dict__['__annotations__'], a
+        getset_descriptor) when the attribute doesn't exist on the class MRO.
+        Walking cls.__mro__ directly avoids that leak.
+        """
         if name in self._subobj_from_class:
             return self._subobj_from_class[name]
         result = NO_SUCH_SUBOBJ
@@ -1744,37 +1752,57 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         #   3. if name in obj.__dict__ → return as-is (no descriptor invocation)
         #   4. if type_attr is a non-data descriptor → invoke it
         #   5. if type_attr is a plain class variable → return it
-        #   6. raise AttributeError → fall through to __getattr__
+        #   6. __getattr__ fallback
+        #   7. raise AttributeError
+        #
+        # Between steps 5 and 6, we also handle objects with custom storage
+        # that aren't visible via the MRO walk or instance __dict__ (step 5b).
+        #
         # Step 1: Single MRO walk on the type (cached).
-        type_attr = self._lookup_type_attr(name)
+        type_attr = self.lookup_class_mro_attr(name)
 
+        # Dynamo patches nn.Module.__init__ at import time to inject tracing
+        # hooks.  Undo that here so the unpatched original is traced instead.
         if type_attr is torch.nn.Module.__init__:
             type_attr = unpatched_nn_module_init
 
         # Step 2: Data descriptors on the type take priority over instance dict.
-        if type_attr is not NO_SUCH_SUBOBJ and _is_data_descriptor(type_attr):
-            return self._resolve_data_descriptor(tx, name, type_attr, source)
+        if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
+            return self.resolve_data_descriptor(tx, name, type_attr, source)
 
         # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
         if hasattr(self.value, "__dict__") and name in self.value.__dict__:
             subobj = self.value.__dict__[name]
-            source = self._maybe_wrap_nn_module_source_for_instance(tx, name, source)
+            source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
             return VariableTracker.build(tx, subobj, source)
 
         # Step 4-5: Non-data descriptor or plain class attribute.
         if type_attr is not NO_SUCH_SUBOBJ:
-            return self._resolve_type_attr(tx, name, type_attr, source)
+            return self.resolve_type_attr(tx, name, type_attr, source)
 
-        # Step 6: Dynamic fallback for objects with side-effect-free
-        # __getattribute__ (e.g. threading.local).
+        # Step 5b: Dynamic fallback for attributes that exist on the live
+        # object but aren't visible to the static MRO walk or instance
+        # __dict__ check above.  This covers objects with custom storage
+        # backends (e.g. threading.local uses a per-thread dict not
+        # accessible via obj.__dict__) and C extensions that store data
+        # outside the normal Python object layout.
+        #
+        # This is NOT the same as the C-level data descriptor fallback in
+        # resolve_data_descriptor (step 2): that handles descriptors found
+        # on the type MRO (like member_descriptor for __slots__), while this
+        # handles attributes that aren't on the type MRO at all.
+        #
+        # Only safe when the class doesn't override __getattribute__,
+        # otherwise we'd run arbitrary user code.
         if not self._object_has_getattribute:
             try:
                 resolved = type(self.value).__getattribute__(self.value, name)
-                return self._resolve_dynamic_attr(tx, name, resolved, source)
+                source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
+                return VariableTracker.build(tx, resolved, source)
             except AttributeError:
                 pass
 
-        # Step 7: __getattr__ fallback.
+        # Step 6: __getattr__ fallback.
         getattr_fn = self._check_for_getattr()
         if isinstance(getattr_fn, types.FunctionType):
             if (
@@ -1817,14 +1845,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ],
             )
 
-        # Step 8: AttributeError.
+        # Step 7: AttributeError.
         raise_observed_exception(
             AttributeError,
             tx,
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
         )
 
-    def _resolve_data_descriptor(
+    def resolve_data_descriptor(
         self,
         tx: "InstructionTranslator",
         name: str,
@@ -1846,7 +1874,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
             # User-defined data descriptor with a Python __get__.
-            return self._invoke_descriptor_get(tx, name, type_attr, source)
+            return self.invoke_descriptor_get(tx, name, type_attr, source)
 
         # C-level data descriptor (property with C fget, member/getset
         # descriptors, Cython attrs, etc.) — resolve via
@@ -1865,7 +1893,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         return VariableTracker.build(tx, resolved, source)
 
-    def _resolve_type_attr(
+    def resolve_type_attr(
         self,
         tx: "InstructionTranslator",
         name: str,
@@ -1884,6 +1912,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         can_use_mro_source = self.cls_source is not None and self.source is not None
 
         if isinstance(type_attr, staticmethod):
+            # type_attr is the raw staticmethod wrapper from cls.__dict__
+            # (not the unwrapped function).  We call __get__ to unwrap it,
+            # but the *source* must go through __func__ on the descriptor
+            # (not the resolved function) because the guard needs to watch
+            # the descriptor object in the class dict, not the result.
             if can_use_mro_source:
                 source = AttrSource(
                     self.get_source_by_walking_mro(tx, name), "__func__"
@@ -1923,7 +1956,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
-            return self._invoke_descriptor_get(tx, name, type_attr, source)
+            return self.invoke_descriptor_get(tx, name, type_attr, source)
 
         # C-level non-data descriptors / opaque callables — defer to runtime.
         # MethodDescriptorType: e.g. list.append (PyMethodDef)
@@ -1951,18 +1984,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source = AttrSource(self.cls_source, name)
         return VariableTracker.build(tx, type_attr, source)
 
-    def _resolve_dynamic_attr(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        resolved: object,
-        source: Source | None,
-    ) -> VariableTracker:
-        """Handle attributes found only via dynamic lookup (e.g. threading.local)."""
-        source = self._maybe_wrap_nn_module_source_for_instance(tx, name, source)
-        return VariableTracker.build(tx, resolved, source)
-
-    def _invoke_descriptor_get(
+    def invoke_descriptor_get(
         self,
         tx: "InstructionTranslator",
         name: str,
@@ -1986,7 +2008,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             source=descriptor_get_source,
         ).call_function(tx, [self, owner_var], {})
 
-    def _maybe_wrap_nn_module_source_for_instance(
+    def maybe_wrap_nn_module_source_for_instance(
         self,
         tx: "InstructionTranslator",
         name: str,
@@ -2860,7 +2882,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         else:
             self._tuple_vt = tuple_vt
 
-    def _resolve_data_descriptor(
+    def resolve_data_descriptor(
         self,
         tx: "InstructionTranslator",
         name: str,
@@ -2873,7 +2895,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             # tuple items, because self.value may not hold actual runtime values.
             _, (idx, _) = type_attr.__reduce__()
             return self._tuple_vt.items[idx]  # type: ignore[union-attr]
-        return super()._resolve_data_descriptor(tx, name, type_attr, source)
+        return super().resolve_data_descriptor(tx, name, type_attr, source)
 
     def call_method(
         self,
