@@ -582,7 +582,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         def gn(x, y):
             return x + y
 
-        @torch.compile
+        @torch.compile(backend="inductor")
         def fn(x, y):
             return gn(x, y) + gn(x, y)
 
@@ -1776,7 +1776,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         device index in the cache key.
         """
 
-        @torch.compile
+        @torch.compile(backend="inductor")
         def f():
             y = torch.tensor([5], device="cuda")
             return (y,)

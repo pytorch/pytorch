@@ -197,7 +197,6 @@ class TensorVariable(VariableTracker):
         super().__init__(**kwargs)
         self.proxy = proxy
         self.dtype = dtype
-        # pyrefly: ignore[read-only]
         self.device = device
         self.layout = layout
         self.ndim = ndim
