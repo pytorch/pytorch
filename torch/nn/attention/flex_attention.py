@@ -446,11 +446,14 @@ def _code_closure_eq(item1: object, item2: object) -> bool:
     if inspect.isfunction(item1) and inspect.isfunction(item2):
         return (
             item1.__code__ == item2.__code__
-            and len(c1 := _closure_contents(item1)) == len(c2 := _closure_contents(item2))
+            and len(c1 := _closure_contents(item1))
+            == len(c2 := _closure_contents(item2))
             and all(_code_closure_eq(a, b) for a, b in zip(c1, c2))
         )
     if isinstance(item1, (list, tuple)) and isinstance(item2, (list, tuple)):
-        return len(item1) == len(item2) and all(_code_closure_eq(a, b) for a, b in zip(item1, item2))
+        return len(item1) == len(item2) and all(
+            _code_closure_eq(a, b) for a, b in zip(item1, item2)
+        )
     if isinstance(item1, torch.Tensor) and isinstance(item2, torch.Tensor):
         return _tensor_eq(item1, item2)
     if isinstance(item1, torch.Tensor) or isinstance(item2, torch.Tensor):
