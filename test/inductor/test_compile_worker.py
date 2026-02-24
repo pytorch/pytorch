@@ -163,6 +163,44 @@ class TestTimer(TestCase):
         t.quit()
 
 
+class TestSetTritonLibdevicePath(TestCase):
+    @config.patch("compile_threads", 1)
+    def test_libdevice_path_no_subprocess(self):
+        """Test libdevice path is set with compile_threads=1 (no subprocess)."""
+        self._test_libdevice_path_with_compilation()
+
+    def test_libdevice_path_default_threads(self):
+        """Test libdevice path is set with default compile_threads (subprocess)."""
+        self._test_libdevice_path_with_compilation()
+
+    def _test_libdevice_path_with_compilation(self):
+        import torch
+        from torch.utils.cpp_extension import CUDA_HOME
+
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+        if CUDA_HOME is None:
+            self.skipTest("CUDA_HOME not set")
+
+        expected = os.path.join(CUDA_HOME, "nvvm", "libdevice", "libdevice.10.bc")
+        if not os.path.isfile(expected):
+            self.skipTest(f"libdevice not found at {expected}")
+
+        # Compile a simple function that uses pow (which uses libdevice)
+        @torch.compile
+        def fn(x):
+            return torch.pow(x, 2.0)
+
+        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        fn(x)
+
+        # Verify libdevice path was set
+        from triton import knobs
+
+        self.assertEqual(knobs.nvidia.libdevice_path, expected)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
