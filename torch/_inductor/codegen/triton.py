@@ -1748,23 +1748,8 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.fmod({a}, {b})"
 
     @staticmethod
-    def pow(a, b):
-        # Check dtype before potential upcast - powf_cuda only supports fp32
-        a_dtype = getattr(a, "dtype", None)
-        if a_dtype == torch.float64:
-            # fp64: libdevice.pow matches eager exactly
-            return f"libdevice.pow({a}, {b})"
-
-        # Use inner helper with upcast decorator for fp32/fp16/bf16
-        return TritonOverrides._pow_impl(a, b)
-
-    @staticmethod
     @maybe_upcast_float32()
-    def _pow_impl(a, b):
-        if config.eager_numerics.pow_precision:
-            # Use inline PTX pow that matches CUDA's powf exactly.
-            # libdevice.pow uses FTZ (flush-to-zero) which causes 1-3 ULP differences.
-            return f"triton_helpers.powf_cuda({a}, {b})"
+    def pow(a, b):
         return f"libdevice.pow({a}, {b})"
 
     @staticmethod
