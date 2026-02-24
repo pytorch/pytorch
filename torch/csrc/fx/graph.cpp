@@ -3,22 +3,75 @@
 #include <structmember.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
-#include <regex>
 #include <string>
 
 namespace {
 
-// Regex patterns matching Python's graph.py
-// _name_regex = re.compile(r"^([a-zA-Z_][0-9a-zA-Z_]*?)(?:_(\d+))?$")
-// _illegal_char_regex = re.compile("[^0-9a-zA-Z_]+")
-static const std::regex& name_regex() {
-  static std::regex re(R"(^([a-zA-Z_][0-9a-zA-Z_]*?)(?:_(\d+))?$)");
-  return re;
+static inline bool is_alnum_or_underscore(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+      (c >= '0' && c <= '9') || c == '_';
 }
 
-static const std::regex& illegal_char_regex() {
-  static std::regex re("[^0-9a-zA-Z_]+");
-  return re;
+static inline bool is_alpha_or_underscore(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+
+// Equivalent to re.compile("[^0-9a-zA-Z_]+").sub("_", s)
+static std::string replace_illegal_chars(const std::string& s) {
+  std::string result;
+  result.reserve(s.size());
+  bool prev_illegal = false;
+  for (char c : s) {
+    if (is_alnum_or_underscore(c)) {
+      result.push_back(c);
+      prev_illegal = false;
+    } else if (!prev_illegal) {
+      result.push_back('_');
+      prev_illegal = true;
+    }
+  }
+  return result;
+}
+
+// Equivalent to re.compile(r"^([a-zA-Z_][0-9a-zA-Z_]*?)(?:_(\d+))?$").match(s)
+// Returns true on match, setting base and (optionally) num_suffix.
+// has_num is set to true when a trailing _\d+ suffix was found.
+static bool name_regex_match(
+    const std::string& s,
+    std::string& base,
+    long long& num_suffix,
+    bool& has_num) {
+  if (s.empty() || !is_alpha_or_underscore(s[0])) {
+    return false;
+  }
+  // All characters must be [a-zA-Z0-9_]
+  for (char c : s) {
+    if (!is_alnum_or_underscore(c)) {
+      return false;
+    }
+  }
+  // Find the last '_' that is followed by only digits (the _\d+ suffix).
+  // The base part uses a non-greedy match, so we want the *last* such split.
+  size_t split = s.rfind('_');
+  if (split != std::string::npos && split > 0 && split + 1 < s.size()) {
+    bool all_digits = true;
+    for (size_t i = split + 1; i < s.size(); ++i) {
+      if (s[i] < '0' || s[i] > '9') {
+        all_digits = false;
+        break;
+      }
+    }
+    if (all_digits) {
+      base = s.substr(0, split);
+      num_suffix = std::stoll(s.substr(split + 1));
+      has_num = true;
+      return true;
+    }
+  }
+  base = s;
+  num_suffix = 0;
+  has_num = false;
+  return true;
 }
 
 struct NamespaceBase {
@@ -141,32 +194,27 @@ static PyObject* NamespaceBase_create_name(
   }
   std::string candidate(candidate_cstr);
 
-  // Try to match candidate with _name_regex
-  std::smatch match;
-  bool matched = std::regex_match(candidate, match, name_regex());
+  std::string base;
+  long long num = 0;
+  bool has_num = false;
 
-  if (!matched) {
+  if (!name_regex_match(candidate, base, num, has_num)) {
     // Delete all characters that are illegal in a Python identifier
-    candidate = std::regex_replace(candidate, illegal_char_regex(), "_");
+    candidate = replace_illegal_chars(candidate);
 
     if (candidate.empty()) {
       candidate = "_unnamed";
     }
 
-    if (std::isdigit(static_cast<unsigned char>(candidate[0]))) {
+    if (candidate[0] >= '0' && candidate[0] <= '9') {
       candidate = "_" + candidate;
     }
 
-    matched = std::regex_match(candidate, match, name_regex());
-    if (!matched) {
+    if (!name_regex_match(candidate, base, num, has_num)) {
       PyErr_SetString(PyExc_AssertionError, "Failed to create valid name");
       return nullptr;
     }
   }
-
-  std::string base = match[1].str();
-  long long num = 0;
-  bool has_num = match[2].matched;
 
   THPObjectPtr candidate_py(PyUnicode_FromString(candidate.c_str()));
   if (!candidate_py) {
@@ -182,7 +230,12 @@ static PyObject* NamespaceBase_create_name(
   if (!has_num || in_used_names) {
     // num = self._base_count.get(candidate, 0)
     PyObject* count_obj = PyDict_GetItem(ns->base_count, candidate_py.get());
-    num = count_obj ? PyLong_AsLongLong(count_obj) : 0;
+    if (count_obj) {
+      num = PyLong_AsLongLong(count_obj);
+      if (num == -1 && PyErr_Occurred()) {
+        return nullptr;
+      }
+    }
 
     // Check _illegal_names
     PyObject* illegal_names = get_illegal_names();
@@ -202,7 +255,7 @@ static PyObject* NamespaceBase_create_name(
       }
     }
   } else {
-    num = std::stoll(match[2].str());
+    // num is already set by name_regex_match
   }
 
   // while candidate in self._used_names:
