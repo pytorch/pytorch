@@ -535,7 +535,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   std::optional<at::Device> bound_device_id_;
 };
 
-inline size_t hash_combine(size_t seed, size_t value) {
+constexpr size_t hash_combine(size_t seed, size_t value) {
   return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
 }
 

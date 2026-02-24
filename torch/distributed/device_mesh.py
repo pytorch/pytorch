@@ -128,20 +128,75 @@ else:
         """
         return getattr(torch, device_type, None)
 
+    def _setup_world_group_and_device(device_type: str, layout_numel: int) -> None:
+        default_initialized = is_initialized()
+        if not default_initialized:
+            init_process_group()
+
+        world_size = get_world_size()
+        if layout_numel > world_size:
+            raise RuntimeError(
+                f"Mesh should not be bigger than default world size {world_size}, "
+                f"but found {layout_numel} ranks!"
+            )
+
+        backend = get_backend()
+        if backend == "fake":
+            return
+
+        device_handle = _get_device_handle(device_type)
+        if device_handle and not device_handle.is_initialized():
+            if "LOCAL_RANK" in os.environ:
+                local_rank = int(os.environ["LOCAL_RANK"])
+                logger.info(
+                    "Setting default device for the current process based on LOCAL_RANK=%s",
+                    local_rank,
+                )
+                device_handle.set_device(local_rank)
+            else:
+                num_devices_per_host = device_handle.device_count()
+                if num_devices_per_host == 0:
+                    return
+                warnings.warn(
+                    "It seems like you did not set/select the default device for "
+                    "the current process before the DeviceMesh initialization or "
+                    "use a launcher (i.e. torchrun) which populates `LOCAL_RANK` "
+                    "environment variable. It is recommended to set the current "
+                    "device for the process BEFORE the DeviceMesh initialization "
+                    "so that the underlying communicator (i.e. NCCL) can be "
+                    "initialized properly. Given that the current process has no "
+                    "default device selected, DeviceMesh will use a heuristic to "
+                    "set the device_id via `global_rank % num_devices_per_host`, "
+                    "assuming homogeneous hardware cluster. ",
+                    stacklevel=2,
+                )
+                if (
+                    world_size > num_devices_per_host
+                    and world_size % num_devices_per_host != 0
+                ):
+                    raise RuntimeError(
+                        f"DeviceMesh only support homogeneous hardware, but found "
+                        f"{world_size} ranks and {num_devices_per_host} "
+                        f"{device_type} devices!"
+                    )
+                device_handle.set_device(get_rank() % num_devices_per_host)
+
     class _DeviceMeshUniverse:
         """
-        Centralizes PG management for a mesh hierarchy. Shared across all meshes
-        derived from the same root mesh. Handles PG creation, caching (to avoid
-        duplicate PGs when the same layout+backend is requested multiple times),
-        and registry for torch.compile tracing.
+        Centralizes backend management for a mesh hierarchy. Shared across all meshes
+        derived from the same root mesh. Handles backend creation, caching (to avoid
+        duplicate backends when the same layout+backend option is requested multiple
+        times), and registry for torch.compile tracing.
 
         NOTE: This object is shared (by reference) across all DeviceMesh instances
-        in a hierarchy. Its dict fields (_pg_registry, _pg_cache) are not
+        in the same universe. Its dict fields (_pg_registry, _pg_cache) are not
         thread-safe; concurrent mutation from multiple threads may race. This
         mirrors the pre-existing threading assumptions of DeviceMesh.
         """
 
         _device_type: str
+        # Caches PG references so torch.compile can trace pg lookup without
+        # invoking c10d at tracing time.
         _pg_registry: dict[str, ProcessGroup]
         _pg_cache: dict[tuple[_MeshLayout, BackendConfig], GroupName | None]
 
@@ -167,81 +222,18 @@ else:
         def register_pg(self, name: str, pg: ProcessGroup) -> None:
             self._pg_registry[name] = pg
 
-        def setup_world_group_and_device(self, layout_numel: int) -> None:
-            default_initialized = is_initialized()
-            if not default_initialized:
-                init_process_group()
-
-            world_size = get_world_size()
-            if layout_numel > world_size:
-                raise RuntimeError(
-                    f"Mesh should not be bigger than default world size {world_size}, "
-                    f"but found {layout_numel} ranks!"
-                )
-
-            backend = get_backend()
-            if backend == "fake":
-                return
-
-            device_handle = _get_device_handle(self._device_type)
-            if device_handle and not device_handle.is_initialized():
-                if "LOCAL_RANK" in os.environ:
-                    local_rank = int(os.environ["LOCAL_RANK"])
-                    logger.info(
-                        "Setting default device for the current process based on LOCAL_RANK=%s",
-                        local_rank,
-                    )
-                    device_handle.set_device(local_rank)
-                else:
-                    num_devices_per_host = device_handle.device_count()
-                    if num_devices_per_host == 0:
-                        return
-                    warnings.warn(
-                        "It seems like you did not set/select the default device for "
-                        "the current process before the DeviceMesh initialization or "
-                        "use a launcher (i.e. torchrun) which populates `LOCAL_RANK` "
-                        "environment variable. It is recommended to set the current "
-                        "device for the process BEFORE the DeviceMesh initialization "
-                        "so that the underlying communicator (i.e. NCCL) can be "
-                        "initialized properly. Given that the current process has no "
-                        "default device selected, DeviceMesh will use a heuristic to "
-                        "set the device_id via `global_rank % num_devices_per_host`, "
-                        "assuming homogeneous hardware cluster. ",
-                        stacklevel=2,
-                    )
-                    if (
-                        world_size > num_devices_per_host
-                        and world_size % num_devices_per_host != 0
-                    ):
-                        raise RuntimeError(
-                            f"DeviceMesh only support homogeneous hardware, but found "
-                            f"{world_size} ranks and {num_devices_per_host} "
-                            f"{self._device_type} devices!"
-                        )
-                    device_handle.set_device(get_rank() % num_devices_per_host)
-
-        def init_one_process_group(
-            self,
+        @staticmethod
+        def _create_process_group(
             sub_layout: _MeshLayout,
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
         ) -> GroupName | None:
-            # NOTE: Backend.Options.__eq__/__hash__ include group_name.
-            # Callers should either leave group_name at its default or ensure
-            # all Options with the same config use the same group_name;
-            # mismatched group_names on otherwise identical configs will miss
-            # the cache.
-            cache_key = (sub_layout, backend_override)
-            if cache_key in self._pg_cache:
-                return self._pg_cache[cache_key]
-
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
             timeout = pg_options._timeout if pg_options else None
             group_desc = f"mesh_{dim_name}"
 
-            dim_group = None
             default_group = _get_default_group()
 
             if sub_layout.numel() == get_world_size() and backend_override == (
@@ -259,12 +251,7 @@ else:
                     and get_backend(default_group) == "gloo"
                     else default_group
                 )
-                pg_name = dim_group.group_name  # type: ignore[union-attr]
-                self._pg_cache[cache_key] = pg_name
-                pg = _resolve_process_group(pg_name)
-                if pg is not None:
-                    self._pg_registry[pg_name] = pg
-                return pg_name
+                return dim_group.group_name  # type: ignore[union-attr]
 
             if (
                 (
@@ -286,14 +273,8 @@ else:
                     group_desc=group_desc,
                 )
                 if dim_group is None:
-                    self._pg_cache[cache_key] = None
                     return None
-                pg_name = dim_group.group_name
-                self._pg_cache[cache_key] = pg_name
-                pg = _resolve_process_group(pg_name)
-                if pg is not None:
-                    self._pg_registry[pg_name] = pg
-                return pg_name
+                return dim_group.group_name
 
             pg_name = None
             for dim_mesh in pg_ranks_by_dim:
@@ -313,6 +294,27 @@ else:
                             f"but got {get_rank()} in {subgroup_ranks}!"
                         )
                     pg_name = dim_group.group_name
+            return pg_name
+
+        def init_one_process_group(
+            self,
+            sub_layout: _MeshLayout,
+            rank_map: torch.Tensor,
+            dim_name: str,
+            backend_override: BackendConfig,
+        ) -> GroupName | None:
+            # NOTE: Backend.Options.__eq__/__hash__ include group_name.
+            # Callers should either leave group_name at its default or ensure
+            # all Options with the same config use the same group_name;
+            # mismatched group_names on otherwise identical configs will miss
+            # the cache.
+            cache_key = (sub_layout, backend_override)
+            if cache_key in self._pg_cache:
+                return self._pg_cache[cache_key]
+
+            pg_name = self._create_process_group(
+                sub_layout, rank_map, dim_name, backend_override
+            )
             self._pg_cache[cache_key] = pg_name
             if pg_name is not None:
                 pg = _resolve_process_group(pg_name)
@@ -536,7 +538,9 @@ else:
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
-                    self._universe.setup_world_group_and_device(self._layout.numel())
+                    _setup_world_group_and_device(
+                        self._device_type, self._layout.numel()
+                    )
                     self._dim_group_names = self._universe.init_process_groups(
                         self._layout,
                         self._rank_map,
