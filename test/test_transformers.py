@@ -5050,6 +5050,7 @@ class TestRoPE(NNTestCase):
         self.assertEqual(k_rot, k_ref, atol=atol, rtol=0)
 
     @expectedFailureMPS  # No double support
+    @skipIfTorchDynamo("gradcheck not compatible with dynamo")
     def test_rope_gradcheck(self, device):
         batch, seq, heads, dim = 1, 4, 2, 8
         q = torch.randn(batch, seq, heads, dim, device=device, dtype=torch.float64, requires_grad=True)

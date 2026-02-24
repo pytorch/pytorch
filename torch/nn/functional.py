@@ -6159,7 +6159,7 @@ def rotary_embedding_frequencies(
         >>> k = torch.randn(2, 128, 8, 64)
         >>> q_rot, k_rot = F.apply_rotary_emb(q, k, cos[:128], sin[:128])
 
-    Note:
+    .. note::
         The frequencies are computed using NeoX-style layout where the
         cos/sin values are duplicated: ``[cos(f0), cos(f1), ..., cos(f0), cos(f1), ...]``
         This supports the rotation ``x * cos + rotate_half(x) * sin``.
@@ -6272,14 +6272,14 @@ def apply_rotary_emb(
         >>> custom_cos, custom_sin = my_llama3_freqs(...)  # User-defined
         >>> q_rot, k_rot = F.apply_rotary_emb(q, k, custom_cos, custom_sin)
 
-    Note:
+    .. note::
         For KV-cache scenarios during inference, you can index into precomputed
-        frequencies to get the cos/sin for specific positions:
+        frequencies to get the cos/sin for specific positions::
 
-        >>> positions = torch.tensor([current_pos])
-        >>> q_rot, k_rot = F.apply_rotary_emb(
-        ...     q, k, cos[positions], sin[positions], seq_dim=1
-        ... )
+            positions = torch.tensor([current_pos])
+            q_rot, k_rot = F.apply_rotary_emb(
+                q, k, cos[positions], sin[positions], seq_dim=1
+            )
 
     .. note::
         This function uses standard PyTorch operations that are efficiently
