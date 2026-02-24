@@ -2207,7 +2207,12 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
         value = self.get(guard)
-        original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
+        # Deepcopying SymInts result in an error from copying FakeTensors.
+        # Instead we just always assume the metadata is the same.
+        metadata = value.__tensor_flatten__()[1]
+        original_metadata = deepcopy(
+            pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
+        )
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
             cls = type(value)
