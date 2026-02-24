@@ -281,7 +281,7 @@ class TestTorchDlPack(TestCase):
 
         # CUDA-based tests runs on non-default streams
         with torch.get_device_module(device_type).stream(
-                torch.get_device_module(device_type).default_stream()
+            torch.get_device_module(device_type).default_stream()
         ):
             x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
             from_dlpack(x)
@@ -824,7 +824,7 @@ class TestTorchDlPack(TestCase):
 
         # Run the comprehensive C++ test
         module.test_dlpack_exchange_api(
-            tensor, api_capsule, device.startswith("cuda") or device.startswith("xpu")
+            tensor, api_capsule, device.startswith(("cuda", "xpu"))
         )
 
     @skipMeta
