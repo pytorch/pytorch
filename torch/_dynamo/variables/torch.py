@@ -63,7 +63,7 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -599,7 +599,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
-                # pyrefly: ignore[bad-argument-type]
                 self.value,
                 tx,
                 self.source,
@@ -1502,6 +1501,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
+        @register(torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols)
+        def handle_has_free_unbacked_symbols(
+            self, tx: "InstructionTranslator", x: VariableTracker
+        ) -> VariableTracker | None:
+            from .tensor import TensorVariable
+
+            if isinstance(x, TensorVariable):
+                example_value = x.as_proxy().node.meta.get("example_value")
+                if example_value is not None:
+                    return variables.ConstantVariable.create(
+                        torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols(
+                            example_value
+                        )
+                    )
+            return None
+
         @register(torch.fx.experimental.symbolic_shapes.guard_scalar)
         def guard_scalar(
             self, tx: "InstructionTranslator", expr: VariableTracker
@@ -1760,17 +1775,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
             # need to guard only on no-arg get_device_module
-            # pyrefly: ignore [unbound-name]
             if device is None:
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
             new_source = AttrSource(
                 ImportSource("torch"),
-                # pyrefly: ignore [unbound-name]
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
-            # pyrefly: ignore [unbound-name]
             return VariableTracker.build(tx, module, new_source)
 
         @register(torch.accelerator.current_stream, torch.cuda.current_stream)
@@ -1886,7 +1898,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                # pyrefly: ignore[missing-attribute]
                 message_eager = message_vt.get_function()
 
                 message_graph_proxy = tx.output.register_static_attr_and_return_proxy(
@@ -1916,7 +1927,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         @register(torch.autograd.grad)
-        # pyrefly: ignore[implicit-any]
         def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
             """
             Handle torch.autograd.grad() calls within compiled regions.
@@ -2755,6 +2765,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         decorated_fn = self.value
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
         fake_impl = decorated_fn._torchdynamo_leaf_fake_fn
+        mutates_args = decorated_fn._torchdynamo_leaf_mutates_args
 
         if fake_impl is None:
             raise ValueError(
@@ -2766,6 +2777,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
+
         flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
             VariableTracker.build(tx, (args_with_states, kwargs_with_states))
         ).unpack_var_sequence(tx)
@@ -2773,6 +2785,19 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
         ]
         input_spec = input_spec_var.as_python_constant()
+
+        mutated_flat_indices = ""
+        if mutates_args:
+            from torch._higher_order_ops.invoke_leaf_function import (
+                _resolve_mutated_flat_indices,
+            )
+
+            try:
+                mutated_flat_indices = _resolve_mutated_flat_indices(
+                    real_impl, mutates_args, len(flat_arg_proxies), input_spec
+                )
+            except ValueError as e:
+                raise UserError(UserErrorType.INVALID_INPUT, str(e)) from e
 
         # Single-element mutable list so the wrappers can write back the output
         # TreeSpec. Read captured_out_spec[0] after the wrappers have been called.
@@ -2797,6 +2822,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl_proxy,
             fake_impl_proxy,
             input_spec_proxy,
+            mutated_flat_indices,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
@@ -2897,7 +2923,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         # this results in cleaner graphs, but only works for inputs
-        # pyrefly: ignore [missing-attribute]
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
@@ -2918,7 +2943,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if isinstance(
             data,
             TensorWithTFOverrideVariable,
-            # pyrefly: ignore [missing-attribute]
         ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented(
                 gb_type="Attempted to use torch.nn.Parameter constructor with tensor subclass",
@@ -2941,11 +2965,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
-            # pyrefly: ignore [missing-attribute]
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
-            # pyrefly: ignore [missing-attribute]
             dtype = data.var_getattr(tx, "dtype").as_python_constant()
-            # pyrefly: ignore [missing-attribute]
             device = data.var_getattr(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented(
@@ -2961,12 +2982,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         placeholder = tx.output.synthetic_graph_input(
             new_parameter_placeholder,
-            # pyrefly: ignore [unbound-name]
             (shape, dtype, device, requires_grad),
         )
-        # pyrefly: ignore [missing-attribute]
         if data.requires_grad:
-            # pyrefly: ignore [missing-attribute]
             data = data.call_method(tx, "detach", [], {})
 
         from .builder import wrap_fx_proxy
@@ -2976,7 +2994,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             tx.output.create_proxy(
                 "call_function",
                 tracable_create_parameter,
-                # pyrefly: ignore [missing-attribute]
                 (data.as_proxy(), placeholder.as_proxy()),
                 {},
             ),

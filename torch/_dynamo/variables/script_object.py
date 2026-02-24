@@ -399,7 +399,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
                 if name == "__setattr__":
                     method(*args_const, **kwargs_const)
-                    return real_obj  # pyrefly: ignore[bad-return]
+                    return real_obj
 
                 constant_val = method(*args_const, **kwargs_const)
 

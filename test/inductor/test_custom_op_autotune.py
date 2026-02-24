@@ -8,12 +8,14 @@ Inductor benchmarks all variants and automatically selects the best performing o
 """
 
 import torch
+import torch._inductor.runtime.benchmarking
 from torch._inductor import config
 from torch._inductor.kernel.custom_op import (
     CustomOpConfig,
     register_custom_op_autotuning,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 
@@ -555,6 +557,241 @@ class TestCustomOpAutoTune(TestCase):
         else:
             print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
         self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
+
+    @skipIfXpu
+    def test_benchmark_with_cudagraphs_uses_cuda_graph_benchmarking(self):
+        """Test that benchmark_with_cudagraphs flag causes CUDA graph benchmarking to be used."""
+        if self.device != "cuda":
+            self.skipTest("CUDA graph test requires CUDA device")
+
+        from unittest.mock import patch
+
+        test_op_name = f"test_lib::cudagraph_patch_{id(self)}"
+
+        def fast_decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def cudagraph_patch_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @cudagraph_patch_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        register_custom_op_autotuning(
+            cudagraph_patch_op,
+            configs=[CustomOpConfig(fast_decomposition)],
+            name="cudagraph_patch_autotuned",
+            benchmark_with_cudagraphs=True,
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(64, 256, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(256, 128, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return cudagraph_patch_op(x, weight)
+
+        cuda_graph_benchmark_called = False
+        original_benchmark_gpu_with_cuda_graph = torch._inductor.runtime.benchmarking.Benchmarker.benchmark_gpu_with_cuda_graph
+
+        def patched_benchmark_gpu_with_cuda_graph(self, fn):
+            nonlocal cuda_graph_benchmark_called
+            cuda_graph_benchmark_called = True
+            return original_benchmark_gpu_with_cuda_graph(self, fn)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            with patch.object(
+                torch._inductor.runtime.benchmarking.Benchmarker,
+                "benchmark_gpu_with_cuda_graph",
+                patched_benchmark_gpu_with_cuda_graph,
+            ):
+                result = test_model(test_x, test_weight)
+
+        self.assertTrue(
+            cuda_graph_benchmark_called,
+            "benchmark_gpu_with_cuda_graph should have been called",
+        )
+        torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
+
+    @skipIfXpu
+    def test_min_speedup_threshold_api(self):
+        """Test that min_speedup_threshold parameter is accepted and compilation works."""
+        test_op_name = f"test_lib::min_speedup_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def min_speedup_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @min_speedup_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Test that API accepts min_speedup_threshold parameter
+        register_custom_op_autotuning(
+            min_speedup_op,
+            configs=[CustomOpConfig(decomposition)],
+            name="min_speedup_autotuned",
+            min_speedup_threshold=1.5,
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(64, 256, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(256, 128, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return min_speedup_op(x, weight)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result = test_model(test_x, test_weight)
+
+        torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
+
+    @skipIfXpu
+    def test_config_patching_in_generated_code(self):
+        """Test that coordinate_descent_tuning config_patches flows through to generated code."""
+        if self.device != "cuda":
+            self.skipTest(
+                "coordinate_descent_tuning test requires CUDA for Triton codegen"
+            )
+
+        test_op_name = f"test_lib::coord_descent_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.ones_like(x)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def coord_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @coord_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Register with config_patches containing coordinate_descent_tuning
+        register_custom_op_autotuning(
+            coord_op,
+            configs=[
+                CustomOpConfig(
+                    decomposition, config_patches={"coordinate_descent_tuning": True}
+                )
+            ],
+            name="coord_descent_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return coord_op(x, weight)
+
+        torch._dynamo.reset()
+
+        # Compile and capture generated code
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result, code = torch._inductor.utils.run_and_get_code(
+                test_model, test_x, test_weight
+            )
+
+        # Check that coordinate_descent_tuning is enabled in the generated code's inductor_meta
+        FileCheck().check("'coordinate_descent_tuning': True").run("\n".join(code))
+
+    @skipIfXpu
+    def test_split_config_patching_in_generated_code(self):
+        """Test that coordinate_descent_tuning config_patches flows through to generated code."""
+        if self.device != "cuda":
+            self.skipTest(
+                "coordinate_descent_tuning test requires CUDA for Triton codegen"
+            )
+
+        test_op_name = f"test_lib::coord_descent_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.ones(
+                x.shape[0], weight.shape[1], dtype=weight.dtype, device=weight.device
+            )
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def coord_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            if x.shape[0] == 128:
+                return torch.empty(
+                    x.shape[0],
+                    weight.shape[1],
+                    dtype=weight.dtype,
+                    device=weight.device,
+                )
+            return x @ weight
+
+        @coord_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Register with config_patches containing coordinate_descent_tuning
+        register_custom_op_autotuning(
+            coord_op,
+            configs=[
+                CustomOpConfig(
+                    decomposition, config_patches={"coordinate_descent_tuning": True}
+                )
+            ],
+            name="coord_descent_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+            dispatch_on={"tensor_name": "x", "dim": 0},
+            split_points=[128, 512],
+        )
+
+        test_x = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return coord_op(x, weight)
+
+        torch._dynamo.mark_dynamic(test_x, 0)
+
+        # Compile and capture generated code
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result, code = torch._inductor.utils.run_and_get_code(
+                test_model, test_x, test_weight
+            )
+
+        # Check that coordinate_descent_tuning is enabled in the main compiled code's inductor_meta
+        # Filter to main compiled code (with symbolic shapes), not benchmark modules (with concrete sizes)
+        import re
+
+        main_code = [c for c in code if re.search(r"\(s\d+,", c)]
+        self.assertTrue(len(main_code) > 0, "Expected main code with symbolic shapes")
+        FileCheck().check("'coordinate_descent_tuning': True").run(main_code[0])
 
 
 if __name__ == "__main__":

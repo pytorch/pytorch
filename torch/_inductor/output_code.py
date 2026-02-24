@@ -29,7 +29,6 @@ from functools import partial
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
-import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
@@ -618,16 +617,31 @@ class CompiledFxGraph(OutputCode):
         self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
 
         if self._wrap_compiled_regions:
-            self.fake_outputs = tuple(
-                [x.meta["val"] for x in gm.graph.find_nodes(op="output")[0].args[0]]
-            )
-            for fake_out in pytree.tree_leaves(self.fake_outputs):
-                if isinstance(fake_out, torch.Tensor) and any(
-                    isinstance(s, torch.SymInt) for s in fake_out.shape
+            from torch._higher_order_ops.wrap import OutputTensorMeta
+
+            fake_vals = [
+                x.meta["val"] for x in gm.graph.find_nodes(op="output")[0].args[0]
+            ]
+            for t in fake_vals:
+                if isinstance(t, torch.Tensor) and any(
+                    isinstance(s, torch.SymInt) for s in t.shape
                 ):
                     raise RuntimeError(
                         "wrap_compiled_regions does not support dynamic shapes yet"
                     )
+            # FakeTensors are not picklable; store metadata for FX graph cache
+            self.fake_outputs = tuple(
+                OutputTensorMeta(
+                    tuple(t.shape),
+                    tuple(t.stride()),
+                    t.dtype,
+                    str(t.device),
+                    t.requires_grad,
+                )
+                if isinstance(t, torch.Tensor)
+                else t
+                for t in fake_vals
+            )
 
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
