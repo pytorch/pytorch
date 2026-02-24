@@ -521,8 +521,13 @@ def meta_copy_(self, src, non_blocking=False):
 
     if isinstance(src, Tensor):
         intermediate = src.to(self, non_blocking)
-        if self.size() != intermediate.size():
-            aten.expand_copy.default(intermediate, self.size())
+        # Validate broadcast compatibility. We call the _refs expand
+        # directly rather than aten.expand_copy.default because the
+        # aten dispatch path hits C++ that cannot handle unbacked
+        # symints. The refs version performs the same checks using
+        # sym_or(x == 1, requested_length == x) which gracefully
+        # handles unbacked symints.
+        torch._refs.expand(intermediate, self.size())
     return self
 
 

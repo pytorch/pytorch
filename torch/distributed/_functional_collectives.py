@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import math
 import sys
 import warnings
 from typing import Any, cast, TYPE_CHECKING, Union
@@ -98,6 +99,9 @@ RANK_TYPES = Union[
     tuple["dist.tensor.DeviceMesh", int],
     c10d.GroupName,
 ]
+
+
+from torch._utils import _chunk_or_narrow_cat  # noqa: F401
 
 
 """
@@ -204,13 +208,16 @@ def all_gather_tensor(
         self, group_size, group_name
     )
     res = _maybe_wrap_tensor(tensor)
-    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
-        # torch.cat access the data so we already need to wait here, first do wait
-        # and then chunk + cat avoid us going through ACT dispatching logic again
+        # Check if _maybe_view_chunk_cat can use the view optimization.
+        # If not, it will use torch.cat which needs the data anyway, so
+        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
         if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-
+            shape = list(res.shape)
+            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+            can_use_view = shape[0] == group_size and numel_between == 1
+            if not can_use_view:
+                res = res.wait()
         res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
@@ -238,13 +245,17 @@ def all_gather_tensor_autograd(
         self, group_size, group_name
     )
     res = _FromTorchTensor.apply(tensor)
-    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
-        # torch.cat access the data so we already need to wait here, first do wait
-        # and then chunk + cat avoid us going through ACT dispatching logic again
+        # Check if _maybe_view_chunk_cat can use the view optimization.
+        # If not, it will use torch.cat which needs the data anyway, so
+        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
         if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+            shape = list(res.shape)
+            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+            can_use_view = shape[0] == group_size and numel_between == 1
+            if not can_use_view:
+                res = res.wait()
+        res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
 
@@ -278,8 +289,7 @@ def reduce_scatter_tensor(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
     tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
         self,
@@ -318,8 +328,7 @@ def reduce_scatter_tensor_autograd(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
     tensor = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
         self,

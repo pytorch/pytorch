@@ -1675,7 +1675,6 @@ def speculate_subgraph_with_auto_output_flattening(
             # be actual FX graph outputs.
             # Collect only tensor and symint VTs that should be graph outputs.
             # We walk the output structure and extract proxyable VTs.
-            # pyrefly: ignore [implicit-any]
             graph_output_vt_list = []
 
             def visit(vt: VariableTracker) -> None:
@@ -5317,8 +5316,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             in_grad_placements,
             device_mesh,
             redistribute_inputs,
-            allow_uneven_sharding,
-            out_shapes,
             *user_args,
         ) = args
 
@@ -5346,8 +5343,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "redistribute_inputs": redistribute_inputs.value,  # type: ignore[attr-defined]
             "in_grad_placements": in_grad_placements.value,  # type: ignore[attr-defined]
             "device_mesh": device_mesh.value,  # type: ignore[attr-defined]
-            "allow_uneven_sharding": allow_uneven_sharding.value,  # type: ignore[attr-defined]
-            "out_shapes": out_shapes.value,  # type: ignore[attr-defined]
         }
         assert local_map_kwargs["device_mesh"] is not None, (
             "Not yet implemented, please manually provide a device_mesh to local_map."
