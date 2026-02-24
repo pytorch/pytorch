@@ -428,13 +428,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self._invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
         # C-level descriptors (WrapperDescriptor, MethodDescriptor, etc.)
-        # For torch-internal classes, build directly (needed for e.g.
-        # torch.Tensor.dim). For other classes, defer to GetAttrVariable.
+        # Build directly when the attribute lives in the class's own __dict__
+        # or the class belongs to torch (needed for e.g. torch.Tensor.dim).
+        # Otherwise defer to GetAttrVariable for inherited C descriptors on
+        # non-torch classes.
         if inspect.ismethoddescriptor(cls_attr) or is_wrapper_or_member_descriptor(
             cls_attr
         ):
             if source and (
-                self.value.__module__.startswith("torch.")
+                name in getattr(self.value, "__dict__", {})
+                or self.value.__module__.startswith("torch.")
                 or self.value.__module__ == "torch"
             ):
                 return VariableTracker.build(tx, cls_attr, source)
