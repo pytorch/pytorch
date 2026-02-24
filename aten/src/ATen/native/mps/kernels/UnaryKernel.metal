@@ -444,7 +444,7 @@ struct digamma_functor {
     return c10::metal::digamma(static_cast<float>(x));
   }
   inline float operator()(const bool x) {
-    return x ? c10::metal::digamma(float(1)) : -INFINITY;
+    return c10::metal::digamma(static_cast<float>(x));
   }
 };
 
