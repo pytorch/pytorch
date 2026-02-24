@@ -6,8 +6,27 @@
 #include <caffe2/core/common.h>
 
 namespace at {
+#ifdef USE_DISTRIBUTED
+static void mps_distributed_error(const c10::OperatorHandle& op) {
+  // c10d ops should never fall back to CPU as they require device-specific implementations
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      op.operator_name().getNamespace().value_or("") != "c10d",
+      "The distributed operator '",
+      op.schema().operator_name(),
+      "' is not currently implemented ",
+      "for the MPS device. If you want this op to be considered for addition ",
+      "please comment on https://github.com/pytorch/pytorch/issues/141287 and mention use-case, that resulted in missing op",
+      " as well as commit hash ",
+      caffe2::GetBuildOptions().at("COMMIT_SHA"),
+      ". Please note, that distributed operators can not fall back to CPU");
+}
+#endif
 
 static void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+#ifdef USE_DISTRIBUTED
+  mps_distributed_error(op);
+#endif
+
   TORCH_WARN_ONCE("The operator '",
                   op.schema().operator_name(),
                   "' is not currently supported ",
@@ -44,6 +63,9 @@ static void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
 }
 
 static void mps_error_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+#ifdef USE_DISTRIBUTED
+  mps_distributed_error(op);
+#endif
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "The operator '",

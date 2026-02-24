@@ -46,6 +46,15 @@ MODULES = [
 ]
 
 
+def get_modules_for_package(package: str) -> list:
+    if package == "all":
+        return MODULES
+    elif package == "torch_torchvision":
+        return [m for m in MODULES if m["name"] == "torchvision"]
+    else:
+        return []
+
+
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
@@ -104,8 +113,8 @@ def check_version(package: str) -> None:
                 f"Torch version mismatch, expected {stable_version} for channel {channel}. But its {torch.__version__}"
             )
 
-        if release_version and package == "all":
-            for module in MODULES:
+        if release_version and package in ["all", "torch_torchvision"]:
+            for module in get_modules_for_package(package):
                 imported_module = importlib.import_module(module["name"])
                 module_version = imported_module.__version__
                 if not module_version.startswith(release_matrix[module["name"]]):
@@ -135,8 +144,8 @@ def check_nightly_binaries_date(package: str) -> None:
             f"the binaries are from {date_t_str} and are more than {NIGHTLY_ALLOWED_DELTA} days old!"
         )
 
-    if package == "all":
-        for module in MODULES:
+    if package in ["all", "torch_torchvision"]:
+        for module in get_modules_for_package(package):
             imported_module = importlib.import_module(module["name"])
             module_version = imported_module.__version__
             date_m_str = re.findall("dev\\d+", module_version)
@@ -235,8 +244,8 @@ def smoke_test_cuda(
     if not torch.cuda.is_available() and is_cuda_system:
         raise RuntimeError(f"Expected CUDA {gpu_arch_ver}. However CUDA is not loaded.")
 
-    if package == "all" and is_cuda_system:
-        for module in MODULES:
+    if package in ["all", "torch_torchvision"] and is_cuda_system:
+        for module in get_modules_for_package(package):
             imported_module = importlib.import_module(module["name"])
             # TBD for vision move extension module to private so it will
             # be _extention.
@@ -247,12 +256,12 @@ def smoke_test_cuda(
                 version = imported_module._extension._check_cuda_version()
             print(f"{module['name']} CUDA: {version}")
 
-    # torch.compile is available on macos-arm64 and Linux for python 3.8-3.13
-    if (
-        torch_compile_check == "enabled"
-        and sys.version_info < (3, 14, 0)
-        and target_os in ["linux", "linux-aarch64", "macos-arm64", "darwin"]
-    ):
+    if torch_compile_check == "enabled" and target_os in [
+        "linux",
+        "linux-aarch64",
+        "macos-arm64",
+        "darwin",
+    ]:
         smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
 
     if torch.cuda.is_available():
@@ -431,9 +440,9 @@ def smoke_test_nvshmem() -> None:
     print(f"NVSHMEM available at run time: {_is_nvshmem_available()}")
 
 
-def smoke_test_modules():
+def smoke_test_modules(package: str):
     cwd = os.getcwd()
-    for module in MODULES:
+    for module in get_modules_for_package(package):
         if module["repo"]:
             if not os.path.exists(f"{cwd}/{module['repo_name']}"):
                 print(f"Path does not exist: {cwd}/{module['repo_name']}")
@@ -471,7 +480,7 @@ def parse_args():
         "--package",
         help="Package to include in smoke testing",
         type=str,
-        choices=["all", "torchonly"],
+        choices=["all", "torch_torchvision", "torchonly"],
         default="all",
     )
     parser.add_argument(
@@ -517,8 +526,8 @@ def main() -> None:
         test_cuda_gds_errors_captured()
         test_sdpa("cuda")
 
-    if options.package == "all":
-        smoke_test_modules()
+    if options.package in ["all", "torch_torchvision"]:
+        smoke_test_modules(options.package)
 
     smoke_test_cuda(
         options.package,

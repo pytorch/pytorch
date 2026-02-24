@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpy2s96qqy/lh/clhimrtibi2dkjbc3qir2skfq7rh7op556v7vpoachae7rc6q2km.py", line 10, in pallas_fused__to_copy_clamp_embedding_fill_81bc8d2f_kernel
-    tmp0 = in_ptr0[s2*min(max(0.0, u1), (-1) + s52)::1]
-                   ^^
-NameError: name 's2' is not defined

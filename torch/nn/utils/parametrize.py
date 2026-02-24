@@ -713,7 +713,7 @@ def remove_parametrizations(
             f"got {type(module.parametrizations).__name__}"
         )
     parametrizations = module.parametrizations[tensor_name]
-    # pyrefly: ignore [invalid-argument]
+
     if parametrizations.is_tensor:
         original = parametrizations.original
         if not isinstance(original, torch.Tensor):

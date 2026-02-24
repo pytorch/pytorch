@@ -29,6 +29,11 @@ using DeviceIndex = torch::stable::accelerator::DeviceIndex;
 // StableIValue conversions handle conversion between c10::Device (in libtorch)
 // and torch::stable::Device (in stable user extensions)
 
+/**
+ * @brief A stable version of c10::Device.
+ *
+ * Minimum compatible version: PyTorch 2.9.
+ */
 class Device {
  private:
   DeviceType type_;
@@ -46,59 +51,136 @@ class Device {
   }
 
  public:
-  // Construct a stable::Device from a DeviceType and optional device index
-  // Default index is -1 (current device)
+  /**
+   * @brief Constructs a Device from a DeviceType and optional device index.
+   *
+   * @param type The type of device (e.g., DeviceType::CPU, DeviceType::CUDA).
+   * @param index The device index. Default is -1 (current device).
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   /* implicit */ Device(DeviceType type, DeviceIndex index = -1)
       : type_(type), index_(index) {
     validate();
   }
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  // Construct a stable::Device from a string description
-  // The string must follow the schema: (cpu|cuda|...)[:<device-index>]
-  // Defined in device_inl.h to avoid circular dependencies
+  // Defined in device_inl.h to avoid circular dependencies.
+  /**
+   * @brief Constructs a stable::Device from a string description.
+   *
+   * The string must follow the schema: (cpu|cuda|...)[:<device-index>]
+   *
+   * @param device_string A string describing the device (e.g., "cuda:0",
+   * "cpu").
+   *
+   * Minimum compatible version: PyTorch 2.10.
+   */
   /* implicit */ Device(const std::string& device_string);
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
   // Copy and move constructors can be default
+  /// \private
   Device(const Device& other) = default;
+  /// \private
   Device(Device&& other) noexcept = default;
 
   // Copy and move assignment operators can be default
+  /// \private
   Device& operator=(const Device& other) = default;
+  /// \private
   Device& operator=(Device&& other) noexcept = default;
 
   // Destructor can be default
+  /// \private
   ~Device() = default;
 
+  /**
+   * @brief Checks if two devices are equal.
+   *
+   * @param other The device to compare with.
+   * @return true if both type and index match, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   bool operator==(const Device& other) const noexcept {
     return type() == other.type() && index() == other.index();
   }
 
+  /**
+   * @brief Checks if two devices are not equal.
+   *
+   * @param other The device to compare with.
+   * @return true if type or index differ, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   bool operator!=(const Device& other) const noexcept {
     return !(*this == other);
   }
 
+  /**
+   * @brief Sets the device index.
+   *
+   * @param index The new device index.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   void set_index(DeviceIndex index) {
     index_ = index;
   }
 
+  /**
+   * @brief Returns the device type.
+   *
+   * @return The DeviceType of this device.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   DeviceType type() const noexcept {
     return type_;
   }
 
+  /**
+   * @brief Returns the device index.
+   *
+   * @return The device index, or -1 if no specific index is set.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   DeviceIndex index() const noexcept {
     return index_;
   }
 
+  /**
+   * @brief Checks if this device has a specific index.
+   *
+   * @return true if index is not -1, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   bool has_index() const noexcept {
     return index_ != -1;
   }
 
+  /**
+   * @brief Checks if this is a CUDA device.
+   *
+   * @return true if the device type is CUDA, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   bool is_cuda() const noexcept {
     return type_ == DeviceType::CUDA;
   }
 
+  /**
+   * @brief Checks if this is a CPU device.
+   *
+   * @return true if the device type is CPU, false otherwise.
+   *
+   * Minimum compatible version: PyTorch 2.9.
+   */
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;
   }

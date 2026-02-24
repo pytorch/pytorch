@@ -94,9 +94,15 @@ def _compile_submod(gm, prefix):
 
             with inductor_config.patch(inductor_options):
                 compiled_fn = torch._inductor.standalone_compile(
-                    submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
+                    submod,
+                    fake_inputs,
+                    dynamic_shapes="from_tracing_context",
+                    aot=True,
                 )
-            assert isinstance(compiled_fn, AOTCompiledArtifact)
+            if not isinstance(compiled_fn, AOTCompiledArtifact):
+                raise AssertionError(
+                    f"Expected AOTCompiledArtifact, got {type(compiled_fn)}"
+                )
             # _dummy_wrapper is to make call_function happy
             compiled_submod = _dummy_wrapper(compiled_fn)
             with gm.graph.inserting_after(node):
@@ -232,9 +238,15 @@ def regional_inductor(gm, *example_args):
         }
     }):
     """
+
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
+
     with torch.fx.traceback.preserve_node_meta(enable=False):
         gm = _create_inductor_marked_regions(gm)
         gm = _compile_inductor_marked_regions(gm)
+        if torch._functorch.config.force_autograd_cache:
+            from torch._inductor.output_code import RegionalOutputCode
+
+            gm = RegionalOutputCode(gm)
         return gm

@@ -29,20 +29,26 @@ def _flatten(
 ) -> None:
     for k, value in sub_schema.items():
         if isinstance(k, tuple):
-            assert all(isinstance(ki, str) for ki in k)
+            if not all(isinstance(ki, str) for ki in k):
+                raise AssertionError(
+                    f"expected all elements of key tuple to be str, got {k}"
+                )
             key_suffix: Label = k
         elif k is None:
             key_suffix = ()
         else:
-            assert isinstance(k, str)
+            if not isinstance(k, str):
+                raise AssertionError(f"expected key to be str, got {type(k)}")
             key_suffix = (k,)
 
         key: Label = key_prefix + key_suffix
         if isinstance(value, (TimerArgs, GroupedBenchmark)):
-            assert key not in result, f"duplicate key: {key}"
+            if key in result:
+                raise AssertionError(f"duplicate key: {key}")
             result[key] = value
         else:
-            assert isinstance(value, dict)
+            if not isinstance(value, dict):
+                raise AssertionError(f"expected value to be dict, got {type(value)}")
             _flatten(key_prefix=key, sub_schema=value, result=result)
 
 
@@ -53,9 +59,16 @@ def flatten(schema: Definition) -> FlatIntermediateDefinition:
 
     # Ensure that we produced a valid flat definition.
     for k, v in result.items():
-        assert isinstance(k, tuple)
-        assert all(isinstance(ki, str) for ki in k)
-        assert isinstance(v, (TimerArgs, GroupedBenchmark))
+        if not isinstance(k, tuple):
+            raise AssertionError(f"expected key to be tuple, got {type(k)}")
+        if not all(isinstance(ki, str) for ki in k):
+            raise AssertionError(
+                f"expected all elements of key tuple to be str, got {k}"
+            )
+        if not isinstance(v, (TimerArgs, GroupedBenchmark)):
+            raise AssertionError(
+                f"expected value to be TimerArgs or GroupedBenchmark, got {type(v)}"
+            )
     return result
 
 
@@ -71,7 +84,8 @@ def parse_stmts(stmts: str) -> tuple[str, str]:
     """
     stmts = textwrap.dedent(stmts).strip()
     lines: list[str] = stmts.splitlines(keepends=False)
-    assert len(lines) >= 3, f"Invalid string:\n{stmts}"
+    if len(lines) < 3:
+        raise AssertionError(f"Invalid string (expected at least 3 lines):\n{stmts}")
 
     column_header_pattern = r"^Python\s{35}\| C\+\+(\s*)$"
     signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"  # noqa: F841
@@ -85,7 +99,10 @@ def parse_stmts(stmts: str) -> tuple[str, str]:
             f"does not match pattern `{column_header_pattern}`"
         )
 
-    assert re.search(separation_pattern, lines[1])
+    if not re.search(separation_pattern, lines[1]):
+        raise AssertionError(
+            f"Separation line `{lines[1]}` does not match pattern `{separation_pattern}`"
+        )
 
     py_lines: list[str] = []
     cpp_lines: list[str] = []
@@ -98,6 +115,7 @@ def parse_stmts(stmts: str) -> tuple[str, str]:
 
         # Make sure we can round trip for correctness.
         l_from_stmts = f"{py_lines[-1]:<40} | {cpp_lines[-1]:<40}".rstrip()
-        assert l_from_stmts == l.rstrip(), f"Failed to round trip `{l}`"
+        if l_from_stmts != l.rstrip():
+            raise AssertionError(f"Failed to round trip `{l}`")
 
     return "\n".join(py_lines), "\n".join(cpp_lines)

@@ -281,7 +281,6 @@ class CuteDSLOpOverrides(OpOverrides):
             else "mlir_math.absi"
         )
         return CuteDSLOpOverrides._apply_unary_op(
-            # pyrefly: ignore [bad-argument-type]
             x,
             f"cute.TensorSSA({abs_op}({{x}}), {{x}}.shape, {{x}}.dtype)",
         )
@@ -305,8 +304,8 @@ class CuteDSLOpOverrides(OpOverrides):
 
         Raises NotImplementedError for unsigned integer and unsupported dtypes.
         """
-        # Always convert up from bf16 and fp16 TODO on configuring
-        dtype = upcast_compute_type(dtype)
+        if use_compute_types:
+            dtype = upcast_compute_type(dtype)
 
         cute_type = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(dtype)
         if cute_type is None:

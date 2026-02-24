@@ -75,10 +75,10 @@ class BasePruningMethod(ABC):
 
     @classmethod
     def apply(cls, module, name, *args, importance_scores=None, **kwargs):
-        r"""Add pruning on the fly and reparametrization of a tensor.
+        r"""Add pruning on the fly and reparameterization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
-        the reparametrization of a tensor in terms of the original tensor
+        the reparameterization of a tensor in terms of the original tensor
         and the pruning mask.
 
         Args:
@@ -281,11 +281,10 @@ class PruningContainer(BasePruningMethod):
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
             self.add_pruning_method(args)
-        # pyrefly: ignore [bad-argument-type]
+
         elif len(args) == 1:  # only 1 item in a tuple
-            # pyrefly: ignore [index-error]
             self._tensor_name = args[0]._tensor_name
-            # pyrefly: ignore [index-error]
+
             self.add_pruning_method(args[0])
         else:  # manual construction from list or other iterable (or no args)
             for method in args:
@@ -428,10 +427,10 @@ class Identity(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name):  # type: ignore[override]
-        r"""Add pruning on the fly and reparametrization of a tensor.
+        r"""Add pruning on the fly and reparameterization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
-        the reparametrization of a tensor in terms of the original tensor
+        the reparameterization of a tensor in terms of the original tensor
         and the pruning mask.
 
         Args:
@@ -483,10 +482,10 @@ class RandomUnstructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, amount):  # type: ignore[override]
-        r"""Add pruning on the fly and reparametrization of a tensor.
+        r"""Add pruning on the fly and reparameterization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
-        the reparametrization of a tensor in terms of the original tensor
+        the reparameterization of a tensor in terms of the original tensor
         and the pruning mask.
 
         Args:
@@ -542,10 +541,10 @@ class L1Unstructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, amount, importance_scores=None):  # type: ignore[override]
-        r"""Add pruning on the fly and reparametrization of a tensor.
+        r"""Add pruning on the fly and reparameterization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
-        the reparametrization of a tensor in terms of the original tensor
+        the reparameterization of a tensor in terms of the original tensor
         and the pruning mask.
 
         Args:
@@ -653,10 +652,10 @@ class RandomStructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, amount, dim=-1):  # type: ignore[override]
-        r"""Add pruning on the fly and reparametrization of a tensor.
+        r"""Add pruning on the fly and reparameterization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
-        the reparametrization of a tensor in terms of the original tensor
+        the reparameterization of a tensor in terms of the original tensor
         and the pruning mask.
 
         Args:
@@ -769,10 +768,10 @@ class LnStructured(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, amount, n, dim, importance_scores=None):  # type: ignore[override]
-        r"""Add pruning on the fly and reparametrization of a tensor.
+        r"""Add pruning on the fly and reparameterization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
-        the reparametrization of a tensor in terms of the original tensor
+        the reparameterization of a tensor in terms of the original tensor
         and the pruning mask.
 
         Args:
@@ -820,10 +819,10 @@ class CustomFromMask(BasePruningMethod):
 
     @classmethod
     def apply(cls, module, name, mask):  # type: ignore[override]
-        r"""Add pruning on the fly and reparametrization of a tensor.
+        r"""Add pruning on the fly and reparameterization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
-        the reparametrization of a tensor in terms of the original tensor
+        the reparameterization of a tensor in terms of the original tensor
         and the pruning mask.
 
         Args:
@@ -835,9 +834,9 @@ class CustomFromMask(BasePruningMethod):
 
 
 def identity(module, name):
-    r"""Apply pruning reparametrization without pruning any units.
+    r"""Apply pruning reparameterization without pruning any units.
 
-    Applies pruning reparametrization to the tensor corresponding to the
+    Applies pruning reparameterization to the tensor corresponding to the
     parameter called ``name`` in ``module`` without actually pruning any
     units. Modifies module in place (and also return the modified module)
     by:

@@ -381,6 +381,7 @@ class CodeGen:
         # Render each argument on its own line
         expanded_def: bool = False,
         record_func: bool = False,
+        additional_meta: Optional[list[str]] = None,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -417,7 +418,10 @@ class CodeGen:
             global_name = namespace.create_name(name_hint, obj)
 
             if global_name in globals_:
-                assert globals_[global_name] == obj
+                if globals_[global_name] != obj:
+                    raise AssertionError(
+                        f"Global name {global_name} already assigned to different object"
+                    )
                 return global_name
             globals_[global_name] = obj
             return global_name
@@ -567,10 +571,26 @@ class CodeGen:
             nonlocal prev_summary_str
 
             if node.op not in {"placeholder", "output"}:
+                additional_meta_str = ""
+                if additional_meta:
+                    parts = []
+                    for key in additional_meta:
+                        if key in node.meta:
+                            parts.append(f"{key}: {node.meta[key]}")
+                    if parts:
+                        additional_meta_str = f"# {', '.join(parts)} "
+
                 annotation_str = ""
                 annotation = node.meta.get("custom", {})
+                annotation_trunc = {}
                 if annotation:
-                    annotation_str = f" Annotation: {annotation}"
+                    for key, value in annotation.items():
+                        value_str = str(value)
+                        if len(value_str) > 40:
+                            annotation_trunc[key] = value_str[:40] + "..."
+                        else:
+                            annotation_trunc[key] = value
+                    annotation_str = f" Annotation: {annotation_trunc}"
 
                 stack_trace_str = "No stacktrace found for following nodes"
                 if stack_trace := node.stack_trace:
@@ -586,13 +606,15 @@ class CodeGen:
                     ac_graph_id = node.meta.get("ac_graph_id", None)
 
                     if recompute is not None and ac_graph_id is not None:
-                        maybe_recompute_info = f" # ac_graph_id: {str(ac_graph_id)} - {str(recompute.name)}"
+                        maybe_recompute_info = (
+                            f" ac_graph_id: {str(ac_graph_id)} - {str(recompute.name)}"
+                        )
                     elif recompute is not None:
-                        maybe_recompute_info = f" # recompute: {str(recompute.name)}"
+                        maybe_recompute_info = f" recompute: {str(recompute.name)}"
                     elif ac_graph_id is not None:
-                        maybe_recompute_info = f" # ac_graph_id: {str(ac_graph_id)}"
+                        maybe_recompute_info = f" ac_graph_id: {str(ac_graph_id)}"
 
-                summary_str = f"\n{dim(f'#{annotation_str}{maybe_recompute_info} {stack_trace_str}')}\n"
+                summary_str = f"\n{dim(f'{additional_meta_str}#{annotation_str}{maybe_recompute_info} {stack_trace_str}')}\n"
 
                 if summary_str != prev_summary_str:
                     prev_summary_str = summary_str
@@ -649,7 +671,10 @@ class CodeGen:
                     if is_plain:
                         maybe_type_annotation = f': "{core}"'
                     elif type(meta_val) is DTensor:
-                        assert dtensorspec_format_shard_order_str is not None
+                        if dtensorspec_format_shard_order_str is None:
+                            raise AssertionError(
+                                "dtensorspec_format_shard_order_str is None for DTensor"
+                            )
                         dtensor_meta = dtensorspec_format_shard_order_str(
                             meta_val._spec.placements,  # type: ignore[attr-defined]
                             meta_val._spec.shard_order,  # type: ignore[attr-defined]
@@ -688,7 +713,10 @@ class CodeGen:
                 body.append('"""\n')
 
             if node.op == "placeholder":
-                assert isinstance(node.target, str)
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"Expected node.target to be str, got {type(node.target)}"
+                    )
                 maybe_default_arg = (
                     "" if not node.args else f" = {_get_repr(node.args[0])}"
                 )
@@ -700,20 +728,29 @@ class CodeGen:
                     body.append(f"{repr(node)} = {raw_name}\n")
                 return
             elif node.op == "call_method":
-                assert isinstance(node.target, str)
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"Expected node.target to be str for call_method, got {type(node.target)}"
+                    )
                 body.append(
                     f"{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.target)}"
                     f"({_format_args(node.args[1:], node.kwargs)})"
                 )
                 return
             elif node.op == "call_function":
-                assert callable(node.target)
+                if not callable(node.target):
+                    raise AssertionError(
+                        f"Expected node.target to be callable, got {type(node.target)}"
+                    )
                 # pretty print operators
                 if (
                     getattr(node.target, "__module__", "") == "_operator"
                     and node.target.__name__ in magic_methods
                 ):
-                    assert isinstance(node.args, tuple)
+                    if not isinstance(node.args, tuple):
+                        raise AssertionError(
+                            f"Expected node.args to be tuple, got {type(node.args)}"
+                        )
                     body.append(
                         f"{repr(node)}{maybe_type_annotation} = "
                         f"{magic_methods[node.target.__name__].format(*(_get_repr(a) for a in node.args))}"
@@ -754,14 +791,20 @@ class CodeGen:
                     wrapped_fns.setdefault(global_name)
                 return
             elif node.op == "call_module":
-                assert isinstance(node.target, str)
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"Expected node.target to be str for call_module, got {type(node.target)}"
+                    )
                 body.append(
                     f"{repr(node)}{maybe_type_annotation} = "
                     f"{_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})"
                 )
                 return
             elif node.op == "get_attr":
-                assert isinstance(node.target, str)
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"Expected node.target to be str for get_attr, got {type(node.target)}"
+                    )
                 body.append(
                     f"{repr(node)}{maybe_type_annotation} = {_format_target(root_module, node.target)}"
                 )
@@ -923,7 +966,8 @@ class _PyTreeCodeGen(CodeGen):
             return out
         if not isinstance(out, (list, tuple)):
             out = [out]
-        assert self.pytree_info.out_spec is not None
+        if self.pytree_info.out_spec is None:
+            raise AssertionError("pytree_info.out_spec is None")
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
     def _format_annotations(self, free_vars: list[str], expanded_def: bool) -> str:
@@ -1155,7 +1199,8 @@ class Graph(_GraphBase):
     @compatibility(is_backward_compatible=False)
     def output_node(self) -> Node:
         output_node = next(iter(reversed(self.nodes)))
-        assert output_node.op == "output"
+        if output_node.op != "output":
+            raise AssertionError(f"Expected output node, got op={output_node.op}")
         return output_node
 
     @compatibility(is_backward_compatible=False)
@@ -1226,7 +1271,10 @@ class Graph(_GraphBase):
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         g._codegen = copy.deepcopy(self._codegen)
         if output_vals is not None:
-            assert isinstance(output_vals, tuple)
+            if not isinstance(output_vals, tuple):
+                raise AssertionError(
+                    f"Expected output_vals to be tuple, got {type(output_vals)}"
+                )
             output_val, old_output_node = output_vals
             new_output_node = g.output(
                 # pyrefly: ignore [bad-argument-type]
@@ -1276,11 +1324,13 @@ class Graph(_GraphBase):
         if not args:
             args = ()
         else:
-            assert isinstance(args, tuple), "args must be a tuple"
+            if not isinstance(args, tuple):
+                raise AssertionError(f"args must be a tuple, got {type(args)}")
         if not kwargs:
             kwargs = immutable_dict()
         else:
-            assert isinstance(kwargs, dict), "kwargs must be a dict"
+            if not isinstance(kwargs, dict):
+                raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
@@ -1340,7 +1390,7 @@ class Graph(_GraphBase):
                 f(to_erase)
 
         self._find_nodes_lookup_table.remove(to_erase)
-        # pyrefly: ignore [missing-attribute]
+
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
@@ -1373,7 +1423,8 @@ class Graph(_GraphBase):
         """
         if n is None:
             return self.inserting_after(self._root)
-        assert n.graph == self, "Node to insert before is not in graph."
+        if n.graph != self:
+            raise AssertionError("Node to insert before is not in graph.")
         return _InsertPoint(self, n.prepend)
 
     @compatibility(is_backward_compatible=True)
@@ -1397,7 +1448,8 @@ class Graph(_GraphBase):
         """
         if n is None:
             return self.inserting_before(self._root)
-        assert n.graph == self, "Node to insert after is not in graph."
+        if n.graph != self:
+            raise AssertionError("Node to insert after is not in graph.")
         return _InsertPoint(self, n.append)
 
     @compatibility(is_backward_compatible=True)
@@ -1659,8 +1711,10 @@ class Graph(_GraphBase):
         """
         args = map_arg(node.args, arg_transform)
         kwargs = map_arg(node.kwargs, arg_transform)
-        assert isinstance(args, tuple)
-        assert isinstance(kwargs, dict)
+        if not isinstance(args, tuple):
+            raise AssertionError(f"Expected args to be tuple, got {type(args)}")
+        if not isinstance(kwargs, dict):
+            raise AssertionError(f"Expected kwargs to be dict, got {type(kwargs)}")
         result_node = self.create_node(
             node.op, node.target, args, kwargs, node.name, node.type
         )
@@ -1694,7 +1748,8 @@ class Graph(_GraphBase):
         if callable(target):
             op = target.__name__
         else:
-            assert isinstance(target, str)
+            if not isinstance(target, str):
+                raise AssertionError(f"Expected target to be str, got {type(target)}")
             op = target
             if _is_magic(op):
                 op = op[2:-2]
@@ -1712,6 +1767,7 @@ class Graph(_GraphBase):
         colored: bool = False,
         expanded_def: bool = False,
         record_func: bool = False,
+        additional_meta: Optional[list[str]] = None,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1780,6 +1836,7 @@ class Graph(_GraphBase):
                 colored=colored,
                 expanded_def=expanded_def,
                 record_func=record_func,
+                additional_meta=additional_meta,
             )
 
     def _python_code(
@@ -1793,6 +1850,7 @@ class Graph(_GraphBase):
         colored: bool = False,
         expanded_def: bool = False,
         record_func: bool = False,
+        additional_meta: Optional[list[str]] = None,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -1804,6 +1862,7 @@ class Graph(_GraphBase):
             colored=colored,
             expanded_def=expanded_def,
             record_func=record_func,
+            additional_meta=additional_meta,
         )
 
     def __str__(self) -> str:

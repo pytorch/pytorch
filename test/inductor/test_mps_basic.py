@@ -62,6 +62,28 @@ class MPSBasicTests(TestCase):
     def test_atanh(self):
         self.common(lambda x: x.atanh(), (torch.rand(1024),))
 
+    def test_tanh(self):
+        self.common(lambda x: x.tanh(), (torch.rand(1024),))
+
+    def test_tanh_large_values(self):
+        # Test that tanh handles large values correctly (should saturate to ±1)
+        x = torch.tensor([-100.0, -50.0, -15.0, 0.0, 15.0, 50.0, 100.0], device="mps")
+
+        @torch.compile
+        def fn(x):
+            return x.tanh()
+
+        result = fn(x)
+        assert torch.allclose(result[0], torch.tensor(-1.0, device="mps")), (
+            "tanh(-100) should be -1"
+        )
+        assert torch.allclose(result[-1], torch.tensor(1.0, device="mps")), (
+            "tanh(100) should be +1"
+        )
+        assert not torch.isnan(result).any(), (
+            "tanh should not produce NaN for large values"
+        )
+
     def test_floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
 
@@ -155,6 +177,20 @@ class MPSBasicTests(TestCase):
         A = torch.diag(torch.tensor([20.0, 0.5, 5.0], dtype=torch.float32) ** 2)
         self.common(fn, (A,), check_lowp=False)
 
+    def test_large_reduction(self):
+        def fn(a, b):
+            return (a[:, None] - b[None, :]).sum()
+
+        a = torch.randn(32, device="mps")
+        b = torch.randn(64, device="mps")
+        self.common(
+            fn,
+            (
+                a,
+                b,
+            ),
+        )
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
@@ -173,6 +209,23 @@ class MPSBasicTestsAOTI(TestCase):
         inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
         m = M().to("mps")
         self.check_model(m, inp)
+
+    def test_tanh_codegen(self):
+        # Verify that tanh uses metal::precise::tanh in generated Metal shader
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.tanh()
+
+        example_inputs = (torch.randn(1024, device="mps"),)
+        model = Model()
+
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            # Verify metal::precise::tanh is used (not clamped version)
+            FileCheck().check("metal::precise::tanh").run(src_code)
 
     def test_fallback_mps(self):
         class M(torch.nn.Module):
