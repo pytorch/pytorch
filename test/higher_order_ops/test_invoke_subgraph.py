@@ -3536,6 +3536,54 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(sf.grad, sf_c.grad)
 
 
+    def test_is_pure_dynamic_shapes(self):
+        @nested_compile_region(is_pure=True)
+        def gn(x, y):
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            a = gn(x, y)
+            b = gn(x, y)
+            return a + b
+
+        x = torch.randn(8, 4, requires_grad=True)
+        y = torch.randn(8, 4, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(y, 0)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        torch._dynamo.mark_dynamic(x_clone, 0)
+        torch._dynamo.mark_dynamic(y_clone, 0)
+
+        call_count = 0
+        orig_speculate = torch._dynamo.variables.higher_order_ops.speculate_subgraph_with_auto_output_flattening
+
+        def counting_speculate(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return orig_speculate(*args, **kwargs)
+
+        with mock.patch.object(
+            torch._dynamo.variables.higher_order_ops,
+            "speculate_subgraph_with_auto_output_flattening",
+            counting_speculate,
+        ):
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(
+                x_clone, y_clone
+            )
+
+        self.assertEqual(call_count, 1)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(
     [

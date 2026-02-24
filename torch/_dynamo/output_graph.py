@@ -1203,10 +1203,12 @@ class OutputGraph(OutputGraphCommon):
 
     def resolve_source_value(self, source: Source) -> Any:
         """Resolve the runtime value a Source points to using root_tx's frame."""
+        # The third arg is a memoization cache for recursive get_value calls.
+        # A plain dict suffices since we discard it after this call.
         return source.get_value(
             {"G": self.root_tx.f_globals, "L": self.root_tx.f_locals},
             {},
-            weakref.WeakKeyDictionary(),
+            {},  # type: ignore[arg-type]
         )
 
     def count_calls(self) -> int:

@@ -700,18 +700,7 @@ def nested_compile_region(
     if options is not None:
         from torch._dynamo import config as dynamo_config
 
-        # Only gate the regional compile check on the compiler fields,
-        # not on is_pure alone.
-        has_compiler_fields = (
-            options.fw_compiler is not None
-            or options.bw_compiler is not None
-            or options.partitioner is not None
-            or options.decompositions is not None
-        )
-        if (
-            has_compiler_fields
-            and not dynamo_config.enable_invoke_subgraph_regional_compile
-        ):
+        if not dynamo_config.enable_invoke_subgraph_regional_compile:
             raise RuntimeError(
                 "nested_compile_region config is an experimental feature for testing only."
             )

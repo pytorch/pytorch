@@ -747,9 +747,10 @@ class PureSubgraphCacheEntry:
     #   idx == -1 → captured variable; data is the Source object
     freevar_mapping: list[tuple[int, Any]]
     single_tensor_output: bool
-    # Fake tensor metadata for each output, cached from the first trace
-    # so we don't need to re-run body_gmod on cache hit.
-    output_metadata: list[Any]  # list[FakeTensor]
+    # Per-output tensor metadata (shape, stride, dtype, device, requires_grad)
+    # cached from the first trace so we can construct fresh FakeTensors on
+    # cache hit without re-running body_gmod.
+    output_metadata: list[tuple[Any, ...]]
     # Sources of all flattened args/kwargs (positional + keyword) from the
     # first trace. On cache hit, we build a replacement dict mapping old arg
     # sources → new arg sources so that captured variable sources can be
