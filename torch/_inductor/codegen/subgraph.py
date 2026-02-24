@@ -163,7 +163,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
-            example_inputs=self.benchmark_inputs,
+            example_inputs=self.example_inputs,
             shape_env=V.graph._shape_env,
             cpp_wrapper=V.graph.cpp_wrapper,
             aot_mode=V.graph.aot_mode,
@@ -187,7 +187,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 **self.config_patches,
             }
             with config.patch(benchmark_config):
-                bm_graph_lowering.run(*self.benchmark_inputs)
+                bm_graph_lowering.run(*self.example_inputs)
                 return bm_graph_lowering.compile_to_module()
 
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
