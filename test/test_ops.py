@@ -2584,6 +2584,7 @@ fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
 
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
+    skip("nn.functional.bilinear"), # skip in ROCm fork, according upstream https://github.com/pytorch/pytorch/issues/159150
     skip("sparse.sampled_addmm"),
     skip("linalg.pinv"),
     skip("linalg.pinv", "hermitian"),
