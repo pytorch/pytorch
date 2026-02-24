@@ -356,11 +356,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.resolve_cls_plain_attr(tx, name, cls_attr, source)
 
         # Step 6-7: Metaclass non-data descriptor or plain attr.
-        # For type(cls) is type, these are wrapper_descriptors like
-        # type.__call__, type.__repr__, type.mro, etc.  We use
-        # GetAttrVariable (not VariableTracker.build) because these are
-        # metaclass-level methods that aren't directly callable on the class
-        # during tracing — they must be deferred to runtime.
+        # These are non-data descriptors on the metaclass (e.g. type.__call__,
+        # type.__subclasses__, type.mro).  We use GetAttrVariable to defer to
+        # runtime rather than VariableTracker.build, because build would create
+        # a variable for the raw C-level descriptor which then fails when
+        # called (e.g. type.__subclasses__ is a method_descriptor that dynamo
+        # can't trace).  GetAttrVariable defers the access and lets
+        # call_method handle it.
         if meta_attr is not NO_SUCH_SUBOBJ:
             return variables.GetAttrVariable(self, name, None, source=source)
 
@@ -421,6 +423,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             func = cls_attr.__get__(None, self.value)
             return VariableTracker.build(tx, func, source)
 
+        # property and _tuplegetter accessed on the class return the
+        # descriptor itself (descriptor.__get__(None, cls) is descriptor).
+        # Build directly — no need to invoke __get__.
+        if isinstance(cls_attr, (property, _collections._tuplegetter)):
+            return VariableTracker.build(tx, cls_attr, source)
+
         # Comparison dunders inherited from object — defer to runtime.
         if name in cmp_name_to_op_mapping and not isinstance(
             cls_attr, types.FunctionType
@@ -461,7 +469,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return VariableTracker.build(tx, cls_attr, source)
             return variables.GetAttrVariable(self, name, None, source=source)
 
-        # Everything else: FunctionType, property, etc.
+        # Everything else: FunctionType, etc.
         return VariableTracker.build(tx, cls_attr, source)
 
     def resolve_cls_plain_attr(
