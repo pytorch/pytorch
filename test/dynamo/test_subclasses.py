@@ -374,6 +374,41 @@ class CtxSubclassTensor(torch.Tensor):
         return return_and_correct_aliasing(func, args, kwargs, out)
 
 
+class DeferredInitSubclass(torch.Tensor):
+    """
+    A traceable wrapper subclass that calls super().__init__() BEFORE
+    setting instance attributes (similar to torchao patterns).
+    """
+
+    @staticmethod
+    def __new__(cls, data, scale):
+        return torch.Tensor._make_wrapper_subclass(
+            cls, data.shape, dtype=data.dtype, device=data.device
+        )
+
+    def __init__(self, data, scale):
+        super().__init__()
+        self._data = data
+        self._scale = scale
+
+    def __tensor_flatten__(self):
+        return ["_data"], {"_scale": self._scale}
+
+    @classmethod
+    def __tensor_unflatten__(cls, inner_tensors, ctx, outer_size, outer_stride):
+        return cls(inner_tensors["_data"], ctx["_scale"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        args_inner = pytree.tree_map_only(DeferredInitSubclass, lambda x: x._data, args)
+        out = func(*args_inner, **kwargs)
+        if isinstance(out, torch.Tensor):
+            return DeferredInitSubclass(out, args[0]._scale)
+        return out
+
+
 def func(a):
     return a.sin()
 
@@ -1831,6 +1866,37 @@ s50 > 3""",
             "Tensor subclass method __metadata_guard__ must be a classmethod",
             lambda: torch.compile(lambda x: x * x)(x),
         )
+
+    def test_tensor_subclass_metadata_with_symint(self):
+        # TENSOR_SUBCLASS_METADATA_MATCH replaces SymInts in metadata with
+        # _AnyCompare sentinels so that (a) deepcopy doesn't pull in the
+        # ShapeEnv, (b) dynamic dims aren't over-guarded, and (c) unbacked
+        # SymInts don't cause errors.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        sym_ctx = StatelessSymbolicContext(
+            dynamic_sizes=[DimDynamic.DYNAMIC],
+        )
+        fake_t = fake_mode.from_tensor(torch.randn(8), symbolic_context=sym_ctx)
+        sym_int = fake_t.shape[0]  # SymInt with hint 8
+
+        # Construct a real tensor whose metadata contains a SymInt.
+        x1 = CtxSubclassTensor(torch.randn(8, 8), sym_int)
+
+        @torch.compile(backend="eager", dynamic=True, fullgraph=True)
+        def f(x):
+            return x * x
+
+        f(x1)
+
+        # Without the fix, the guard stores the SymInt's hint value (8)
+        # and recompiles when it sees a different constant. With the fix,
+        # the SymInt position is replaced by _AnyCompare so the guard
+        # passes for any constant value.
+        x2 = CtxSubclassTensor(torch.randn(8, 8), 3)
+        _check_recompiles(self, f, (x1,), (x2,), False)
 
     def test_subclass_constructor_proxying(self):
         import dataclasses
@@ -3327,6 +3393,50 @@ class <lambda>(torch.nn.Module):
         )
 """,  # noqa: B950
         )
+
+    def test_wrap_tensor_returns_user_defined_object_for_self_in_init(self):
+        """
+        Test that wrap_tensor returns UserDefinedObjectVariable when wrapping
+        the `self` parameter in an __init__ method of a traceable wrapper subclass.
+        """
+        from unittest.mock import MagicMock
+
+        from torch._dynamo.source import LocalSource
+        from torch._dynamo.variables.builder import VariableBuilder
+        from torch._dynamo.variables.user_defined import UserDefinedObjectVariable
+        from torch._guards import tracing, TracingContext
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        # Create a traceable wrapper subclass tensor
+        data = torch.randn(4, 4)
+        tensor = DeferredInitSubclass(data, 2.0)
+        self.assertTrue(is_traceable_wrapper_subclass(tensor))
+
+        # Mock the InstructionTranslator (tx) with required attributes
+        mock_tx = MagicMock()
+        mock_tx.f_code.co_name = "__init__"
+        mock_tx.f_code.co_argcount = 3
+        mock_tx.f_code.co_varnames = ("self", "data", "scale")
+        mock_tx.output.side_effects = {}
+        mock_tx.output.input_source_to_var = {}
+        mock_tx.output.variable_tracker_cache = MagicMock()
+        mock_tx.output.variable_tracker_cache.get.return_value = None
+
+        # Create LocalSource for 'self' parameter
+        source = LocalSource(local_name="self", is_input=True)
+
+        # Create a TracingContext and use tracing() context manager
+        ctx = TracingContext(fake_mode=None)
+        with tracing(ctx):
+            builder = VariableBuilder(mock_tx, source)
+
+            # Call wrap_tensor - with the fix enabled, this should return
+            # UserDefinedObjectVariable instead of trying to fake the tensor
+            result = builder.wrap_tensor(tensor)
+
+        # With the fix: expect UserDefinedObjectVariable
+        # Without the fix: would try to fake and potentially fail
+        self.assertIsInstance(result, UserDefinedObjectVariable)
 
 
 instantiate_parametrized_tests(SubclassTests)
