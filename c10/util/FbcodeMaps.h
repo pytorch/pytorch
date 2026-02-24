@@ -18,11 +18,15 @@ template <typename Key, typename Value>
 using FastMap = folly::F14FastMap<Key, Value>;
 template <typename Key>
 using FastSet = folly::F14FastSet<Key>;
+template <typename Key>
+using HashedKey = folly::F14HashedKey<Key>;
 #else
 template <typename Key, typename Value>
 using FastMap = std::unordered_map<Key, Value>;
 template <typename Key>
 using FastSet = std::unordered_set<Key>;
+template <typename Key>
+using HashedKey = Key;
 #endif
 } // namespace c10
 

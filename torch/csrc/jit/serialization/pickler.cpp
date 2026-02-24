@@ -15,6 +15,23 @@
 
 namespace torch::jit {
 
+namespace {
+
+c10::HashedKey<std::string> buildPushGlobalKey(
+    std::string_view module_name,
+    std::string_view class_name) {
+  std::string key;
+  key.reserve(module_name.size() + class_name.size() + 2);
+  key.append(module_name.data(), module_name.size());
+  key.push_back('\n');
+  key.append(class_name.data(), class_name.size());
+  key.push_back('\n');
+
+  return c10::HashedKey<std::string>{std::move(key)};
+}
+
+} // namespace
+
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
@@ -163,7 +180,9 @@ void Pickler::pushDevice(const IValue& ivalue) {
   auto deviceStr = device.str();
   auto it = memoized_devices_map_.find(deviceStr);
   if (it == memoized_devices_map_.end()) {
-    pushGlobal("torch", "device");
+    static const c10::HashedKey<std::string> kTorchDevice{
+        buildPushGlobalKey("torch", "device")};
+    pushGlobal(kTorchDevice);
     pushString(deviceStr);
     push<PickleOpCode>(PickleOpCode::TUPLE1);
     push<PickleOpCode>(PickleOpCode::REDUCE);
@@ -179,7 +198,9 @@ void Pickler::pushRRef(const IValue& ivalue) {
   auto rrefInterface = ivalue.toRRef();
   auto rref =
       c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(rrefInterface);
-  pushGlobal("torch.distributed.rpc", "rref");
+  static const c10::HashedKey<std::string> kTorchDistributedRpcRref{
+      buildPushGlobalKey("torch.distributed.rpc", "rref")};
+  pushGlobal(kTorchDistributedRpcRref);
   auto& ctx = distributed::rpc::RRefContext::getInstance();
   auto rrefForkData = ctx.prepareChildFork(rref);
   push<PickleOpCode>(PickleOpCode::MARK);
@@ -340,13 +361,10 @@ void Pickler::pushBytes(const std::string& string) {
 void Pickler::pushGlobal(
     std::string_view module_name,
     std::string_view class_name) {
-  std::string key;
-  key.reserve(module_name.size() + class_name.size() + 2);
-  key.append(module_name.data(), module_name.size());
-  key.push_back('\n');
-  key.append(class_name.data(), class_name.size());
-  key.push_back('\n');
+  pushGlobal(buildPushGlobalKey(module_name, class_name));
+}
 
+void Pickler::pushGlobal(const c10::HashedKey<std::string>& key) {
   const auto memo_entry = memoized_globals_map_.find(key);
   if (memo_entry == memoized_globals_map_.end()) {
     push<PickleOpCode>(PickleOpCode::GLOBAL);
@@ -368,7 +386,9 @@ void Pickler::pushTensor(const IValue& ivalue) {
 }
 
 void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
-  pushGlobal("torch._utils", "_rebuild_sparse_tensor");
+  static const c10::HashedKey<std::string> kTorchUtilsRebuildSparseTensor{
+      buildPushGlobalKey("torch._utils", "_rebuild_sparse_tensor")};
+  pushGlobal(kTorchUtilsRebuildSparseTensor);
   push<PickleOpCode>(PickleOpCode::MARK);
   // layout
   auto layout = tensor.layout();
@@ -408,7 +428,9 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
       break;
   }
   // backward_hooks
-  pushGlobal("collections", "OrderedDict");
+  static const c10::HashedKey<std::string> kCollectionsOrderedDict{
+      buildPushGlobalKey("collections", "OrderedDict")};
+  pushGlobal(kCollectionsOrderedDict);
   push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
   // Construct the collections.OrderedDict for the backward_hooks
   push<PickleOpCode>(PickleOpCode::REDUCE);
@@ -487,7 +509,9 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   pushIValue(tensor.requires_grad());
 
   // backward_hooks
-  pushGlobal("collections", "OrderedDict");
+  static const c10::HashedKey<std::string> kCollectionsOrderedDict{
+      buildPushGlobalKey("collections", "OrderedDict")};
+  pushGlobal(kCollectionsOrderedDict);
   push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
   // Construct the collections.OrderedDict for the backward_hooks
   push<PickleOpCode>(PickleOpCode::REDUCE);
@@ -564,7 +588,9 @@ void Pickler::pushDouble(double value) {
 }
 void Pickler::pushComplexDouble(const IValue& value) {
   c10::complex<double> d = value.toComplexDouble();
-  pushGlobal("builtins", "complex");
+  static const c10::HashedKey<std::string> kBuiltinsComplex{
+      buildPushGlobalKey("builtins", "complex")};
+  pushGlobal(kBuiltinsComplex);
   pushIValue(d.real());
   pushIValue(d.imag());
   push<PickleOpCode>(PickleOpCode::TUPLE2);
@@ -583,7 +609,9 @@ void Pickler::pushLong(const std::string& data) {
 }
 
 void Pickler::pushTensorReference(const IValue& ivalue) {
-  pushGlobal("torch.jit._pickle", "build_tensor_from_id");
+  static const c10::HashedKey<std::string> kTorchJitPickleBuildTensorFromId{
+      buildPushGlobalKey("torch.jit._pickle", "build_tensor_from_id")};
+  pushGlobal(kTorchJitPickleBuildTensorFromId);
   tensor_table_->push_back(ivalue.toTensor());
   auto tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
@@ -601,7 +629,9 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 // serialization
 void Pickler::startTypeTag() {
   if (tag_aggregates_) {
-    pushGlobal("torch.jit._pickle", "restore_type_tag");
+    static const c10::HashedKey<std::string> kTorchJitPickleRestoreTypeTag{
+        buildPushGlobalKey("torch.jit._pickle", "restore_type_tag")};
+    pushGlobal(kTorchJitPickleRestoreTypeTag);
   }
 }
 namespace {
