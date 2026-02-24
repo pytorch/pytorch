@@ -1090,7 +1090,7 @@ if(USE_ROCM)
     endif()
 
     # ROCM-SMI needed to support symmetric memory
-    if (USE_DISTRIBUED AND UNIX)
+    if(USE_DISTRIBUTED AND UNIX)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         rocm_smi64
       )
