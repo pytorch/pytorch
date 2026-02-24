@@ -394,7 +394,11 @@ class Shard(torch._C._distributed.Shard):
             group=(mesh, mesh_dim),
         )
 
-        result = self._maybe_unpad_tensor(result, logical_dim_size, num_chunks)
+        # Narrow to the exact logical dim size. This both removes any
+        # padding added by _maybe_pad_tensor and ensures the correct
+        # symbolic shape under torch.compile (where all_gather produces
+        # n * ceil(s/n) which SymPy cannot simplify back to s).
+        result = result.narrow(self.dim, 0, logical_dim_size)
 
         return result
 
