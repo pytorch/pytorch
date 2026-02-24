@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     MI350_ARCH,
     parametrize,
+    skipIfRocmArch,
     skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
