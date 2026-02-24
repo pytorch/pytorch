@@ -106,6 +106,10 @@ class OutputAliasInfo:
     dynamic_dims: Optional[set[int]]
     # requires_grad
     requires_grad: bool
+    # Whether this output participates in the backward pass.  Normally the
+    # same as requires_grad, but False for views created under no_grad() that
+    # inherit requires_grad from their base without having a grad_fn.
+    requires_grad_for_backward: bool
     # Sequence of ViewMeta objects.
     #
     # Provides us the means to re-run view functions on other tensors.
