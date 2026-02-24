@@ -70,7 +70,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: opmicrobenchmark-build
     with:
-      timeout-minutes: 120
+      timeout-minutes: 240
       build-environment: ${{ needs.opmicrobenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
@@ -108,7 +108,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: opmicrobenchmark-build-b200
     with:
-      timeout-minutes: 120
+      timeout-minutes: 240
       build-environment: ${{ needs.opmicrobenchmark-build-b200.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
@@ -143,7 +143,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: opmicrobenchmark-build-rocm
     with:
-      timeout-minutes: 250
+      timeout-minutes: 360
       build-environment: ${{ needs.opmicrobenchmark-build-rocm.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}
