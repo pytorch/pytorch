@@ -7163,9 +7163,9 @@ class ShapeEnv:
         mutable state. SymNode.expr uses _replacements_version_counter (which
         tracks only replacement changes) to cache calls to replace() (and
         transitively this method), so depending on other state would cause
-        stale cache results. (Note: _set_replacement, called for path
-        compression, may read other fields like var_to_range, but those are
-        side effects that do not affect the returned value.)
+        stale cache results. (Note: _set_replacement,  may read other fields
+        like var_to_range, but those are side effects that do not affect the
+        returned value.)
         """
         if a not in self.replacements:
             return a
