@@ -42,13 +42,18 @@ def _wrap_tma_args(args: list[Any], kernel_fn: CachingAutotuner) -> list[Any]:
     signature = kernel_fn.triton_meta.get("signature", {})
     sig_items = list(signature.items())
 
-    # Quick check: any TMA descriptors at all?
+    # Track args index separately from sig_items index since the signature
+    # may include constexpr entries that are not present in args.
     tma_indices = []
-    for i, (name, sig_type) in enumerate(sig_items):
+    arg_idx = 0
+    for name, sig_type in sig_items:
+        if isinstance(sig_type, str) and sig_type == "constexpr":
+            continue
         if isinstance(sig_type, str) and (
             sig_type == "nvTmaDesc" or sig_type.startswith("tensordesc<")
         ):
-            tma_indices.append((i, name, sig_type))
+            tma_indices.append((arg_idx, name, sig_type))
+        arg_idx += 1
 
     if not tma_indices:
         return args
