@@ -288,14 +288,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
-    def _lookup_cls_mro_attr(self, name: str) -> object:
+    def lookup_cls_mro_attr(self, name: str) -> object:
         """Walk cls.__mro__ only (not the metaclass chain) to find *name*."""
         for base in self.value.__mro__:
             if name in base.__dict__:
                 return base.__dict__[name]
         return NO_SUCH_SUBOBJ
 
-    def _lookup_metaclass_attr(self, name: str) -> object:
+    def lookup_metaclass_attr(self, name: str) -> object:
         """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
         for base in type(self.value).__mro__:
             if name in base.__dict__:
@@ -342,27 +342,32 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Step 1-2: Metaclass data descriptors.
         # For type(cls) is type, these are C-level getset/member descriptors
         # for __dict__, __mro__, __name__, __qualname__, __doc__, etc.
-        meta_attr = self._lookup_metaclass_attr(name)
+        meta_attr = self.lookup_metaclass_attr(name)
         if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
-            return self._resolve_meta_data_descriptor(tx, name, meta_attr, source)
+            return self.resolve_meta_data_descriptor(tx, name, meta_attr, source)
 
         # Step 3-5: Class MRO lookup.
-        cls_attr = self._lookup_cls_mro_attr(name)
+        cls_attr = self.lookup_cls_mro_attr(name)
         if cls_attr is not NO_SUCH_SUBOBJ:
             if hasattr(type(cls_attr), "__get__"):
                 # Step 4: Descriptor — invoke __get__(None, cls).
-                return self._resolve_cls_descriptor(tx, name, cls_attr, source)
+                return self.resolve_cls_descriptor(tx, name, cls_attr, source)
             # Step 5: Plain attribute.
-            return self._resolve_cls_plain_attr(tx, name, cls_attr, source)
+            return self.resolve_cls_plain_attr(tx, name, cls_attr, source)
 
         # Step 6-7: Metaclass non-data descriptor or plain attr.
+        # For type(cls) is type, these are wrapper_descriptors like
+        # type.__call__, type.__repr__, type.mro, etc.  We use
+        # GetAttrVariable (not VariableTracker.build) because these are
+        # metaclass-level methods that aren't directly callable on the class
+        # during tracing — they must be deferred to runtime.
         if meta_attr is not NO_SUCH_SUBOBJ:
-            return self._resolve_meta_nondata_attr(tx, name, meta_attr, source)
+            return variables.GetAttrVariable(self, name, None, source=source)
 
         # Step 8: __getattr__ on metaclass.
         metacls = type(self.value)
         if metacls is not type:
-            meta_getattr = self._lookup_metaclass_attr("__getattr__")
+            meta_getattr = self.lookup_metaclass_attr("__getattr__")
             if meta_getattr is not NO_SUCH_SUBOBJ and isinstance(
                 meta_getattr, types.FunctionType
             ):
@@ -377,7 +382,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             args=[f"type object '{self.value.__name__}' has no attribute '{name}'"],
         )
 
-    def _resolve_meta_data_descriptor(
+    def resolve_meta_data_descriptor(
         self,
         tx: "InstructionTranslator",
         name: str,
@@ -395,7 +400,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         resolved = type.__getattribute__(self.value, name)
         return VariableTracker.build(tx, resolved, source)
 
-    def _resolve_cls_descriptor(
+    def resolve_cls_descriptor(
         self,
         tx: "InstructionTranslator",
         name: str,
@@ -435,7 +440,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 or self.value.__module__ == "torch"
             ):
                 return VariableTracker.build(tx, cls_attr, source)
-            return self._invoke_cls_descriptor_get(tx, name, cls_attr, source)
+            return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
         # C-level descriptors (WrapperDescriptor, MethodDescriptor, etc.)
         # Build directly when the attribute lives in the class's own __dict__
@@ -459,7 +464,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Everything else: FunctionType, property, etc.
         return VariableTracker.build(tx, cls_attr, source)
 
-    def _resolve_cls_plain_attr(
+    def resolve_cls_plain_attr(
         self,
         tx: "InstructionTranslator",
         name: str,
@@ -475,19 +480,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.GetAttrVariable(self, name)
         return VariableTracker.build(tx, cls_attr, source)
 
-    def _resolve_meta_nondata_attr(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        meta_attr: object,
-        source: Source | None,
-    ) -> VariableTracker:
-        """Handle metaclass non-data descriptors or plain attrs (step 6-7)."""
-        # For type(cls) is type, these are wrapper_descriptors like
-        # type.__call__, type.__repr__, type.mro, etc.
-        return variables.GetAttrVariable(self, name, None, source=source)
-
-    def _invoke_cls_descriptor_get(
+    def invoke_cls_descriptor_get(
         self,
         tx: "InstructionTranslator",
         name: str,
