@@ -583,7 +583,8 @@ inline float polygamma(const int64_t order, const T0 input) {
   return sgn * gamma(n + 1) * zeta(n + 1, x);
 }
 
-float trigamma(float x) {
+template<typename T>
+inline float trigamma(T x) {
   float sign = 1.0f;
   float result = 0.0f;
 
@@ -592,13 +593,9 @@ float trigamma(float x) {
     auto sin_pi_x = sin(M_PI_F * x);
     result -= (M_PI_F * M_PI_F) / (sin_pi_x * sin_pi_x);
     x = 1.0f - x;
-  }
-
-  else if (x == 0.0) {
+  } else if (x == 0.0) {
     return INFINITY;
-  }
-
-  else if (x < 1.0) {
+  } else if (x < 1.0) {
     result += 1.0 / (x * x);
     x += 1.0f;
   }
