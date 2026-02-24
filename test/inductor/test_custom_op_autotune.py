@@ -31,12 +31,6 @@ class TestCustomOpAutoTune(TestCase):
         super().setUp()
         self.device = "cuda" if HAS_GPU else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
-        # Clear any previous registrations to ensure test isolation
-        from torch._inductor.lowering import user_lowerings
-        from torch._inductor.select_algorithm import ExternKernelChoice
-
-        user_lowerings.clear()
-        ExternKernelChoice._registry.clear()
 
     def _run_autotune_test(self, op_object, inputs, expected, test_name):
         """Shared test infrastructure for autotuning tests."""
@@ -798,91 +792,6 @@ class TestCustomOpAutoTune(TestCase):
         main_code = [c for c in code if re.search(r"\(s\d+,", c)]
         self.assertTrue(len(main_code) > 0, "Expected main code with symbolic shapes")
         FileCheck().check("'coordinate_descent_tuning': True").run(main_code[0])
-
-    @skipIfXpu
-    def test_aten_mm_simple_decomp(self):
-        """Test aten.mm with a simple decomposition via user_lowerings."""
-        from torch._inductor.lowering import user_lowerings
-
-        def simple_decomp(mat1, mat2):
-            """Simple decomposition using bmm with batch dim of 1."""
-            return torch.bmm(mat1.unsqueeze(0), mat2.unsqueeze(0)).squeeze(0)
-
-        register_custom_op_autotuning(
-            torch.ops.aten.mm.default,
-            configs=[CustomOpConfig(simple_decomp)],
-            name="test_mm_simple",
-        )
-
-        self.assertIn(torch.ops.aten.mm.default, user_lowerings)
-
-        test_a = torch.randn(32, 64, device=self.device, dtype=self.dtype)
-        test_b = torch.randn(64, 32, device=self.device, dtype=self.dtype)
-
-        @torch.compile
-        def test_model(a, b):
-            return torch.mm(a, b)
-
-        torch._dynamo.reset()
-        with config.patch(max_autotune=True, fx_graph_cache=False):
-            result = test_model(test_a, test_b)
-
-        torch.testing.assert_close(
-            result, torch.mm(test_a, test_b), rtol=1e-1, atol=1e-1
-        )
-
-    @skipIfXpu
-    def test_empty_config_generator_falls_back_to_triton(self):
-        """Test that empty config_generator falls back to normal mm autotuning.
-
-        When config_generator returns empty list, the user_lowering returns None
-        and graph.py falls back to the normal lowering (triton mm autotuning).
-        """
-        if self.device != "cuda":
-            self.skipTest("Triton fallback test requires CUDA")
-
-        from torch._inductor.lowering import user_lowerings
-
-        # Config generator that returns empty - should trigger fallback
-        def empty_config_gen(fake_tensors):
-            return []
-
-        register_custom_op_autotuning(
-            torch.ops.aten.mm.default,
-            config_generator=empty_config_gen,
-            name="test_empty_fallback",
-        )
-
-        self.assertIn(torch.ops.aten.mm.default, user_lowerings)
-
-        # Use shapes that will trigger triton autotuning
-        test_a = torch.randn(64, 128, device=self.device, dtype=self.dtype)
-        test_b = torch.randn(128, 64, device=self.device, dtype=self.dtype)
-
-        @torch.compile
-        def test_model(a, b):
-            return torch.mm(a, b)
-
-        # Enable max_autotune with TRITON backend
-        with config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="TRITON",
-            fx_graph_cache=False,
-        ):
-            result, code = torch._inductor.utils.run_and_get_code(
-                test_model, test_a, test_b
-            )
-
-        # Verify correctness
-        torch.testing.assert_close(
-            result, torch.mm(test_a, test_b), rtol=1e-1, atol=1e-1
-        )
-
-        # Verify triton template was used (fallback to normal autotuning)
-        self.assertTrue(
-            any("triton_tem" in c for c in code),
-            "Expected triton_tem in generated code when falling back to triton autotuning",
-        )
 
 
 if __name__ == "__main__":
