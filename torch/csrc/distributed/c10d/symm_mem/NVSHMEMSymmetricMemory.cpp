@@ -1,9 +1,8 @@
-#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 
 #include <ATen/ceil_div.h>
@@ -52,7 +51,8 @@ struct NVSHMEMAllocation {
 };
 
 // A map from group name to rank-to-global rank mapping
-static std::unordered_map<std::string, std::vector<int>> rank_to_global_rank_map{};
+static std::unordered_map<std::string, std::vector<int>>
+    rank_to_global_rank_map{};
 // A map from group name to rank-to-global rank device array
 static std::unordered_map<std::string, int*> rank_to_global_rank_dev_map{};
 
@@ -91,11 +91,13 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
                   << ", group_name: " << group_name
                   << ", exchanged_n_times: " << exchanged_n_times;
       }
-      it = rank_to_global_rank_map.emplace_hint(it, group_name, rank_to_global_rank);
+      it = rank_to_global_rank_map.emplace_hint(
+          it, group_name, rank_to_global_rank);
 
       // Emplace a device array of rank to global rank mapping
-      auto rank_to_global_rank_dev = reinterpret_cast<int*>(
-          c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
+      auto rank_to_global_rank_dev =
+          reinterpret_cast<int*>(c10::cuda::CUDACachingAllocator::raw_alloc(
+              sizeof(int) * world_size_));
       AT_CUDA_CHECK(cudaMemcpy(
           rank_to_global_rank_dev,
           rank_to_global_rank.data(),
@@ -358,7 +360,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     // NVSHMEM needs to be initialized with the global group
     auto group = resolve_process_group("0");
-    initialize_nvshmem_with_store(group->getStore(), group->getRank(), group->getSize(), device_idx);
+    initialize_nvshmem_with_store(
+        group->getStore(), group->getRank(), group->getSize(), device_idx);
 
     auto ptr = nvshmem_malloc(size);
     // If size is 0 (which is legal allocation request) we shouldn't error out
