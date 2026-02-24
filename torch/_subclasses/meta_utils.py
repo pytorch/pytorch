@@ -926,9 +926,7 @@ class MetaConverter(Generic[_TensorT]):
                     )
 
             current_source = AttrSource(source, attr)
-            inner_callback = functools.partial(
-                callback, device=meta_tensor_desc.device
-            )
+            inner_callback = functools.partial(callback, device=meta_tensor_desc.device)
             new_empty_tensor = self._empty_create_subclass(
                 meta_tensor_desc,
                 meta_tensor_desc.size,
