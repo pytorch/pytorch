@@ -3583,6 +3583,30 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_is_pure_dynamic_shapes_symint_intermediate(self):
+        # SymInt intermediates (e.g. from .shape[0]) get added as extra
+        # graph outputs by collect_intermediate_outputs. The is_pure cache
+        # must handle these non-tensor outputs.
+        @nested_compile_region(is_pure=True)
+        def gn(x, y):
+            return (x * y).view(x.shape[0], -1)
+
+        def fn(x, y):
+            a = gn(x, y)
+            b = gn(x, y)
+            return a + b
+
+        x = torch.randn(8, 4)
+        y = torch.randn(8, 4)
+        ref = fn(x, y)
+
+        x_clone = x.clone()
+        y_clone = y.clone()
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True, dynamic=True)(
+            x_clone, y_clone
+        )
+        self.assertEqual(ref, res)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(

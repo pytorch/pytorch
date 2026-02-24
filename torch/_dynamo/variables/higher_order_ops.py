@@ -5309,9 +5309,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     f"is_pure: sequence output contains non-tensor: {type(item)}"
                 )
 
-        # Cache output tensor metadata so we can construct fresh FakeTensors
-        # on cache hit without re-running body_gmod. example_value is always a
-        # tuple from auto output flattening.
+        # allow_side_effects is disabled for is_pure in _call_function, so
+        # example_value contains only user outputs (no extra intermediates).
         output_metadata = [
             (t.shape, t.stride(), t.dtype, t.device, t.requires_grad)
             for t in example_value
@@ -5348,6 +5347,14 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             if old_source != new_source:
                 source_replacement[old_source] = new_source
 
+        # Lookup existing placeholders by source so we can reuse them below
+        # instead of creating duplicates via VariableBuilder.
+        existing_source_to_node: dict = {}
+        for node in tx.output.graph.find_nodes(op="placeholder"):
+            ga = node.meta.get("grapharg", None)
+            if ga is not None and ga.source is not None:
+                existing_source_to_node[ga.source] = node
+
         # Rebuild proxy args from the cached freevar mapping
         new_lifted_args = []
         for user_arg_idx, data in cached.freevar_mapping:
@@ -5362,13 +5369,15 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 if source_replacement:
                     new_source = source.clone(lambda s: source_replacement.get(s, s))
 
-                value = tx.output.resolve_source_value(new_source)
-                vt = VariableBuilder(tx, new_source)(value)
-                new_lifted_args.append(vt.as_proxy())
+                if new_source in existing_source_to_node:
+                    node = existing_source_to_node[new_source]
+                    new_lifted_args.append(torch.fx.Proxy(node, tx.output.current_tracer))
+                else:
+                    value = tx.output.resolve_source_value(new_source)
+                    vt = VariableBuilder(tx, new_source)(value)
+                    new_lifted_args.append(vt.as_proxy())
 
-        # Construct fresh FakeTensors from cached metadata. The
-        # invoke_subgraph HOP always returns a flat tuple of tensors (via
-        # auto output flattening), so example_value must be a tuple.
+        # Construct fresh FakeTensors from cached metadata.
         assert tx.fake_mode is not None
         with tx.fake_mode:
             example_value = tuple(
@@ -5422,17 +5431,26 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             if cached is not None:
                 return self._stamp_out_cached_subgraph(tx, fn_args_vt, kwargs, cached)
 
-        # Normal path: trace the subgraph
+        # Normal path: trace the subgraph.
+        # Pure functions have no side effects, so disable allow_side_effects
+        # to prevent collect_intermediate_outputs from adding extra SymInt
+        # outputs that complicate caching.
         assert self._HOP_NAME is not None
-        (
-            p_args,
-            p_kwargs,
-            example_value,
-            body_r,
-            body_gmod,
-            body_name,
-            body_graph_output_vts,
-        ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
+        old_allow_side_effects = self.allow_side_effects
+        if is_pure:
+            self.allow_side_effects = False
+        try:
+            (
+                p_args,
+                p_kwargs,
+                example_value,
+                body_r,
+                body_gmod,
+                body_name,
+                body_graph_output_vts,
+            ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
+        finally:
+            self.allow_side_effects = old_allow_side_effects
 
         if len(p_kwargs) > 0:
             unimplemented(
