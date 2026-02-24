@@ -1,0 +1,147 @@
+V0127 15:58:21.927000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr -1 to l_x_
+V0127 15:58:21.935000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr -1 to l_x_
+V0127 15:58:21.935000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr -1 to sin
+V0127 15:58:21.943000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr 0 to mul
+V0127 15:58:21.944000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr 1 to output
+V0127 15:58:21.945000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr 1 to subgraph_0
+V0127 15:58:21.945000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr 1 to invoke_subgraph
+V0127 15:58:21.949000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr 1 to getitem
+V0127 15:58:21.949000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr 1 to getitem_1
+V0127 15:58:21.950000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr 1 to sub
+V0127 15:58:21.951000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [0/0] [__annotation] Assigning new_seq_nr 2 to output
+V0127 15:58:21.965000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 2 to arg0_1
+V0127 15:58:21.968000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 3 to sin
+V0127 15:58:21.968000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 4 to mul
+V0127 15:58:21.969000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 4 to output
+V0127 15:58:21.972000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 7 to arg0_1
+V0127 15:58:21.972000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 7 to sin
+V0127 15:58:21.973000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 7 to mul
+V0127 15:58:21.973000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 7 to output
+V0127 15:58:21.982000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 8 to arg0_1
+V0127 15:58:21.983000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 9 to sin
+V0127 15:58:21.984000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 10 to mul
+V0127 15:58:21.984000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 10 to output
+V0127 15:58:21.986000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to arg0_1
+V0127 15:58:21.987000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to sin
+V0127 15:58:21.987000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to mul
+V0127 15:58:21.987000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to output
+V0127 15:58:21.989000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:21.989000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 1 to arg0_1
+V0127 15:58:21.990000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:21.990000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr -1 to sin
+V0127 15:58:21.991000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:21.991000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 0 to mul
+V0127 15:58:21.991000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:21.991000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 1 to output
+V0127 15:58:21.993000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to repeated_subgraph0
+V0127 15:58:21.993000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to invoke_subgraph
+V0127 15:58:21.993000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to getitem
+V0127 15:58:21.994000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 12 to sub
+V0127 15:58:21.996000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:21.996000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to arg0_1
+V0127 15:58:21.996000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:21.996000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to arg1_1
+V0127 15:58:21.997000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 13 to sin
+V0127 15:58:21.998000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to mul
+V0127 15:58:21.998000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:21.999000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to mul_1
+V0127 15:58:21.999000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:21.999000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 13 to cos
+V0127 15:58:22.000000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.000000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 13 to mul_2
+V0127 15:58:22.001000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.001000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to output
+V0127 15:58:22.003000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.003000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to arg0_1
+V0127 15:58:22.003000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.003000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to arg1_1
+V0127 15:58:22.004000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to sin
+V0127 15:58:22.004000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to mul
+V0127 15:58:22.005000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to mul_1
+V0127 15:58:22.005000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to cos
+V0127 15:58:22.005000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to mul_2
+V0127 15:58:22.006000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.006000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to output
+V0127 15:58:22.008000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.008000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to arg0_1
+V0127 15:58:22.008000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.008000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to arg1_1
+V0127 15:58:22.009000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:22.009000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 13 to sin
+V0127 15:58:22.010000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:22.010000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to mul
+V0127 15:58:22.010000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:22.010000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 14 to mul_1
+V0127 15:58:22.011000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:22.011000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 13 to cos
+V0127 15:58:22.012000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:488] [__annotation] seq_nr from current_meta seq_nr
+V0127 15:58:22.012000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 13 to mul_2
+V0127 15:58:22.012000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.012000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to output
+V0127 15:58:22.014000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.014000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to repeated_subgraph1
+V0127 15:58:22.014000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.014000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to invoke_subgraph_1
+V0127 15:58:22.015000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.015000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to getitem_1
+V0127 15:58:22.016000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:482] [__annotation] seq_nr from current_meta grad_fn_seq_nr
+V0127 15:58:22.016000 4107306 /data/users/shangdiy/pytorch/torch/fx/proxy.py:203] [__annotation] Assigning new_seq_nr 11 to getitem_2
+V0127 15:58:22.018000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:629] [__annotation] forward:: key: 11, value: repeated_subgraph0
+V0127 15:58:22.018000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:629] [__annotation] forward:: key: 12, value: sub
+V0127 15:58:22.018000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:629] [__annotation] forward:: key: 1, value: arg0_1
+V0127 15:58:22.018000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:629] [__annotation] forward:: key: -1, value: sin
+V0127 15:58:22.018000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:629] [__annotation] forward:: key: 0, value: mul
+V0127 15:58:22.018000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:629] [__annotation] forward:: key: 13, value: sin
+V0127 15:58:22.018000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:629] [__annotation] forward:: key: 14, value: mul
+V0127 15:58:22.018000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: primals_1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: None
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: tangents_1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: None
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: repeated_subgraph0
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: invoke_subgraph
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: getitem
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: sub
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 12
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: repeated_subgraph1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: invoke_subgraph_1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: getitem_1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: getitem_2
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: output
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: None
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: arg0_1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: sin
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: -1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: mul
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 0
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: output
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: arg0_1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: arg1_1
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: sin
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 13
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: mul
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 14
+V0127 15:58:22.019000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: mul_1
+V0127 15:58:22.020000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 14
+V0127 15:58:22.020000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: cos
+V0127 15:58:22.020000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 13
+V0127 15:58:22.020000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: mul_2
+V0127 15:58:22.020000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 13
+V0127 15:58:22.020000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:581] [__annotation] node: output
+V0127 15:58:22.020000 4107306 /data/users/shangdiy/pytorch/torch/_functorch/_aot_autograd/utils.py:583] [__annotation] seq_nr: 11
+.
+----------------------------------------------------------------------
+Ran 1 test in 0.534s
+
+OK
+stage1
