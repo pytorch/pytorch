@@ -692,6 +692,33 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
     @with_comms
+    def test_squeeze_inplace_local_tensor(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/174136.
+
+        squeeze_.dim updated the DTensor spec but not the underlying local tensor
+        when redistribution was required (e.g. Shard -> Replicate for a
+        globally-singleton dim), leaving shape metadata inconsistent.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Squeeze a globally-singleton sharded dim: requires redistribution
+        # (Shard(0) -> Replicate) since the sharded dim disappears.
+        x = torch.arange(4, dtype=torch.float32, device=self.device_type).reshape(1, 4)
+        dt = distribute_tensor(x, mesh, [Shard(0)])
+        dt.squeeze_(0)
+        self.assertEqual(dt.shape, torch.Size([4]))
+        self.assertEqual(dt._local_tensor.shape, torch.Size([4]))
+        self.assertEqual(dt.full_tensor(), x.squeeze(0))
+
+        # Squeeze on a non-singleton dim is a no-op; shapes and data unchanged.
+        x2 = torch.randn(self.world_size, 4, device=self.device_type)
+        dt2 = distribute_tensor(x2, mesh, [Shard(0)])
+        dt2.squeeze_(1)
+        self.assertEqual(dt2.shape, torch.Size([self.world_size, 4]))
+        self.assertEqual(dt2._local_tensor.shape, torch.Size([1, 4]))
+        self.assertEqual(dt2.full_tensor(), x2)
+
+    @with_comms
     def test_storage_offset_slice(self):
         """
         Test that storage_offset is properly tracked on DTensor when slicing
