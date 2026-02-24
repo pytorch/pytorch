@@ -365,6 +365,21 @@ compiled_create_block_mask = torch.compile(
 def causal_mask(b, h, q_idx, kv_idx):
     return q_idx >= kv_idx
 
+def test_blockmask_adjust_updates_seq_lengths_cpu():
+    bm = create_block_mask(
+        causal_mask,
+        B=1,
+        H=1,
+        Q_LEN=128,
+        KV_LEN=128,
+        device="cpu",
+    )
+    bm2 = bm._adjust(16, 16)
+
+    # Regression for #175533: _adjust must update seq_lengths
+    assert bm2.seq_lengths == (16, 16)
+    assert bm2.shape[-2:] == (16, 16)
+
 
 # copied from https://github.com/meta-pytorch/attention-gym/blob/main/attn_gym/masks/document_mask.py
 def generate_random_lengths(total_length, num_documents) -> list[int]:
