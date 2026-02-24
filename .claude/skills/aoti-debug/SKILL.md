@@ -7,6 +7,22 @@ description: Debug AOTInductor (AOTI) errors and crashes. Use when encountering 
 
 This skill helps diagnose and fix common AOTInductor issues.
 
+## Error Pattern Routing
+
+**Check the error message and route to the appropriate sub-guide:**
+
+### Triton Index Out of Bounds
+If the error matches this pattern:
+```
+Assertion `index out of bounds: 0 <= tmpN < ksM` failed
+```
+**→ Follow the guide in `triton-index-out-of-bounds.md`**
+
+### All Other Errors
+Continue with the sections below.
+
+---
+
 ## First Step: Always Check Device and Shape Matching
 
 **For ANY AOTI error (segfault, exception, crash, wrong output), ALWAYS check these first:**
