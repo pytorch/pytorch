@@ -872,6 +872,7 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(softplus)                         \
   _(layer_norm)                       \
   _(native_layer_norm)                \
+  _(rms_norm)                         \
   _(group_norm)                       \
   _(frobenius_norm, dim)              \
   _(nuclear_norm)                     \

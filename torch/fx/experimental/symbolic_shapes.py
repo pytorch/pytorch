@@ -3981,8 +3981,7 @@ class ShapeEnv:
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
         # Separate counter tracking only replacement changes, used by
-        # SymNode.expr cache to avoid spurious invalidation from
-        # deferred runtime asserts.
+        # SymNode.expr
         self._replacements_version_counter = 0
 
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
