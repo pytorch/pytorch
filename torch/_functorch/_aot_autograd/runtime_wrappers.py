@@ -3044,5 +3044,8 @@ from torch._higher_order_ops.wrap import inductor_compiled_code
 def _inductor_compiled_code_analyze_mode(
     mode: _AnalyzeCustomOpInputOutputMode, func: Any, inputs: Any
 ) -> Any:
-    with mode:
-        return func(inputs)
+    # Re-dispatch without re-entering the mode so that other modes on the
+    # stack (e.g. FakeTensorMode) still get a chance to handle the HOP.
+    # _pop_mode_temporarily keeps our mode off the stack during this call,
+    # so we won't recurse back here.
+    return inductor_compiled_code(func, inputs)
