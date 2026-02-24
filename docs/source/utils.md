@@ -99,6 +99,8 @@
     is_out_of_place
     is_pytorch_file
     is_special_file
+    match_extensions
+    matched_files_iter
     openf
     preprocess_file_and_save_result
     preprocessor
