@@ -101,6 +101,12 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  * The RNG state tensors must be allocated in the default memory pool (not the
  * graph pool) because they persist across graph replays and are managed
  * internally.
+ *
+ * We allocate on the default stream via StreamGuard so get_pool() returns the
+ * default pool. CUDAStreamCaptureModeGuard is required because when the
+ * current stream is default (not capturing), cudaMallocMaybeCapturing skips
+ * the relaxed-mode guard, but cudaMalloc can still fail if another stream is
+ * capturing.
  */
 void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
   if (is_initialized()) {
@@ -109,6 +115,12 @@ void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
 
   auto options = at::TensorOptions().device(at::kCUDA).dtype(at::kLong);
   c10::InferenceMode inference_guard(false);
+
+  c10::cuda::CUDAStream default_stream = c10::cuda::getDefaultCUDAStream();
+  c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
+      cudaStreamCaptureModeRelaxed);
+  c10::cuda::CUDAStreamGuard stream_guard(default_stream);
+
   rng_state_seed_extragraph_ = at::empty({1}, options);
   rng_state_offset_extragraph_ = at::empty({1}, options);
   offset_intragraph_ = 0;

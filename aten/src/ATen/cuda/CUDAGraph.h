@@ -147,9 +147,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
-  std::stack<
-      ska::flat_hash_map<c10::intrusive_ptr<at::CUDAGeneratorState>, uint64_t>>
-      conditional_rng_snapshots_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
 
