@@ -50,11 +50,9 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import dataclass_transform, ParamSpec, Self
 from unittest import mock
 
 import sympy
-
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_tops
@@ -63,6 +61,7 @@ from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
+from typing_extensions import dataclass_transform, ParamSpec, Self
 
 
 OPTIMUS_EXCLUDE_POST_GRAD = [
@@ -3440,7 +3439,13 @@ def copy_misaligned_inputs(
 
     # hoist above loop because this is on the hot path
     ret_pair_defined = return_pair_idxs is not None
+    num_inputs = len(new_inputs)
     for i in check_inputs_idxs:
+        if i >= num_inputs:
+            # inputs_to_check may contain stale indices from compile time
+            # (e.g. when constants were included in example_inputs during
+            # compilation but are not present at runtime). Skip them.
+            continue
         _inp = new_inputs[i]
         assert isinstance(_inp, torch.Tensor), (
             f"Expected tensors only, but got: {type(_inp)}"
