@@ -413,11 +413,11 @@ scalar_multiplicative_ops = [
     aten.mul_.Scalar,
 ]
 
-# Monotone increasing unary ops: P(max)->P(max), P(min)->P(min)
-# Only ops that are monotone on their ENTIRE domain belong here.
+# Monotonic increasing unary ops: P(max)->P(max), P(min)->P(min)
+# Only ops that are monotonic on their ENTIRE domain belong here.
 # Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
 # because P(max) offsets can push inputs outside the valid domain.
-monotone_increasing_unary_ops = [
+monotonic_increasing_unary_ops = [
     aten.asinh.default,
     aten.asinh_.default,
     aten.atan.default,
@@ -454,9 +454,9 @@ monotone_increasing_unary_ops = [
     aten.trunc_.default,
 ]
 
-# Monotone decreasing unary ops: P(max)->P(min), P(min)->P(max)
+# Monotonic decreasing unary ops: P(max)->P(min), P(min)->P(max)
 # Note: acos excluded due to domain constraints [-1,1] causing validation failures
-monotone_decreasing_unary_ops: list[OpOverload] = [
+monotonic_decreasing_unary_ops: list[OpOverload] = [
     aten.erfc.default,
     aten.erfc_.default,
     aten.special_erfcx.default,
@@ -473,8 +473,12 @@ all_partial_preserving_unary_ops = [
     aten.rad2deg_.default,
 ]
 
-# Monotone binary ops: maps op -> which partial to preserve (max, min, or None)
-monotone_binary_ops: dict[torch._ops.OpOverload, str | None] = {
+# Binary ops that are monotonically increasing in both arguments.
+# All get base rules P(max/min)+R→P(max/min) (monotonicity guarantees
+# correctness). Ops that ARE max/min additionally preserve P(max/min)
+# when both inputs carry the same partial: value maps to which partial
+# type to add ("max", "min"), or None for base rules only.
+monotonic_binary_ops: dict[torch._ops.OpOverload, str | None] = {
     aten.clamp_max.Tensor: "min",
     aten.clamp_min.Tensor: "max",
     aten.fmax.default: "max",
@@ -483,14 +487,14 @@ monotone_binary_ops: dict[torch._ops.OpOverload, str | None] = {
     aten.logaddexp2.default: None,
     aten.maximum.default: "max",
     aten.minimum.default: "min",
+    prims.fmax.default: "max",
+    prims.fmin.default: "min",
 }
 
 # .out variants stay on old path until PR2 adds out-variant infrastructure
 partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.maximum.out: "max",
-    prims.fmax.default: "max",
     aten.minimum.out: "min",
-    prims.fmin.default: "min",
 }
 
 # Rule constants for partial placement propagation
@@ -825,14 +829,13 @@ for op, linear_in_second_arg in binary_multiplicative_ops.items():
     )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES + rules))
 
 # Scalar multiplicative ops: unary linear rules
-# Scalar multiplicative ops: unary linear rules
 for op in scalar_multiplicative_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
     )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
 
-# Monotone increasing unary: P(max)->P(max), P(min)->P(min)
-for op in monotone_increasing_unary_ops:
+# Monotonic increasing unary: P(max)->P(max), P(min)->P(min)
+for op in monotonic_increasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(
@@ -844,8 +847,8 @@ for op in monotone_increasing_unary_ops:
         )
     )
 
-# Monotone decreasing unary: P(max)->P(min), P(min)->P(max)
-for op in monotone_decreasing_unary_ops:
+# Monotonic decreasing unary: P(max)->P(min), P(min)->P(max)
+for op in monotonic_decreasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(
@@ -867,7 +870,7 @@ for op in all_partial_preserving_unary_ops:
         )
     )
 
-# neg: linear (P(sum)->P(sum), P(avg)->P(avg)) + monotone decreasing
+# neg: linear (P(sum)->P(sum), P(avg)->P(avg)) + monotonic decreasing
 register_single_dim_strategy(
     [aten.neg.default, aten.neg_.default],
     schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
@@ -882,8 +885,8 @@ register_single_dim_strategy(
     )
 )
 
-# Monotone binary ops
-for op, preserve in monotone_binary_ops.items():
+# Monotonic binary ops
+for op, preserve in monotonic_binary_ops.items():
     rules = list(_monotone_binary_base_rules)
     if preserve == "max":
         rules.append([Partial("max"), Partial("max"), Partial("max")])
