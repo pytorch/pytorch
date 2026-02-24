@@ -8,7 +8,7 @@ from typing import cast, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -324,10 +324,8 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.mean.dim: "avg",
     aten.mean.out: "avg",
     aten.max.default: "max",
-    aten.max.dim: "max",
     aten.max.out: "max",
     aten.min.default: "min",
-    aten.min.dim: "min",
     aten.min.out: "min",
     aten.amax.default: "max",
     aten.amax.out: "max",
@@ -367,6 +365,61 @@ def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
         reduction_linear=True,
         reduction_op=reduction_op,
     )
+
+
+# max.dim/min.dim return (values, indices). Values can use Partial(max/min)
+# but indices cannot be meaningfully reduced — replace Partial with Replicate.
+MAX_MIN_DIM_OPS = {
+    aten.max.dim: "max",
+    aten.min.dim: "min",
+}
+
+
+@register_op_strategy(list(MAX_MIN_DIM_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
+def max_min_dim_strategy(op_schema: OpSchema) -> OpStrategy:
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
+    dims = None
+    if len(op_schema.args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
+
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+    keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
+    reduction_op = MAX_MIN_DIM_OPS[op_schema.op]
+
+    values_strategy = common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=keep_dim,
+        reduction_linear=True,
+        reduction_op=reduction_op,
+    )
+
+    # Build per-output tuple specs: values keep their placements (including
+    # Partial), indices replace Partial with Replicate since index values
+    # cannot be combined across ranks with max/min reduction.
+    output_strategy = OpStrategy([])
+    for op_spec in values_strategy.strategies:
+        values_spec = op_spec.output_spec
+        indices_placements = tuple(
+            Replicate() if isinstance(p, Partial) else p for p in values_spec.placements
+        )
+        indices_spec = DTensorSpec(
+            mesh=values_spec.mesh,
+            placements=indices_placements,
+        )
+        output_strategy.strategies.append(
+            OpSpec(
+                output_specs=(values_spec, indices_spec),
+                input_specs=op_spec.input_specs,
+                redistribute_cost=op_spec.redistribute_cost,
+            )
+        )
+
+    return output_strategy
 
 
 @register_op_strategy(list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
@@ -1095,11 +1148,45 @@ def _common_norm_forward_strategy(
                 generate_redistribute_costs(bias_strategy, bias_target_spec)
             )
 
-        # the output spec is the same as input spec
-        output_target_spec = input_target_spec
+        # Build per-output specs with correct tensor_meta.
+        # out: same shape as input, contiguous strides
+        # mean/rstd: shape = input_shape[:axis], contiguous strides
+        input_tm = input_src_spec.tensor_meta
+        assert input_tm is not None
+        input_shape = input_tm.shape
+        out_placements = input_target_spec.placements
+
+        out_strides = torch._prims_common.make_contiguous_strides_for(input_shape)
+        out_spec = DTensorSpec(
+            mesh=mesh,
+            placements=out_placements,
+            tensor_meta=TensorMeta(
+                shape=input_shape,
+                stride=out_strides,
+                dtype=input_tm.dtype,
+            ),
+        )
+
+        stat_shape = torch.Size(input_shape[:axis])
+        stat_strides = torch._prims_common.make_contiguous_strides_for(stat_shape)
+        stat_spec = DTensorSpec(
+            mesh=mesh,
+            placements=out_placements,
+            tensor_meta=TensorMeta(
+                shape=stat_shape,
+                stride=stat_strides,
+                dtype=input_tm.dtype,
+            ),
+        )
+
+        if rms_norm:
+            output_specs = (out_spec, stat_spec)
+        else:
+            output_specs = (out_spec, stat_spec, stat_spec)
+
         output_strategy.strategies.append(
             OpSpec(
-                output_specs=output_target_spec,
+                output_specs=output_specs,
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
             )
