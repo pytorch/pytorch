@@ -415,6 +415,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_foreach_lerp_inplace_decomposition_disabled_capture_scalar(self):
         """With decompositions disabled and capture_scalar_outputs=True, foreach_lerp_
         with scalar weight should work without graph breaks.
