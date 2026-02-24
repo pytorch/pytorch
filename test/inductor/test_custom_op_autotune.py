@@ -1429,7 +1429,6 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch.cuda.empty_cache()
         torch._C._cuda_clearCublasWorkspaces()
 
         # Create test tensors and establish baseline with some mm activity
@@ -1458,7 +1457,6 @@ class TestCustomOpAutoTune(TestCase):
         # Deleting the graph should automatically clean up cuBLAS workspaces
         del graph, c
         torch.cuda.synchronize()
-        torch.cuda.empty_cache()
 
         memory_after_cleanup = torch.cuda.memory_allocated()
 
@@ -1475,7 +1473,6 @@ class TestCustomOpAutoTune(TestCase):
 
         # Clear everything first
         torch.cuda.synchronize()
-        torch.cuda.empty_cache()
         torch._C._cuda_clearCublasWorkspaces()
 
         # Create test tensors
@@ -1491,7 +1488,6 @@ class TestCustomOpAutoTune(TestCase):
         # This should capture into CUDA graph, benchmark, and clean up properly
         _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
         torch.cuda.synchronize()
-        torch.cuda.empty_cache()
 
         memory_after_first = torch.cuda.memory_allocated()
 
@@ -1507,7 +1503,6 @@ class TestCustomOpAutoTune(TestCase):
             memory_after_first,
             f"Memory leak detected: after_first={memory_after_first}, after_many={memory_after_many}",
         )
-
 
 
 instantiate_parametrized_tests(TestCustomOpAutoTune)
