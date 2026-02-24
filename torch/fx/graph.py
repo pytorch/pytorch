@@ -154,7 +154,7 @@ class _Namespace(_NamespaceBase):
     - Names generated do not shadow builtins, unless the object is indeed that builtin.
 
     This class is now implemented in C++ (_NamespaceBase) for performance.
-    See torch/csrc/fx/node.cpp for the implementation.
+    See torch/csrc/fx/graph.cpp for the implementation.
     """
 
     # Type annotations for the members (implemented in C++)

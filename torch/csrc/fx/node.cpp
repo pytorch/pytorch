@@ -47,6 +47,35 @@ inline static bool is_legal_op(PyObject* op) {
   return false;
 }
 
+// Set a ValueError with torch.typename for target type mismatches in Node init.
+// Returns -1 (the init failure code) for convenience.
+inline static int set_target_type_error(
+    PyObject* graph,
+    PyObject* name,
+    PyObject* target,
+    const char* expected) {
+  THPObjectPtr torch_module(PyImport_ImportModule("torch"));
+  if (!torch_module) {
+    return -1;
+  }
+  THPObjectPtr typename_fn(PyObject_GetAttrString(torch_module, "typename"));
+  if (!typename_fn) {
+    return -1;
+  }
+  THPObjectPtr type_str(PyObject_CallOneArg(typename_fn, target));
+  const char* type_cstr = type_str ? PyUnicode_AsUTF8(type_str) : "unknown";
+  PyErr_Format(
+      PyExc_ValueError,
+      "Node [graph = %R, name = '%S'] target %R has type %s "
+      "but a %s is expected",
+      graph,
+      name,
+      target,
+      type_cstr,
+      expected);
+  return -1;
+}
+
 inline static PyObject* import_from(const char* module_name, const char* name) {
   THPObjectPtr module(PyImport_ImportModule(module_name));
   if (!module) {
@@ -291,56 +320,16 @@ static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
   }
 
   if (strcmp(op_str, "call_function") == 0) {
-    // For call_function, target must be callable
     if (!PyCallable_Check(target)) {
-      THPObjectPtr torch_module(PyImport_ImportModule("torch"));
-      if (!torch_module) {
-        return -1;
-      }
-      THPObjectPtr typename_fn(
-          PyObject_GetAttrString(torch_module, "typename"));
-      if (!typename_fn) {
-        return -1;
-      }
-      THPObjectPtr type_str(PyObject_CallOneArg(typename_fn, target));
-      const char* type_cstr = type_str ? PyUnicode_AsUTF8(type_str) : "unknown";
-      PyErr_Format(
-          PyExc_ValueError,
-          "Node [graph = %R, name = '%S'] target %R has type %s "
-          "but a Callable is expected",
-          graph,
-          name,
-          target,
-          type_cstr);
-      return -1;
+      return set_target_type_error(graph, name, target, "Callable");
     }
   } else {
-    // For other ops, target must be a string
     if (!is_legal_op(op)) {
       PyErr_Format(PyExc_AssertionError, "Invalid op: %S", op);
       return -1;
     }
     if (!PyUnicode_Check(target)) {
-      THPObjectPtr torch_module(PyImport_ImportModule("torch"));
-      if (!torch_module) {
-        return -1;
-      }
-      THPObjectPtr typename_fn(
-          PyObject_GetAttrString(torch_module, "typename"));
-      if (!typename_fn) {
-        return -1;
-      }
-      THPObjectPtr type_str(PyObject_CallOneArg(typename_fn, target));
-      const char* type_cstr = type_str ? PyUnicode_AsUTF8(type_str) : "unknown";
-      PyErr_Format(
-          PyExc_ValueError,
-          "Node [graph = %R, name = '%S'] target %R has type %s "
-          "but a str is expected",
-          graph,
-          name,
-          target,
-          type_cstr);
-      return -1;
+      return set_target_type_error(graph, name, target, "str");
     }
   }
 
@@ -1040,6 +1029,17 @@ static PyObject* NodeBase_replace_all_uses_with(
     return nullptr;
   }
 
+  // Fetch replace_with.name once before the loop if there are hooks to call.
+  THPObjectPtr replace_with_name;
+  if (replace_hooks && PySequence_Check(replace_hooks.get()) &&
+      PySequence_Size(replace_hooks.get()) > 0) {
+    replace_with_name =
+        THPObjectPtr(PyObject_GetAttrString(replace_with, "name"));
+    if (!replace_with_name) {
+      return nullptr;
+    }
+  }
+
   Py_ssize_t num_users = PyList_GET_SIZE(to_process.get());
   for (Py_ssize_t i = 0; i < num_users; i++) {
     PyObject* use_node = PyList_GET_ITEM(to_process.get(), i);
@@ -1064,25 +1064,15 @@ static PyObject* NodeBase_replace_all_uses_with(
       return nullptr;
     }
 
-    // Call replace hooks. In Python: "if replace_hooks:" is False for empty
-    // list, so only access .name when there are actual hooks to call. Use
-    // attribute lookup to match Python semantics (raises AttributeError if
-    // replace_with doesn't have .name).
-    if (replace_hooks && PySequence_Check(replace_hooks.get())) {
+    // Call replace hooks
+    if (replace_with_name) {
       Py_ssize_t num_hooks = PySequence_Size(replace_hooks.get());
-      if (num_hooks > 0) {
-        THPObjectPtr replace_with_name(
-            PyObject_GetAttrString(replace_with, "name"));
-        if (!replace_with_name) {
-          return nullptr; // Raises AttributeError naturally
-        }
-        for (Py_ssize_t j = 0; j < num_hooks; j++) {
-          THPObjectPtr hook(PySequence_GetItem(replace_hooks.get(), j));
-          if (hook &&
-              !call_replace_hook_with_keywords(
-                  hook.get(), self, replace_with_name.get(), use_node)) {
-            return nullptr;
-          }
+      for (Py_ssize_t j = 0; j < num_hooks; j++) {
+        THPObjectPtr hook(PySequence_GetItem(replace_hooks.get(), j));
+        if (hook &&
+            !call_replace_hook_with_keywords(
+                hook.get(), self, replace_with_name.get(), use_node)) {
+          return nullptr;
         }
       }
     }
@@ -1155,6 +1145,13 @@ static PyObject* NodeBase_is_impure(
     THPObjectPtr target_mod(
         PyObject_CallOneArg(get_submodule.get(), node->target));
     if (!target_mod) {
+      return nullptr;
+    }
+    if (target_mod.get() == Py_None) {
+      PyErr_Format(
+          PyExc_AssertionError,
+          "Did not find expected submodule target %S",
+          node->target);
       return nullptr;
     }
     THPObjectPtr is_impure_attr(
@@ -1541,8 +1538,10 @@ static int NodeBase_setattro(
     return -1;
   }
 
+  bool is_name = strcmp(attr_name, "name") == 0;
+
   // Handle "name" attribute change - call replace hooks
-  if (strcmp(attr_name, "name") == 0 && node->name) {
+  if (is_name && node->name) {
     PyObject* owning_module = GraphBase_borrow_owning_module(node->graph);
     if (owning_module && owning_module != Py_None) {
       THPObjectPtr replace_hooks(
@@ -1572,34 +1571,31 @@ static int NodeBase_setattro(
     PyErr_Clear();
   }
 
-  // Check if we need to update _find_nodes_lookup_table
-  // Use direct C++ calls instead of going through Python
+  // The lookup table indexes on (op, target), so only those attributes
+  // need remove/re-insert when changed.
+  bool needs_lookup_update =
+      strcmp(attr_name, "op") == 0 || strcmp(attr_name, "target") == 0;
+
+  PyObject* find_nodes_lookup = nullptr;
   bool update = false;
-  PyObject* find_nodes_lookup =
-      GraphBase_borrow_find_nodes_lookup_table(node->graph);
-  if (find_nodes_lookup && find_nodes_lookup != Py_None) {
-    // Check if attribute exists on self
-    if (PyObject_HasAttr(self, name_obj)) {
-      // Check if self is in the lookup table using direct C++ call
-      if (FindNodesLookupTable_contains_impl(find_nodes_lookup, self)) {
-        update = true;
-        // Remove from lookup table using direct C++ call
-        FindNodesLookupTable_remove_impl(find_nodes_lookup, self);
+  if (needs_lookup_update) {
+    find_nodes_lookup = GraphBase_borrow_find_nodes_lookup_table(node->graph);
+    if (find_nodes_lookup && find_nodes_lookup != Py_None) {
+      if (PyObject_HasAttr(self, name_obj)) {
+        if (FindNodesLookupTable_contains_impl(find_nodes_lookup, self)) {
+          update = true;
+          FindNodesLookupTable_remove_impl(find_nodes_lookup, self);
+        }
       }
     }
+    PyErr_Clear();
   }
-  PyErr_Clear();
 
-  // Use generic setattro to actually set the attribute
   int result = PyObject_GenericSetAttr(self, name_obj, value);
 
-  // Re-insert into lookup table if needed using direct C++ call
+  // Re-insert into lookup table if needed
   if (update && result == 0) {
-    PyObject* find_nodes_lookup2 =
-        GraphBase_borrow_find_nodes_lookup_table(node->graph);
-    if (find_nodes_lookup2 && find_nodes_lookup2 != Py_None) {
-      FindNodesLookupTable_insert_impl(find_nodes_lookup2, self);
-    }
+    FindNodesLookupTable_insert_impl(find_nodes_lookup, self);
     PyErr_Clear();
   }
 
