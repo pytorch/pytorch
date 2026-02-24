@@ -232,13 +232,13 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         except ImportError:
             import mock_store_global_crossfile_inline
 
-        @torch.compile()
+        @torch.compile(backend="eager")
         def fn(x):
             mock_store_global_crossfile_inline.set_flag_true()
             mock_store_global_crossfile_inline.set_flag_false()
             return x + 1
 
-        @torch.compile()
+        @torch.compile(backend="eager")
         def fn_set_true(x):
             mock_store_global_crossfile_inline.set_flag_true()
             return x + 1
