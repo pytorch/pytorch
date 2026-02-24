@@ -4027,7 +4027,8 @@ class Scheduler:
             if fusion_log.isEnabledFor(logging.DEBUG):
                 if ms_fused < ms1 + ms2:
                     fusion_log.debug(
-                        "can fuse (benchmark): fusing %s with %s cause %sx speedup (ms_fused=%.6f, ms1=%.6f, ms2=%.6f, ms1+ms2=%.6f)",
+                        "can fuse (benchmark): fusing %s with %s cause %sx speedup "
+                        "(ms_fused=%.6f, ms1=%.6f, ms2=%.6f, ms1+ms2=%.6f)",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
@@ -4038,7 +4039,8 @@ class Scheduler:
                     )
                 else:
                     fusion_log.debug(
-                        "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown (ms_fused=%.6f, ms1=%.6f, ms2=%.6f, ms1+ms2=%.6f)",
+                        "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown "
+                        "(ms_fused=%.6f, ms1=%.6f, ms2=%.6f, ms1+ms2=%.6f)",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
