@@ -62,7 +62,7 @@ class _dynamic_dispatch_dtypes(_dispatch_dtypes):
 
 def get_supported_dtypes(op, sample_inputs_fn, device_type):
     # Returns the supported dtypes for the given operator and device_type pair.
-    assert device_type in ["cpu", "cuda", "xpu"]
+    assert device_type in ["cpu", "cuda", "xpu"] # noqa: S101
     if not TEST_CUDA and device_type == "cuda":
         warnings.warn(
             "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!",
