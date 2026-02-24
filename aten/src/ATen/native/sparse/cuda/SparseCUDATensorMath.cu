@@ -16,6 +16,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/macros/Macros.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -809,6 +810,24 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   }();
 #endif
 
+  // MSVC is not happy with having macros in AT_DISPATCH,
+  // so we are using a lambda which we try to force-inline
+  const auto maybe_provide_aligned_buffer_idx_ptr
+    = [&](int64_t* idx_ptr, int64_t start_offset, int64_t len) C10_ALWAYS_INLINE_ATTRIBUTE -> int64_t* {
+#ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
+      auto* start = idx_ptr + start_offset;
+      const auto is_misaligned_start = (reinterpret_cast<uintptr_t>(start) % 16) != 0;
+      if (is_misaligned_start && aligned_row_indices_buffer.defined()) {
+        aligned_row_indices_buffer.narrow(0, 0, len)
+          .copy_(indices_dim1.narrow(0, start_offset, len));
+        return aligned_row_indices_buffer.data_ptr<int64_t>();
+      }
+      return start;
+#else
+      return idx_ptr + start_offset;
+#endif
+  };
+
   Scalar beta = 0;
   Scalar alpha = 1;
 
@@ -843,21 +862,11 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
         // Create variables to view just the current set of matrices
         int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
         cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
-#ifdef CUSPARSE_SPMV_ALIGNMENT_BUG_PRESENT
-        auto* row_indices_ptr = [&]() -> auto* {
-          auto* start = row_indices_start_ptr + mat_el_begin_idx;
-          // See the definition of `aligned_row_indices_buffer`
-          const auto is_misaligned_start = (reinterpret_cast<uintptr_t>(start) % 16) != 0;
-          if (is_misaligned_start && aligned_row_indices_buffer.defined()) {
-            aligned_row_indices_buffer.narrow(0, 0, sparse_nnz)
-              .copy_(indices_dim1.narrow(0, mat_el_begin_idx, sparse_nnz));
-            return aligned_row_indices_buffer.data_ptr<int64_t>();
-          }
-          return start;
-        }();
-#else
-        auto* row_indices_ptr = row_indices_start_ptr + mat_el_begin_idx;
-#endif
+        auto* row_indices_ptr = maybe_provide_aligned_buffer_idx_ptr(
+          row_indices_start_ptr,
+          mat_el_begin_idx,
+          sparse_nnz
+        );
         auto* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
         scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
 
