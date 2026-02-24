@@ -41,7 +41,7 @@ void softplus_kernel(
           // Use numerically stable formula: exp(-abs(y)) never overflows
           // For y > 0: log1p(exp(-abs(y))) / beta + a
           // For y <= 0: log1p(exp(-abs(y))) / beta + 0
-          opmath_t z = ::log1p(std::exp(-std::abs(y))) / beta;
+          opmath_t z = std::log1p(std::exp(-std::abs(y))) / beta;
           return (y > opmath_t(0) ? aop : opmath_t(0)) + z;
         });
       });
