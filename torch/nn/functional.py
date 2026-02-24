@@ -6268,9 +6268,10 @@ def apply_rotary_emb(
         >>> k = torch.randn(2, 8, 128, 64)
         >>> q_rot, k_rot = F.apply_rotary_emb(q, k, cos[:128], sin[:128], seq_dim=2)
 
-        >>> # With custom frequencies (e.g., for LLaMA3 scaling)
-        >>> custom_cos, custom_sin = my_llama3_freqs(...)  # User-defined
-        >>> q_rot, k_rot = F.apply_rotary_emb(q, k, custom_cos, custom_sin)
+    With custom frequencies (e.g., for LLaMA3 scaling)::
+
+        custom_cos, custom_sin = my_llama3_freqs(...)  # User-defined
+        q_rot, k_rot = F.apply_rotary_emb(q, k, custom_cos, custom_sin)
 
     .. note::
         For KV-cache scenarios during inference, you can index into precomputed
