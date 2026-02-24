@@ -198,6 +198,14 @@ if(HIP_FOUND)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
+    find_file(ROCM_SMI_HEADER_PATH
+      NAMES rocm_smi/rocm_smi.h
+      NO_DEFAULT_PATH
+      PATHS ${ROCM_INCLUDE_DIRS}
+    )
+    if(NOT ROCM_SMI_HEADER_PATH)
+      message(FATAL_ERROR "rocm_smi.h not found. Please install the rocm-smi-lib package.")
+    endif()
   endif()
 
   # Optional components.
