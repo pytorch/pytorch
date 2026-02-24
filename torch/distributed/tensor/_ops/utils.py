@@ -497,9 +497,16 @@ def expand_to_full_mesh_op_strategy(
             )
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
-        if inplace_op and self_spec.placements != input_specs[0].placements:
-            # if it's inplace op, we would only allow the OpSpec to be added when the
-            # input_spec matches the first argument's runtime sharding, otherwise we skip
+        if inplace_op and (
+            self_spec.placements != input_specs[0].placements
+            or (
+                spec_list[0] is not None
+                and spec_list[0].placements != self_spec.placements
+            )
+        ):
+            # For inplace ops, both the proposed input[0] and the output must
+            # match self's runtime placement: input[0] because self can't be
+            # redistributed, output because the result IS self.
             if blocking_inplace_input_placements is None:
                 blocking_inplace_input_placements = self_spec.placements
             continue
