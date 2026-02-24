@@ -485,6 +485,28 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_attribute_error_caught_from_getattr(self):
+        class Obj:
+            def __getattr__(self, name):
+                raise AttributeError("boom")
+
+        obj = Obj()
+
+        def fn(x):
+            try:
+                obj.missing_attr
+            except AttributeError:
+                return torch.sin(x)
+            return torch.cos(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+
+        self.assertEqual(ref, res)
+
     def test_stop_iteration(self):
         def zip_longest(*iterables, fillvalue=None):
             # Get the iterators for each iterable
