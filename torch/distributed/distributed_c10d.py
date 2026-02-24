@@ -146,6 +146,9 @@ try:
     # pyrefly: ignore [missing-import]
     from torchcomms._comms import _BackendWrapper, new_comm
 
+    # pyrefly: ignore [missing-import]
+    from torchcomms.hooks import FlightRecorderHook
+
     _TORCHCOMM_AVAILABLE = True
 except ImportError:
     _TORCHCOMM_AVAILABLE = False
@@ -2057,6 +2060,12 @@ def _new_process_group_helper(
             comm = new_comm(
                 backend_str, torch_device, name=group_name, store=backend_prefix_store
             )
+            buffer_size = os.environ.get(
+                "TORCH_FR_BUFFER_SIZE",
+                os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
+            )
+            recorder = FlightRecorderHook(max_entries=int(buffer_size))
+            recorder.register_with_comm(comm)
             # Keep a reference so the comm outlives this function scope.
             _world.comms.append(comm)
             group_name = GroupName(group_name)
