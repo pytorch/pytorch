@@ -2306,8 +2306,7 @@ class TMACompatibilityChecker:
         """
         if self.force:
             strides = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(st)
-                for st in block_params.strides
+                V.graph.sizevars.symbolic_hint(st) for st in block_params.strides
             ]
         else:
             strides = block_params.strides
@@ -5332,7 +5331,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(numel)
+            numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefully: it is
                 # large, to ensure that we don't shrink the block size (since
