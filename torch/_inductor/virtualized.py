@@ -10,8 +10,8 @@ we will import V from this module::
     from .virtualized import V
 
 Various handlers are accessible as attributes on this module; for example,
-you might access ``V.graph.sizevars.size_hint`` to resolve a size hint associated with
-a number.
+you might access ``V.graph.sizevars.optimzations_hint`` to resolve a hint
+associated with a symbolic expression.
 
 There are a few distinct usage patterns for virtualized global variables:
 
