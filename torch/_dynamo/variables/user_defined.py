@@ -430,15 +430,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # C-level descriptors (WrapperDescriptor, MethodDescriptor, etc.)
         # Build directly when the attribute lives in the class's own __dict__
         # or the class belongs to torch (needed for e.g. torch.Tensor.dim).
-        # Otherwise defer to GetAttrVariable for inherited C descriptors on
-        # non-torch classes.
+        # OrderedDict's C-level methods are handled at runtime.
         if inspect.ismethoddescriptor(cls_attr) or is_wrapper_or_member_descriptor(
             cls_attr
         ):
-            if source and (
-                name in getattr(self.value, "__dict__", {})
-                or self.value.__module__.startswith("torch.")
-                or self.value.__module__ == "torch"
+            if (
+                source
+                and self.value is not collections.OrderedDict
+                and (
+                    name in getattr(self.value, "__dict__", {})
+                    or self.value.__module__.startswith("torch.")
+                    or self.value.__module__ == "torch"
+                )
             ):
                 return VariableTracker.build(tx, cls_attr, source)
             return variables.GetAttrVariable(self, name, None, source=source)
