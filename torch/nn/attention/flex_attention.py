@@ -846,8 +846,10 @@ class BlockMask:
             new_kv_indices,
             new_full_kv_num_blocks,
             new_full_kv_indices,
-            self.BLOCK_SIZE,
-            self.mask_mod,
+            BLOCK_SIZE=self.BLOCK_SIZE,
+            mask_mod=self.mask_mod,
+            seq_lengths=(new_q_len, new_kv_len),
+            compute_q_blocks=self.q_indices is not None,
         )
 
     def numel(self):

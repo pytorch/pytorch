@@ -2806,6 +2806,37 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
 
     @supported_platform
+    def test_adjust_updates_seq_lengths(self, device):
+        def causal_mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q_len = kv_len = 32
+        adj_q_len = adj_kv_len = 16
+        head_dim = 32
+
+        block_mask = create_block_mask(
+            causal_mask_mod,
+            B=None,
+            H=None,
+            Q_LEN=q_len,
+            KV_LEN=kv_len,
+            device=device,
+        )
+        adjusted_block_mask = block_mask._adjust(adj_q_len, adj_kv_len)
+
+        self.assertEqual(adjusted_block_mask.seq_lengths, (adj_q_len, adj_kv_len))
+        self.assertEqual(adjusted_block_mask.shape, (1, 1, adj_q_len, adj_kv_len))
+
+        q = torch.randn((1, 1, adj_q_len, head_dim), device=device)
+        k = torch.randn((1, 1, adj_kv_len, head_dim), device=device)
+        v = torch.randn((1, 1, adj_kv_len, head_dim), device=device)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out = flex_attention(q, k, v, block_mask=adjusted_block_mask)
+
+        self.assertEqual(out.shape, q.shape)
+
+    @supported_platform
     def test_mask_mod_combiners(self, device):
         def causal_mask(b, h, q, kv):
             return q >= kv
