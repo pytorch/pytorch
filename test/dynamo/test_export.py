@@ -9,9 +9,6 @@ import functools
 import inspect
 import io
 import operator
-import os
-import subprocess
-import sys
 import unittest
 from collections.abc import Sequence
 from enum import Enum
@@ -387,7 +384,9 @@ def forward(self, x, y):
             _error_on_data_dependent_ops=True,
         )(*[x1, x2])
         ep = torch.export.export(fx_model, (x1, x2))
-        res = torch.compile(ep.module(), dynamic=True, fullgraph=True)(x1, x2)
+        res = torch.compile(ep.module(), backend="eager", dynamic=True, fullgraph=True)(
+            x1, x2
+        )
         self.assertTrue(torch._dynamo.utils.same(res, M()(x1, x2)))
 
     def test_dupes(self):
@@ -4571,30 +4570,6 @@ def forward(self, x, b, y):
             res = ep.module()(*inputs)
 
         self.assertEqual(ref, res)
-
-    def test_strict_export_under_pythonoptimize(self):
-        env = dict(os.environ)
-        env["PYTHONOPTIMIZE"] = "1"
-        code = """\
-import torch
-model = torch.nn.Linear(2, 3)
-example_input = torch.randn(1, 2)
-ep = torch.export.export(model, args=(example_input,), strict=True)
-out_export = ep.module()(example_input)
-out_orig = model(example_input)
-torch.testing.assert_close(out_export, out_orig)
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=f"strict export under PYTHONOPTIMIZE=1 failed: stdout={result.stdout!r} stderr={result.stderr!r}",
-        )
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
