@@ -343,7 +343,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # For type(cls) is type, these are C-level getset/member descriptors
         # for __dict__, __mro__, __name__, __qualname__, __doc__, etc.
         meta_attr = self._lookup_metaclass_attr(name)
-        if meta_attr is not NO_SUCH_SUBOBJ and _is_data_descriptor(meta_attr):
+        if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
             return self._resolve_meta_data_descriptor(tx, name, meta_attr, source)
 
         # Step 3-5: Class MRO lookup.
