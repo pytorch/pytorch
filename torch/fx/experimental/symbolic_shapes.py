@@ -66,6 +66,7 @@ from torch._logging import dtrace_structured, LazyString, structured, trace_stru
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
+from torch.fx.experimental._config import AggressiveGuardFreeMode
 from torch.fx.experimental.recording import (
     FakeTensorMeta,
     record_shapeenv_event,
@@ -6592,6 +6593,25 @@ class ShapeEnv:
 
         return None
 
+    def _maybe_evaluate_range_only(
+        self,
+        expr: sympy.Basic,
+        fallback: Optional[sympy.Basic] = None,
+    ) -> Optional[sympy.Basic]:
+        """
+        Lightweight range-based evaluation using only bound_sympy (value range
+        analysis), without expensive simplification, axiom matching, or symbol
+        reallocation.
+
+        Returns the resolved value if range analysis determines it, otherwise
+        returns fallback.
+        """
+        var_ranges = {x: self.var_to_range.get(x) for x in expr.free_symbols}
+        out = bound_sympy(expr, var_ranges)  # type: ignore[arg-type]
+        if out.is_singleton():
+            return out.lower
+        return fallback
+
     @_lru_cache
     def _maybe_evaluate_static(
         self,
@@ -7788,9 +7808,31 @@ class ShapeEnv:
 
             # Try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
-            fast_result = self._maybe_fast_eval_comparison(expr)
-            if fast_result is not None:
-                return fast_result
+            if (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+                < AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS
+            ):
+                fast_result = self._maybe_fast_eval_comparison(expr)
+                if fast_result is not None:
+                    return fast_result
+
+            # Aggressive guard-free semantics:
+            # VALUE_RANGE_ANALYSIS: use value range analysis (bound_sympy) before returning fallback
+            # SKIP_RANGE_ANALYSIS: skip range analysis entirely, just return fallback_value
+            aggressive_level = (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+            )
+            if hint is None and aggressive_level > 0 and fallback_value is not None:
+                if aggressive_level >= AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS:
+                    # Skip range analysis entirely
+                    self._log_suppressed_dde(orig_expr, fallback_value)
+                    return fallback_value
+                else:
+                    # Level 1: try range analysis first
+                    range_result = self._maybe_evaluate_range_only(expr, fallback_value)
+                    if range_result is fallback_value:
+                        self._log_suppressed_dde(orig_expr, fallback_value)
+                    return range_result
 
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
