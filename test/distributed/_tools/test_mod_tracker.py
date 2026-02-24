@@ -236,29 +236,21 @@ class TestCompileSafeHooks(TestCase):
         ):
             model(x).sum().backward()
 
-        fw = [(k, f) for k, f in log if k.endswith("fw")]
-        self.assertEqual(
-            fw,
-            [
-                ("pre_fw", "linear1"),
-                ("post_fw", "linear1"),
-                ("pre_fw", "act"),
-                ("post_fw", "act"),
-                ("pre_fw", "linear2"),
-                ("post_fw", "linear2"),
-            ],
-        )
-        bw = [(k, f) for k, f in log if k.endswith("bw")]
-        self.assertEqual(
-            bw,
-            [
-                ("pre_bw", "linear2"),
-                ("post_bw", "linear2"),
-                ("pre_bw", "act"),
-                ("post_bw", "act"),
-                ("pre_bw", "linear1"),
-                ("post_bw", "linear1"),
-            ],
+        self.assertExpectedInline(
+            "\n".join(f"{k} {f}" for k, f in log),
+            """\
+pre_fw linear1
+post_fw linear1
+pre_fw act
+post_fw act
+pre_fw linear2
+post_fw linear2
+pre_bw linear2
+post_bw linear2
+pre_bw act
+post_bw act
+pre_bw linear1
+post_bw linear1""",
         )
 
     def test_all_hooks_compiled(self):
@@ -276,25 +268,41 @@ class TestCompileSafeHooks(TestCase):
             compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
             compiled(x).sum().backward()
 
-        fw_count = sum(1 for k, _ in log if k.endswith("fw"))
-        bw_count = sum(1 for k, _ in log if k.endswith("bw"))
-        self.assertEqual(fw_count, 6)
-        self.assertEqual(bw_count, 6)
+        self.assertExpectedInline(
+            "\n".join(f"{k} {f}" for k, f in log),
+            """\
+pre_fw linear1
+post_fw linear1
+pre_fw act
+post_fw act
+pre_fw linear2
+post_fw linear2
+pre_bw linear2
+post_bw linear2
+pre_bw act
+post_bw act
+pre_bw linear1
+post_bw linear1""",
+        )
 
     def test_root_module_skipped(self):
         model = self._make_model()
         x = torch.randn(3, 4)
-        fqns = set()
+        fqns = []
 
         with ModTracker.compile_safe_hooks(
             model,
-            post_fw_hook=lambda fqn, inp, out: fqns.add(fqn),
+            post_fw_hook=lambda fqn, inp, out: fqns.append(fqn),
         ):
             torch.compile(model, backend="aot_eager", fullgraph=True)(x)
 
-        self.assertNotIn("", fqns)
-        self.assertIn("linear1", fqns)
-        self.assertIn("linear2", fqns)
+        self.assertExpectedInline(
+            "\n".join(sorted(set(fqns))),
+            """\
+act
+linear1
+linear2""",
+        )
 
     def test_gradient_correctness(self):
         model = self._make_model()
@@ -320,12 +328,15 @@ class TestCompileSafeHooks(TestCase):
     def test_post_fw_receives_inputs_and_outputs(self):
         model = self._make_model()
         x = torch.randn(3, 4, requires_grad=True)
-        shapes = {}
+        log = {}
+
+        def fmt(t):
+            return f"shape={list(t.shape)} stride={list(t.stride())} dtype={t.dtype}"
 
         def record_post_fw(fqn, inputs, outputs):
-            shapes[fqn] = (
-                [t.shape for t in inputs],
-                [t.shape for t in outputs],
+            log[fqn] = (
+                [fmt(t) for t in inputs],
+                [fmt(t) for t in outputs],
             )
 
         with ModTracker.compile_safe_hooks(
@@ -335,12 +346,15 @@ class TestCompileSafeHooks(TestCase):
             compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
             compiled(x).sum().backward()
 
-        # linear1: (3,4) -> (3,8)
-        self.assertEqual(shapes["linear1"][0], [torch.Size([3, 4])])
-        self.assertEqual(shapes["linear1"][1], [torch.Size([3, 8])])
-        # linear2: (3,8) -> (3,2)
-        self.assertEqual(shapes["linear2"][0], [torch.Size([3, 8])])
-        self.assertEqual(shapes["linear2"][1], [torch.Size([3, 2])])
+        self.assertExpectedInline(
+            "\n".join(
+                f"{fqn} inp={log[fqn][0]} out={log[fqn][1]}" for fqn in sorted(log)
+            ),
+            """\
+act inp=['shape=[3, 8] stride=[8, 1] dtype=torch.float32'] out=['shape=[3, 8] stride=[8, 1] dtype=torch.float32']
+linear1 inp=['shape=[3, 4] stride=[4, 1] dtype=torch.float32'] out=['shape=[3, 8] stride=[8, 1] dtype=torch.float32']
+linear2 inp=['shape=[3, 8] stride=[8, 1] dtype=torch.float32'] out=['shape=[3, 2] stride=[2, 1] dtype=torch.float32']""",  # noqa: B950
+        )
 
     def test_module_filter(self):
         model = self._make_model()
@@ -354,7 +368,12 @@ class TestCompileSafeHooks(TestCase):
         ):
             torch.compile(model, backend="aot_eager", fullgraph=True)(x)
 
-        self.assertEqual(set(fqns), {"linear1", "linear2"})
+        self.assertExpectedInline(
+            "\n".join(sorted(set(fqns))),
+            """\
+linear1
+linear2""",
+        )
 
 
 if __name__ == "__main__":

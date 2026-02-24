@@ -411,8 +411,9 @@ class ModTracker:
                 where this returns ``True`` get hooks. Default: all modules.
 
         Note:
-            - Only supports ``aot_eager`` backend (inductor not yet supported by
-              ``leaf_function``).
+            - Works in eager mode, and under ``torch.compile`` with ``eager``
+              and ``aot_eager`` backends. The ``inductor`` backend is not yet
+              supported by ``leaf_function``.
             - The root module (fqn ``""``) is automatically skipped because
               ``torch.compile(model)`` wraps the model in ``OptimizedModule``,
               causing root-level hooks to fire outside the compiled region.
