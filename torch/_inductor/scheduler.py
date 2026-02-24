@@ -5199,7 +5199,9 @@ class Scheduler:
             ):
                 candidates.append(
                     (
-                        V.graph.sizevars.size_hint(lhs_dep.get_numel(), fallback=0),
+                        V.graph.sizevars.optimization_hint(
+                            lhs_dep.get_numel(), fallback=0
+                        ),
                         lhs_dep,
                         rhs_dep,
                     )
@@ -6516,27 +6518,6 @@ class Scheduler:
         if cur_partition:
             partitions.append(cur_partition)
             skip_cudagraphs.append(skip_cudagraph)
-
-        # Apply minimum partition size threshold: if a cudagraph-eligible partition
-        # has fewer kernels than the threshold, mark it as non-cudagraphable
-        min_size = config.triton.cudagraph_min_partition_size
-        if min_size > 0:
-            for i, (partition, skip) in enumerate(zip(partitions, skip_cudagraphs)):
-                if not skip:
-                    # Count kernels excluding NopKernelSchedulerNode
-                    kernel_count = sum(
-                        1
-                        for n in partition
-                        if not isinstance(n, NopKernelSchedulerNode)
-                    )
-                    if kernel_count < min_size:
-                        skip_cudagraphs[i] = True
-                        cudagraphs_log.debug(
-                            "Partition %d has %d kernels, below minimum size %d, skipping cudagraph",
-                            i,
-                            kernel_count,
-                            min_size,
-                        )
 
         signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
