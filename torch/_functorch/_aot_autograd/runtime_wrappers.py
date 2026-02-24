@@ -88,6 +88,8 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import (
+    _extract_runtime_opaques,
+    collect_needed_opaques,
     requires_subclass_dispatch,
     runtime_unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
@@ -112,12 +114,12 @@ def _describe_arg_for_logging(arg: object) -> str:
     from torch._library import opaque_object
 
     try:
-        is_dtensor = isinstance(arg, torch.distributed._tensor.DTensor)
+        is_dtensor = isinstance(arg, torch.distributed.tensor.DTensor)
     except AttributeError:
         is_dtensor = False
 
     if is_dtensor:
-        arg = typing.cast(torch.distributed._tensor.DTensor, arg)
+        arg = typing.cast(torch.distributed.tensor.DTensor, arg)
         mesh = arg.device_mesh
         return (
             f"DTensor(shape={arg.shape}, dtype={arg.dtype}, "
@@ -941,7 +943,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         if self.maybe_subclass_meta is None:
             return compiled_fn
 
-        subclass_metas = runtime_metadata.subclass_fw_graph_out_meta
+        subclass_fw_graph_out_metas = runtime_metadata.subclass_fw_graph_out_meta
 
         @wraps(compiled_fn)
         def inner_fn(args: list[Any]) -> Any:
@@ -952,11 +954,30 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 _log_input_metadata(runtime_metadata)
                 _log_args_list(args, "Incoming args")
 
-            unwrapped_args = runtime_unwrap_tensor_subclasses(
+            # Extract opaque objects from input subclasses before unwrapping
+            needed_meta_opaques: set[tuple[int, ...]] = set()
+            for meta in subclass_fw_graph_out_metas:
+                if isinstance(meta, SubclassCreationMeta):
+                    collect_needed_opaques(meta, needed_meta_opaques)
+
+            unwrapped_args, input_meta_opaques = runtime_unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
                 append_symints=True,
+                needed_meta_opaques=needed_meta_opaques,
             )
+
+            # Also extract direct opaque inputs (those with src format (input_idx,))
+            # These are opaques that were lifted directly as graph inputs
+            for src in needed_meta_opaques:
+                if len(src) == 1:
+                    input_idx = src[0]
+                    if input_idx >= len(args):
+                        raise AssertionError(
+                            f"opaque source {src} references input index {input_idx}, "
+                            f"but only {len(args)} args provided"
+                        )
+                    input_meta_opaques[src] = args[input_idx]
 
             if aot_graphs_log.isEnabledFor(logging.DEBUG):
                 _log_args_list(unwrapped_args, "After unwrapping, unwrapped_args")
@@ -972,10 +993,11 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
             wrapped_outs = wrap_tensor_subclasses(
                 unwrapped_outs,
-                subclass_metas=subclass_metas,
+                subclass_metas=subclass_fw_graph_out_metas,
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
                 included_subclass_symints=True,
+                input_meta_opaques=input_meta_opaques,
             )
 
             if aot_graphs_log.isEnabledFor(logging.DEBUG):
@@ -1917,6 +1939,7 @@ def _backward_prologue_functional(
     metadata: ViewAndMutationMeta,
     maybe_subclass_metadata: SubclassMeta | None,
     *flat_args: Any,
+    out_tangent_opaques: dict[tuple[int, ...], Any] | None = None,
 ) -> list[Any]:
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -2073,6 +2096,17 @@ def _backward_prologue_functional(
                 "The grad inputs should be same number as forward output tangents"
             )
 
+        # Extract opaques from tangent subclasses before they get flattened.
+        # These will be used to remap opaques in backward grad_inputs.
+        if out_tangent_opaques is not None:
+            for tidx, (t, m) in enumerate(
+                zip(tangents, metadata.subclass_tangent_meta)
+            ):
+                if isinstance(
+                    m, SubclassCreationMeta
+                ) and is_traceable_wrapper_subclass(t):
+                    _extract_runtime_opaques((tidx,), t, m, out_tangent_opaques)
+
         stack_traces = metadata.tangent_source_stack_traces or ()
 
         flat_processed_tangents = list(
@@ -2107,12 +2141,12 @@ def _backward_prologue_functional(
                 # arguments to the forward graph, and they will be saved
                 # as activation in the backward graph.
                 append_symints=False,
-            )
+            )[0]
             + flat_processed_tangents
             + runtime_unwrap_tensor_subclasses(
                 all_args[tangents_end_idx:],  # type: ignore[arg-type]
                 append_symints=False,
-            )
+            )[0]
         )
     else:
         stack_traces = metadata.tangent_source_stack_traces or ()
@@ -2193,6 +2227,7 @@ def _backward_epilogue_functional(
     out: Any,
     *,
     make_subclass_override: Callable[..., Any] | None = None,
+    input_meta_opaques: dict[tuple[int, ...], Any] | None = None,
 ) -> tuple[Any, ...]:
     # Toss out the backward output tokens
     num_bw_tokens = metadata.num_backward_tokens
@@ -2215,6 +2250,7 @@ def _backward_epilogue_functional(
             included_subclass_symints=True,
             is_runtime=True,
             make_subclass_override=make_subclass_override,
+            input_meta_opaques=input_meta_opaques,
         )
         return outs_wrapped
     return out
@@ -2775,6 +2811,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                 # Combine tensors from both sources:
                 # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
                 # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
+                tangent_opaques: dict[tuple[int, ...], Any] = {}
                 all_args = _backward_prologue_functional(
                     (
                         list(ctx.saved_tensors) + ctx._tensors_no_vc_check
@@ -2786,6 +2823,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,
+                    out_tangent_opaques=tangent_opaques,
                 )
 
                 if num_rng:
@@ -2837,6 +2875,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                         CompiledFunction.metadata,
                         CompiledFunction.maybe_subclass_metadata,
                         out,
+                        input_meta_opaques=tangent_opaques or None,
                     )
 
                 needs_grad = torch.is_grad_enabled() and any(

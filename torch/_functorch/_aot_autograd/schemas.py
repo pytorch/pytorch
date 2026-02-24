@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
     from .descriptors import AOTInput, AOTOutput
     from .graph_capture_wrappers import JointFnHandle
+    from .subclass_utils import OpaqueObjectRemapping
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -255,6 +256,7 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
     memory_format: Optional[MemoryFormatMeta] = None
+    opaque_remappings: Sequence[OpaqueObjectRemapping] = ()
 
     def compute_outer_size_and_stride(
         self,
@@ -293,7 +295,17 @@ class SubclassCreationMeta:
         all_args: Sequence[torch.Tensor | IntLikeType],
         *,
         is_runtime: bool,
+        input_meta_opaques: dict[tuple[int, ...], OpaqueType] | None = None,
     ) -> torch.Tensor:
+        # At runtime, substitute opaque objects if we have runtime_opaques
+        meta = self.meta
+        if is_runtime and self.opaque_remappings and input_meta_opaques is not None:
+            if not isinstance(meta, (list, tuple)):
+                raise AssertionError("meta should be a Sequence")
+            meta = list(meta)
+            for source in self.opaque_remappings:
+                meta[source.dst] = input_meta_opaques[source.src]
+
         inner_tensors = {}
 
         curr_start_idx = self.flat_tensor_start_idx
@@ -305,6 +317,7 @@ class SubclassCreationMeta:
                 subclass = creation_meta.creation_fn(
                     all_args,
                     is_runtime=is_runtime,
+                    input_meta_opaques=input_meta_opaques,
                 )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
@@ -327,7 +340,7 @@ class SubclassCreationMeta:
             outer_size, outer_stride = self.outer_size, self.outer_stride
 
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
-            inner_tensors, self.meta, outer_size, outer_stride
+            inner_tensors, meta, outer_size, outer_stride
         )
 
         if not is_runtime:

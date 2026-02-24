@@ -1333,7 +1333,12 @@ def aot_dispatch_subclass(
                 )
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]
-            subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
+            # Collect opaques from tangents so we can build remappings
+            # for grad_inputs (the backward's outputs).
+            _, tangent_opaques = create_subclass_meta(meta.traced_tangents)
+            subclass_meta.grad_input_metas, _ = create_subclass_meta(
+                grad_inputs, input_opaques=tangent_opaques
+            )
 
             # Add extra symints as outputs to the forward/backward graphs
             # ignore nested ints here
