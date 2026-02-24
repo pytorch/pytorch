@@ -20,19 +20,26 @@ from torch._inductor.kernel.custom_op import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_MACOS, skipIfXpu
-from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_GPU,
+    HAS_TRITON,
+    IS_BIG_GPU,
+)
 
 
 torch.set_float32_matmul_precision("high")
 
 
 @unittest.skipIf(IS_MACOS, "TODO: mac")
+@unittest.skipUnless(HAS_GPU and HAS_TRITON, "requires GPU and Triton")
 class TestCustomOpAutoTune(TestCase):
     """Test custom operation autotuning functionality."""
 
     def setUp(self) -> None:
         """Set up test environment with appropriate device and dtype."""
         super().setUp()
+        torch._dynamo.reset()
         self.device = "cuda" if HAS_GPU else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
         # Clear any previous lowering registrations to ensure test isolation
@@ -1237,4 +1244,7 @@ class TestCustomOpAutoTune(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    from torch._inductor.utils import is_big_gpu
+
+    if HAS_GPU and HAS_CPU and is_big_gpu():
+        run_tests()
