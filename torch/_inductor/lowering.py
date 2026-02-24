@@ -111,6 +111,8 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 
 log = logging.getLogger(__name__)
 lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
+# User-registered lowerings that take priority over built-in lowerings.
+user_lowerings: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
@@ -4737,13 +4739,13 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None
             + 2 * (stride[i] - 1),
             stride[i],
         )
-        if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
+        if V.graph.sizevars.guard_or_false(
+            sympy.Ge((x_alt - 1) * stride[i] - x - padding[i], 0)
+        ):
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
-            V.graph.sizevars.check_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
-        if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
+        if V.graph.sizevars.guard_or_false(sympy.Eq(x_out, x_alt)):
             # ceil mode is actually a no-op, lets guard on that
-            V.graph.sizevars.check_equals(x_out, x_alt)
             ceil_mode = False
         else:
             x_out = x_alt
