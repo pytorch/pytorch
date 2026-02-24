@@ -323,7 +323,6 @@ def register_dataclass(
         >>> assert torch.allclose(point.y, torch.tensor(2))
 
     """
-    drop_field_names = drop_field_names or []
 
     if not dataclasses.is_dataclass(cls):
         if field_names is None:
@@ -331,30 +330,36 @@ def register_dataclass(
                 "field_names must be specified with a list of all fields used to "
                 f"initialize {cls}, as it is not a dataclass."
             )
-    elif field_names is None:
-        field_names = [f.name for f in dataclasses.fields(cls) if f.init]
     else:
         dataclass_init_fields = {f.name for f in dataclasses.fields(cls) if f.init}
-        dataclass_init_fields.difference_update(drop_field_names)
 
-        if dataclass_init_fields != set(field_names):
-            error_msg = "field_names does not include all dataclass fields.\n"
+        drop_field_names_set = set(drop_field_names or [])
+        if field_names is None:
+            field_names = [
+                f.name
+                for f in dataclasses.fields(cls)
+                if f.init and f.name not in drop_field_names_set
+            ]
+        else:
+            field_names_set = set(field_names)
+            if dataclass_init_fields != field_names_set | drop_field_names_set:
+                error_msg = "field_names does not include all dataclass fields.\n"
 
-            if missing := dataclass_init_fields - set(field_names):
-                error_msg += (
-                    f"Missing fields in `field_names`: {missing}. If you want "
-                    "to include these fields in the pytree, please add them "
-                    "to `field_names`, otherwise please add them to "
-                    "`drop_field_names`.\n"
-                )
+                if missing := dataclass_init_fields - field_names_set:
+                    error_msg += (
+                        f"Missing fields in `field_names`: {missing}. If you want "
+                        "to include these fields in the pytree, please add them "
+                        "to `field_names`, otherwise please add them to "
+                        "`drop_field_names`.\n"
+                    )
 
-            if unexpected := set(field_names) - dataclass_init_fields:
-                error_msg += (
-                    f"Unexpected fields in `field_names`: {unexpected}. "
-                    "Please remove these fields, or add them to `drop_field_names`.\n"
-                )
+                if unexpected := field_names_set - dataclass_init_fields:
+                    error_msg += (
+                        f"Unexpected fields in `field_names`: {unexpected}. "
+                        "Please remove these fields, or add them to `drop_field_names`.\n"
+                    )
 
-            raise ValueError(error_msg)
+                raise ValueError(error_msg)
 
     def _flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
