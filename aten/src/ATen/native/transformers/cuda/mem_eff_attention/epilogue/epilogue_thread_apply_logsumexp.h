@@ -68,17 +68,20 @@ struct ArrayExponential {
   }
 };
 
+template <int N>
+struct dependent_false : std::false_type {};
+
 template <int ElementsPerAccess>
 struct ArrayExponential<half_t, ElementsPerAccess> {
   static_assert(
-      !std::is_same<half_t, half_t>::value,
+      dependent_false<ElementsPerAccess>::value,
       "ArrayExponential is not implemented for half_t");
 };
 
 template <int ElementsPerAccess>
 struct ArrayExponential<bfloat16_t, ElementsPerAccess> {
   static_assert(
-      !std::is_same<bfloat16_t, bfloat16_t>::value,
+      dependent_false<ElementsPerAccess>::value,
       "ArrayExponential is not implemented for bfloat16_t");
 };
 } // namespace detail
