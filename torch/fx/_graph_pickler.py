@@ -157,13 +157,10 @@ class GraphPickler(pickle.Pickler):
         """
         Unpickle an object.
         """
-        from torch._dynamo.utils import dynamo_timed
-
-        with dynamo_timed("GraphPickler.loads"):
-            state = _UnpickleState(fake_mode)
-            with io.BytesIO(data) as stream:
-                unpickler = _GraphUnpickler(stream, state)
-                return unpickler.load()
+        state = _UnpickleState(fake_mode)
+        with io.BytesIO(data) as stream:
+            unpickler = _GraphUnpickler(stream, state)
+            return unpickler.load()
 
     @classmethod
     def debug_dumps(

@@ -511,9 +511,6 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     }
   }
 
-  map.emplace(
-      kIsAsynchronizedOp, std::to_string(debugInfo->isAsynchronizedOp()));
-
   if (get_record_tensor_addrs_enabled()) {
     std::vector<std::string> addressList;
     if (config.introspectInputs) {

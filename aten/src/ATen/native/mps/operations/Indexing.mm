@@ -781,30 +781,33 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
 
   std::cout << "result=" << result << std::endl;
 
+  Tensor self_ = (result.dim() == 0) ? result.view(1) : result;
+  Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+
   IndexReduceParams params;
   params.index_stride = index.stride(0);
   params.reduce_dim = dim;
-  params.ndim = result.dim();
+  params.ndim = self_.dim();
 
-  for (const auto dim : c10::irange(result.dim())) {
-    params.self_strides[dim] = result.stride(dim);
-    params.self_sizes[dim] = result.size(dim);
-    params.source_strides[dim] = source.stride(dim);
-    params.source_sizes[dim] = source.size(dim);
+  for (const auto dim : c10::irange(self_.dim())) {
+    params.self_strides[dim] = self_.stride(dim);
+    params.self_sizes[dim] = self_.size(dim);
+    params.source_strides[dim] = source_.stride(dim);
+    params.source_sizes[dim] = source_.size(dim);
   }
 
   MPSStream* stream = getCurrentMPSStream();
 
-  auto num_threads = source.numel();
+  auto num_threads = source_.numel();
 
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
       auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
-          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
-      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source});
+          "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(self_), mps::scalarToMetalTypeString(index)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {self_, index, source_});
       [compute_encoder setComputePipelineState:pipeline_state];
-      mps::mtl_setArgs(compute_encoder, result, index, source, params);
+      mps::mtl_setArgs(compute_encoder, self_, index, source_, params);
       mps::mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
       getMPSProfiler().endProfileKernel(pipeline_state);
     }
@@ -813,13 +816,13 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   std::cout << "result=" << result << std::endl;
 
   if (reduction_type == ReductionType::MEAN) {
-    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
-    counts.index_add_(dim, index, at::ones_like(source));
+    auto counts = include_self ? at::ones_like(self_) : at::zeros_like(self_);
+    counts.index_add_(dim, index, at::ones_like(source_));
     counts.masked_fill_(counts.eq(0), 1);
-    if (result.is_floating_point() || result.is_complex()) {
-      result.div_(counts);
+    if (self_.is_floating_point() || self_.is_complex()) {
+      self_.div_(counts);
     } else {
-      result.div_(counts, "floor");
+      self_.div_(counts, "floor");
     }
     std::cout << "counts=" << counts << std::endl;
     std::cout << "result=" << result << std::endl;
