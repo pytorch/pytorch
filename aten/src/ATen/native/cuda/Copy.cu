@@ -19,6 +19,7 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 // TODO(NS): Investigate why FP8 conversion intrinsics end up being slower
 #ifdef AT_USE_NV_CVT_INTRINSICS
@@ -32,14 +33,9 @@ namespace {
 // Initial pool size for CUDA events per device.
 constexpr size_t kInitialEventPoolSize = 8;
 
-at::cuda::CUDAEventPtr getEventFromPool(const at::DeviceIndex device_idx) {
-  static auto* event_pool = []() {
-    auto* pool = new at::cuda::EventPool();
-    // Pre-populate the pool with events to avoid stalls in creating events
-    pool->init_num_events(kInitialEventPoolSize);
-    return pool;
-  }();
-
+at::cuda::CUDAEventPool::Event getEventFromPool(const at::DeviceIndex device_idx) {
+  // Pre-populate the pool with events to avoid stalls in creating events
+  static auto* event_pool = new at::cuda::CUDAEventPool(kInitialEventPoolSize);
   return event_pool->get(device_idx);
 }
 
@@ -431,14 +427,26 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   // Copy between CPU and GPU
   cuda::OptionalCUDAGuard device_guard;
   cudaMemcpyKind kind;
+  const Tensor* host_tensor = nullptr;
   if (dst_device.is_cuda() && src_device.is_cpu()) {
     device_guard.set_device(dst_device);
     kind = cudaMemcpyHostToDevice;
+    host_tensor = &iter.tensor(1);
   } else if (dst_device.is_cpu() && src_device.is_cuda()) {
     device_guard.set_device(src_device);
     kind = cudaMemcpyDeviceToHost;
+    host_tensor = &iter.tensor(0);
   } else {
     TORCH_INTERNAL_ASSERT(false, "unsupported devices in GPU copy_()");
+  }
+
+  // Check for unpinned CPU memory during CUDA graph capture
+  if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+    TORCH_CHECK(
+        host_tensor->is_pinned(),
+        "Cannot copy between CPU and CUDA tensors during CUDA graph capture ",
+        "unless the CPU tensor is pinned. Please use tensor.pin_memory() or ",
+        "allocate the tensor with pin_memory=True.");
   }
 
   void* dst = iter.data_ptr(0);

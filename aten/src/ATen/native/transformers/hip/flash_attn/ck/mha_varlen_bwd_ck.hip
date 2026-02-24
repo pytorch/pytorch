@@ -112,9 +112,9 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
 
     // dq_acc: (split, total_q, nheads, hdim)
     ck_tile::index_t split_stride_dq_acc = dq_acc.stride(0);
-    ck_tile::index_t batch_stride_dq_acc = 0;
+    ck_tile::long_index_t batch_stride_dq_acc = 0;
     ck_tile::index_t stride_dq_acc = dq_acc.stride(1);
-    ck_tile::index_t nhead_stride_dq_acc = dq_acc.stride(2);
+    ck_tile::long_index_t nhead_stride_dq_acc = dq_acc.stride(2);
 
     float p_undrop = 1.0 - p_dropout;
 
@@ -164,7 +164,10 @@ fmha_bwd_args get_ck_fmha_varlen_bwd_args(const mask_info &mask,
                          dq_acc.data_ptr(), // dq_acc
                          seqlens_q.data_ptr(), // seqstart_q
                          seqlens_k.data_ptr(), // seqstart_k
+                         nullptr, // seqlen_q_ptr
                          nullptr, // seqlen_k_ptr
+                         nullptr, // cu_seqlen_q_ptr
+                         nullptr, // cu_seqlen_k_ptr
                          total_q,
                          total_k,
                          b,
@@ -255,7 +258,7 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
     if (is_causal) { window_size_right = 0; }
 
     bool is_dropout = p_dropout > 0.0;
-    auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -366,7 +369,7 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
     }
 
     // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
     auto softmax_d = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));

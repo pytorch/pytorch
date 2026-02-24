@@ -1,6 +1,7 @@
 # Owner(s): ["module: __torch_dispatch__"]
 # ruff: noqa: F841
 
+import gc
 import pickle
 import sys
 import tempfile
@@ -593,11 +594,14 @@ class TestPythonRegistration(TestCase):
             def _test():
                 torch.ops._test_python_registration._op()
 
-            assert "_test_python_registration::_op" in str(_test.graph)
+            if "_test_python_registration::_op" not in str(_test.graph):
+                raise AssertionError("expected _test_python_registration::_op in graph")
 
         with self.assertRaises(AssertionError):
             test_helper("")  # alias_analysis="FROM_SCHEMA"
 
+        # Run gc to make sure the previous Library is removed.  This is needed in dynamo-wrapped 3.14t
+        gc.collect()
         test_helper("CONSERVATIVE")
 
     def test_error_for_unsupported_ns_or_kind(self) -> None:
@@ -970,9 +974,13 @@ $1: f32[1] = torch._ops.aten.detach.default($0)""",
 
             @staticmethod
             def backward(ctx, grad_output):
-                assert isinstance(grad_output, LoggingTensor)
+                if not isinstance(grad_output, LoggingTensor):
+                    raise AssertionError(
+                        f"expected LoggingTensor, got {type(grad_output)}"
+                    )
                 (x,) = ctx.saved_tensors
-                assert isinstance(x, LoggingTensor)
+                if not isinstance(x, LoggingTensor):
+                    raise AssertionError(f"expected LoggingTensor, got {type(x)}")
                 escape[0] = x
                 return grad_output * 2 * x
 
@@ -1560,10 +1568,11 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""",
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
 
-        assert self.assertRaisesRegex(
+        if not self.assertRaisesRegex(
             RuntimeError,
             "subclass Mode but.* associated to a python object of type Mode",
-        )
+        ):
+            raise AssertionError("expected RuntimeError")
 
     def test_notimplemented_mode(self):
         sub_count = 0

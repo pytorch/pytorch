@@ -171,7 +171,6 @@ class _DDPBucketAssignment:
         if len(self.parameters) == 0:
             raise ValueError("Empty bucket assignment")
         # DDP guarantees all parameters in the bucket have the same device
-        # pyrefly: ignore [read-only]
         self.device: torch.device = self.parameters[0].device
         self.tensor: torch.Tensor | None = None
 

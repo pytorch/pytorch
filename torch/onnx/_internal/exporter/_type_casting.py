@@ -5,7 +5,8 @@ import torch
 
 def unpack_float4x2_as_uint8(tensor: torch.Tensor) -> np.ndarray:
     """Convert a float4x2 tensor to unpacked uint8 np array."""
-    assert tensor.dtype == torch.float4_e2m1fn_x2
+    if tensor.dtype != torch.float4_e2m1fn_x2:
+        raise AssertionError(f"Expected float4_e2m1fn_x2, got {tensor.dtype}")
     data = tensor.view(torch.uint8).numpy(force=True).flatten()
     result_size = tensor.numel() * 2
     result = np.empty([result_size], dtype=np.uint8)
@@ -28,5 +29,6 @@ def get_float4_shape(tensor: torch.Tensor) -> tuple[int, ...]:
     two fp4 values packed into 1 byte. Semantically it represents (*tensor.shape[:-1], tensor.shape[-1]*2)
     fp4 elements.
     """
-    assert tensor.dtype == torch.float4_e2m1fn_x2
+    if tensor.dtype != torch.float4_e2m1fn_x2:
+        raise AssertionError(f"Expected float4_e2m1fn_x2, got {tensor.dtype}")
     return (*tensor.shape[:-1], tensor.shape[-1] * 2)

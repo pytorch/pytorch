@@ -678,7 +678,8 @@ class TestStatelessFunctionalAPI(TestCase):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                assert not hasattr(self, 'extra')
+                if hasattr(self, 'extra'):
+                    raise AssertionError("self should not have 'extra' attribute")
 
             def forward(self, x):
                 return x + self.extra
