@@ -493,7 +493,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
                   multi_tensor_apply<1>(
                       tensor_lists,
                       LpNormFunctor<scalar_t, NormType::LInf, out_t>(),
-                      output_per_tensor.template mutable_data_ptr<out_opmath_t>(),
+                      output_per_tensor
+                          .template mutable_data_ptr<out_opmath_t>(),
                       max_chunks_per_tensor);
                 }
               }
@@ -521,7 +522,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
                 if (p == static_cast<double>(1)) {
                   lpnorm_cleanup<scalar_t, NormType::L1, out_t, apply_root>
                       <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                          output_per_tensor.template const_data_ptr<out_opmath_t>() +
+                          output_per_tensor
+                                  .template const_data_ptr<out_opmath_t>() +
                               i * MAX_TENSORS_PER_KERNEL *
                                   max_chunks_per_tensor,
                           addr_struct,
@@ -529,7 +531,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
                 } else if (p == static_cast<double>(2)) {
                   lpnorm_cleanup<scalar_t, NormType::L2, out_t, apply_root>
                       <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                          output_per_tensor.template const_data_ptr<out_opmath_t>() +
+                          output_per_tensor
+                                  .template const_data_ptr<out_opmath_t>() +
                               i * MAX_TENSORS_PER_KERNEL *
                                   max_chunks_per_tensor,
                           addr_struct,
@@ -538,7 +541,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
                   if (p == std::numeric_limits<double>::infinity()) {
                     lpnorm_cleanup<scalar_t, NormType::LInf, out_t, apply_root>
                         <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                            output_per_tensor.template const_data_ptr<out_opmath_t>() +
+                            output_per_tensor
+                                    .template const_data_ptr<out_opmath_t>() +
                                 i * MAX_TENSORS_PER_KERNEL *
                                     max_chunks_per_tensor,
                             addr_struct,
