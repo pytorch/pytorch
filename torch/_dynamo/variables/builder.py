@@ -17,6 +17,7 @@ The builders in this module handle converting Python values into appropriate
 VariableTracker instances based on their type and usage context.
 """
 
+import _thread
 import abc
 import collections
 import contextlib
@@ -190,6 +191,7 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
+    RLockVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -1412,9 +1414,6 @@ class VariableBuilder:
             return WrapperUserFunctionVariable(
                 value, "_torchdynamo_inline", source=self.source
             )
-        elif value is functools.wraps:
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return FunctoolsWrapsVariable(value, source=self.source)
         elif value is collections.namedtuple:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
