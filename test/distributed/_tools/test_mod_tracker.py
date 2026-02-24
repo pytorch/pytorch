@@ -199,7 +199,7 @@ class TestModTracker(TestCase):
 
 
 class TestCompileSafeHooks(TestCase):
-    """Tests for ModTracker.register_compile_safe_hooks."""
+    """Tests for ModTracker.compile_safe_hooks."""
 
     def setUp(self):
         super().setUp()
@@ -227,14 +227,13 @@ class TestCompileSafeHooks(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         log = []
 
-        with ModTracker() as tracker:
-            tracker.register_compile_safe_hooks(
-                model,
-                pre_fw_hook=lambda fqn, t: log.append(("pre_fw", fqn)),
-                post_fw_hook=lambda fqn, inp, out: log.append(("post_fw", fqn)),
-                pre_bw_hook=lambda fqn, t: log.append(("pre_bw", fqn)),
-                post_bw_hook=lambda fqn, t: log.append(("post_bw", fqn)),
-            )
+        with ModTracker.compile_safe_hooks(
+            model,
+            pre_fw_hook=lambda fqn, t: log.append(("pre_fw", fqn)),
+            post_fw_hook=lambda fqn, inp, out: log.append(("post_fw", fqn)),
+            pre_bw_hook=lambda fqn, t: log.append(("pre_bw", fqn)),
+            post_bw_hook=lambda fqn, t: log.append(("post_bw", fqn)),
+        ):
             model(x).sum().backward()
 
         fw = [(k, f) for k, f in log if k.endswith("fw")]
@@ -267,14 +266,13 @@ class TestCompileSafeHooks(TestCase):
         x = torch.randn(3, 4, requires_grad=True)
         log = []
 
-        with ModTracker() as tracker:
-            tracker.register_compile_safe_hooks(
-                model,
-                pre_fw_hook=lambda fqn, t: log.append(("pre_fw", fqn)),
-                post_fw_hook=lambda fqn, inp, out: log.append(("post_fw", fqn)),
-                pre_bw_hook=lambda fqn, t: log.append(("pre_bw", fqn)),
-                post_bw_hook=lambda fqn, t: log.append(("post_bw", fqn)),
-            )
+        with ModTracker.compile_safe_hooks(
+            model,
+            pre_fw_hook=lambda fqn, t: log.append(("pre_fw", fqn)),
+            post_fw_hook=lambda fqn, inp, out: log.append(("post_fw", fqn)),
+            pre_bw_hook=lambda fqn, t: log.append(("pre_bw", fqn)),
+            post_bw_hook=lambda fqn, t: log.append(("post_bw", fqn)),
+        ):
             compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
             compiled(x).sum().backward()
 
@@ -288,11 +286,10 @@ class TestCompileSafeHooks(TestCase):
         x = torch.randn(3, 4)
         fqns = set()
 
-        with ModTracker() as tracker:
-            tracker.register_compile_safe_hooks(
-                model,
-                post_fw_hook=lambda fqn, inp, out: fqns.add(fqn),
-            )
+        with ModTracker.compile_safe_hooks(
+            model,
+            post_fw_hook=lambda fqn, inp, out: fqns.add(fqn),
+        ):
             torch.compile(model, backend="aot_eager", fullgraph=True)(x)
 
         self.assertNotIn("", fqns)
@@ -308,14 +305,13 @@ class TestCompileSafeHooks(TestCase):
         model.zero_grad()
         x2 = x1.detach().clone().requires_grad_(True)
 
-        with ModTracker() as tracker:
-            tracker.register_compile_safe_hooks(
-                model,
-                pre_fw_hook=lambda fqn, t: None,
-                post_fw_hook=lambda fqn, inp, out: None,
-                pre_bw_hook=lambda fqn, t: None,
-                post_bw_hook=lambda fqn, t: None,
-            )
+        with ModTracker.compile_safe_hooks(
+            model,
+            pre_fw_hook=lambda fqn, t: None,
+            post_fw_hook=lambda fqn, inp, out: None,
+            pre_bw_hook=lambda fqn, t: None,
+            post_bw_hook=lambda fqn, t: None,
+        ):
             compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
             compiled(x2).sum().backward()
 
@@ -332,11 +328,10 @@ class TestCompileSafeHooks(TestCase):
                 [t.shape for t in outputs],
             )
 
-        with ModTracker() as tracker:
-            tracker.register_compile_safe_hooks(
-                model,
-                post_fw_hook=record_post_fw,
-            )
+        with ModTracker.compile_safe_hooks(
+            model,
+            post_fw_hook=record_post_fw,
+        ):
             compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
             compiled(x).sum().backward()
 
@@ -352,12 +347,11 @@ class TestCompileSafeHooks(TestCase):
         x = torch.randn(3, 4)
         fqns = []
 
-        with ModTracker() as tracker:
-            tracker.register_compile_safe_hooks(
-                model,
-                post_fw_hook=lambda fqn, inp, out: fqns.append(fqn),
-                module_filter=lambda fqn, mod: isinstance(mod, torch.nn.Linear),
-            )
+        with ModTracker.compile_safe_hooks(
+            model,
+            post_fw_hook=lambda fqn, inp, out: fqns.append(fqn),
+            module_filter=lambda fqn, mod: isinstance(mod, torch.nn.Linear),
+        ):
             torch.compile(model, backend="aot_eager", fullgraph=True)(x)
 
         self.assertEqual(set(fqns), {"linear1", "linear2"})
