@@ -230,7 +230,7 @@ bool buffers_are_equal(const void* a, const void* b, size_t nbytes) {
 
 TEST(materialize_test, copy_on_write) {
   StorageImpl original_storage(
-      {}, /*size_bytes=*/6, GetCPUAllocator(), /*resizable=*/false);
+      {}, /*size_bytes=*/4, GetCPUAllocator(), /*resizable=*/false);
   std::memcpy(original_storage.mutable_data(), "abcd", 4);
   void const* original_data = original_storage.data();
 

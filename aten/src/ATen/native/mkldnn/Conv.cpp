@@ -442,7 +442,9 @@ Tensor mkldnn_convolution_pointwise_binary(
     auto weight =
         weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
     auto other = other_t.contiguous(memory_format);
-    auto output = at::empty(output_sizes, input_t.options()).contiguous(memory_format);
+    auto output = at::empty(
+        output_sizes,
+        input_t.options().memory_format(memory_format));
     const ideep::tensor x = itensor_from_tensor(input);
     const ideep::tensor w = itensor_from_tensor(weight);
     const ideep::tensor z = itensor_from_tensor(other);
