@@ -561,6 +561,52 @@ class MpsInterface(DeviceInterface):
             return 0
 
 
+class TpuInterface(DeviceInterface):
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
+        return True
+
+    @classmethod
+    def is_dtype_supported(
+        cls, dtype: torch.dtype, including_emulation: bool = False
+    ) -> bool:
+        if dtype in [torch.float64, torch.complex128]:
+            return False
+        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
+
+    @staticmethod
+    def is_available() -> bool:
+        # TODO: call torch_tpu API to check device availability.
+        return True
+
+    @staticmethod
+    def current_device() -> int:
+        return 0
+
+    @staticmethod
+    def get_compute_capability(device: torch.types.Device = None) -> str:
+        return ""
+
+    @staticmethod
+    def synchronize(device: torch.types.Device = None) -> None:
+        pass
+
+    # pyrefly: ignore [bad-override]
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: torch.types.Device = None) -> Any:
+            return namedtuple("TPUProperties", ["multi_processor_count"])(
+                1  # type: ignore[arg-type]
+            )
+
+        @staticmethod
+        def current_device() -> int:
+            return 0
+
+
+device_interfaces: dict[str, type[DeviceInterface]] = {}
+_device_initialized = False
+
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
@@ -605,5 +651,6 @@ def init_device_reg() -> None:
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
+    register_interface_for_device("tpu", TpuInterface)
 
     _device_initialized = True
