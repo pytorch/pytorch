@@ -303,8 +303,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return NO_SUCH_SUBOBJ
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        from . import ConstantVariable
-
         source = AttrSource(self.source, name) if self.source is not None else None
 
         # --- Dynamo-specific pre-checks ---
@@ -368,9 +366,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if meta_getattr is not NO_SUCH_SUBOBJ and isinstance(
                 meta_getattr, types.FunctionType
             ):
-                return variables.UserMethodVariable(
-                    meta_getattr, self
-                ).call_function(
+                return variables.UserMethodVariable(meta_getattr, self).call_function(
                     tx, [variables.ConstantVariable.create(name)], {}
                 )
 
@@ -378,9 +374,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         raise_observed_exception(
             AttributeError,
             tx,
-            args=[
-                f"type object '{self.value.__name__}' has no attribute '{name}'"
-            ],
+            args=[f"type object '{self.value.__name__}' has no attribute '{name}'"],
         )
 
     def _resolve_meta_data_descriptor(
@@ -416,9 +410,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if isinstance(cls_attr.__func__, property):
                 fget_vt = VariableTracker.build(tx, cls_attr.__func__.fget)
                 return fget_vt.call_function(tx, [self], {})
-            return variables.UserMethodVariable(
-                cls_attr.__func__, self, source=source
-            )
+            return variables.UserMethodVariable(cls_attr.__func__, self, source=source)
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
             func = cls_attr.__get__(None, self.value)
@@ -435,10 +427,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(get_fn, types.FunctionType):
             return self._invoke_cls_descriptor_get(tx, name, cls_attr, source)
 
-        # Everything else: FunctionType (function.__get__(None, cls) returns
-        # itself), property (returned as-is from class, not invoked),
-        # member descriptors, C-level descriptors (MethodDescriptor,
-        # WrapperDescriptor, etc.).
+        # C-level descriptors (WrapperDescriptor, MethodDescriptor, etc.)
+        # For torch-internal classes, build directly (needed for e.g.
+        # torch.Tensor.dim). For other classes, defer to GetAttrVariable.
+        if inspect.ismethoddescriptor(cls_attr) or is_wrapper_or_member_descriptor(
+            cls_attr
+        ):
+            if source and (
+                self.value.__module__.startswith("torch.")
+                or self.value.__module__ == "torch"
+            ):
+                return VariableTracker.build(tx, cls_attr, source)
+            return variables.GetAttrVariable(self, name, None, source=source)
+
+        # Everything else: FunctionType, property, etc.
         return VariableTracker.build(tx, cls_attr, source)
 
     def _resolve_cls_plain_attr(
@@ -481,9 +483,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         descriptor_get_source = None
         if self.source:
             descriptor_source = AttrSource(self.source, name)
-            descriptor_get_source = AttrSource(
-                TypeSource(descriptor_source), "__get__"
-            )
+            descriptor_get_source = AttrSource(TypeSource(descriptor_source), "__get__")
             descriptor_var = VariableTracker.build(tx, descriptor, descriptor_source)
         else:
             descriptor_var = UserDefinedObjectVariable(descriptor)
