@@ -12,8 +12,13 @@
 // include only the nvshmem host library headers:
 // #include <nvshmem_host.h>
 // It translates into the following two lines:
+#if !defined(USE_ROCM)
 #include <host/nvshmem_api.h>
 #include <host/nvshmemx_api.h>
+#else
+#include <rocshmem/rocshmem.hpp>
+using namespace rocshmem;
+#endif
 // For maximum compatibility, we use the "host/" style for now.
 
 namespace c10d::nvshmem_extension {

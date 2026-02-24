@@ -1461,6 +1461,42 @@ if(USE_ROCM)
   if(USE_ROCM_CK_SDPA)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
+
+  message(WARNING "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM}")
+  if(USE_NVSHMEM)
+    if(NOT ${rocshmem_FOUND})
+      message(FATAL_ERROR "USE_NVSHMEM=1 and roccshmem is NOT FOUND")
+    endif()
+
+    message(STATUS "rocSHMEM found, building with rocSHMEM support")
+    message(STATUS "ROCSHMEM_INCLUDE_DIR: '${ROCSHMEM_INCLUDE_DIR}'")
+    set(TORCH_ROCSHMEM_SRCS
+      "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
+      "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
+      "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu"
+      "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
+    )
+    # Set the compiler language to HIP to ensure hipcc is used for compiling
+    set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
+
+    hip_add_library(torch_rocshmem SHARED ${TORCH_ROCSHMEM_SRCS})
+
+    # Set the linker language to HIP to ensure hipcc is used for linking
+    set_target_properties(torch_rocshmem PROPERTIES LINKER_LANGUAGE HIP)
+
+    target_compile_definitions(torch_hip PUBLIC USE_NVSHMEM)
+    target_compile_definitions(torch_rocshmem PUBLIC USE_NVSHMEM)
+
+    target_compile_options(torch_rocshmem PRIVATE ${HIP_CXX_FLAGS})
+
+    target_link_libraries(torch_rocshmem PRIVATE roc::rocshmem)
+    target_link_libraries(torch_hip PRIVATE torch_rocshmem)
+
+    install(TARGETS torch_rocshmem EXPORT Caffe2Targets DESTINATION
+      "${TORCH_INSTALL_LIB_DIR}")
+  else()
+    message(STATUS "ROCSHMEM not found, not building with ROCSHMEM support.")
+  endif()
 endif()
 
 if(BUILD_LITE_INTERPRETER)
@@ -1983,7 +2019,10 @@ if(BUILD_TEST)
   endif()
 
   if(USE_ROCM)
+    string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
+    set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
     set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
+
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
       if(test_src MATCHES "^.*\.hip$")

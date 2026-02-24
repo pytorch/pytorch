@@ -13,6 +13,7 @@
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
 
+#ifndef USE_ROCM
 // NVSHMEM minimum SM arch
 #define _NVSHMEM_MIN_SM_ARCH 700
 
@@ -29,9 +30,14 @@
 // Only include host APIs. See nvshmem.h for details.
 #  define NVSHMEM_HOSTLIB_ONLY
 #endif  // Must be done before nvshmem.h is included
+#endif
 
+#ifdef USE_ROCM
+#include <rocshmem/rocshmem.hpp>
+#else
 #include <nvshmem.h>
 #include <nvshmemx.h>
+#endif
 
 namespace c10d::nvshmem_extension {
 
@@ -42,6 +48,10 @@ extern "C" void nvshmem_init() __attribute__((weak));
 
 // Check if NVSHMEM is available
 bool is_nvshmem_available() {
+#if defined(USE_ROCM)
+  //rocSHMEM is compiled in by default, it's not loaded in at runtime currently
+  return true;
+#else
   // Runtime check
   static std::mutex mutex;
   static int is_available = -2;
@@ -66,15 +76,18 @@ bool is_nvshmem_available() {
     }
   }
   return is_available == 1;
+#endif
 }
 
 // Initializes the device state in CUmodule so that it’s able to perform NVSHMEM
 // operations.
 void nvshmemx_cumodule_init(uintptr_t module) {
-  auto cumodule = reinterpret_cast<CUmodule>(module);
+#if !defined(USE_ROCM)
+  auto cumodule = reinterpret_cast<hipModule_t>(module);
   NVSHMEM_CHECK(
     ::nvshmemx_cumodule_init(cumodule),
     "nvshmemx_cumodule_init failed");
+#endif
 }
 
 at::Tensor nvshmem_broadcast(at::Tensor& input, const int64_t root, const std::string& group_name) {
@@ -177,7 +190,8 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
   // - `BLOCK_SCAN_WARP_SCANS` is a low-latency scan algorithm (instead of high
   // throughput which we don't need here).
   // - `at_cuda_detail::cub` is torch's cub wrapper, see #55292.
-  using BlockScanT = at_cuda_detail::cub::BlockScan<int64_t, THREADS_PER_BLOCK, at_cuda_detail::cub::BLOCK_SCAN_WARP_SCANS>;
+  using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int64_t,
+        THREADS_PER_BLOCK, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
   // Allocate shared memory for BlockScan
   __shared__ typename BlockScanT::TempStorage temp_storage;
 
@@ -334,6 +348,11 @@ void all_to_all_vdev(
 
   // Exchange output splits and source offsets
   // Use collective launch because kernel involves nvshmem barrier
+#if defined(USE_ROCM)
+  exchangeSplitAndOffset<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      in_splits_ptr, out_splits_offsets_ptr, team);
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
   void* args0[] = {
       &in_splits_ptr,
       &out_splits_offsets_ptr,
@@ -345,7 +364,7 @@ void all_to_all_vdev(
       args0,
       0,
       stream);
-
+#endif
   // CTA Tuning
   auto input_size = input.numel() * input.element_size();
   int num_blocks = get_a2a_nblocks(
@@ -357,6 +376,12 @@ void all_to_all_vdev(
   size_t stride_bytes = input.stride(0) * input.element_size();
 
   // All to all data exchange
+#if defined(USE_ROCM)
+  allToAllV<<<dim3(num_blocks), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      input_ptr, output_ptr, out_splits_offsets_ptr,
+      stride_bytes, team);
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
   void* args1[] = {
       &input_ptr,
       &output_ptr,
@@ -370,6 +395,7 @@ void all_to_all_vdev(
       args1,
       0,
       stream);
+#endif
 }
 
 // Start of `all_to_all_vdev_2d`
@@ -455,7 +481,7 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
   CUDA_KERNEL_ASSERT(n <= WARP_SIZE);
 
   // Specialize WarpScan for type int
-  using WarpScan = at_cuda_detail::cub::WarpScan<int64_t>;
+  using WarpScan = ROCM_HIPCUB(at_cuda_detail::cub)::WarpScan<int64_t>;
   // Allocate WarpScan shared memory for N warps
   __shared__ typename WarpScan::TempStorage temp_storage[NUM_WARPS];
 
@@ -685,6 +711,12 @@ void all_to_all_vdev_2d(
   auto input_dim0 = input.size(0);
   bool rank_is_row_in = true;
   // Use collective launch because kernel involves nvshmem barrier
+#if defined(USE_ROCM)
+  exchangeSplitAndOffset_2d<false><<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      in_splits_ptr, out_splits_offsets_ptr, team,
+      ne, input_dim0, rank_is_row_in);
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
   void* args0[] = {
       &in_splits_ptr,
       &out_splits_offsets_ptr,
@@ -699,17 +731,25 @@ void all_to_all_vdev_2d(
       args0,
       0,
       stream);
-
+#endif
   // CTA Tuning
   // Naive for now, use 1 block per expert.
   // Total number of blocks is limited to 64 (intra-node) or 8 (inter-node).
-  int num_blocks = std::min(world_size * ne, world_size > 8 ? 8 : 64);
+  int num_blocks = ::min(world_size * ne, world_size > 8 ? 8 : 64);
 
   // Stride at dim 0
   size_t stride_bytes = input.stride(0) * input.element_size();
   bool rank_is_row_out = !rank_is_row_in;
 
   // All to all data exchange
+#if defined(USE_ROCM)
+  allToAllV_2d<<<dim3(num_blocks), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      input_ptr, output_ptr,
+      in_splits_ptr, out_splits_offsets_ptr,
+      stride_bytes, world_size,
+      ne, major_align_val, rank_is_row_out, team);
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
   void* args1[] = {
       &input_ptr,
       &output_ptr,
@@ -728,6 +768,7 @@ void all_to_all_vdev_2d(
       args1,
       0,
       stream);
+#endif
 }
 
 void all_to_all_vdev_2d_offset(
@@ -820,6 +861,17 @@ void all_to_all_vdev_2d_offset(
   auto input_dim0 = input.size(0);
   bool rank_is_row_in = false;
   // Use collective launch because kernel involves nvshmem barrier
+#if defined(USE_ROCM)
+  exchangeSplitAndOffset_2d<true><<<dim3(1), dim3(THREADS_PER_BLOCK), 0,
+    stream>>>(
+        in_splits_offsets_ptr,
+        out_splits_offsets_ptr,
+        team,
+        ne,
+        input_dim0,
+        rank_is_row_in);
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
   void* args0[] = {
       &in_splits_offsets_ptr,
       &out_splits_offsets_ptr,
@@ -834,7 +886,7 @@ void all_to_all_vdev_2d_offset(
       args0,
       0,
       stream);
-
+#endif
   // CTA Tuning
   // Naive for now, use 1 block per expert.
   // Total number of blocks is limited to 64 (intra-node) or 8 (inter-node).
@@ -845,6 +897,20 @@ void all_to_all_vdev_2d_offset(
   bool rank_is_row_out = !rank_is_row_in;
 
   // All to all data exchange
+#if defined(USE_ROCM)
+  allToAllV_2d<<<dim3(num_blocks), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      input_ptr,
+      output_ptr,
+      in_splits_offsets_ptr,
+      out_splits_offsets_ptr,
+      stride_bytes,
+      ne,
+      world_size,
+      major_align_val,
+      rank_is_row_out,
+      team);
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
   void* args1[] = {
       &input_ptr,
       &output_ptr,
@@ -863,10 +929,11 @@ void all_to_all_vdev_2d_offset(
       args1,
       0,
       stream);
+#endif
 }
 
 /* Tiled Communication */
-
+#if !defined(USE_ROCM)
 using Shape2D = nvshmemx::shape<int64_t, int64_t>;
 using Stride2D = nvshmemx::stride<int64_t, int64_t>;
 
@@ -1068,7 +1135,7 @@ void multi_root_tile_reduce(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
-
+#endif
 } // namespace c10d::nvshmem_extension
 
 
@@ -1082,6 +1149,8 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
+#if !defined(USE_ROCM)
   m.impl("tile_reduce", c10d::nvshmem_extension::tile_reduce);
   m.impl("multi_root_tile_reduce", c10d::nvshmem_extension::multi_root_tile_reduce);
+#endif
 }
