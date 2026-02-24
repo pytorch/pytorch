@@ -353,6 +353,32 @@ pointwise_ops = [
     prims.ne.default,
     prims.spherical_bessel_j0.default,
     prims.zeta.default,
+    # Foreach ops without specialized partial rules
+    aten._foreach_abs.default,
+    aten._foreach_abs_.default,
+    aten._foreach_addcdiv_.Scalar,
+    aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_addcdiv_.Tensor,
+    aten._foreach_addcmul.Scalar,
+    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcmul_.ScalarList,
+    aten._foreach_addcmul_.Tensor,
+    aten._foreach_clamp_max_.Scalar,
+    aten._foreach_clamp_min_.Scalar,
+    aten._foreach_lerp_.Scalar,
+    aten._foreach_pow.List,
+    aten._foreach_pow.ScalarList,
+    aten._foreach_reciprocal_.default,
+    aten._foreach_sqrt.default,
+    aten._foreach_sqrt_.default,
+    aten._foreach_zero_.default,
+    aten._foreach_exp.default,
+    aten._foreach_exp_.default,
+    aten._foreach_cos.default,
+    aten._foreach_cos_.default,
+    aten._foreach_log.default,
+    aten._foreach_log_.default,
+    aten._amp_foreach_non_finite_check_and_unscale_.default,
 ]
 
 # Linear pointwise ops, split by linearity type.
@@ -366,6 +392,10 @@ binary_additive_ops = [
     aten.sub.Tensor,
     aten.sub.out,
     aten.sub_.Tensor,
+    aten._foreach_add.List,
+    aten._foreach_add_.List,
+    aten._foreach_sub.List,
+    aten._foreach_sub_.List,
 ]
 
 # Maps op -> whether R, P(x) -> P(x) is valid (linear in second arg).
@@ -377,14 +407,37 @@ binary_multiplicative_ops: dict[OpOverload, bool] = {
     aten.mul.Tensor: True,
     aten.mul.out: True,
     aten.mul_.Tensor: True,
+    aten._foreach_div.List: False,
+    aten._foreach_div.Tensor: False,
+    aten._foreach_div_.List: False,
+    aten._foreach_div_.Tensor: False,
+    aten._foreach_mul.List: True,
+    aten._foreach_mul.Tensor: True,
+    aten._foreach_mul_.List: True,
+    aten._foreach_mul_.Tensor: True,
 }
 
-# Scalar multiplicative ops: unary linear rules
-scalar_multiplicative_ops = [
+# Scalar linear ops: multiplying/dividing/adding/subtracting by scalar is linear
+scalar_linear_ops = [
     aten.div.Scalar,
     aten.div_.Scalar,
     aten.mul.Scalar,
     aten.mul_.Scalar,
+    aten._foreach_add.Scalar,
+    aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
+    aten._foreach_div.Scalar,
+    aten._foreach_div.ScalarList,
+    aten._foreach_div_.Scalar,
+    aten._foreach_div_.ScalarList,
+    aten._foreach_mul.Scalar,
+    aten._foreach_mul.ScalarList,
+    aten._foreach_mul_.Scalar,
+    aten._foreach_mul_.ScalarList,
+    aten._foreach_sub.Scalar,
+    aten._foreach_sub.ScalarList,
+    aten._foreach_sub_.Scalar,
+    aten._foreach_sub_.ScalarList,
 ]
 
 # Monotonic increasing unary ops: P(max)->P(max), P(min)->P(min)
@@ -493,6 +546,7 @@ monotonic_binary_ops: dict[torch._ops.OpOverload, str | None] = {
     aten.minimum.out: "min",
     prims.fmax.default: "max",
     prims.fmin.default: "min",
+    aten._foreach_maximum_.List: "max",
 }
 
 # Rule constants for partial placement propagation
@@ -570,6 +624,21 @@ def _make_partial_strategy(
         return placements
 
     return strategy
+
+
+def _register(
+    op: OpOverload,
+    extra_rules: list[list[Placement]] | None = None,
+    static_argnum: int = 0,
+) -> None:
+    """Register a single-dim strategy for an op, auto-detecting foreach schema."""
+    if "_foreach_" in str(op) or "_amp_foreach_" in str(op):
+        schema = RuntimeSchemaInfo(needs_pytree=True)
+    else:
+        schema = RuntimeSchemaInfo(static_argnum, static_kwargkey=["out"])
+    register_single_dim_strategy(op, schema_info=schema)(
+        _make_partial_strategy(extra_rules=extra_rules)
+    )
 
 
 def pointwise_strategy(
@@ -790,17 +859,35 @@ p_sum_scalar_redistribute_ops = {
     aten.sub_.Tensor,
 }
 
-# Register new single-dim strategies for categorized ops.
+# Register single-dim strategies for all categorized ops.
+
+_NEG_RULES: list[list[Placement]] = (
+    _UNARY_LINEAR_RULES
+    + [  # pyrefly: ignore[bad-assignment]
+        [Partial("min"), Partial("max")],
+        [Partial("max"), Partial("min")],
+    ]
+)
+
+_MONOTONIC_INCREASING_RULES: list[list[Placement]] = [
+    [Partial("max"), Partial("max")],
+    [Partial("min"), Partial("min")],
+]
+
+_MONOTONIC_DECREASING_RULES: list[list[Placement]] = [
+    [Partial("min"), Partial("max")],
+    [Partial("max"), Partial("min")],
+]
+
+_ALL_PARTIAL_PRESERVING_RULES: list[list[Placement]] = [
+    [Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
+]
 
 for op in unary_linear_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
+    _register(op, _UNARY_LINEAR_RULES)
 
 for op in binary_additive_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_BINARY_ADDITIVE_RULES))
+    _register(op, _BINARY_ADDITIVE_RULES)
 
 # _UNARY_LINEAR_RULES handles the scalar promotion case: Python's __mul__/__truediv__
 # promote scalars to 0-dim tensors, so aten.mul.Scalar dispatches as aten.mul.Tensor
@@ -816,66 +903,30 @@ for op, linear_in_second_arg in binary_multiplicative_ops.items():
             [Partial("sum"), Replicate(), Partial("sum")],
             [Partial("avg"), Replicate(), Partial("avg")],
         ]
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES + rules))
+    _register(op, _UNARY_LINEAR_RULES + rules)
 
-# Scalar multiplicative ops: unary linear rules
-for op in scalar_multiplicative_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
+# Scalar linear ops: static_argnum=1 because first arg is scalar
+for op in scalar_linear_ops:
+    _register(op, _UNARY_LINEAR_RULES, static_argnum=1)
 
-# Monotonic increasing unary: P(max)->P(max), P(min)->P(min)
 for op in monotonic_increasing_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _make_partial_strategy(
-            extra_rules=[
-                [Partial("max"), Partial("max")],
-                [Partial("min"), Partial("min")],
-            ]
-        )
-    )
+    _register(op, _MONOTONIC_INCREASING_RULES)
 
-# Monotonic decreasing unary: P(max)->P(min), P(min)->P(max)
 for op in monotonic_decreasing_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _make_partial_strategy(
-            extra_rules=[
-                [Partial("min"), Partial("max")],
-                [Partial("max"), Partial("min")],
-            ]
-        )
-    )
+    _register(op, _MONOTONIC_DECREASING_RULES)
 
-# All-partial-preserving unary: P(x)->P(x) for all x
 for op in all_partial_preserving_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _make_partial_strategy(
-            extra_rules=[[Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")]
-        )
-    )
+    _register(op, _ALL_PARTIAL_PRESERVING_RULES)
 
-# neg: linear (P(sum)->P(sum), P(avg)->P(avg)) + monotonic decreasing
-register_single_dim_strategy(
-    [aten.neg.default, aten.neg.out, aten.neg_.default],
-    schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
-)(
-    _make_partial_strategy(
-        # pyrefly: ignore [bad-argument-type]
-        extra_rules=_UNARY_LINEAR_RULES
-        + [
-            [Partial("min"), Partial("max")],
-            [Partial("max"), Partial("min")],
-        ]
-    )
-)
+# neg: linear + monotonic decreasing
+for op in [
+    aten.neg.default,
+    aten.neg.out,
+    aten.neg_.default,
+    aten._foreach_neg.default,
+    aten._foreach_neg_.default,
+]:
+    _register(op, _NEG_RULES)
 
 # Monotonic binary ops
 for op, preserve in monotonic_binary_ops.items():
@@ -884,88 +935,17 @@ for op, preserve in monotonic_binary_ops.items():
         rules.append([Partial("max"), Partial("max"), Partial("max")])
     elif preserve == "min":
         rules.append([Partial("min"), Partial("min"), Partial("min")])
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=rules))
+    _register(op, rules)
 
 # copy_(self, src): preserves all Partial types (2 tensor inputs → 3-element rules)
-register_single_dim_strategy(
-    aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-)(
-    _make_partial_strategy(
-        extra_rules=[
-            [Partial(r), Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
-        ]
-    )
+_register(
+    aten.copy_.default,
+    [[Partial(r), Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")],
 )
 
-# Generic pointwise ops: just Shard + Replicate strategies
+# Generic pointwise ops: just Shard + Replicate strategies (no partial rules)
 for op in pointwise_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy())
-
-# TODO: add all for_each ops
-for_each_ops = [
-    aten._foreach_abs.default,
-    aten._foreach_abs_.default,
-    aten._foreach_addcdiv_.Scalar,
-    aten._foreach_addcdiv_.ScalarList,
-    aten._foreach_addcdiv_.Tensor,
-    aten._foreach_addcmul.Scalar,
-    aten._foreach_addcmul_.Scalar,
-    aten._foreach_addcmul_.ScalarList,
-    aten._foreach_addcmul_.Tensor,
-    aten._foreach_clamp_max_.Scalar,
-    aten._foreach_clamp_min_.Scalar,
-    aten._foreach_div_.List,
-    aten._foreach_div_.Scalar,
-    aten._foreach_div_.ScalarList,
-    aten._foreach_div_.Tensor,
-    aten._foreach_div.List,
-    aten._foreach_div.Scalar,
-    aten._foreach_div.ScalarList,
-    aten._foreach_div.Tensor,
-    aten._foreach_lerp_.Scalar,
-    aten._foreach_maximum_.List,
-    aten._foreach_mul.Scalar,
-    aten._foreach_mul.ScalarList,
-    aten._foreach_mul.Tensor,
-    aten._foreach_mul.List,
-    aten._foreach_mul_.Scalar,
-    aten._foreach_mul_.ScalarList,
-    aten._foreach_mul_.Tensor,
-    aten._foreach_mul_.List,
-    aten._foreach_pow.List,
-    aten._foreach_pow.ScalarList,
-    aten._foreach_neg.default,
-    aten._foreach_neg_.default,
-    aten._foreach_reciprocal_.default,
-    aten._foreach_sub.Scalar,
-    aten._foreach_sub_.Scalar,
-    aten._foreach_sub.List,
-    aten._foreach_sub_.List,
-    aten._foreach_sub.ScalarList,
-    aten._foreach_sub_.ScalarList,
-    aten._foreach_sqrt.default,
-    aten._foreach_sqrt_.default,
-    aten._foreach_zero_.default,
-    aten._foreach_exp.default,
-    aten._foreach_exp_.default,
-    aten._foreach_cos.default,
-    aten._foreach_cos_.default,
-    aten._foreach_log.default,
-    aten._foreach_log_.default,
-    aten._amp_foreach_non_finite_check_and_unscale_.default,
-]
-
-for_each_linearity_ops = [
-    aten._foreach_add.Scalar,
-    aten._foreach_add_.Scalar,
-    aten._foreach_add_.ScalarList,
-    aten._foreach_add.List,
-    aten._foreach_add_.List,
-]
+    _register(op)
 
 
 def list_pointwise_strategy(
@@ -1035,18 +1015,6 @@ def list_pointwise_strategy(
         list_strategy.append(pointwise_strategy)
     return TupleStrategy(list_strategy)
 
-
-# Foreach ops: use register_single_dim_strategy (auto-detected by expanded_foreach_strategy)
-for op in for_each_ops:
-    register_single_dim_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        _make_partial_strategy()
-    )
-
-# Foreach ops with linearity (add/sub with scalars)
-for op in for_each_linearity_ops:
-    register_single_dim_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        _make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES)
-    )
 
 fused_ops = [
     aten._fused_adam_.default,
