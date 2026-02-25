@@ -12,7 +12,7 @@ from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
-    skipIfRocm,
+    TEST_WITH_ROCM,
 )
 
 
@@ -84,8 +84,9 @@ class P2PIpcTest(MultiProcContinuousTest):
         """Test P2P IPC with regular cudaMalloc allocations."""
         self._test_p2p_ipc_impl()
 
-    @unittest.skip("Requires fix for expandable segments IPC handle type propagation")
-    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "expandable_segments mode is not supported on ROCm"
+    )
     def test_p2p_ipc_expandable_segments(self) -> None:
         """
         Test P2P IPC with expandable segments enabled.
