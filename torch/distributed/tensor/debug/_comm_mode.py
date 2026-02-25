@@ -241,6 +241,7 @@ class CommDebugMode(TorchDispatchMode):
 
     def __init__(self):
         super().__init__()
+        self.supports_higher_order_operators = True
         self.comm_counts: dict[Any, int] = defaultdict(int)
         self.comm_module_counts = {}
         self.comm_module_operation_counts = {}
@@ -643,6 +644,12 @@ class CommDebugMode(TorchDispatchMode):
         # run **before** subclasses get a chance to run.
         # Returning NotImplemented here gives us a chance to let DTensor
         # run and desugar into comms ops, before CommDebugMode sees them.
+
+        # Higher-order operators (e.g. run_dtensor_rng_op) don't have
+        # _overloadpacket and aren't collectives — just redispatch.
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            kwargs = kwargs if kwargs else {}
+            return func(*args, **kwargs)
 
         # sets up operation-level collective count
         if self.advanced_module_tracker.name not in self.comm_module_operation_counts:

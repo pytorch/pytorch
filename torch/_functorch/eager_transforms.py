@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, Optional, overload, TYPE_CHECKING, Union
+from typing import Any, overload, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -369,12 +369,12 @@ def jvp_increment_nesting() -> Generator[int, None, None]:
 def _vjp_with_argnums(
     func: Callable[..., Any],
     *primals: Any,
-    argnums: Optional[argnums_t] = None,
+    argnums: argnums_t | None = None,
     has_aux: bool = False,
 ) -> tuple[Any, Callable[..., Any]] | tuple[Any, Callable[..., Any], Any]:
     # This is the same function as vjp but also accepts an argnums argument
     # All args are the same as vjp except for the added argument
-    # argnums (Optional[int or tuple[int,...]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    # argnums (int or tuple[int,...] | None): Optional, specifies the argument(s) to compute gradients with respect to.
     #         If None, computes the gradients with respect to all inputs (used for vjp). Default: None
     #
     # WARN: Users should NOT call this function directly and should just be calling vjp.
@@ -476,10 +476,10 @@ def error_if_complex(func_name: str, args: Any, is_input: bool) -> None:
 @exposed_in("torch.func")
 def jacrev(
     func: Callable[..., Any],
-    argnums: Union[int, tuple[int, ...]] = 0,
+    argnums: int | tuple[int, ...] = 0,
     *,
     has_aux: bool = False,
-    chunk_size: Optional[int] = None,
+    chunk_size: int | None = None,
     _preallocate_and_copy: bool = False,
 ) -> Callable[..., Any]:
     """
@@ -1128,7 +1128,7 @@ def _jvp_with_argnums(
     func: Callable[..., Any],
     primals: Any,
     tangents: Any,
-    argnums: Optional[argnums_t],
+    argnums: argnums_t | None,
     *,
     strict: bool = False,
     has_aux: bool,
