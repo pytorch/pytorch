@@ -67,9 +67,8 @@ jobs:
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
       tests-to-include: >-
-         ${{ github.event_name == 'schedule' && 'test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs
          test_autograd inductor/test_torchinductor inductor/test_kernel_benchmark
          inductor/test_pad_mm inductor/test_benchmark_fusion inductor/test_aot_inductor
          inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
-         inductor/test_flex_attention inductor/test_max_autotune' || '' }}
+         inductor/test_flex_attention inductor/test_max_autotune
     secrets: inherit
