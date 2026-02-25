@@ -5,26 +5,19 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
+#include <ATen/BlasBackend.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/tunable/Tunable.h>
-#include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
-#include <ATen/native/cuda/RowwiseScaledMM.h>
-#include <ATen/native/cuda/ScaledGroupMM.h>
-#include <ATen/native/cuda/GroupMM.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/ceil_div.h>
-
-#ifdef USE_MSLK
-#include <mslk/gemm/gemm_torch.h>
-#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -56,18 +49,19 @@
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-namespace at::cuda::scaled {
+namespace at::native::scaled {
 
 /**
  * Both inputs must be fp8,
  * Each needs a single scale, {Tensorwise (float)}
  */
-bool check_tensorwise_recipe(c10::ScalarType type_a,
-                             std::vector<ScalingType>& recipe_a,
-                             ArrayRef<Tensor>& scales_a,
-                             c10::ScalarType type_b,
-                             std::vector<ScalingType>& recipe_b,
-                             ArrayRef<Tensor>& scales_b) {
+bool check_tensorwise_recipe(
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    c10::ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    c10::ArrayRef<Tensor>& scales_b) {
   // both types must be fp8
   if (!isFloat8Type(type_a) || !isFloat8Type(type_b)) {
     return false;
@@ -90,12 +84,13 @@ bool check_tensorwise_recipe(c10::ScalarType type_a,
  * Both inputs must be fp8,
  * Each needs scales, {Rowwise (float)}
  */
-bool check_rowwise_recipe(c10::ScalarType type_a,
-                             std::vector<ScalingType>& recipe_a,
-                             ArrayRef<Tensor>& scales_a,
-                             c10::ScalarType type_b,
-                             std::vector<ScalingType>& recipe_b,
-                             ArrayRef<Tensor>& scales_b) {
+bool check_rowwise_recipe(
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
   // both types must be fp8
   if (!isFloat8Type(type_a) || !isFloat8Type(type_b)) {
     return false;
@@ -115,18 +110,18 @@ bool check_rowwise_recipe(c10::ScalarType type_a,
   return true;
 }
 
-
 /**
  * Two-level scaling, canonical NVFP4
  * Both inputs must be fp4
  * A, B need 2 scales, {Blockwise_1x16 (e4m3), Tensorwise (fp32)}
  */
-bool check_nvfp4_recipe(c10::ScalarType type_a,
-                        std::vector<ScalingType>& recipe_a,
-                        ArrayRef<Tensor>& scales_a,
-                        c10::ScalarType type_b,
-                        std::vector<ScalingType>& recipe_b,
-                        ArrayRef<Tensor>& scales_b) {
+bool check_nvfp4_recipe(
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
   // both types must be fp4
   if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
     return false;
@@ -151,13 +146,13 @@ bool check_nvfp4_recipe(c10::ScalarType type_a,
  * Both inputs must be fp4
  * A, B need 1 scale, {Blockwise_1x16 (e4m3)}
  */
-bool check_nvfp4_recipe_single_scale
-                       (c10::ScalarType type_a,
-                        std::vector<ScalingType>& recipe_a,
-                        ArrayRef<Tensor>& scales_a,
-                        c10::ScalarType type_b,
-                        std::vector<ScalingType>& recipe_b,
-                        ArrayRef<Tensor>& scales_b) {
+bool check_nvfp4_recipe_single_scale(
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
   // both types must be fp4
   if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
     return false;
@@ -179,16 +174,18 @@ bool check_nvfp4_recipe_single_scale
 
 /**
  * Both inputs must be fp8
- * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B: {Blockwise_128x128 (float)
+ * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B:
+ * {Blockwise_128x128 (float)
  */
-bool check_deepseek_recipe(ScalingType expected_recipe_a,
-                           ScalingType expected_recipe_b,
-                           c10::ScalarType type_a,
-                           std::vector<ScalingType>& recipe_a,
-                           ArrayRef<Tensor>& scales_a,
-                           c10::ScalarType type_b,
-                           std::vector<ScalingType>& recipe_b,
-                           ArrayRef<Tensor>& scales_b) {
+bool check_deepseek_recipe(
+    ScalingType expected_recipe_a,
+    ScalingType expected_recipe_b,
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
   // both types must be fp8
   if (type_a != ScalarType::Float8_e4m3fn || type_b != ScalarType::Float8_e4m3fn) {
     return false;
@@ -212,12 +209,13 @@ bool check_deepseek_recipe(ScalingType expected_recipe_a,
  * Both inputs must be fp8
  * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
  */
-bool check_mxfp8_recipe(c10::ScalarType type_a,
-                        std::vector<ScalingType>& recipe_a,
-                        ArrayRef<Tensor>& scales_a,
-                        c10::ScalarType type_b,
-                        std::vector<ScalingType>& recipe_b,
-                        ArrayRef<Tensor>& scales_b) {
+bool check_mxfp8_recipe(
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
   // both types must be fp8
   if (type_a != ScalarType::Float8_e4m3fn || type_b != ScalarType::Float8_e4m3fn) {
     return false;
@@ -241,12 +239,13 @@ bool check_mxfp8_recipe(c10::ScalarType type_a,
  * Both inputs must be fp4
  * A, B must have 1 scale each, {Blockwise_1x32, e8m0}
  */
-bool check_mxfp4_recipe(c10::ScalarType type_a,
-                        std::vector<ScalingType>& recipe_a,
-                        ArrayRef<Tensor>& scales_a,
-                        c10::ScalarType type_b,
-                        std::vector<ScalingType>& recipe_b,
-                        ArrayRef<Tensor>& scales_b) {
+bool check_mxfp4_recipe(
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
   // both types must be fp4
   if (type_a != ScalarType::Float4_e2m1fn_x2 || type_b != ScalarType::Float4_e2m1fn_x2) {
     return false;
@@ -266,4 +265,4 @@ bool check_mxfp4_recipe(c10::ScalarType type_a,
   return true;
 }
 
-} // namespace at::native::cuda::blas::scaled
+}  // at::scaled
