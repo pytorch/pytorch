@@ -134,8 +134,18 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
 
-    def _compile_for_benchmarking(self) -> Any:
-        """Compile the subgraph for benchmarking, returns the compiled module."""
+    def _compile_for_benchmarking(self, enhanced: bool = False) -> Any:
+        """Compile the subgraph for benchmarking, returns the compiled module.
+
+        Args:
+            enhanced: If True, enable max_autotune_gemm for more accurate benchmarking
+                that captures triton template + epilogue fusion performance.
+                Used by defer_benchmark mode.
+
+                Note: even with enhanced=True, this compiles the subgraph in ISOLATION
+                (its own GraphLowering), not in the main graph context. This captures
+                intra-subgraph fusion but NOT cross-boundary fusion with the main graph.
+        """
         from torch._inductor.graph import GraphLowering
 
         safe_name = self.name.replace("::", "_").replace(".", "_")
@@ -157,12 +167,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
         with V.set_graph_handler(bm_graph_lowering):
-            # Disable nested autotuning to prevent recursion,
-            # but allow Triton backend for accurate benchmarking of Triton vs ATen
             with config.patch(
                 max_autotune=False,
-                max_autotune_gemm=False,
-                # Removed: max_autotune_gemm_backends="ATEN"
+                max_autotune_gemm=enhanced,
             ):
                 bm_graph_lowering.run(*self.example_inputs)
                 return bm_graph_lowering.compile_to_module()
@@ -170,7 +177,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
         """Regular benchmarking: compile and use benchmarker with warmup/rep."""
         if self._compiled_module is None:
-            self._compiled_module = self._compile_for_benchmarking()
+            enhanced = getattr(self, "_enhanced_benchmark", False)
+            self._compiled_module = self._compile_for_benchmarking(enhanced=enhanced)
 
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values

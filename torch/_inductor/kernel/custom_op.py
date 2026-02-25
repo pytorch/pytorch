@@ -531,6 +531,7 @@ def autotune_custom_op(
         dict[str, Callable[[torch.Tensor], torch.Tensor]]
     ] = None,
     return_choice: bool = False,
+    defer_benchmark: bool = False,
 ) -> Union[TensorBox, Any, tuple[Any, Any]]:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
@@ -634,6 +635,126 @@ def autotune_custom_op(
         raise RuntimeError(f"No valid choices generated for {name}")
 
     is_collective = _detect_collective_ops(choices)
+
+    # Deferred benchmarking with enhanced compilation (Option C):
+    #
+    # When defer_benchmark=True, this path provides more accurate autotuning by:
+    # 1. Enhanced benchmark: compiles each choice with max_autotune_gemm=True,
+    #    capturing triton template + epilogue fusion performance (vs standard
+    #    benchmark which uses max_autotune_gemm=False / cublas fallback)
+    # 2. Inline ALL choices into main graph BEFORE fusion, tagged with variant_id
+    #    so they participate in the scheduler's fuse_nodes() pass
+    # 3. After fusion, finalize_deferred_choices() prunes loser variant nodes
+    # 4. Winner's inlined nodes go through normal codegen (triton template, not cublas)
+    #
+    # KNOWN LIMITATION (future work):
+    # The benchmark itself still happens DURING LOWERING (not after fusion).
+    # Each choice is compiled independently via _compile_for_benchmarking(enhanced=True),
+    # which runs a separate GraphLowering with its own scheduling/fusion. This captures
+    # INTRA-SUBGRAPH fusion (e.g., matmul + bias + relu fused into one triton template),
+    # but does NOT capture CROSS-BOUNDARY fusion between the subgraph's last op and
+    # the main graph's next op (e.g., fusing the custom op's output matmul with a
+    # subsequent pointwise op from the main graph).
+    #
+    # True post-fusion benchmarking (benchmark AFTER main-graph fuse_nodes()) is not
+    # feasible in the current architecture because creating a new GraphLowering during
+    # the scheduling phase conflicts with the active V.graph context (causes segfault).
+    # To achieve this, Inductor would need either:
+    # (a) A mechanism to compile/benchmark a subset of fused SchedulerNodes independently
+    # (b) N full-graph compilations (one per variant), which is expensive but correct
+    # See 0224_pr2_deferred_inline_design.md for the full design discussion.
+    if defer_benchmark:
+        from torch._inductor.codegen.subgraph import (
+            inline_subgraph_to_ir_nodes,
+            SubgraphChoiceCaller,
+        )
+
+        # Collect inlineable choices
+        inlineable = [
+            (i, c)
+            for i, c in enumerate(choices)
+            if isinstance(c, SubgraphChoiceCaller)
+            and c.gm is not None
+            and not _graph_contains_triton_op(c.gm)
+        ]
+
+        if len(inlineable) < 2:
+            log.info("Defer: < 2 inlineable choices, falling back to standard path")
+        else:
+            log.info(
+                "Defer: enhanced benchmark + inline %d choices for %s",
+                len(inlineable),
+                name,
+            )
+
+            # Phase 1: Enhanced benchmark ALL choices (at lowering time, with V.graph active)
+            for idx, choice in inlineable:
+                choice._enhanced_benchmark = True
+                choice._compiled_module = None
+
+            selected_result, winning_choice = autotune_select_algorithm(
+                name=name,
+                choices=choices,
+                input_nodes=list(inputs),
+                layout=choices[0].layout,
+                input_gen_fns=input_gen_fns,
+                return_choice=True,
+                is_collective=is_collective,
+            )
+
+            # Log benchmark results
+            log.info(
+                "Enhanced benchmark winner: %s",
+                getattr(winning_choice, "name", type(winning_choice).__name__),
+            )
+
+            # Phase 2: Inline ALL choices into main graph BEFORE fusion
+            variants = []
+            for idx, choice in inlineable:
+                existing_buffers = set(V.graph.name_to_buffer.keys())
+
+                variant_output = inline_subgraph_to_ir_nodes(
+                    choice.gm, inputs, f"{name}_v{idx}"
+                )
+
+                new_buffer_names = set(V.graph.name_to_buffer.keys()) - existing_buffers
+
+                # Tag with variant_id for fusion barrier
+                for buf_name in new_buffer_names:
+                    buf = V.graph.name_to_buffer[buf_name]
+                    buf._variant_id = idx
+
+                is_winner = choice is winning_choice
+                variants.append(
+                    {
+                        "index": idx,
+                        "choice": choice,
+                        "output": variant_output,
+                        "buffer_names": new_buffer_names,
+                        "is_winner": is_winner,
+                    }
+                )
+                log.info(
+                    "  Inlined variant %d (%s): %d buffers%s",
+                    idx,
+                    choice.name,
+                    len(new_buffer_names),
+                    " [WINNER]" if is_winner else "",
+                )
+
+            # Store for post-fusion pruning in scheduler
+            if not hasattr(V.graph, "_deferred_variants"):
+                V.graph._deferred_variants = []
+            V.graph._deferred_variants.append(
+                {
+                    "name": name,
+                    "variants": variants,
+                }
+            )
+
+            # Return winner's output (connected to downstream ops)
+            winner_variant = next(v for v in variants if v["is_winner"])
+            return winner_variant["output"]
 
     # Run autotuning and get both result and winning choice
     selected_result, winning_choice = autotune_select_algorithm(
@@ -770,6 +891,7 @@ def _standard_lowering_fn(
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
     ] = None,
+    defer_benchmark: bool = False,
 ) -> Any:
     """Standard autotuning lowering function."""
     decompositions, non_tensor_args = _prepare_configs_and_decompositions(
@@ -788,6 +910,7 @@ def _standard_lowering_fn(
         non_tensor_args=non_tensor_args,
         op_overload=op_overload,
         user_input_gen_fns=input_gen_fns,
+        defer_benchmark=defer_benchmark,
     )
 
     validate_ir(result)
@@ -1035,6 +1158,7 @@ def _create_autotuning_lowering(
     ] = None,
     dispatch_on: Optional[tuple[str, int]] = None,
     split_points: Optional[list[int]] = None,
+    defer_benchmark: bool = False,
 ) -> Callable[..., Any]:
     """Create the lowering function for autotuning."""
     if not is_range_based:
@@ -1053,6 +1177,7 @@ def _create_autotuning_lowering(
                 tensor_inputs=tensor_inputs,
                 runtime_kwargs=runtime_kwargs,
                 config_generator=config_generator,
+                defer_benchmark=defer_benchmark,
             )
 
         return standard_lowering_wrapper
@@ -1096,6 +1221,7 @@ def register_custom_op_autotuning(
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
     dispatch_on: Optional[dict[str, Any]] = None,
     split_points: Optional[list[int]] = None,
+    defer_benchmark: bool = False,
 ) -> None:
     """Register custom op for autotuning with custom_op configs where each config
     specifies a decomposition implementation function with its parameter values.
@@ -1266,6 +1392,7 @@ def register_custom_op_autotuning(
         dispatch_on=dispatch_on_tuple,
         split_points=split_points,
         range_upper_bound=range_upper_bound,
+        defer_benchmark=defer_benchmark,
     )
 
     lowerings[op_overload] = lowering_fn

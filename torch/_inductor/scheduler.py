@@ -2978,6 +2978,7 @@ class Scheduler:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
         self.merge_loops()
+        self.finalize_deferred_choices()
         self.finalize_multi_template_buffers()
         if (
             config.max_autotune_gemm or config.max_autotune
@@ -3790,11 +3791,75 @@ class Scheduler:
         with dynamo_timed("benchmark_codegened_module"):
             return backend.benchmark_codegened_module(module)
 
+    def finalize_deferred_choices(self) -> None:
+        """
+        After fusion, prune losing deferred variant nodes from the graph.
+
+        The enhanced benchmark was already performed at lowering time
+        (with max_autotune_gemm=True). All variants were inlined BEFORE fusion
+        so they participated in fuse_nodes(). Now we remove the losers' nodes.
+
+        KNOWN LIMITATION (future work):
+        The benchmark happens during lowering, not after main-graph fusion.
+        This means the benchmark captures intra-subgraph fusion (e.g., matmul
+        epilogue fusion within the decomposition) but NOT cross-boundary fusion
+        (e.g., fusing the custom op's output with a subsequent main-graph op).
+        True post-fusion benchmarking is not currently feasible because creating
+        a new GraphLowering during scheduling conflicts with the active V.graph
+        context. Two potential solutions:
+        (a) Compile/benchmark a subset of fused SchedulerNodes independently
+        (b) N full-graph compilations (one per variant) - expensive but correct
+        """
+        if not hasattr(V.graph, "_deferred_variants") or not V.graph._deferred_variants:
+            return
+
+        for deferred_info in V.graph._deferred_variants:
+            variants = deferred_info["variants"]
+            name = deferred_info["name"]
+
+            winner = next((v for v in variants if v["is_winner"]), variants[0])
+            losers = [v for v in variants if not v["is_winner"]]
+
+            log.info(
+                "Post-fusion pruning for %s: keeping variant %d (%s), "
+                "removing %d losers (%d total buffers)",
+                name,
+                winner["index"],
+                winner["choice"].name,
+                len(losers),
+                sum(len(v["buffer_names"]) for v in losers),
+            )
+
+            # Remove loser variants' buffers from V.graph
+            loser_names: set[str] = set()
+            for v in losers:
+                for buf_name in v["buffer_names"]:
+                    V.graph.name_to_buffer.pop(buf_name, None)
+                    V.graph.removed_buffers.add(buf_name)
+                loser_names.update(v["buffer_names"])
+
+            # Remove loser nodes from scheduler
+            self.nodes = [
+                n
+                for n in self.nodes
+                if not (
+                    isinstance(n, BaseSchedulerNode) and n.get_name() in loser_names
+                )
+            ]
+
+            log.info(
+                "  Pruned %d loser buffers, %d scheduler nodes remain",
+                len(loser_names),
+                len(self.nodes),
+            )
+
+        V.graph._deferred_variants = []
+
     def finalize_multi_template_buffers(self) -> None:
         """
         Finalize a backing choice for MultiTemplateBuffers which did not already have a
-        choice finalized through fusion. In the case of an extern choice, this will result
-        in replacing the SchedulerNode.
+        choice finalized through fusion. In the case of an extern or subgraph choice,
+        this will result in replacing the SchedulerNode.
 
         If a MultiTemplateBuffer did not have any fusion opportunities, finalizing a choice
         will force completion of compilation and benchmarking.
@@ -3841,6 +3906,16 @@ class Scheduler:
                     else:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
+
+                # Handle SubgraphChoiceCaller: inline the winning subgraph
+                from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+
+                if isinstance(min_node_unfused, SubgraphChoiceCaller):
+                    log.info(
+                        "Deferred benchmark: SubgraphChoiceCaller won for %s, "
+                        "creating SubgraphBuffer",
+                        multi_node.get_name(),
+                    )
 
                 with ir.IRNode.current_origins(multi_node.origins):
                     out_tensorbox = min_node_unfused.output_node()
