@@ -115,24 +115,33 @@ non_decreasing_unary_ops = [
     aten.tanh_.default,
     aten.trunc.default,
     aten.trunc_.default,
+    # nan_to_num is non-decreasing on its entire domain (including nan/inf):
+    # it maps -inf→min, nan→0, inf→max, and is identity elsewhere.
+    aten.nan_to_num.default,
+    aten.nan_to_num_.default,
 ]
 
 # Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
-non_increasing_unary_ops = [
+# Note: acos excluded due to domain constraints [-1,1] causing validation failures
+non_increasing_unary_ops: list[OpOverload] = [
     aten.erfc.default,
     aten.erfc_.default,
     aten.special_erfcx.default,
 ]
 
-# All-partial-preserving unary ops: P(x)->P(x) for all x.
-# These ops preserve the exact value for each element, only transforming units/representation.
-all_partial_preserving_unary_ops = [
+# Linear nondecreasing unary ops: both linear (P(sum/avg) preserved) and
+# nondecreasing (P(max/min) preserved).  Multiplication by a positive constant.
+linear_nondecreasing_unary_ops = [
     aten.deg2rad.default,
     aten.deg2rad_.default,
-    aten.nan_to_num.default,
-    aten.nan_to_num_.default,
     aten.rad2deg.default,
     aten.rad2deg_.default,
+]
+
+# All-partial-preserving unary ops: P(x)->P(x) for all x.
+# TODO: positive should be removed once CIA (Copy Is All) optimizes it away.
+all_partial_preserving_unary_ops = [
+    aten.positive.default,
 ]
 
 # Binary ops monotonically increasing in both arguments.
@@ -265,7 +274,6 @@ pointwise_ops = (
         aten.cosh.default,
         aten.cosh.out,
         aten.cosh_.default,
-        aten.deg2rad.out,
         aten.digamma.default,
         aten.digamma.out,
         aten.digamma_.default,
@@ -400,7 +408,6 @@ pointwise_ops = (
         aten.polygamma.default,
         aten.polygamma.out,
         aten.polygamma_.default,
-        aten.positive.default,
         aten.pow.Scalar,
         aten.pow.Scalar_out,
         aten.pow.Tensor_Scalar,
@@ -412,7 +419,6 @@ pointwise_ops = (
         aten.reciprocal.default,
         aten.reciprocal.out,
         aten.reciprocal_.default,
-        aten.rad2deg.out,
         aten.remainder.Scalar,
         aten.remainder.Scalar_Tensor,
         aten.remainder.Scalar_out,
@@ -491,6 +497,7 @@ pointwise_ops = (
     ]
     + non_decreasing_unary_ops
     + non_increasing_unary_ops
+    + linear_nondecreasing_unary_ops
     + all_partial_preserving_unary_ops
     + monotonic_binary_ops
 )
