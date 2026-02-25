@@ -698,9 +698,7 @@ class OutputGraph(OutputGraphCommon):
         self.tracing_context.traced_code.append(f_code)
         self.tracing_context.cudagraph_annotation = self.cudagraph_annotation
         self.traced_code = self.tracing_context.traced_code
-        self.dynamo_compile_id: CompileId | None = (
-            CompileContext.current_compile_id()
-        )
+        self.dynamo_compile_id: CompileId | None = CompileContext.current_compile_id()
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -3738,9 +3736,7 @@ class SubgraphTracer(fx.Tracer):
             return proxy
 
     # See NOTE: [Nested SubgraphTracer and free_variable handling] for more details
-    def lift_tracked_freevar_to_input(
-        self, proxy: fx.Proxy
-    ) -> LazyProxy | fx.Proxy:
+    def lift_tracked_freevar_to_input(self, proxy: fx.Proxy) -> LazyProxy | fx.Proxy:
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
         assert self.parent is not None, (

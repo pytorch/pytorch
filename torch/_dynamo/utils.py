@@ -1209,7 +1209,12 @@ def is_lru_cache_wrapped_function(
     )
 
 
-_FuncTypes: TypeAlias = types.FunctionType | types.BuiltinFunctionType | types.MethodDescriptorType | types.WrapperDescriptorType
+_FuncTypes: TypeAlias = (
+    types.FunctionType
+    | types.BuiltinFunctionType
+    | types.MethodDescriptorType
+    | types.WrapperDescriptorType
+)
 
 
 def is_function_or_wrapper(
@@ -1257,7 +1262,11 @@ cmp_name_to_op_str_mapping = {
 def is_wrapper_or_member_descriptor(
     value: Any,
 ) -> TypeIs[
-    types.GetSetDescriptorType | types.MethodDescriptorType | types.WrapperDescriptorType | types.MemberDescriptorType | types.MethodWrapperType
+    types.GetSetDescriptorType
+    | types.MethodDescriptorType
+    | types.WrapperDescriptorType
+    | types.MemberDescriptorType
+    | types.MethodWrapperType
 ]:
     return isinstance(
         value,
@@ -2273,9 +2282,7 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
 
 
-def clone_input(
-    x: torch.Tensor, *, dtype: torch.dtype | None = None
-) -> torch.Tensor:
+def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.Tensor:
     """copy while preserving strides"""
     # TODO: this is questionable
     if is_fake(x):
@@ -2424,7 +2431,10 @@ def preserve_rng_state() -> Generator[None, None, None]:
 def is_jit_model(
     model0: Any,
 ) -> TypeIs[
-    torch.jit._trace.TopLevelTracedModule | torch.jit._script.RecursiveScriptModule | torch.jit.ScriptFunction[Any, Any] | torch.jit.ScriptModule
+    torch.jit._trace.TopLevelTracedModule
+    | torch.jit._script.RecursiveScriptModule
+    | torch.jit.ScriptFunction[Any, Any]
+    | torch.jit.ScriptModule
 ]:
     return isinstance(
         model0,
@@ -3552,9 +3562,7 @@ def get_fake_values_from_nodes(
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_concrete_sizes_from_symints(
-    msg: str, fake_mode: FakeTensorMode | None
-) -> str:
+def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) -> str:
     """
     Replace symbolic size expressions (like 's0', 's94') in error messages
     with their concrete runtime values for better readability.

@@ -230,10 +230,12 @@ class FrameStateSizeEntry:
     scalar: int | AutoDynamic | AutoUnset = dataclasses.field(default=auto_unset)
     # NB: We don't have cases where we have a known dimensionality but
     # we know NOTHING about the individual sizes
-    size: AutoDynamic | AutoUnset | tuple[int | AutoDynamic, ...] = (
+    size: AutoDynamic | AutoUnset | tuple[int | AutoDynamic, ...] = dataclasses.field(
+        default=auto_unset
+    )
+    stride: AutoDynamic | AutoUnset | tuple[int | AutoDynamic | InferStride, ...] = (
         dataclasses.field(default=auto_unset)
     )
-    stride: AutoDynamic | AutoUnset | tuple[int | AutoDynamic | InferStride, ...] = dataclasses.field(default=auto_unset)
 
     def render(self) -> str:
         # Special cases

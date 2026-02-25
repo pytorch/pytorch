@@ -1345,7 +1345,11 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(
         self,
         source: Source,
-        example_value: KeysView[Any] | set[Any] | frozenset[Any] | dict[Any, Any] | None,
+        example_value: KeysView[Any]
+        | set[Any]
+        | frozenset[Any]
+        | dict[Any, Any]
+        | None,
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):

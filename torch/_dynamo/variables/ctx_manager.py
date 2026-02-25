@@ -1516,7 +1516,7 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
 class CudagraphOverrideVariable(ContextWrappingVariable):
     """represents torch._dynamo.override_cudagraphs"""
 
-    def __init__(self, fwd: Optional[bool], bwd: Optional[bool], **kwargs: Any) -> None:
+    def __init__(self, fwd: bool | None, bwd: bool | None, **kwargs: Any) -> None:
         super().__init__(
             target_values=(fwd, bwd),
             initial_values=None,  # Captured in enter()

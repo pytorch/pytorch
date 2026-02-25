@@ -1141,9 +1141,7 @@ class DiskDynamoCache(DiskDynamoStore):
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
-    def load_and_install_package(
-        self, fn: Callable[..., Any]
-    ) -> CompilePackage | None:
+    def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
         """
         Load directly into a package and install backends
         """

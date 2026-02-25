@@ -116,12 +116,25 @@ class SideEffects:
         self,
         output_graph: "OutputGraph",
         id_to_variable: dict[int, VariableTracker] | None = None,
-        store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]] | None = None,
+        store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
+        | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
         keepalive: list[Any] | None = None,
-        save_for_backward: list[tuple[AutogradFunctionContextVariable, list[VariableTracker]]] | None = None,
-        tensor_hooks: dict[int, tuple["variables.TensorVariable", VariableTracker, "variables.RemovableHandleVariable", str]] | None = None,
+        save_for_backward: list[
+            tuple[AutogradFunctionContextVariable, list[VariableTracker]]
+        ]
+        | None = None,
+        tensor_hooks: dict[
+            int,
+            tuple[
+                "variables.TensorVariable",
+                VariableTracker,
+                "variables.RemovableHandleVariable",
+                str,
+            ],
+        ]
+        | None = None,
     ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)

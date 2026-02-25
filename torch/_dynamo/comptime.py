@@ -214,9 +214,7 @@ class ComptimeContext:
             "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
         )
 
-    def print_graph(
-        self, *, verbose: bool = True, file: TextIO | None = None
-    ) -> None:
+    def print_graph(self, *, verbose: bool = True, file: TextIO | None = None) -> None:
         """
         Print the partially constructed FX graph that would be passed
         to the user compiler after compilation.
@@ -238,9 +236,7 @@ class ComptimeContext:
     def print(self, val: Any, *, file: TextIO | None = None) -> None:
         print(repr(val), file=file)
 
-    def print_disas(
-        self, *, file: TextIO | None = None, stacklevel: int = 0
-    ) -> None:
+    def print_disas(self, *, file: TextIO | None = None, stacklevel: int = 0) -> None:
         """
         Print the current series of opcodes being executed (not including
         parent frames), including where you are in the particular opcode
@@ -272,9 +268,7 @@ class ComptimeContext:
         for s in tx.stack:
             print(f"- {s.debug_repr()}", file=file)
 
-    def print_locals(
-        self, *, file: TextIO | None = None, stacklevel: int = 0
-    ) -> None:
+    def print_locals(self, *, file: TextIO | None = None, stacklevel: int = 0) -> None:
         """
         Print all of the locals available in the current context.
         By default this view is very limited; you can get more information

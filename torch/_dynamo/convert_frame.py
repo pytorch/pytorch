@@ -468,9 +468,7 @@ def exception_handler(
 
 
 FRAME_COUNTER = 0
-FRAME_COMPILE_COUNTER: typing.Counter[int | FrameStateSizeEntry] = (
-    collections.Counter()
-)
+FRAME_COMPILE_COUNTER: typing.Counter[int | FrameStateSizeEntry] = collections.Counter()
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:

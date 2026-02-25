@@ -14,7 +14,6 @@ is properly initialized, making it safe to import and use this module even in
 non-distributed scenarios.
 """
 
-
 import torch.distributed as dist
 
 from . import config

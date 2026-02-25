@@ -45,14 +45,7 @@ import traceback
 import types
 import weakref
 from collections import deque
-from typing import (
-    Any,
-    cast,
-    NoReturn,
-    TYPE_CHECKING,
-    TypeAlias,
-    TypeVar,
-)
+from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
 from typing_extensions import TypeIs
 
 import torch
@@ -227,7 +220,11 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
 
-ExceptionVals: TypeAlias = variables.ExceptionVariable | UserDefinedExceptionClassVariable | UserDefinedExceptionObjectVariable
+ExceptionVals: TypeAlias = (
+    variables.ExceptionVariable
+    | UserDefinedExceptionClassVariable
+    | UserDefinedExceptionObjectVariable
+)
 
 
 @functools.cache
@@ -5301,15 +5298,15 @@ class InstructionTranslatorBase(
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
-        self._constants_cache: list[
-            ConstantVariable | SliceVariable | None
-        ] = [None] * len(f_code.co_consts)
+        self._constants_cache: list[ConstantVariable | SliceVariable | None] = [
+            None
+        ] * len(f_code.co_consts)
 
         self.is_trace_bytecode_log_enabled: bool | None = (
             trace_bytecode_log.isEnabledFor(logging.DEBUG)
         )
-        self.is_trace_source_log_enabled: bool | None = (
-            trace_source_log.isEnabledFor(logging.DEBUG)
+        self.is_trace_source_log_enabled: bool | None = trace_source_log.isEnabledFor(
+            logging.DEBUG
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 

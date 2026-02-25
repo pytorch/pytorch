@@ -384,7 +384,7 @@ def leaf_function(
 
 
 def leaf_function(
-    fn: Optional[Callable[_P, _R]] = None, *, mutates_args: Optional[set[str]] = None
+    fn: Callable[_P, _R] | None = None, *, mutates_args: set[str] | None = None
 ) -> Callable[_P, _R] | Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Decorator to mark a function as a leaf function for :func:`torch.compile`.
@@ -1252,9 +1252,7 @@ def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
         maybe_mark_dynamic(t, i)
 
 
-def mark_static(
-    t: Any, index: int | list[Any] | tuple[Any] | None = None
-) -> None:
+def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> None:
     """
     Mark a tensor as having a static dim or mark a nn module class as static.
 

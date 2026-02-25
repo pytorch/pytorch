@@ -153,7 +153,9 @@ If you are removing an existing torch level API:
 """
 manual_torch_name_rule_map: dict[
     str,
-    type[TorchInGraphFunctionVariable] | type[SkipFunctionVariable] | type[UserFunctionVariable],
+    type[TorchInGraphFunctionVariable]
+    | type[SkipFunctionVariable]
+    | type[UserFunctionVariable],
 ] = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
