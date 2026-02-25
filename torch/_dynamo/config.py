@@ -155,13 +155,13 @@ automatic_dynamic_shapes = (
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
-# When True, dynamic graphs from automatic_dynamic get an exclusion guard
-# that rejects inputs matching the original static graph's sizes, so those
-# inputs fall through to the static graph. This prevents the dynamic graph
-# from shadowing the static graph in the cache (important for activation
-# checkpointing correctness). The exclusion is best-effort: if no static
-# fallback exists in the cache, the dynamic graph is used anyway.
-guard_exclusion_for_automatic_dynamic = True
+# When True, ensures the same input always selects the same compiled graph
+# regardless of cache ordering. Dynamic graphs from automatic_dynamic get an
+# exclusion guard that rejects inputs matching the original static graph's
+# sizes, so those inputs fall through to the static graph. This prevents the
+# dynamic graph from shadowing the static graph in the cache (important for
+# activation checkpointing correctness).
+stable_graph_selection_for_automatic_dynamic = True
 
 # log graph in/out metadata
 # This is only turned on for export today since we
