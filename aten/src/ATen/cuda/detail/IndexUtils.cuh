@@ -33,4 +33,31 @@ getTensorInfo(const at::TensorBase &t) {
     data_ptr, dims, sz, st);
 }
 
+// ForwardIt: only legacy random access iterator is supported.
+template<class ForwardIt, class T, bool is_lower = true>
+static __host__ __device__ __forceinline__
+ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
+    ForwardIt it;
+    typename std::iterator_traits<ForwardIt>::difference_type count, step;
+    // NOTE: std::distance(first, last) compiles but produces wrong results here,
+    // so only legacy random access iterators are safe in this code.
+    count = last - first;
+
+    while (count > 0) {
+      it = first;
+      step = count / 2;
+      // avoiding std::advance(it, step),
+      // although it does work unlike std::distance
+      it += step;
+      if (is_lower ? *it < value : value >= *it) {
+        first = ++it;
+        count -= step + 1;
+      }
+      else {
+        count = step;
+      }
+    }
+    return first;
+}
+
 } // namespace at::cuda::detail
