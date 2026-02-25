@@ -584,7 +584,7 @@ inline float polygamma(const int64_t order, const T0 input) {
 }
 
 template <typename T>
-inline float trigamma(T x) {
+float trigamma(T x) {
   float sign = 1.0f;
   float result = 0.0f;
 

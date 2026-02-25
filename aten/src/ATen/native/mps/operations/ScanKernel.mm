@@ -60,10 +60,12 @@ static void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64
   // Preprocess output tensor - ensure it's contiguous for Metal shaders
   Tensor output_tensor = output;
   bool output_needs_copy = !output.is_contiguous();
+  Tensor temp_output;
 
   if (output_needs_copy) {
     // Create a temporary contiguous tensor with the same shape and type
-    output_tensor = at::empty_like(output, output.options().memory_format(c10::MemoryFormat::Contiguous));
+    temp_output = at::empty_like(output, output.options()).contiguous();
+    output_tensor = temp_output;
   }
 
   // Determine which kernel to use based on scan dimension position
