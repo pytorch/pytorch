@@ -324,8 +324,10 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.mean.dim: "avg",
     aten.mean.out: "avg",
     aten.max.default: "max",
+    aten.max.dim: "max",
     aten.max.out: "max",
     aten.min.default: "min",
+    aten.min.dim: "min",
     aten.min.out: "min",
     aten.amax.default: "max",
     aten.amax.out: "max",
@@ -365,61 +367,6 @@ def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
         reduction_linear=True,
         reduction_op=reduction_op,
     )
-
-
-# max.dim/min.dim return (values, indices). Values can use Partial(max/min)
-# but indices cannot be meaningfully reduced — replace Partial with Replicate.
-MAX_MIN_DIM_OPS = {
-    aten.max.dim: "max",
-    aten.min.dim: "min",
-}
-
-
-@register_op_strategy(list(MAX_MIN_DIM_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
-def max_min_dim_strategy(op_schema: OpSchema) -> OpStrategy:
-    args_schema = op_schema.args_schema
-    input_strategy = args_schema[0]
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-
-    dims = None
-    if len(op_schema.args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
-
-    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
-    keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
-    reduction_op = MAX_MIN_DIM_OPS[op_schema.op]
-
-    values_strategy = common_reduction_strategy(
-        input_strategy,
-        reduce_dims,
-        keep_dim=keep_dim,
-        reduction_linear=True,
-        reduction_op=reduction_op,
-    )
-
-    # Build per-output tuple specs: values keep their placements (including
-    # Partial), indices replace Partial with Replicate since index values
-    # cannot be combined across ranks with max/min reduction.
-    output_strategy = OpStrategy([])
-    for op_spec in values_strategy.strategies:
-        values_spec = op_spec.output_spec
-        indices_placements = tuple(
-            Replicate() if isinstance(p, Partial) else p for p in values_spec.placements
-        )
-        indices_spec = DTensorSpec(
-            mesh=values_spec.mesh,
-            placements=indices_placements,
-        )
-        output_strategy.strategies.append(
-            OpSpec(
-                output_specs=(values_spec, indices_spec),
-                input_specs=op_spec.input_specs,
-                redistribute_cost=op_spec.redistribute_cost,
-            )
-        )
-
-    return output_strategy
 
 
 @register_op_strategy(list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1))

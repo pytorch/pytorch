@@ -939,28 +939,6 @@ class TestOpSchemaMetaProperties(TestCase):
             out_spec = specs if isinstance(specs, DTensorSpec) else specs[0]
             self.assertEqual(out_spec.tensor_meta.stride, (8, 1))
 
-    def test_max_dim_output_specs_are_tuple(self):
-        """max.dim should return (values_spec, indices_spec) tuple."""
-        from torch.distributed.tensor._ops._math_ops import max_min_dim_strategy
-
-        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
-        input_meta = TensorMeta(
-            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
-        )
-        input_spec = DTensorSpec(mesh, (Shard(0),), input_meta)
-
-        op_schema = OpSchema(
-            torch.ops.aten.max.dim,
-            (OpStrategy([OpSpec(input_spec)]), 1),
-            {},
-        )
-
-        strategy = max_min_dim_strategy(op_schema)
-        for op_spec in strategy.strategies:
-            specs = op_spec.output_specs
-            self.assertIsInstance(specs, tuple)
-            self.assertEqual(len(specs), 2)
-
     def test_layer_norm_backward_output_specs_are_tuple(self):
         """layer_norm backward returns (d_input, d_weight, d_bias) tuple."""
         from torch.distributed.tensor._ops._math_ops import (
