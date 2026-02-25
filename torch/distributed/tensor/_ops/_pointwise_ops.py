@@ -58,6 +58,11 @@ prims = torch.ops.prims
 # Linear pointwise ops, split by linearity type.
 unary_linear_ops = [aten.to.dtype]
 
+_UNARY_LINEAR_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum")],
+    [Partial("avg"), Partial("avg")],
+]
+
 binary_additive_ops = [
     aten.add.Tensor,
     aten.add_.Tensor,
@@ -65,9 +70,37 @@ binary_additive_ops = [
     aten.sub_.Tensor,
 ]
 
+_BINARY_ADDITIVE_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum"), Partial("sum")],
+    [Partial("avg"), Partial("avg"), Partial("avg")],
+    # P(x), R -> P(x): adding/subtracting a replicated value preserves partial type
+    # (the replicated value is constant across ranks, so reduce order is unaffected)
+    [Partial("avg"), Partial("avg"), Replicate()],
+    [Partial("max"), Partial("max"), Replicate()],
+    [Partial("min"), Partial("min"), Replicate()],
+    # R, P(avg) -> P(avg): avg is linear so this holds for any alpha
+    # (R, P(max/min) excluded: negative alpha would flip the ordering)
+    [Partial("avg"), Replicate(), Partial("avg")],
+]
+
 # mul: partials propagate through either arg. div: only through numerator.
 binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor]
 binary_div_ops = [aten.div.Tensor, aten.div_.Tensor]
+
+# _UNARY_LINEAR_RULES handles the scalar promotion case: Python's __mul__/__truediv__
+# promote scalars to 0-dim tensors, so aten.mul.Scalar dispatches as aten.mul.Tensor
+# with n_tensors=1, matching the length-2 unary rules.
+_MUL_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum"), Replicate()],
+    [Partial("avg"), Partial("avg"), Replicate()],
+    [Partial("sum"), Replicate(), Partial("sum")],
+    [Partial("avg"), Replicate(), Partial("avg")],
+]
+
+_DIV_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum"), Replicate()],
+    [Partial("avg"), Partial("avg"), Replicate()],
+]
 
 scalar_linear_ops = [
     aten.div.Scalar,
@@ -75,8 +108,6 @@ scalar_linear_ops = [
     aten.mul.Scalar,
     aten.mul_.Scalar,
 ]
-
-neg_ops = [aten.neg.default, aten.neg_.default]
 
 # Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
 # Only ops that are non-decreasing on their ENTIRE domain belong here.
@@ -119,6 +150,11 @@ non_decreasing_unary_ops = [
     aten.trunc_.default,
 ]
 
+_MONOTONIC_INCREASING_RULES: list[list[Placement]] = [
+    [Partial("max"), Partial("max")],
+    [Partial("min"), Partial("min")],
+]
+
 # Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
 # Note: acos excluded due to domain constraints [-1,1] causing validation failures
 non_increasing_unary_ops: list[OpOverload] = [
@@ -126,6 +162,15 @@ non_increasing_unary_ops: list[OpOverload] = [
     aten.erfc_.default,
     aten.special_erfcx.default,
 ]
+
+_MONOTONIC_DECREASING_RULES: list[list[Placement]] = [
+    [Partial("min"), Partial("max")],
+    [Partial("max"), Partial("min")],
+]
+
+neg_ops = [aten.neg.default, aten.neg_.default]
+
+_NEG_RULES: list[list[Placement]] = _UNARY_LINEAR_RULES + _MONOTONIC_DECREASING_RULES
 
 # All-partial-preserving unary ops: P(x)->P(x) for all x
 # These ops preserve the exact value for each element, only transforming units/representation
@@ -136,6 +181,10 @@ all_partial_preserving_unary_ops = [
     aten.nan_to_num_.default,
     aten.rad2deg.default,
     aten.rad2deg_.default,
+]
+
+_ALL_PARTIAL_PRESERVING_RULES: list[list[Placement]] = [
+    [Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
 ]
 
 # Binary ops monotonically increasing in both arguments.
@@ -159,6 +208,13 @@ monotonic_min_preserving_binary_ops = [
 monotonic_binary_ops = [
     aten.logaddexp.default,
     aten.logaddexp2.default,
+]
+
+_monotone_binary_base_rules: list[list[Placement]] = [
+    [Partial("max"), Partial("max"), Replicate()],
+    [Partial("max"), Replicate(), Partial("max")],
+    [Partial("min"), Partial("min"), Replicate()],
+    [Partial("min"), Replicate(), Partial("min")],
 ]
 
 # .out variants stay on old path until PR2 adds out-variant infrastructure
@@ -500,32 +556,6 @@ pointwise_ops = [
     prims.zeta.default,
 ]
 
-# Rule constants for partial placement propagation
-_UNARY_LINEAR_RULES: list[list[Placement]] = [
-    [Partial("sum"), Partial("sum")],
-    [Partial("avg"), Partial("avg")],
-]
-
-_BINARY_ADDITIVE_RULES: list[list[Placement]] = [
-    [Partial("sum"), Partial("sum"), Partial("sum")],
-    [Partial("avg"), Partial("avg"), Partial("avg")],
-    # P(x), R -> P(x): adding/subtracting a replicated value preserves partial type
-    # (the replicated value is constant across ranks, so reduce order is unaffected)
-    [Partial("avg"), Partial("avg"), Replicate()],
-    [Partial("max"), Partial("max"), Replicate()],
-    [Partial("min"), Partial("min"), Replicate()],
-    # R, P(avg) -> P(avg): avg is linear so this holds for any alpha
-    # (R, P(max/min) excluded: negative alpha would flip the ordering)
-    [Partial("avg"), Replicate(), Partial("avg")],
-]
-
-_monotone_binary_base_rules: list[list[Placement]] = [
-    [Partial("max"), Partial("max"), Replicate()],
-    [Partial("max"), Replicate(), Partial("max")],
-    [Partial("min"), Partial("min"), Replicate()],
-    [Partial("min"), Replicate(), Partial("min")],
-]
-
 
 def single_mesh_dim_common_pointwise_strategy(
     args_schema: ArgsType,
@@ -813,21 +843,6 @@ for op in binary_additive_ops:
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(_make_partial_strategy(extra_rules=_BINARY_ADDITIVE_RULES))
 
-# _UNARY_LINEAR_RULES handles the scalar promotion case: Python's __mul__/__truediv__
-# promote scalars to 0-dim tensors, so aten.mul.Scalar dispatches as aten.mul.Tensor
-# with n_tensors=1, matching the length-2 unary rules.
-_MUL_RULES: list[list[Placement]] = [
-    [Partial("sum"), Partial("sum"), Replicate()],
-    [Partial("avg"), Partial("avg"), Replicate()],
-    [Partial("sum"), Replicate(), Partial("sum")],
-    [Partial("avg"), Replicate(), Partial("avg")],
-]
-
-_DIV_RULES: list[list[Placement]] = [
-    [Partial("sum"), Partial("sum"), Replicate()],
-    [Partial("avg"), Partial("avg"), Replicate()],
-]
-
 for op in binary_mul_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
@@ -843,56 +858,25 @@ for op in scalar_linear_ops:
         op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
     )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
 
-# Monotonic increasing unary: P(max)->P(max), P(min)->P(min)
 for op in non_decreasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _make_partial_strategy(
-            extra_rules=[
-                [Partial("max"), Partial("max")],
-                [Partial("min"), Partial("min")],
-            ]
-        )
-    )
+    )(_make_partial_strategy(extra_rules=_MONOTONIC_INCREASING_RULES))
 
-# Monotonic decreasing unary: P(max)->P(min), P(min)->P(max)
 for op in non_increasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _make_partial_strategy(
-            extra_rules=[
-                [Partial("min"), Partial("max")],
-                [Partial("max"), Partial("min")],
-            ]
-        )
-    )
+    )(_make_partial_strategy(extra_rules=_MONOTONIC_DECREASING_RULES))
 
-# All-partial-preserving unary: P(x)->P(x) for all x
 for op in all_partial_preserving_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _make_partial_strategy(
-            extra_rules=[[Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")]
-        )
-    )
+    )(_make_partial_strategy(extra_rules=_ALL_PARTIAL_PRESERVING_RULES))
 
-# neg: linear (P(sum)->P(sum), P(avg)->P(avg)) + monotonic decreasing
 register_single_dim_strategy(
     neg_ops,
     schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
-)(
-    _make_partial_strategy(
-        # pyrefly: ignore [bad-argument-type]
-        extra_rules=_UNARY_LINEAR_RULES
-        + [
-            [Partial("min"), Partial("max")],
-            [Partial("max"), Partial("min")],
-        ]
-    )
-)
+)(_make_partial_strategy(extra_rules=_NEG_RULES))
 
 # Monotonic binary ops: max-preserving
 for op in monotonic_max_preserving_binary_ops:
