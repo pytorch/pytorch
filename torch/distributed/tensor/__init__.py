@@ -86,3 +86,9 @@ full.__module__ = "torch.distributed.tensor"
 rand.__module__ = "torch.distributed.tensor"
 randn.__module__ = "torch.distributed.tensor"
 zeros.__module__ = "torch.distributed.tensor"
+
+# Register DTensor dispatch for higher order operators
+from torch._higher_order_ops.print import _register_dtensor_impl
+
+
+_register_dtensor_impl()
