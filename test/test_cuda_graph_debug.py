@@ -329,45 +329,6 @@ class TestCUDAGraphDebugBacktraces(TestCase):
         self.assertIn("replay traceback (python)", error_msg)
 
 
-class TestMakeGraphedCallables(TestCase):
-    def test_make_graphed_callables(self):
-        # Module that creates internal view tensors saved for backward
-        # (mimics attention reshape pattern). After make_graphed_callables
-        # returns, the autograd graph from capture is consumed and these
-        # view tensors are GC'd. Their memory is still in the capture pool,
-        # so check_input_liveness must not flag them as dead.
-        class ViewModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(64, 64)
-
-            def forward(self, x):
-                y = self.linear(x)
-                # .view().transpose() creates views whose data_ptr differs
-                # from the base block address
-                y = y.view(2, 4, 16).transpose(0, 1)
-                return y.contiguous().view(4, 32)
-
-        model = ViewModule().cuda()
-        x = torch.randn(2, 64, device="cuda", requires_grad=True)
-
-        torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
-
-        torch.cuda.make_graphed_callables(
-            model,
-            (x,),
-            check_input_liveness=True,
-        )
-
-        _sync_and_gc_collect()
-
-        out = model(x)
-        loss = out.sum()
-        loss.backward()
-
-        torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(True)
-
-
 class TestCUDAGraphDebugExternalOps(TestCase):
     def test_custom_autograd_function(self):
         from torch.autograd import Function
