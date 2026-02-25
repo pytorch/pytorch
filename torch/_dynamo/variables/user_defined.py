@@ -22,6 +22,7 @@ maintaining proper semantics while enabling optimizations where possible.
 """
 
 import _collections  # type: ignore[import-not-found]
+import _thread
 import builtins
 import collections
 import contextlib
@@ -117,6 +118,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.constant import ConstantVariable
 
+    from .dicts import DunderDictVariable
     from .lists import ListVariable, TupleVariable
 
 
@@ -957,6 +959,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             return variables.MappingProxyVariable(args[0])
+        elif self.value is _thread.RLock:
+            return variables.RLockVariable.create(tx, source=self.source)
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
             with do_not_convert_to_tracable_parameter():
                 return tx.inline_user_function_return(
@@ -1086,7 +1090,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     _nonvar_fields = {
         "value",
         "value_type",
-        "attrs_directly_modifed_on_dict",
         *UserDefinedVariable._nonvar_fields,
     }
 
@@ -1116,12 +1119,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.base_cls_vt = base_cls_vt
         self.init_args = init_args
 
-        # This records names of the attributes that were modified via instance
+        # This records the attributes that were modified via instance
         # `__dict__` directly, rather than the normal setattr path.
-        #
-        # TODO consider emulating `obj.__dict__` as a `ConstDictVariable` to get
-        # rid of these workarounds here and in `GetAttrVariable`.
-        self.attrs_directly_modifed_on_dict: set[str] = set()
+        self.dict_vt: DunderDictVariable | None = None
 
         # Cache inspect.getattr_static outputs for the same name. This is fine
         # because if there is a mutation for the name, we use side-effects infra
@@ -1152,6 +1152,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
+        # Could this be in a Mixin instead?
+        if self.dict_vt is None:
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+            # Should this be done lazily?
+            for name, value in self.value.__dict__.items():
+                vt = VariableTracker.build(
+                    tx, value, source=self.source and AttrSource(self.source, name)
+                )
+                self.dict_vt.setitem(name, vt)
+        return self.dict_vt
 
     def is_underlying_vt_modified(self, side_effects: "SideEffects") -> bool:
         return False
@@ -1335,7 +1347,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
 
         if directly_update_dict:
-            self.attrs_directly_modifed_on_dict.add(name_str)
+            self.get_dict_vt(tx).setitem(name_str, value)
         else:
             tmp = self.try_get_descritor_and_setter_py_func(name_str)
             if tmp:
@@ -1533,7 +1545,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return True
             # For untraceable `__set__` we should still skip if the attribute
             # was mutated via instance `__dict__`.
-            elif attr_name in self.attrs_directly_modifed_on_dict:
+            elif self.dict_vt and self.dict_vt.contains(attr_name):
                 return True
         return False
 
@@ -1640,8 +1652,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return result
 
         if name == "__dict__":
-            options_dict = {"source": source}
-            return variables.GetAttrVariable(self, name, None, **options_dict)
+            return self.get_dict_vt(tx)
 
         # TODO(anijain2305) - Investigate if we need specialization for more
         # dunder attrs. inspect.getattr_static does not return correct value for
@@ -2812,15 +2823,15 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         return self._tuple_vt.get_python_hash()
 
     def is_python_equal(self, other: object) -> bool:
-        return isinstance(
-            other, UserDefinedTupleVariable
-        ) and self._tuple_vt.is_python_equal(other._tuple_vt)
+        other = (
+            other._tuple_vt if isinstance(other, UserDefinedTupleVariable) else other
+        )
+        return self._tuple_vt.is_python_equal(other)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
-        self.generic_dict_vt = ConstDictVariable({})
 
     def method_setattr_standard(
         self,
@@ -2862,26 +2873,14 @@ class MutableMappingVariable(UserDefinedObjectVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to
-        # update the __dict__ attribute. To prevent graph break, we directly
-        # return a ConstDictVariable for the __dict__attr.
-        #
-        # However, users can try to add a new attribute to the class using the
-        # __dict__ attribute. To catch this, we save the ConstDictVariable for
-        # the __dict__ and then lookup into this vt for each attr lookup.
+        # update the __dict__ attribute. The parent class
+        # (UserDefinedObjectVariable) implements __dict__ lookups using a VT
+        # (self.dict_vt) that uses the side effects table as source of truth.
         if name == "get" and type(self.value).get in (  # type: ignore[attr-defined]
             collections.abc.Mapping.get,
             dict.get,
         ):
             return variables.UserMethodVariable(polyfills.mapping_get, self)
-        elif name == "__dict__" and self.source:
-            self.generic_dict_vt = variables.LazyVariableTracker.create(  # type: ignore[assignment]
-                self.value.__dict__, AttrSource(self.source, "__dict__")
-            )
-            return self.generic_dict_vt
-        elif out := self.generic_dict_vt.maybe_getitem_const(
-            variables.ConstantVariable(name)
-        ):
-            return out
         else:
             return super().var_getattr(tx, name)
 
