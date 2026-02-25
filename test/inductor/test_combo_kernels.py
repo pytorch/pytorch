@@ -410,6 +410,7 @@ class ComboKernelTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_block_size(self):
         from torch.profiler import ProfilerActivity
@@ -489,6 +490,7 @@ class ComboKernelTests(TestCase):
             FileCheck().check("pid_offset = pid").run(code[0])
 
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @requires_gpu_and_triton
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_combo_kernel_dynamic_shapes_grid_changes(self):
@@ -569,6 +571,7 @@ class ComboKernelTests(TestCase):
             )
 
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
     def test_combo_kernel_yz_overflow(self):
