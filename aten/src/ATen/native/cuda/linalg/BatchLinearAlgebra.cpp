@@ -811,6 +811,12 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 // Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
 //     Batched cholesky_solve is dispatched to magma.
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
+  const auto L = upper
+    ? c10::MaybeOwned<Tensor>::owned(A.mH())
+    : c10::MaybeOwned<Tensor>::borrowed(A);
+  auto y = at::linalg_solve_triangular(*L, self, /*upper=*/false, /*left=*/true);
+  auto x = at::linalg_solve_triangular(*L, y.mH(), /*upper=*/false, /*left=*/false);
+  return x.mH();
 #if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
