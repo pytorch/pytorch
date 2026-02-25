@@ -4097,6 +4097,15 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->isHistoryEnabled();
   }
 
+  std::shared_ptr<GatheredContext> getContextForPointer(
+      const void* ptr) override {
+    Block* block = get_allocated_block(const_cast<void*>(ptr));
+    if (!block) {
+      return nullptr;
+    }
+    return block->context_when_allocated;
+  }
+
   bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,

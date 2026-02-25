@@ -196,6 +196,10 @@ class CUDAAllocator : public DeviceAllocator {
         " does not yet support recordHistory. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual std::shared_ptr<GatheredContext> getContextForPointer(
+      const void* ptr) {
+    return nullptr;
+  }
   virtual void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
@@ -399,6 +403,10 @@ inline void popCompileContext() {
 
 inline bool isHistoryEnabled() {
   return get()->isHistoryEnabled();
+}
+
+inline std::shared_ptr<GatheredContext> getContextForPointer(const void* ptr) {
+  return get()->getContextForPointer(ptr);
 }
 
 inline bool checkPoolLiveAllocations(
