@@ -227,6 +227,7 @@ _MONOTONIC_DECREASING_RULES: list[list[Placement]] = [
     [Partial("max"), Partial("min")],
 ]
 
+# neg is linear: -(A1 + A2) = -A1 + -A2
 neg_ops = [
     aten.neg.default,
     aten.neg.out,
@@ -294,13 +295,17 @@ _monotone_binary_base_rules: list[list[Placement]] = [
     [Partial("min"), Replicate(), Partial("min")],
 ]
 
+# Ops that preserve specific Partial types through the operation.
+# For example, torch.maximum preserves Partial("max") because
+# max(max(a), max(b)) == max(a, b).
 # .out variants stay on old path until PR2 adds out-variant infrastructure
 partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.maximum.out: "max",
     aten.minimum.out: "min",
 }
 
-# Reconstruct the original linear_pointwise_ops dict for the existing registration path.
+# The linear pointwise ops map, key is op, value is the type of linearity.
+# Reconstructed from category lists for the existing registration path.
 linear_pointwise_ops: dict[OpOverload, int] = {
     **dict.fromkeys(unary_linear_ops, 0),
     **dict.fromkeys(binary_additive_ops, 1),
@@ -711,12 +716,21 @@ def pointwise_strategy(
     max_ndim = -1
 
     if op_schema.is_inplace_op():
+        # inplace op should follow the first arg strategy
         followed_strategy = op_schema.args_schema[0]
         followed_strategy_index = 0
     elif op_schema.is_out_variant_op():
+        # out variant op should follow the out kwarg strategy
         followed_strategy = op_schema.kwargs_schema["out"]
+        # out variant is technically a kwarg for the strategy to follow so it does not
+        # have an "index", we set it to a reasonably large number just to indicate it's
+        # not a valid index
         followed_strategy_index = 100
     else:
+        # normal pointwise op, we choose to follow the arg with
+        # the max shards in case operands needs reshard
+        # in case of multiple operands with max shard, we take
+        # the one with the max number of dimensions
         for idx, arg_strategy in enumerate(op_schema.args_schema):
             if not isinstance(arg_strategy, OpStrategy):
                 continue
@@ -760,7 +774,13 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
-    """Strategy for pointwise ops that preserve specific Partial types."""
+    """
+    Strategy for pointwise ops that preserve specific Partial types.
+
+    For example, torch.maximum preserves Partial("max") placements because
+    max(max(a), max(b)) == max(a, b). Similarly, torch.minimum preserves
+    Partial("min") placements.
+    """
     preserve_partial = partial_preserving_ops.get(op_schema.op)
     return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
 
@@ -981,6 +1001,7 @@ for op in linear_pointwise_ops:
             op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
         )(linear_pointwise_strategy)
 
+# Keep .out variants on old register_op_strategy path
 for op in partial_preserving_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         partial_preserving_pointwise_strategy
@@ -994,6 +1015,7 @@ register_op_strategy(
     prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
 )(copy_strategy)
 
+# Keep pointwise_ops on old path (single-dim registrations above take precedence)
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
@@ -1059,6 +1081,69 @@ _register(
 # Generic pointwise ops: just Shard + Replicate strategies (no partial rules)
 for op in pointwise_ops:
     _register(op)
+
+
+# TODO: add all for_each ops
+for_each_ops = [
+    aten._foreach_abs.default,
+    aten._foreach_abs_.default,
+    aten._foreach_addcdiv_.Scalar,
+    aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_addcdiv_.Tensor,
+    aten._foreach_addcmul.Scalar,
+    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcmul_.ScalarList,
+    aten._foreach_addcmul_.Tensor,
+    aten._foreach_clamp_max_.Scalar,
+    aten._foreach_clamp_min_.Scalar,
+    aten._foreach_div_.List,
+    aten._foreach_div_.Scalar,
+    aten._foreach_div_.ScalarList,
+    aten._foreach_div_.Tensor,
+    aten._foreach_div.List,
+    aten._foreach_div.Scalar,
+    aten._foreach_div.ScalarList,
+    aten._foreach_div.Tensor,
+    aten._foreach_lerp_.Scalar,
+    aten._foreach_maximum_.List,
+    aten._foreach_mul.Scalar,
+    aten._foreach_mul.ScalarList,
+    aten._foreach_mul.Tensor,
+    aten._foreach_mul.List,
+    aten._foreach_mul_.Scalar,
+    aten._foreach_mul_.ScalarList,
+    aten._foreach_mul_.Tensor,
+    aten._foreach_mul_.List,
+    aten._foreach_pow.List,
+    aten._foreach_pow.ScalarList,
+    aten._foreach_neg.default,
+    aten._foreach_neg_.default,
+    aten._foreach_reciprocal_.default,
+    aten._foreach_sub.Scalar,
+    aten._foreach_sub_.Scalar,
+    aten._foreach_sub.List,
+    aten._foreach_sub_.List,
+    aten._foreach_sub.ScalarList,
+    aten._foreach_sub_.ScalarList,
+    aten._foreach_sqrt.default,
+    aten._foreach_sqrt_.default,
+    aten._foreach_zero_.default,
+    aten._foreach_exp.default,
+    aten._foreach_exp_.default,
+    aten._foreach_cos.default,
+    aten._foreach_cos_.default,
+    aten._foreach_log.default,
+    aten._foreach_log_.default,
+    aten._amp_foreach_non_finite_check_and_unscale_.default,
+]
+
+for_each_linearity_ops = [
+    aten._foreach_add.Scalar,
+    aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
+    aten._foreach_add.List,
+    aten._foreach_add_.List,
+]
 
 
 def list_pointwise_strategy(
@@ -1128,6 +1213,23 @@ def list_pointwise_strategy(
         list_strategy.append(pointwise_strategy)
     return TupleStrategy(list_strategy)
 
+
+def list_linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    for each list op stratgy that supports linearity
+    """
+    return list_pointwise_strategy(op_schema, linearity=True)
+
+
+for op in for_each_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        list_pointwise_strategy
+    )
+
+for op in for_each_linearity_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        list_linear_pointwise_strategy
+    )
 
 fused_ops = [
     aten._fused_adam_.default,
