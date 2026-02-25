@@ -2368,8 +2368,9 @@ class CppKernel(Kernel):
 
     def size_hint(self):
         assert self.call_ranges is not None
-        expr = sympy_product(self.call_ranges)
-        return V.graph.sizevars.optimization_hint(expr)
+        return V.graph.sizevars.size_hint(
+            sympy_product(self.call_ranges), fallback=8192
+        )
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         assert isinstance(self, CppKernelProxy)
@@ -3925,7 +3926,7 @@ class TilingSelect:
                     if tiling_indice < 0 or tiling_indice >= len(call_ranges):
                         continue
                     if has_free_symbols(call_ranges):
-                        call_range = V.graph.sizevars.optimization_hint(
+                        call_range = V.graph.sizevars.size_hint(
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
