@@ -307,13 +307,20 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
-def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
+def user_defined_triton_kernel_transitive_closure_source_code(
+    kernel, epilogue_fusion: Optional[tuple[ir.ComputedBuffer, str]] = None
+) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
     its dependencies
+
+    epilogue_fusion: Optional[(fused epilogue node, modified kerel src code)]
     """
     compile_wrapper = IndentedBuffer()
-    compile_wrapper.splice(kernel.src, strip=True)
+    kernel_src = kernel.src
+    if epilogue_fusion:
+        kernel_src = epilogue_fusion[1]
+    compile_wrapper.splice(kernel_src, strip=True)
 
     # Also include any possible kernel being called indirectly
     import triton
@@ -2460,6 +2467,7 @@ class PythonWrapperCodegen(CodeGen):
         restore_value_args,
         reset_to_zero_args,
         grids: list[list[Union[int, sympy.Expr]]],
+        epilogue_fusion: Optional[tuple[ir.ComputedBuffer, str]],
     ):
         from ..runtime.triton_heuristics import (
             config_to_dict,
@@ -2709,7 +2717,9 @@ class PythonWrapperCodegen(CodeGen):
             @triton.jit
             """
         )
-        kernel_src = user_defined_triton_kernel_transitive_closure_source_code(kernel)
+        kernel_src = user_defined_triton_kernel_transitive_closure_source_code(
+            kernel, epilogue_fusion
+        )
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")

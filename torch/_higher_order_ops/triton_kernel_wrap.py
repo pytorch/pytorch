@@ -1,3 +1,4 @@
+import ast
 import collections
 import copy
 import dataclasses
@@ -7,6 +8,7 @@ import itertools
 import logging
 import operator
 import threading
+import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
@@ -19,6 +21,7 @@ import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode
+from torch._inductor.dependencies import Dep, ReadWrites, StarDep
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -29,6 +32,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import guard_scalar
 from torch.types import IntLikeType
+from torch.utils._ordered_set import OrderedSet
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -796,7 +800,7 @@ class MemoizeWithCycleCheck:
         functions: dict[str, dict[Intermediate, list[Op]]],
         fn_name: str,
         *args: Any,
-    ) -> list[bool]:
+    ) -> Any:
         key: tuple[Any, ...] = (fn_name, *args)
         if key not in self.cache:
             self.cache[key] = None
@@ -881,21 +885,35 @@ def get_tma_stores(
     return result
 
 
+@dataclasses.dataclass
+class TensorAccesses:
+    read_writes: ReadWrites
+    can_fuse_epilogue: bool
+
+
 @MemoizeWithCycleCheck
-def analyze_kernel_mutations(
-    functions: dict[str, dict[Intermediate, list[Op]]], fn_name: str, num_args: int
-) -> list[bool]:
+def analyze_kernel_access(
+    functions: dict[str, dict[Intermediate, list[Op]]],
+    fn_name: str,
+    num_args: int,
+    tensor_names: tuple[str, ...],
+) -> TensorAccesses:
     """
-    Analyzes the graph to detect all sinks from a predefined list of sinks
-    by using triton's MemWrite trait list. NOTE: What if triton exposed this?
-    From each sink, it traverses the CFG backwards to identify all the input
-    pointers that are mutated.
+    Analyzes the graph to detect which arguments are written to and which are read.
+
+    For writes: traverses from write sinks (tt.store, tt.atomic_cas, etc.) backwards
+    to identify input pointers that are written to.
+
+    For reads: traverses from read operations (tt.load) backwards to identify
+    input pointers that are read from.
+
+    Returns ReadWrites with StarDep objects for each accessed tensor.
     """
     # Name of mutation op to mutated parameter indices
     # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
     # All the OPs that have MemWrite trait.
     # What if Triton exposed this?
-    MUTATION_OPS = {
+    WRITE_OPS = {
         "tt.store": [0],
         "tt.atomic_cas": [0],
         "tt.atomic_rmw": [0],
@@ -903,11 +921,15 @@ def analyze_kernel_mutations(
         "tt.experimental_tensormap_create": [0],
         "tt.descriptor_store": [0],
     }
-    # Ops that we want to bail out on
+    READ_OPS = {
+        "tt.load": [0],
+        "tt.load_tensor_descriptor": [0],
+    }
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
 
-    stack: list[Union[Param, Intermediate]] = []
-    visited = set()
+    write_stack: list[Union[Param, Intermediate]] = []
+    read_stack: list[Union[Param, Intermediate]] = []
+
     ops = functions[fn_name]
     tma_stores = get_tma_stores(functions, fn_name)
 
@@ -937,55 +959,108 @@ def analyze_kernel_mutations(
                         f"got {len(op.args)}"
                     )
                 if op.args[0] in tma_stores:
-                    stack.append(op.args[1])
+                    write_stack.append(op.args[1])
 
             if op.name == "tt.call":
                 if op.fn_call_name not in functions:
                     raise AssertionError(
                         f"Function {op.fn_call_name} not found in functions dict"
                     )
-                mutations = analyze_kernel_mutations(
+                # Create placeholder names for nested function arguments
+                nested_names = tuple(f"_arg{i}" for i in range(len(op.args)))
+                accesses = analyze_kernel_access(
                     functions,
                     # pyrefly: ignore [bad-argument-type]
                     op.fn_call_name,
                     len(op.args),
+                    nested_names,
                 )
-                stack.extend(arg for arg, mutated in zip(op.args, mutations) if mutated)
+                # Map back from StarDep names to args
+                written_set = {dep.name for dep in accesses.read_writes.writes}
+                read_set = {dep.name for dep in accesses.read_writes.reads}
+                for arg, name in zip(op.args, nested_names):
+                    if name in written_set:
+                        write_stack.append(arg)
+                    if name in read_set:
+                        read_stack.append(arg)
             else:
-                stack.extend(op.args[idx] for idx in MUTATION_OPS.get(op.name, []))
+                write_stack.extend(op.args[idx] for idx in WRITE_OPS.get(op.name, []))
+                read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
 
-    # The following is an iterative DFS algorithm
-    mutated = [False] * num_args
-    while stack:
-        arg = stack.pop()
-        if arg in visited:
-            continue
+    def _find_arg_access_count(
+        initial_stack: list[Union[Param, Intermediate]],
+        skip_loads: bool,
+    ) -> dict[int, int]:
+        """DFS traversal to find argument indices that are accessed (and how many times they are accessed)."""
+        access_count = dict()
+        stack = initial_stack[:]
 
-        visited.add(arg)
+        while stack:
+            arg = stack.pop()
 
-        if isinstance(arg, Param):
-            if arg.idx >= num_args:
-                # This is an argument defined in the kernel, not passed in
-                continue
-            mutated[arg.idx] = True
-        elif isinstance(arg, Intermediate) and not arg.fake():
-            for op in ops[arg]:
-                # Skip arguments to load
-                if op.name != "tt.load":
+            if isinstance(arg, Param):
+                if arg.idx >= num_args:
+                    continue
+                if arg.idx not in access_count:
+                    access_count[arg.idx] = 1
+                else:
+                    access_count[arg.idx] += 1
+            elif isinstance(arg, Intermediate) and not arg.fake():
+                for op in ops[arg]:
+                    if skip_loads and op.name == "tt.load":
+                        continue
                     stack.extend(op.args)
-    return mutated
+
+        return access_count
+
+    write_count = _find_arg_access_count(write_stack, skip_loads=True)
+    read_count = _find_arg_access_count(read_stack, skip_loads=False)
+
+    writes: OrderedSet[Dep] = OrderedSet(
+        StarDep(tensor_names[i]) for i in sorted(write_count.keys())
+    )
+    reads: OrderedSet[Dep] = OrderedSet(
+        StarDep(tensor_names[i]) for i in sorted(read_count.keys())
+    )
+
+    read_writes = ReadWrites(
+        reads=reads,
+        writes=writes,
+        index_exprs=OrderedSet(),
+    )
+
+    def _decide_can_fuse_epilogue():
+        # only do epilogue fusion if the kernel has a single output tensor
+        if len(write_count) != 1:
+            return False
+
+        written_arg_index = next(iter(write_count))
+        # only do epilogue fusion if the written tensor is written exactly once
+        if write_count[written_arg_index] != 1:
+            return False
+
+        written_arg_name = next(iter(writes)).name
+        #  cannot fuse if the kernel also reads from the output buffer
+        if any(read_dep.name == written_arg_name for read_dep in reads):
+            return False
+
+        return True
+
+    can_fuse_epilogue = _decide_can_fuse_epilogue()
+
+    return TensorAccesses(read_writes=read_writes, can_fuse_epilogue=can_fuse_epilogue)
 
 
-def identify_mutated_tensors(
+def identify_accessed_tensors(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
-) -> list[str]:
+) -> TensorAccesses:
     """
     Given a triton kernel and the arguments for this kernel, this function
     1) Retrieves the TTIR converted version of the kernel from Triton's API.
     2) Parses the TTIR and creates a control flow graph
-    3) Analyzes the graph to detect all input tensor mutations
+    3) Analyzes the graph to detect which input tensors are read and/or written
     """
 
     ttir_module = None
@@ -1009,22 +1084,21 @@ def identify_mutated_tensors(
                 f"Kernel name {kernel_fn_name} not found in TTIR kernel name {kernel_name}"
             )
         # Reset the cache between top level invocations
-        # The cache for analyze kernel mutations is mainly used for cycle
+        # The cache for analyze kernel access is mainly used for cycle
         # detection, so each top level invocation needs a clean cache
-        analyze_kernel_mutations.reset()
+        analyze_kernel_access.reset()
         get_tma_stores.reset()
-        mutations = analyze_kernel_mutations(
-            functions, kernel_name, len(ordered_tensor_names)
+        return analyze_kernel_access(
+            functions,
+            kernel_name,
+            len(ordered_tensor_names),
+            tuple(ordered_tensor_names),
         )
-
-        return [
-            ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
-        ]
     except Exception:
         import torch._inductor.ir
 
         log.warning(
-            "Encountered an exception in identify_mutated_tensors, assuming every input is mutated",
+            "Encountered an exception in identify_accessed_tensors, assuming every input is mutated",
             exc_info=True,
         )
         if ttir_module is not None:
@@ -1035,11 +1109,83 @@ def identify_mutated_tensors(
                 log.debug("===\t%s\t===", name)
                 for ret, ops in fn.items():
                     log.debug("%s\t=>\t%s", ret, ops)
-        return [
+
+        all_tensor_names = [
             key
             for key, value in kwargs.items()
             if isinstance(value, (Tensor, torch._inductor.ir.TensorBox))
         ]
+        all_deps = OrderedSet(StarDep(name) for name in all_tensor_names)
+        all_deps = typing.cast(OrderedSet[Dep], all_deps)
+        return TensorAccesses(
+            ReadWrites(
+                reads=all_deps,
+                writes=all_deps,
+                index_exprs=OrderedSet(),
+            ),
+            can_fuse_epilogue=False,
+        )
+
+
+@dataclasses.dataclass
+class TritonStore:
+    store_node: ast.Call
+    store_pointer_node: ast.Expr
+    store_value_node: ast.Expr
+
+
+@dataclasses.dataclass
+class TritonStores:
+    stores: list[TritonStore]
+
+
+@functools.cache
+def identify_triton_stores(source_code: str) -> TritonStores:
+    """
+    Parse Python source code of triton kernel and find all tl.store calls.
+    Returns a TritonStores object containing information about pointer, value, and mask.
+
+    tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
+    """
+
+    tree = ast.parse(source_code)
+    stores = []
+
+    def _extract_arg(node, arg_name, positional_index):
+        """
+        Extract an argument from a Call node, checking both positional and keyword args.
+        Returns the AST node for the argument, or None if not found.
+        """
+        # Check positional args first
+        if len(node.args) > positional_index:
+            return node.args[positional_index]
+
+        # Check keyword args
+        for keyword in node.keywords:
+            if keyword.arg == arg_name:
+                return keyword.value
+
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            # Check if this is a tl.store call
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "tl"
+                and node.func.attr == "store"
+            ):
+                # Extract required arguments
+                pointer_node = _extract_arg(node, "pointer", 0)
+                value_node = _extract_arg(node, "value", 1)
+
+                if pointer_node is None or value_node is None:
+                    continue
+
+                stores.append(TritonStore(node, pointer_node, value_node))
+
+    return TritonStores(stores=stores)
 
 
 ###############################################################################
@@ -1275,9 +1421,10 @@ def get_mutated_tensors(
 ) -> list[str]:
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
-    return identify_mutated_tensors(
+    tensor_accesses = identify_accessed_tensors(
         kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
     )
+    return [dep.name for dep in tensor_accesses.read_writes.writes]
 
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl
