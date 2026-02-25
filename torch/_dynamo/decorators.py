@@ -28,7 +28,6 @@ from .eval_frame import (
     RunOnlyContext,
     skip_code,
 )
-from .exc import IncorrectUsage
 from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
@@ -104,7 +103,6 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
                 nonrecursive_disable_wrapper
             )
             nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
-            # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
 
         if fn is None:
@@ -749,7 +747,7 @@ def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
             != variables.TorchInGraphFunctionVariable
             and trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable
         ):
-            raise IncorrectUsage(
+            raise RuntimeError(
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )
@@ -1345,14 +1343,15 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
 def _allow_in_graph_einops() -> None:
     import einops
 
-    if einops.__version__ >= "0.8.2":
-        if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
-            # trigger backend registration up front to avoid a later guard failure
-            # that would otherwise cause a recompilation
-            einops.rearrange(torch.randn(1), "i -> i")
-
-        # einops 0.8.2+ don't need explicit allow_in_graph calls
-        return
+    # There is a lru_cache logspam issue with einops when allow_in_graph is not
+    # used. Disabling this for now until the lru_cache issue is resolved.
+    # if einops.__version__ >= "0.8.2":
+    #     if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+    #         # trigger backend registration up front to avoid a later guard failure
+    #         # that would otherwise cause a recompilation
+    #         einops.rearrange(torch.randn(1), "i -> i")
+    #     # einops 0.8.2+ don't need explicit allow_in_graph calls
+    #     return
 
     try:
         # requires einops > 0.6.1, torch >= 2.0

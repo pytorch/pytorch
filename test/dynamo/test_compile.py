@@ -209,7 +209,7 @@ class InPlaceCompilationTests(TestCase):
             return x
 
         a = torch.randn(1, 1)
-        out = torch.compile(fn)(a)
+        out = torch.compile(fn, backend="eager")(a)
         self.assertEqual(out, a)
 
     def test_to_sparse_to_dense_with_graph_break(self):
@@ -219,7 +219,7 @@ class InPlaceCompilationTests(TestCase):
             return x
 
         x = torch.tensor([[1.0]])
-        c_fn = torch.compile(fn)
+        c_fn = torch.compile(fn, backend="eager")
 
         output = fn(x)
         c_output = c_fn(x)
