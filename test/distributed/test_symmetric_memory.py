@@ -1686,6 +1686,89 @@ class LoweringTest(MultiProcContinuousTest):
             msg="CUDAGraph replay with upstream propagation does not match eager",
         )
 
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_hoisting_with_device_copy(self):
+        """
+        Verify ExternKernelOut output buffers are hoisted into the prior
+        CUDAGraph partition using a *natural* partition boundary (DeviceCopy)
+        instead of custom_should_partition_ops.
+
+        Pattern: [CG 0: add] → [fallback: cpu(), cuda()] → [CG 1: mul]
+
+        DeviceCopy is explicitly listed in should_partition() and cannot be
+        fused or optimized away since it is a physical cross-device transfer.
+        The cpu→cuda DeviceCopy output (CUDA ExternKernelOut) should be
+        pre-allocated inside partition_0 so it is captured once during CG
+        recording and replayed with a fixed pointer.
+        """
+        self._init_process()
+
+        N = 16
+        x = torch.rand(N, N, device=self.device)
+
+        def func(x):
+            y = x + 1
+            y_cpu = y.cpu()
+            y_back = y_cpu.cuda()
+            return y_back * 2
+
+        with torch._inductor.config.patch(
+            {
+                "graph_partition": True,
+                "triton.cudagraphs": True,
+            }
+        ):
+            compiled = torch.compile(func, fullgraph=True)
+            code = run_and_get_triton_code(compiled, x)
+
+        # Verify multiple partitions exist (DeviceCopy created a split)
+        self.assertIn(
+            "self.partitions[0]",
+            code,
+            "Expected at least partition_0 in generated code",
+        )
+
+        # partition_0 is the first CUDAGraph partition (y = x + 1).
+        # The hoisted cpu→cuda DeviceCopy output allocation should
+        # appear inside partition_0 as an extra empty_strided_cuda.
+        partition_0_match = re.search(
+            r"def partition_0\(.*?\n(.*?)(?=\ndef |\Z)", code, re.DOTALL
+        )
+        self.assertIsNotNone(
+            partition_0_match, "Could not find partition_0 in generated code"
+        )
+        p0_code = partition_0_match.group(0)
+        cuda_alloc_count = p0_code.count("empty_strided_cuda")
+        self.assertGreaterEqual(
+            cuda_alloc_count,
+            2,
+            f"Expected >= 2 empty_strided_cuda in partition_0 "
+            f"(pointwise output + hoisted DeviceCopy output), "
+            f"got {cuda_alloc_count}.\npartition_0 code:\n{p0_code}",
+        )
+
+        # Correctness with CG replay
+        with torch._inductor.config.patch(
+            {
+                "graph_partition": True,
+                "triton.cudagraphs": True,
+            }
+        ):
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                result = compiled(x)
+
+        expected = (x + 1).cpu().cuda() * 2
+        torch.testing.assert_close(
+            result,
+            expected,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Hoisted DeviceCopy output produced incorrect result on CG replay",
+        )
+
 
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda
