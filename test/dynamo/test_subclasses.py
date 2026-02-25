@@ -3528,6 +3528,7 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(shell._scale, 2.0)
 
     def test_generator_iteration_over_subclass(self):
+        # Basing this test on the issue repro provided in https://github.com/pytorch/pytorch/issues/175610
         class YieldTensor(torch.Tensor):
             @staticmethod
             def wrap(t):
