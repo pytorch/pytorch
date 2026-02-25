@@ -4,8 +4,10 @@
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
+#include <cstdint>
 #include <functional>
 #include <type_traits>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -23,6 +25,29 @@
 #endif
 
 namespace at::native {
+
+namespace {
+
+bool can_use_foreach_copy_mixed_dtype_same_pair_fastpath(
+    TensorList self,
+    TensorList src) {
+  for (const auto i : c10::irange(self.size())) {
+    const auto& dst_tensor = self[i];
+    const auto& src_tensor = src[i];
+
+    if (dst_tensor.scalar_type() != src_tensor.scalar_type() ||
+        dst_tensor.is_conj() != src_tensor.is_conj() ||
+        dst_tensor.is_neg() != src_tensor.is_neg() ||
+        !dst_tensor.is_non_overlapping_and_dense() ||
+        !src_tensor.is_non_overlapping_and_dense()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+} // namespace
 
 template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_tensor_list_op(
@@ -346,6 +371,76 @@ struct Copy<dst_t, c10::complex<float>> {
 
 namespace {
 
+template <int depth, int r_args_depth, int res_arg_index>
+struct CopyFunctorInt8 {
+  static_assert(depth == 2 && r_args_depth == 1 && res_arg_index == 1);
+
+  template <bool IS_VOLTA_OR_HIGHER>
+  __device__ __forceinline__ void operator()(
+      int64_t chunk_size,
+      TensorListMetadata<depth, IS_VOLTA_OR_HIGHER>& tl) {
+    constexpr int64_t kVectorBytes = sizeof(uint4);
+
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const auto chunk_offset = chunk_idx * chunk_size;
+    auto n = tl.numel_for_tensor[tensor_loc] - chunk_offset;
+    if (n <= 0) {
+      return;
+    }
+    if (n > chunk_size) {
+      n = chunk_size;
+    }
+
+    const auto* src_ptr =
+        reinterpret_cast<const int8_t*>(tl.addresses[0][tensor_loc]) +
+        chunk_offset;
+    auto* dst_ptr = reinterpret_cast<int8_t*>(
+                        const_cast<void*>(tl.addresses[1][tensor_loc])) +
+        chunk_offset;
+
+    // Strip-mine a scalar prefix to reach a region where both pointers are
+    // 16-byte aligned; if alignments differ, fall back to scalar copy.
+    const auto src_align = static_cast<int64_t>(
+        reinterpret_cast<uintptr_t>(src_ptr) % kVectorBytes);
+    const auto dst_align = static_cast<int64_t>(
+        reinterpret_cast<uintptr_t>(dst_ptr) % kVectorBytes);
+
+    int64_t head_bytes = 0;
+    if (src_align == dst_align) {
+      head_bytes = (kVectorBytes - src_align) % kVectorBytes;
+      if (head_bytes > n) {
+        head_bytes = n;
+      }
+    } else {
+      head_bytes = n;
+    }
+
+    for (int64_t i = threadIdx.x; i < head_bytes; i += blockDim.x) {
+      dst_ptr[i] = src_ptr[i];
+    }
+    if (head_bytes == n) {
+      return;
+    }
+
+    const auto vector_bytes = ((n - head_bytes) / kVectorBytes) * kVectorBytes;
+    if (vector_bytes > 0) {
+      const auto* src_vec =
+          reinterpret_cast<const uint4*>(src_ptr + head_bytes);
+      auto* dst_vec = reinterpret_cast<uint4*>(dst_ptr + head_bytes);
+      const auto vector_elems = vector_bytes / kVectorBytes;
+      for (int64_t i = threadIdx.x; i < vector_elems; i += blockDim.x) {
+        dst_vec[i] = src_vec[i];
+      }
+    }
+
+    for (int64_t i = head_bytes + vector_bytes + threadIdx.x; i < n;
+         i += blockDim.x) {
+      dst_ptr[i] = src_ptr[i];
+    }
+  }
+};
+
 template <
     typename T,
     typename src_t,
@@ -408,6 +503,29 @@ struct CopyFunctor {
   }
 };
 
+void foreach_copy_mixed_dtype_same_pair_fastpath_cuda_(
+    TensorList self,
+    TensorList src) {
+  std::vector<Tensor> dst_byte_views;
+  std::vector<Tensor> src_byte_views;
+  dst_byte_views.reserve(self.size());
+  src_byte_views.reserve(src.size());
+
+  for (const auto i : c10::irange(self.size())) {
+    dst_byte_views.emplace_back(self[i].view(kByte));
+    src_byte_views.emplace_back(src[i].view(kByte));
+  }
+
+  std::vector<std::vector<Tensor>> tensor_lists{
+      std::move(src_byte_views), std::move(dst_byte_views)};
+  multi_tensor_apply<2>(
+      tensor_lists,
+      CopyFunctorInt8<
+          /* depth */ 2,
+          /* r_args_depth */ 1,
+          /* res_arg_index */ 1>());
+}
+
 } // anonymous namespace
 
 void foreach_tensor_copy_list_kernel_cuda_(
@@ -415,21 +533,34 @@ void foreach_tensor_copy_list_kernel_cuda_(
     TensorList src,
     const bool non_blocking) {
   check_foreach_api_restrictions(self, src);
+
+  const bool src_have_uniform_dtype =
+      std::all_of(src.cbegin(), src.cend(), [&src](const auto& t) -> bool {
+        return t.dtype() == src[0].dtype();
+      });
+  const bool self_have_uniform_dtype =
+      std::all_of(self.cbegin(), self.cend(), [&self](const auto& t) -> bool {
+        return t.dtype() == self[0].dtype();
+      });
+
   if (!(_check_tensors_share_device_and_dtype(
             {self, src}, /* skip_dtype_check */ true) &&
-        std::all_of(
-            src.cbegin(),
-            src.cend(),
-            [&src](const auto& t) -> bool {
-              return t.dtype() == src[0].dtype();
-            }) &&
-        std::all_of(
-            self.cbegin(),
-            self.cend(),
-            [&self](const auto& t) -> bool {
-              return t.dtype() == self[0].dtype();
-            }) &&
         _check_tensors_share_sizes_and_strides({self, src}))) {
+    return at::native::foreach_tensor_copy_list_kernel_slow_(
+        self, src, non_blocking);
+  }
+
+  // here, we can conclude that all tensor pairs share size and
+  // stride. Furthermore, all tensors are on the same device, have
+  // strided layout, and are non-overlapping and dense
+
+  if (!(src_have_uniform_dtype && self_have_uniform_dtype)) {
+    if (can_use_foreach_copy_mixed_dtype_same_pair_fastpath(self, src)) {
+      foreach_copy_mixed_dtype_same_pair_fastpath_cuda_(self, src);
+      increment_version(self);
+      return;
+    }
+
     return at::native::foreach_tensor_copy_list_kernel_slow_(
         self, src, non_blocking);
   }
