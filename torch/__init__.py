@@ -72,6 +72,7 @@ __all__ = [
     "ByteTensor",
     "CharStorage",
     "CharTensor",
+    "DeviceModule",
     "DoubleStorage",
     "DoubleTensor",
     "FloatStorage",
@@ -100,6 +101,8 @@ __all__ = [
     "get_deterministic_debug_mode",
     "get_device_module",
     "get_float32_matmul_precision",
+    "get_module_for_device",
+    "get_registered_device_modules",
     "get_rng_state",
     "inference_mode",
     "initial_seed",
@@ -114,6 +117,7 @@ __all__ = [
     "no_grad",
     "rand",
     "randn",
+    "register_module_for_device",
     "save",
     "seed",
     "set_default_device",
@@ -2967,7 +2971,7 @@ def get_module_for_device(device: str | torch.device) -> DeviceModule:
     if isinstance(device, torch.device):
         device = device.type
     if not _device_modules_initialized:
-        init_device_modules_reg()
+        _init_device_modules_reg()
     if device in device_modules:
         return device_modules[device]
     raise NotImplementedError(f"No module for device {device}")
@@ -2975,11 +2979,11 @@ def get_module_for_device(device: str | torch.device) -> DeviceModule:
 
 def get_registered_device_modules() -> list[str]:
     if not _device_modules_initialized:
-        init_device_modules_reg()
+        _init_device_modules_reg()
     return list(device_modules.keys())
 
 
-def init_device_modules_reg() -> None:
+def _init_device_modules_reg() -> None:
     global _device_modules_initialized
     register_module_for_device("cpu", get_device_module("cpu"))
     register_module_for_device("cuda", get_device_module("cuda"))
