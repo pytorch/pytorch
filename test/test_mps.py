@@ -809,6 +809,23 @@ class TestAvgPool(TestCaseMPS):
             self.assertEqual(out_mps, out_cpu, msg=msg)
 
 
+    def test_channels_last_storage_offset(self):
+        # Regression test: channels_last tensors with non-zero storage_offset produced wrong
+        # results on MPS because the Placeholder path for NHWC ops ignored storage_offset.
+        # Build a channels_last tensor with offset>0 via slice+reshape+permute.
+        x = torch.randn(1, 65, 64, device="mps")[:, 1:].reshape(1, 8, 8, 64).permute(0, 3, 1, 2)
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        self.assertGreater(x.storage_offset(), 0)
+
+        pool_mps = F.avg_pool2d(x, 2)
+        pool_cpu = F.avg_pool2d(x.cpu(), 2)
+        self.assertEqual(pool_mps.cpu(), pool_cpu)
+
+        bn_mps = torch.nn.BatchNorm2d(64).eval().to("mps")(x)
+        bn_cpu = torch.nn.BatchNorm2d(64).eval()(x.cpu())
+        self.assertEqual(bn_mps.cpu(), bn_cpu)
+
+
 class TestMPS(TestCaseMPS):
     def ulpAssertAllClose(self, output, reference, n_ulps):
         """
@@ -1656,6 +1673,41 @@ class TestMPS(TestCaseMPS):
         helper([5, 10, 3])
         helper([10, 5, 10, 3])
         helper([10, 5, 10, 3, 20])
+
+    def test_masked_scatter_raises(self):
+        x_mps = torch.tensor([0, 0, 0], device="mps")
+        mask_mps = torch.tensor([1, 1, 1], dtype=torch.bool, device="mps")
+        source_mps = torch.tensor([2, 5], device="mps")
+
+        with self.assertRaisesRegex(RuntimeError, "source < number of ones in mask"):
+            x_mps.masked_scatter_(mask_mps, source_mps)
+
+    def test_masked_scatter_without_mask_indices(self):
+        x_mps = torch.tensor([1, 2, 3, 4], device="mps")
+        mask_mps = torch.tensor(0, dtype=torch.bool, device="mps")
+        source_mps = torch.tensor([2, 5], device="mps")
+
+        y_mps = x_mps.masked_scatter(mask_mps, source_mps)
+
+        self.assertEqual(x_mps, y_mps)
+
+    def test_masked_scatter_no_side_effects(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/175576
+        x_mps = torch.zeros(5, dtype=torch.int64, device="mps")
+        mask_mps = torch.tensor([1, 0, 1, 0, 1], dtype=torch.bool, device="mps")
+        source_mps = torch.tensor([[1, 2], [3, 4]], device="mps")
+
+        x_cpu = x_mps.detach().clone().cpu()
+        mask_cpu = mask_mps.detach().clone().cpu()
+        source_cpu = source_mps.detach().clone().cpu()
+
+        y_cpu = x_cpu.masked_scatter(mask_cpu, source_cpu)
+        y_mps = x_mps.masked_scatter(mask_mps, source_mps)
+
+        self.assertEqual(y_cpu, y_mps)
+        self.assertEqual(x_cpu, x_mps)
+        self.assertEqual(mask_cpu, mask_mps)
+        self.assertEqual(source_cpu, source_mps)
 
     def test_masked_fill(self):
         device = "mps"
@@ -9629,10 +9681,10 @@ class TestLinalgMPS(TestCaseMPS):
 
 
 class TestSDPA(TestCaseMPS):
-    def _compare_tensors(self, y, ref):
+    def _compare_tensors(self, y, ref, tol=0.01):
         denom = torch.maximum(ref.abs(), torch.tensor([1e-6], device=ref.device, dtype=ref.dtype))
         err = ((y - ref).abs() / denom).mean().item()
-        self.assertLess(err, 0.01)
+        self.assertLess(err, tol)
 
     def _test_sdpa_no_mask(
         self,
@@ -9735,6 +9787,24 @@ class TestSDPA(TestCaseMPS):
         out_cpu = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
         out_mps = F.scaled_dot_product_attention(q.to('mps'), k.to('mps'), v.to('mps'), attn_mask=mask.to('mps'))
         self._compare_tensors(out_mps.cpu(), out_cpu)
+
+    @parametrize("dtype", [torch.bfloat16, torch.float16, torch.float])
+    def test_sdpa_2pass(self, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/174861
+        q = torch.randn(1, 32, 1, 128, dtype=dtype)
+        k = torch.randn(1, 2, 1024, 128, dtype=dtype)
+        v = torch.randn(1, 2, 1024, 128, dtype=dtype)
+        sdpa_kwargs = {"enable_gqa": True}
+
+        out_cpu = F.scaled_dot_product_attention(q, k, v, **sdpa_kwargs)
+        out_mps = F.scaled_dot_product_attention(
+            q.to("mps"), k.to("mps"), v.to("mps"), **sdpa_kwargs
+        )
+
+        tol = 0.1 if dtype == torch.bfloat16 else 0.01
+
+        self.assertEqual(out_mps, out_cpu, atol=1e-3, rtol=1e-6)
+        self._compare_tensors(out_mps.cpu(), out_cpu, tol=tol)
 
     @parametrize("dtype", [torch.float16, torch.float32])
     def test_sdpa_3d_input(self, dtype):
