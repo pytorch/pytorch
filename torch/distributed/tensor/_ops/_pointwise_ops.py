@@ -150,6 +150,10 @@ non_decreasing_unary_ops = [
     aten.tanh_.default,
     aten.trunc.default,
     aten.trunc_.default,
+    # nan_to_num is non-decreasing on its entire domain (including nan/inf):
+    # it maps -inf→min, nan→0, inf→max, and is identity elsewhere.
+    aten.nan_to_num.default,
+    aten.nan_to_num_.default,
 ]
 
 _MONOTONIC_INCREASING_RULES: list[list[Placement]] = [
@@ -175,15 +179,23 @@ neg_ops = [aten.neg.default, aten.neg_.default]
 
 _NEG_RULES: list[list[Placement]] = _UNARY_LINEAR_RULES + _MONOTONIC_DECREASING_RULES
 
-# All-partial-preserving unary ops: P(x)->P(x) for all x
-# These ops preserve the exact value for each element, only transforming units/representation
-all_partial_preserving_unary_ops = [
+# Linear nondecreasing unary ops: both linear (P(sum/avg) preserved) and
+# nondecreasing (P(max/min) preserved).  Multiplication by a positive constant.
+linear_nondecreasing_unary_ops = [
     aten.deg2rad.default,
     aten.deg2rad_.default,
-    aten.nan_to_num.default,
-    aten.nan_to_num_.default,
     aten.rad2deg.default,
     aten.rad2deg_.default,
+]
+
+_LINEAR_NONDECREASING_RULES: list[list[Placement]] = (
+    _UNARY_LINEAR_RULES + _MONOTONIC_INCREASING_RULES
+)
+
+# All-partial-preserving unary ops: P(x)->P(x) for all x.
+# TODO: positive should be removed once CIA (Copy Is All) optimizes it away.
+all_partial_preserving_unary_ops = [
+    aten.positive.default,
 ]
 
 _ALL_PARTIAL_PRESERVING_RULES: list[list[Placement]] = [
@@ -219,6 +231,7 @@ _monotone_binary_base_rules: list[list[Placement]] = [
     [Partial("min"), Partial("min"), Replicate()],
     [Partial("min"), Replicate(), Partial("min")],
 ]
+
 
 # Ops that preserve specific Partial types through the operation.
 # For example, torch.maximum preserves Partial("max") because
@@ -483,7 +496,6 @@ pointwise_ops = [
     aten.polygamma.default,
     aten.polygamma.out,
     aten.polygamma_.default,
-    aten.positive.default,
     aten.pow.Scalar,
     aten.pow.Scalar_out,
     aten.pow.Tensor_Scalar,
@@ -981,6 +993,11 @@ for op in non_increasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(_make_partial_strategy(extra_rules=_MONOTONIC_DECREASING_RULES))
+
+for op in linear_nondecreasing_unary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_LINEAR_NONDECREASING_RULES))
 
 for op in all_partial_preserving_unary_ops:
     register_single_dim_strategy(
