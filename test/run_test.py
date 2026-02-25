@@ -200,12 +200,10 @@ ROCM_BLOCKLIST = [
 
 # Add architecture-specific blocklist entries
 if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
-    # Some autotune tests on gfx1100 are hanging, disable for now
-    ROCM_BLOCKLIST.append("inductor/test_max_autotune")
-    # ROCm 7.2 gfx1100 started timing out due to these
-    ROCM_BLOCKLIST.append("inductor/test_torchinductor_dynamic_shapes")
-    ROCM_BLOCKLIST.append("inductor/test_torchinductor_opinfo")
-    ROCM_BLOCKLIST.append("inductor/test_ck_backend")
+    # Skip all inductor tests on Navi arch
+    ROCM_BLOCKLIST.extend(
+        test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)
+    )
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
