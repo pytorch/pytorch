@@ -724,7 +724,8 @@ class TestOverlapPreservingBucketing(InductorTestCase):
     def test_dead_fusible_code_no_crash(self):
         """
         Test that dead fusible code (fusion regions with no external outputs)
-        does not crash collapse_fusion_regions.
+        does not crash collapse_fusion_regions, and that collapse/expand
+        round-trips preserve the graph.
 
         Regression test for the bug where dead code created a fusion region
         with no external outputs, causing fuse_by_partitions to crash with
@@ -758,6 +759,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         from torch._inductor.fx_passes.fusion_regions import (
             build_fusion_regions,
             collapse_fusion_regions,
+            expand_fusion_regions,
         )
 
         with FakeTensorMode():
@@ -765,9 +767,16 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             y = torch.randn(16, 16)
             gm = make_fx(func_with_dead_fusible_code)(x, y)
 
+        graph_str_before = gm.print_readable(print_output=False)
+
         region_of = build_fusion_regions(gm)
-        # Should not crash
-        collapse_fusion_regions(gm, region_of)
+        new_region_of = collapse_fusion_regions(gm, region_of)
+
+        # Expand back and verify graph is preserved
+        expand_fusion_regions(gm, new_region_of)
+        gm.recompile()
+        graph_str_after = gm.print_readable(print_output=False)
+        self.assertEqual(graph_str_before, graph_str_after)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
