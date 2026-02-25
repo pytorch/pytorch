@@ -82,6 +82,61 @@ def can_realize_as_comm_buffer(
     return False
 
 
+def _propagate_comm_layout_to_upstream(
+    buffer: ir.Buffer,
+    comm_buffer_type: ir.CommBufferType,
+    group_name: "torch.distributed.distributed_c10d.GroupName",
+) -> "ir.Buffer | None":
+    """
+    Propagate CommBufferLayout to the upstream buffer that feeds buffer.
+
+    When a pointwise op is optimized to run in-place on its
+    input, the input and output share the same storage via buffer reuse.
+    Comm buffers use a separate reuse pool from regular CUDA buffers, so
+    if only the pointwise output gets CommBufferLayout, the in-place reuse
+    with its upstream regular CUDA input will fail — leaving the comm
+    buffer uninitialized (the "disconnected P2P buffer" bug).
+
+    By marking the upstream buffer as a comm buffer and then making the
+    downstream ComputedBuffer mutate the upstream via MutationLayout,
+    we avoid allocating a separate comm buffer for the downstream op.
+
+    Returns the converted upstream buffer, or None.
+    """
+    if not isinstance(buffer, ir.ComputedBuffer):
+        return None
+
+    try:
+        read_writes = buffer.get_read_writes()
+    except Exception:
+        return None
+
+    converted_upstream = None
+    for dep in read_writes.reads:
+        upstream_buf = V.graph.name_to_buffer.get(dep.name)
+        if upstream_buf is None:
+            continue
+        if not upstream_buf.should_allocate():
+            continue
+        upstream_layout = upstream_buf.get_output_spec()
+        if isinstance(upstream_layout, ir.CommBufferLayout):
+            converted_upstream = upstream_buf
+            break
+        if not isinstance(upstream_layout, (ir.FlexibleLayout, ir.FixedLayout)):
+            continue
+        if is_symbolic(upstream_buf.get_numel()):
+            continue
+        upstream_buf.layout = ir.CommBufferLayout(
+            layout=upstream_layout,
+            comm_buffer_type=comm_buffer_type,
+            group_name=group_name,
+        )
+        converted_upstream = upstream_buf
+        break
+
+    return converted_upstream
+
+
 def realize_as_comm_buffer(
     x: ir.TensorBox,
     comm_buffer_type: ir.CommBufferType,
@@ -92,6 +147,13 @@ def realize_as_comm_buffer(
 
     Specifically, this realizes the underlying buffer if it's still unrealized
     and changes the layout of the buffer to `ir.CommBufferLayout`.
+
+    When the buffer is a ComputedBuffer (e.g., add in residual connection)
+    whose upstream input can be converted to a comm buffer, we use
+    MutationLayout so the ComputedBuffer writes directly into the upstream's
+    comm buffer instead of allocating a separate one.  This avoids the
+    "disconnected P2P buffer" bug where the in-place triton kernel would
+    read from an uninitialized comm buffer.
     """
     x.realize()
     buffer = _get_data(x)
@@ -115,11 +177,17 @@ def realize_as_comm_buffer(
             f"a comm buffer (got {layout})."
         )
 
-    buffer.layout = ir.CommBufferLayout(
-        layout=layout,
-        comm_buffer_type=comm_buffer_type,
-        group_name=group_name,
-    )
+    upstream = _propagate_comm_layout_to_upstream(buffer, comm_buffer_type, group_name)
+
+    if upstream is not None and isinstance(buffer, ir.ComputedBuffer):
+        assert isinstance(layout, ir.FlexibleLayout), type(layout)
+        buffer.layout = ir.MutationLayoutSHOULDREMOVE(upstream)
+    else:
+        buffer.layout = ir.CommBufferLayout(
+            layout=layout,
+            comm_buffer_type=comm_buffer_type,
+            group_name=group_name,
+        )
 
 
 def _get_data(x: ir.TensorBox) -> ir.IRNode:
@@ -420,20 +488,46 @@ def register_symm_mem_lowerings():
 
     from .lowering import register_lowering
 
+    def _copy_input_to_comm_buffer(
+        inp: ir.TensorBox,
+        comm_buffer_type: ir.CommBufferType,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ) -> ir.TensorBox:
+        """
+        Fallback: insert a Pointwise identity copy allocated in P2P via
+        CommBufferLayout.  Used when we don't control the input's allocation.
+        # TODO: For InputBuffer with static shapes, PR #175486 (Layout allocator)
+        # replaces this with a DMA .copy_() outside the graph.
+        """
+        inp.realize()
+        copy = ir.Pointwise.create(
+            device=inp.get_device(),
+            dtype=inp.get_dtype(),
+            inner_fn=inp.make_loader(),
+            ranges=inp.get_size(),
+        )
+        assert can_realize_as_comm_buffer(copy, comm_buffer_type)
+        realize_as_comm_buffer(copy, comm_buffer_type, group_name)
+        return copy
+
     def _maybe_realize_symm_mem(
         inp: ir.TensorBox,
         group_name: str,  # type: ignore[arg-type]
-    ) -> None:
+    ) -> ir.TensorBox:
         """
-        Helper to realize an input as symmetric memory buffer if possible.
+        Ensure inp is in P2P memory for a symm_mem collective.
+
+        Returns the (possibly replaced) TensorBox. Callers must use
+        the return value since a new identity-copy buffer may be created.
+        # TODO: PR#5 adds a Layout-based path (Path 2) for InputBuffer.
         """
         if can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM):
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
+            return inp
         else:
-            log.warning(
-                "Failed to realize the input as a symmetric memory buffer for symm_mem operation; "
-                "ensure the input is allocated as a symmetric memory buffer."
-            )
+            return _copy_input_to_comm_buffer(
+                inp, ir.CommBufferType.SYMM_MEM, group_name
+            )  # type: ignore[arg-type]
 
     def _create_out_variant_node(
         out_op: torch._ops.OpOverload,
@@ -481,7 +575,7 @@ def register_symm_mem_lowerings():
         reduce_op: str,
         group_name: str,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         return _create_out_variant_node(
             out_op=symm_mem.one_shot_all_reduce_out.default,
             tensor_inputs=[inp],
@@ -496,7 +590,7 @@ def register_symm_mem_lowerings():
         group_name: str,
         out: ir.TensorBox,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         return pytree.tree_map(
             ir.TensorBox.create,
             ir.FallbackKernel.create(
@@ -515,7 +609,7 @@ def register_symm_mem_lowerings():
         reduce_op: str,
         group_name: str,
     ):
-        _maybe_realize_symm_mem(symm_buffer, group_name)
+        symm_buffer = _maybe_realize_symm_mem(symm_buffer, group_name)
         return _create_out_variant_node(
             out_op=symm_mem.one_shot_all_reduce_copy_out.default,
             tensor_inputs=[symm_buffer, local_input],
@@ -531,7 +625,7 @@ def register_symm_mem_lowerings():
         group_name: str,
         out: ir.TensorBox,
     ):
-        _maybe_realize_symm_mem(symm_buffer, group_name)
+        symm_buffer = _maybe_realize_symm_mem(symm_buffer, group_name)
         return pytree.tree_map(
             ir.TensorBox.create,
             ir.FallbackKernel.create(
@@ -550,7 +644,7 @@ def register_symm_mem_lowerings():
         reduce_op: str,
         group_name: str,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         ir.FallbackKernel.create(
             symm_mem.two_shot_all_reduce_.default,
             inp,
@@ -566,7 +660,7 @@ def register_symm_mem_lowerings():
         group_name: str,
         output: ir.TensorBox,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         return pytree.tree_map(
             ir.TensorBox.create,
             ir.FallbackKernel.create(
@@ -584,7 +678,7 @@ def register_symm_mem_lowerings():
         reduce_op: str,
         group_name: str,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         ir.FallbackKernel.create(
             symm_mem.multimem_all_reduce_.default,
             inp,
@@ -599,7 +693,7 @@ def register_symm_mem_lowerings():
         reduce_op: str,
         group_name: str,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         return _create_out_variant_node(
             out_op=symm_mem.multimem_one_shot_all_reduce_out.default,
             tensor_inputs=[inp],
@@ -614,7 +708,7 @@ def register_symm_mem_lowerings():
         group_name: str,
         out: ir.TensorBox,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         return pytree.tree_map(
             ir.TensorBox.create,
             ir.FallbackKernel.create(
@@ -634,7 +728,7 @@ def register_symm_mem_lowerings():
         group_name: str,
         out: ir.TensorBox,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         return pytree.tree_map(
             ir.TensorBox.create,
             ir.FallbackKernel.create(
@@ -653,7 +747,7 @@ def register_symm_mem_lowerings():
         group_name: str,
         out: ir.TensorBox,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         return pytree.tree_map(
             ir.TensorBox.create,
             ir.FallbackKernel.create(
@@ -671,7 +765,7 @@ def register_symm_mem_lowerings():
         split_last_dim: bool,
         output: ir.TensorBox,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
         return pytree.tree_map(
             ir.TensorBox.create,
             ir.FallbackKernel.create(
@@ -691,8 +785,8 @@ def register_symm_mem_lowerings():
         out_splits_offsets: ir.TensorBox,
         group_name: str,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
-        _maybe_realize_symm_mem(out, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
+        out = _maybe_realize_symm_mem(out, group_name)
         ir.FallbackKernel.create(
             symm_mem.all_to_all_vdev.default,
             inp,
@@ -712,8 +806,8 @@ def register_symm_mem_lowerings():
         group_name: str,
         major_align=None,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
-        _maybe_realize_symm_mem(out, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
+        out = _maybe_realize_symm_mem(out, group_name)
         ir.FallbackKernel.create(
             symm_mem.all_to_all_vdev_2d.default,
             inp,
@@ -733,8 +827,8 @@ def register_symm_mem_lowerings():
         out_splits_offsets: ir.TensorBox,
         group_name: str,
     ):
-        _maybe_realize_symm_mem(inp, group_name)
-        _maybe_realize_symm_mem(out, group_name)
+        inp = _maybe_realize_symm_mem(inp, group_name)
+        out = _maybe_realize_symm_mem(out, group_name)
         ir.FallbackKernel.create(
             symm_mem.all_to_all_vdev_2d_offset.default,
             inp,
@@ -753,8 +847,8 @@ def register_symm_mem_lowerings():
         group_name: str,
         reduce_op: str = "sum",
     ):
-        _maybe_realize_symm_mem(in_tile, group_name)
-        _maybe_realize_symm_mem(out_tile, group_name)
+        in_tile = _maybe_realize_symm_mem(in_tile, group_name)
+        out_tile = _maybe_realize_symm_mem(out_tile, group_name)
         ir.FallbackKernel.create(
             symm_mem.tile_reduce.default,
             in_tile,
@@ -773,9 +867,9 @@ def register_symm_mem_lowerings():
         group_name: str,
         reduce_op: str = "sum",
     ):
-        for in_tile in in_tiles:
-            _maybe_realize_symm_mem(in_tile, group_name)
-        _maybe_realize_symm_mem(out_tile, group_name)
+        for i, in_tile in enumerate(in_tiles):
+            in_tiles[i] = _maybe_realize_symm_mem(in_tile, group_name)
+        out_tile = _maybe_realize_symm_mem(out_tile, group_name)
         ir.FallbackKernel.create(
             symm_mem.multi_root_tile_reduce.default,
             in_tiles,

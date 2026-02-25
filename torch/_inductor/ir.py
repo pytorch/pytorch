@@ -4580,6 +4580,8 @@ class Buffer(IRNode, CodegenSymbol):
         return loader
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
+            return self.layout.get_buffer().codegen_reference(writer)
         return self.get_name()
 
     def decide_layout(self) -> None:
