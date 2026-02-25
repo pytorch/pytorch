@@ -933,6 +933,13 @@ register_op_strategy(
     prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
 )(copy_strategy)
 
+# Keep .out variants on old register_op_strategy path until PR2
+for op in partial_preserving_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        partial_preserving_pointwise_strategy
+    )
+
+# Keep pointwise_ops on old path (single-dim registrations above take precedence)
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
@@ -1025,18 +1032,6 @@ register_single_dim_strategy(
         ]
     )
 )
-
-# Keep .out variants on old register_op_strategy path until PR2
-for op in partial_preserving_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        partial_preserving_pointwise_strategy
-    )
-
-# Keep pointwise_ops on old path (single-dim registrations above take precedence)
-for op in pointwise_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        pointwise_strategy
-    )
 
 # TODO: add all for_each ops
 for_each_ops = [
