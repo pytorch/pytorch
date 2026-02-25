@@ -638,11 +638,11 @@ def get_args_parser() -> ArgumentParser:
     parser.add_argument(
         "--master-port",
         "--master_port",
-        default=29500,
+        default=None,
         type=int,
         action=env,
         help="Port on the master node (rank 0) to be used for communication during distributed "
-        "training. It is only used for static rendezvous.",
+        "training. It is only used for static rendezvous. Defaults to 29500.",
     )
     parser.add_argument(
         "--local-addr",
@@ -976,6 +976,20 @@ def run(args):
             args.rdzv_endpoint,
             args.rdzv_id,
         )
+    elif (
+        args.rdzv_backend == "static"
+        and not args.rdzv_endpoint
+        and args.master_port is None
+    ):
+        _, max_nodes = parse_min_max_nnodes(args.nnodes)
+        if max_nodes == 1:
+            args.rdzv_backend = "c10d"
+            args.rdzv_endpoint = "localhost:0"
+            args.rdzv_id = str(uuid.uuid4())
+
+    # master_port is only used for the static rendezvous backend, not c10d
+    if args.master_port is None:
+        args.master_port = 29500
 
     config, cmd, cmd_args = config_from_args(args)
     elastic_launch(
