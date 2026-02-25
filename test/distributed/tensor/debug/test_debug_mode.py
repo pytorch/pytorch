@@ -40,6 +40,10 @@ from torch.utils._debug_mode import (
     DebugMode,
     hash_tensor_fn,
     norm_hash_fn,
+    register_context_manager_intercept,
+    register_function_intercept,
+    unregister_context_manager_intercept,
+    unregister_function_intercept,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_package
@@ -594,17 +598,22 @@ class TestDTensorDebugMode(TestCase):
             if backend == "inductor":
                 self.assertExpectedInline(
                     debug_mode.debug_string(),
-                    """    aten::addmm.out(t: f32[8], t: f32[8, 8], t: f32[8, 8], out=t: f32[8, 8])  ->  t: f32[8, 8]""",
+                    """\
+    [external] torch.enable_grad(__enter__)
+      aten::addmm.out(t: f32[8], t: f32[8, 8], t: f32[8, 8], out=t: f32[8, 8])  ->  t: f32[8, 8]
+    [external] torch.enable_grad(__exit__)""",
                 )
             else:
                 self.assertExpectedInline(
                     debug_mode.debug_string(),
                     """\
-  [aot_eager region (compile)] enter
-  [annotate] Foo
-    aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
-    aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
-  [aot_eager region (compile)] exit""",
+    [external] torch.enable_grad(__enter__)
+    [aot_eager region (compile)] enter
+    [annotate] Foo
+      aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+      aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+    [aot_eager region (compile)] exit
+    [external] torch.enable_grad(__exit__)""",
                 )
 
     def test_nn_module_in_eager(self):
@@ -706,15 +715,17 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
     [nn.Mod] Baz
-    [aot_eager region (compile)] enter
-      [nn.Mod (compile)] L['self'].l1
-        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
-        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
-      aten::relu(t: f32[4, 4])  ->  t: f32[4, 4]
-      [nn.Mod (compile)] L['self'].l2
-        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
-        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
-    [aot_eager region (compile)] exit
+      [external] torch.enable_grad(__enter__)
+      [aot_eager region (compile)] enter
+        [nn.Mod (compile)] L['self'].l1
+          aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::relu(t: f32[4, 4])  ->  t: f32[4, 4]
+        [nn.Mod (compile)] L['self'].l2
+          aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+      [aot_eager region (compile)] exit
+      [external] torch.enable_grad(__exit__)
       [nn.Mod] Baz.bar
         aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
         [nn.Mod] Baz.bar.l3
@@ -735,21 +746,23 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  [aot_eager region (compile)] enter
-    [nn.Mod (compile)] L['self'].foo
-      [nn.Mod (compile)] L['self'].foo.l1
-        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
-        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
-      aten::relu(t: f32[4, 4])  ->  t: f32[4, 4]
-      [nn.Mod (compile)] L['self'].foo.l2
-        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
-        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
-    [nn.Mod (compile)] L['self'].bar
-      aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
-      [nn.Mod (compile)] L['self'].bar.l3
-        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
-        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
-  [aot_eager region (compile)] exit
+    [external] torch.enable_grad(__enter__)
+    [aot_eager region (compile)] enter
+      [nn.Mod (compile)] L['self'].foo
+        [nn.Mod (compile)] L['self'].foo.l1
+          aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::relu(t: f32[4, 4])  ->  t: f32[4, 4]
+        [nn.Mod (compile)] L['self'].foo.l2
+          aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+      [nn.Mod (compile)] L['self'].bar
+        aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
+        [nn.Mod (compile)] L['self'].bar.l3
+          aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    [aot_eager region (compile)] exit
+    [external] torch.enable_grad(__exit__)
     aten::sum(t: f32[4, 4])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
@@ -814,15 +827,17 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   [record function] FWD
-    [aot_eager region (compile)] enter
-      aten::mm(t: f32[8, 4], t: f32[4, 2])  ->  t: f32[8, 2]
-      aten::add.Tensor(t: f32[8, 2], 1)  ->  t: f32[8, 2]
-      aten::sum(t: f32[8, 2])  ->  t: f32[]
-      aten::t(t: f32[8, 4])  ->  t: f32[4, 8]
-      aten::t(t: f32[4, 2])  ->  t: f32[2, 4]
-    [aot_eager region (compile)] exit
-      aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
-      aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
+      [external] torch.enable_grad(__enter__)
+      [aot_eager region (compile)] enter
+        aten::mm(t: f32[8, 4], t: f32[4, 2])  ->  t: f32[8, 2]
+        aten::add.Tensor(t: f32[8, 2], 1)  ->  t: f32[8, 2]
+        aten::sum(t: f32[8, 2])  ->  t: f32[]
+        aten::t(t: f32[8, 4])  ->  t: f32[4, 8]
+        aten::t(t: f32[4, 2])  ->  t: f32[2, 4]
+      [aot_eager region (compile)] exit
+        aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
+        aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
+      [external] torch.enable_grad(__exit__)
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
   [aot_eager region (compile)] enter
     aten::expand(t: f32[], [8, 2])  ->  t: f32[8, 2]
@@ -1042,15 +1057,17 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-    torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, t: f32[8, 8])  ->  ('t: f32[8, 8]', 't: f32[8, 8]')
-    [annotate] [enter InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
-      aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
-    [annotate] [exit InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
-    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]
-    torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, t: f32[8, 8])  ->  ('t: f32[8, 8]', 't: f32[8, 8]')
-    [annotate] [enter InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
-      aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
-    [annotate] [exit InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+    [external] torch.enable_grad(__enter__)
+      torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, t: f32[8, 8])  ->  ('t: f32[8, 8]', 't: f32[8, 8]')
+      [annotate] [enter InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+        aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
+      [annotate] [exit InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+      aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]
+      torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, t: f32[8, 8])  ->  ('t: f32[8, 8]', 't: f32[8, 8]')
+      [annotate] [enter InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+        aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
+      [annotate] [exit InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+    [external] torch.enable_grad(__exit__)
     aten::sum(t: f32[8, 8])  ->  t: f32[]
     aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
     aten::expand(t: f32[], [8, 8])  ->  t: f32[8, 8]
@@ -1118,6 +1135,171 @@ class TestDTensorDebugMode(TestCase):
     aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",  # noqa: B950
             ignore_comments=True,
         )
+
+
+class TestExternalCallRecording(TestCase):
+    def test_grad_mode_recording(self):
+        x = torch.randn(4, 4)
+        with DebugMode(record_output=False) as debug_mode:
+            with torch.no_grad():
+                _ = x + 1
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [external] torch.no_grad(__enter__)
+      aten::add.Tensor(t: f32[4, 4], 1)
+    [external] torch.no_grad(__exit__)""",
+        )
+
+    def test_set_grad_enabled_recording(self):
+        with DebugMode() as debug_mode:
+            with torch.set_grad_enabled(False):
+                pass
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [external] torch.set_grad_enabled(__enter__, mode=False)
+    [external] torch.set_grad_enabled(__exit__)""",
+        )
+
+    def test_inference_mode_recording(self):
+        with DebugMode() as debug_mode:
+            with torch.inference_mode():
+                pass
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [external] torch.inference_mode(__enter__, mode=True)
+    [external] torch.inference_mode(__exit__)""",
+        )
+
+    @requires_cuda
+    def test_autocast_recording(self):
+        with DebugMode() as debug_mode:
+            with torch.autocast(device_type="cuda"):
+                pass
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [external] torch.autocast(__enter__, device=cuda, dtype=torch.float16)
+    [external] torch.autocast(__exit__)""",
+        )
+
+    def test_nested_context_managers(self):
+        with DebugMode(record_output=False) as debug_mode:
+            with torch.no_grad():
+                x = torch.randn(2, 2)
+                with torch.set_grad_enabled(True):
+                    _ = x + 1
+                _ = x * 2
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [external] torch.no_grad(__enter__)
+      aten::randn([2, 2], device=cpu, pin_memory=False)
+      [external] torch.set_grad_enabled(__enter__, mode=True)
+        aten::add.Tensor(t: f32[2, 2], 1)
+      [external] torch.set_grad_enabled(__exit__)
+      aten::mul.Tensor(t: f32[2, 2], 2)
+    [external] torch.no_grad(__exit__)""",
+        )
+
+    @requires_cuda
+    def test_cuda_stream_recording(self):
+        from torch.cuda import StreamContext
+
+        register_context_manager_intercept(
+            StreamContext,
+            "torch.cuda.stream",
+            lambda *a, **kw: f"device={a[0].stream.device}" if a[0].stream else None,
+        )
+        try:
+            s = torch.cuda.Stream()
+            x = torch.randn(2, 2, device="cuda")
+            with DebugMode(record_output=False) as debug_mode:
+                with torch.cuda.stream(s):
+                    _ = x + 1
+
+            self.assertExpectedInline(
+                debug_mode.debug_string(),
+                """\
+    [external] torch.cuda.stream(__enter__, device=cuda:0)
+      aten::add.Tensor(t: f32[2, 2], 1)
+    [external] torch.cuda.stream(__exit__)""",
+            )
+        finally:
+            unregister_context_manager_intercept(StreamContext)
+
+    def test_user_register_context_manager(self):
+        class MyContext:
+            def __init__(self, key):
+                self.key = key
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        register_context_manager_intercept(
+            MyContext, enter_args_fn=lambda *a, **kw: f"key={a[0].key}"
+        )
+        try:
+            with DebugMode(record_output=False) as debug_mode:
+                with MyContext("test_val"):
+                    x = torch.randn(2, 2)
+                    _ = x + 1
+
+            self.assertExpectedInline(
+                debug_mode.debug_string(),
+                """\
+    [external] MyContext(__enter__, key=test_val)
+      aten::randn([2, 2], device=cpu, pin_memory=False)
+      aten::add.Tensor(t: f32[2, 2], 1)
+    [external] MyContext(__exit__)""",
+            )
+        finally:
+            unregister_context_manager_intercept(MyContext)
+
+    def test_register_function_intercept(self):
+        import types
+
+        mod = types.ModuleType("test_mod")
+        mod.my_func = lambda x, y: x + y
+
+        register_function_intercept(
+            mod, "my_func", lambda *a, **kw: f"x={a[0]}, y={a[1]}"
+        )
+        try:
+            with DebugMode() as debug_mode:
+                result = mod.my_func(3, 4)
+
+            self.assertEqual(result, 7)
+            self.assertExpectedInline(
+                debug_mode.debug_string(),
+                """    [external] <lambda>(x=3, y=4)""",
+            )
+        finally:
+            unregister_function_intercept(mod, "my_func")
+
+    def test_unregister_restores_original(self):
+        class Ctx:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        register_context_manager_intercept(Ctx)
+        unregister_context_manager_intercept(Ctx)
+        ctx = Ctx()
+        ctx.__enter__()
+        ctx.__exit__(None, None, None)
 
 
 class TestDebugModeUtils(TestCase):

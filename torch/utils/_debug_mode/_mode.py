@@ -46,6 +46,7 @@ from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.utils._debug_mode import _utils
 from torch.utils._debug_mode._calls import (
     _AnnotateCall,
+    _ExternalCall,
     _get_call_name,
     _OpCall,
     _OutputPlacementCall,
@@ -455,6 +456,7 @@ class DebugMode(TorchDispatchMode):
     def __enter__(self):
         global _ACTIVE_DEBUG_MODE_COUNT
         _ACTIVE_DEBUG_MODE_COUNT += 1
+        _install_intercepts()
         if self.record_torchfunction:
             torch._C._push_on_torch_function_stack(self)
 
@@ -473,6 +475,8 @@ class DebugMode(TorchDispatchMode):
     def __exit__(self, *args):
         global _ACTIVE_DEBUG_MODE_COUNT
         _ACTIVE_DEBUG_MODE_COUNT -= 1
+        if _ACTIVE_DEBUG_MODE_COUNT == 0:
+            _uninstall_intercepts()
         super().__exit__(*args)
         if self.record_nn_module:
             self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
@@ -605,6 +609,11 @@ class DebugMode(TorchDispatchMode):
     ) -> _TritonKernelCall:
         call = _TritonKernelCall(kernel_name, kwargs, self.call_depth + 1)
         call.stringify_args(self.record_tensor_attributes)
+        self.operators.append(call)
+        return call
+
+    def _record_external_call(self, func_name: str, args_str: str) -> _ExternalCall:
+        call = _ExternalCall(func_name, args_str, self.call_depth + 1)
         self.operators.append(call)
         return call
 
@@ -1051,3 +1060,233 @@ def get_active_debug_mode() -> DebugMode | None:
             debug_mode = mode
             break
     return debug_mode
+
+
+def _maybe_record_external(func_name: str, args_str: str) -> None:
+    if _ACTIVE_DEBUG_MODE_COUNT == 0:
+        return
+    debug_mode = get_active_debug_mode()
+    if debug_mode is not None:
+        debug_mode._record_external_call(func_name, args_str)
+
+
+# --- External call recording ---
+#
+# Two ways to record non-dispatch calls into DebugMode's log:
+#
+# 1. Auto-interception (for code you don't own, e.g. torch APIs):
+#    Monkey-patches owner.attr when DebugMode is active, restores on exit.
+#    Built-in torch API interceptions are in _get_intercept_specs().
+#    Users register their own via register_external_intercept().
+#
+#      register_external_intercept(MyCtx, "__enter__", "MyCtx", lambda *a, **kw: "")
+#
+# 2. Call-site recording (for code you do own):
+#    Zero overhead when DebugMode is inactive (_ACTIVE_DEBUG_MODE_COUNT == 0).
+#
+#      def my_function(x):
+#          _maybe_record_external("my_function", f"x={x}")
+#          ...
+
+_INTERCEPT_ORIGINALS: dict[tuple[Any, str], Callable] = {}
+_USER_CONTEXT_SPECS: list[tuple[type, str, Callable | None]] = []
+_USER_FUNCTION_SPECS: list[tuple[Any, str, str, Callable]] = []
+
+
+def _get_context_intercept_specs() -> list[tuple[type, str, Callable | None]]:
+    from torch.amp.autocast_mode import autocast
+    from torch.autograd.grad_mode import (
+        enable_grad,
+        inference_mode,
+        no_grad,
+        set_grad_enabled,
+    )
+
+    # (cls, display_name, enter_args_fn_or_None)
+    # enter_args_fn receives (*args, **kwargs) where args[0] is self
+    return [
+        (no_grad, "torch.no_grad", None),
+        (enable_grad, "torch.enable_grad", None),
+        (
+            set_grad_enabled,
+            "torch.set_grad_enabled",
+            lambda *a, **kw: f"mode={a[0].mode}",
+        ),
+        (inference_mode, "torch.inference_mode", lambda *a, **kw: f"mode={a[0].mode}"),
+        (
+            autocast,
+            "torch.autocast",
+            lambda *a, **kw: f"device={a[0].device}, dtype={a[0].fast_dtype}",
+        ),
+    ]
+
+
+def register_context_manager_intercept(
+    cls: type,
+    display_name: str | None = None,
+    enter_args_fn: Callable | None = None,
+) -> None:
+    """Register a context manager class for DebugMode external call recording.
+
+    Intercepts both ``__enter__`` and ``__exit__``. Ops inside the context
+    are indented under the enter call. Output looks like::
+
+        [external] display_name(__enter__, <extra args>)
+          <ops inside are indented>
+        [external] display_name(__exit__)
+
+    Args:
+        cls: The context manager class.
+        display_name: Label in ``[external] <display_name>(...)``.
+            Defaults to ``cls.__name__``.
+        enter_args_fn: Optional ``(*args, **kwargs) -> str`` for extra info on
+            ``__enter__``. ``args[0]`` is the instance. If None, no extra args.
+
+    Example::
+
+        register_context_manager_intercept(
+            MyCtx, enter_args_fn=lambda *a, **kw: f"key={a[0].key}"
+        )
+    """
+    if not (hasattr(cls, "__enter__") and hasattr(cls, "__exit__")):
+        raise TypeError(
+            f"{cls.__name__} is not a context manager (missing __enter__/__exit__)"
+        )
+    if display_name is None:
+        display_name = cls.__name__
+    spec = (cls, display_name, enter_args_fn)
+    _USER_CONTEXT_SPECS.append(spec)
+    if _ACTIVE_DEBUG_MODE_COUNT > 0:
+        _install_context_intercept(*spec)
+
+
+def register_function_intercept(
+    owner: Any, attr: str, args_fn: Callable, display_name: str | None = None
+) -> None:
+    """Register a plain function for DebugMode external call recording.
+
+    Args:
+        owner: Module or object containing the function.
+        attr: Function attribute name.
+        args_fn: ``(*args, **kwargs) -> str`` formats display arguments.
+        display_name: Label in ``[external] <display_name>(...)``.
+            Defaults to the function's ``__name__`` or the ``attr`` string.
+
+    Example::
+
+        register_function_intercept(
+            torch, "manual_seed", lambda *a, **kw: f"seed={a[0]}"
+        )
+    """
+    if display_name is None:
+        name = getattr(getattr(owner, attr), "__name__", attr)
+        display_name = str(name)
+    spec: tuple[Any, str, str, Callable] = (owner, attr, display_name, args_fn)
+    _USER_FUNCTION_SPECS.append(spec)
+    if _ACTIVE_DEBUG_MODE_COUNT > 0:
+        _install_function_intercept(*spec)
+
+
+def unregister_context_manager_intercept(cls: type) -> None:
+    """Remove a context manager interception registered via register_context_manager_intercept."""
+    _USER_CONTEXT_SPECS[:] = [s for s in _USER_CONTEXT_SPECS if s[0] is not cls]
+    for attr in ("__enter__", "__exit__"):
+        key = (cls, attr)
+        if key in _INTERCEPT_ORIGINALS:
+            setattr(cls, attr, _INTERCEPT_ORIGINALS.pop(key))
+
+
+def unregister_function_intercept(owner: Any, attr: str) -> None:
+    """Remove a function interception registered via register_function_intercept."""
+    _USER_FUNCTION_SPECS[:] = [
+        s for s in _USER_FUNCTION_SPECS if not (s[0] is owner and s[1] == attr)
+    ]
+    key = (owner, attr)
+    if key in _INTERCEPT_ORIGINALS:
+        setattr(owner, attr, _INTERCEPT_ORIGINALS.pop(key))
+
+
+def _install_context_intercept(
+    cls: type, display_name: str, enter_args_fn: Callable | None
+) -> None:
+    for attr, depth_delta, args_fn in [
+        (
+            "__enter__",
+            +1,
+            lambda *a, **kw: f"__enter__, {afn(*a, **kw)}" if afn else "__enter__",
+        ),
+        ("__exit__", -1, None),
+    ]:
+        key = (cls, attr)
+        if key in _INTERCEPT_ORIGINALS:
+            continue
+        original = getattr(cls, attr)
+        _INTERCEPT_ORIGINALS[key] = original
+
+        if attr == "__enter__":
+            if enter_args_fn is not None:
+                afn = enter_args_fn
+
+                @functools.wraps(original)
+                def enter_wrapper(
+                    *args, _orig=original, _name=display_name, _afn=afn, **kwargs
+                ):
+                    _maybe_record_external(_name, f"__enter__, {_afn(*args, **kwargs)}")
+                    result = _orig(*args, **kwargs)
+                    dm = get_active_debug_mode()
+                    if dm is not None:
+                        dm.call_depth += 1
+                    return result
+            else:
+
+                @functools.wraps(original)
+                def enter_wrapper(*args, _orig=original, _name=display_name, **kwargs):
+                    _maybe_record_external(_name, "__enter__")
+                    result = _orig(*args, **kwargs)
+                    dm = get_active_debug_mode()
+                    if dm is not None:
+                        dm.call_depth += 1
+                    return result
+
+            setattr(cls, attr, enter_wrapper)
+        else:
+
+            @functools.wraps(original)
+            def exit_wrapper(*args, _orig=original, _name=display_name, **kwargs):
+                dm = get_active_debug_mode()
+                if dm is not None:
+                    dm.call_depth -= 1
+                _maybe_record_external(_name, "__exit__")
+                return _orig(*args, **kwargs)
+
+            setattr(cls, attr, exit_wrapper)
+
+
+def _install_function_intercept(
+    owner: Any, attr: str, func_name: str, args_fn: Callable
+) -> None:
+    key = (owner, attr)
+    if key in _INTERCEPT_ORIGINALS:
+        return
+    original = getattr(owner, attr)
+    _INTERCEPT_ORIGINALS[key] = original
+
+    @functools.wraps(original)
+    def wrapper(*args, **kwargs):
+        _maybe_record_external(func_name, args_fn(*args, **kwargs))
+        return original(*args, **kwargs)
+
+    setattr(owner, attr, wrapper)
+
+
+def _install_intercepts() -> None:
+    for spec in _get_context_intercept_specs() + _USER_CONTEXT_SPECS:
+        _install_context_intercept(*spec)
+    for spec in _USER_FUNCTION_SPECS:
+        _install_function_intercept(*spec)
+
+
+def _uninstall_intercepts() -> None:
+    for (owner, attr), original in _INTERCEPT_ORIGINALS.items():
+        setattr(owner, attr, original)
+    _INTERCEPT_ORIGINALS.clear()
