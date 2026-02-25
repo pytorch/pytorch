@@ -2004,6 +2004,7 @@ def clamp(
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
+
     if min is not None:
         a_isnan = torch.isnan(a)
         condition = torch.bitwise_or(torch.ge(a, min), a_isnan)  # type: ignore[arg-type]
@@ -5016,12 +5017,14 @@ def empty(
     if memory_format == torch.contiguous_format:
         strides = utils.make_contiguous_strides_for(shape)
     elif memory_format == torch.channels_last_3d:
+        # pyrefly: ignore [bad-specialization]
         strides = utils.make_channels_last_3d_strides_for(shape)
     else:  # memory_format == torch.channels_last
         torch._check(
             memory_format == torch.channels_last,
             lambda: f"torch.empty: received an unknown memory format {memory_format}!",
         )
+        # pyrefly: ignore [bad-specialization]
         strides = utils.make_channels_last_2d_strides_for(shape)
 
     return torch.empty_strided(

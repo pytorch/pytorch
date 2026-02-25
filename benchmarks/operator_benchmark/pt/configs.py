@@ -1,5 +1,7 @@
 import operator_benchmark as op_bench
 
+import torch
+
 
 """
 Configs shared by multiple benchmarks
@@ -129,6 +131,7 @@ conv_3d_configs_short = op_bench.config_list(
     ],
     cross_product_configs={
         "device": ["cpu", "cuda"],
+        "dtype": [torch.float32],
     },
     tags=["short"],
 )
@@ -142,6 +145,7 @@ conv_3d_configs_long = op_bench.cross_product_configs(
     H=[128],
     W=[128],
     device=["cpu", "cuda"],
+    dtype=[torch.float32, torch.float16, torch.bfloat16],
     tags=["long"],
 )
 
