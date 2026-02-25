@@ -63,6 +63,8 @@ ignore=
     ^mailto:
 
 [checking]
+# Default threads - can be overridden via CLI: linkchecker -t <num>
+# CI workflows should use: -t $(nproc) to match available CPU cores
 threads=10
 timeout=30
 # Limit recursion depth to avoid crawling the entire site.

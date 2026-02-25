@@ -45,7 +45,12 @@ if [[ "$1" == "--all" ]]; then
     echo "Build them first:  cd docs && make html"
     exit 1
   fi
+  # Dynamically set threads based on available CPU cores
+  # CLI arg (-t) overrides the config file setting
+  THREADS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 10)
+
   echo "Checking ALL internal links and anchors in $DOCS_DIR ..."
+  echo "Using $THREADS threads (based on available CPU cores)"
   echo "This may take a while..."
   echo "Output will be saved to $OUTPUT_FILE"
 
@@ -57,6 +62,7 @@ if [[ "$1" == "--all" ]]; then
   set +e
   linkchecker \
     --config="$CONFIG" \
+    --threads="$THREADS" \
     "$ENTRY" 2>&1 | tee "$OUTPUT_FILE"
   exit_code=${PIPESTATUS[0]}
   set -e
