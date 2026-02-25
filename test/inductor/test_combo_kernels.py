@@ -537,6 +537,89 @@ class ComboKernelTests(TestCase):
             self.assertEqual(grid1[1], 1)
             self.assertEqual(grid2[1], 1)
 
+    @requires_gpu_and_triton
+    @parametrize("pointwise_only,expected_kernel_count", [(False, 2), (True, 3)])
+    def test_combo_kernels_pointwise_only(self, pointwise_only, expected_kernel_count):
+        def fn(a, b, c, d):
+            p1 = a * 2.0
+            p2 = b + 1.0
+            r1 = c.sum(dim=-1)
+            r2 = d.mean(dim=-1)
+            return p1, p2, r1, r2
+
+        inps = [
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(1024, device=GPU_TYPE),
+            torch.rand(32, 1024, device=GPU_TYPE),
+            torch.rand(32, 1024, device=GPU_TYPE),
+        ]
+
+        out_eager = fn(*inps)
+
+        torch._inductor.metrics.reset()
+        with torch._inductor.config.patch(
+            "combo_kernels_pointwise_only", pointwise_only
+        ):
+            fn_c = torch.compile(fn)
+            out_compiled, _ = run_and_get_code(fn_c, *inps)
+            self.assertEqual(out_eager, out_compiled)
+            # With pointwise_only=True, we expect more kernels because reductions are not combined with pointwise ops
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count, expected_kernel_count
+            )
+
+    @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
+    @requires_gpu_and_triton
+    @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
+    def test_combo_kernel_yz_overflow(self):
+        from torch.profiler import ProfilerActivity
+
+        def fn(a, b):
+            a_permute = a.permute(0, 2, 1)
+            a_clone = a_permute.clone(memory_format=torch.contiguous_format)
+            a_view = a_clone.view(-1, a.shape[1])
+
+            b_permute = b.permute(0, 2, 1)
+            b_clone = b_permute.clone(memory_format=torch.contiguous_format)
+            b_view = b_clone.view(-1, b.shape[1])
+            return a_view, b_view
+
+        inps = (
+            torch.rand(4800, 34, 256, device=GPU_TYPE),
+            torch.rand(22630, 44, 256, device=GPU_TYPE),
+        )
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+
+        with tempfile.NamedTemporaryFile(suffix=".json") as trace_file:
+            trace_path = trace_file.name
+            activity = getattr(ProfilerActivity, GPU_TYPE.upper())
+
+            with torch.profiler.profile(
+                activities=[activity],
+                record_shapes=True,
+            ) as prof:
+                out_compiled, code = run_and_get_code(fn_c, *inps)
+
+            prof.export_chrome_trace(trace_path)
+
+            with open(trace_path) as f:
+                trace_json = json.load(f)
+
+            triton_events = [
+                event
+                for event in trace_json["traceEvents"]
+                if "triton_poi_fused_0" in event["name"]
+            ]
+
+            if torch._inductor.config.combo_kernel_per_subkernel_blocks:
+                self.assertEqual([83660, 1, 1], triton_events[0]["args"]["grid"])
+            else:
+                self.assertEqual([4, 45260, 2], triton_events[0]["args"]["grid"])
+
+        self.assertEqual(out_eager, out_compiled)
+
 
 class ComboKernelBenchmarkTests(TestCase):
     check_model_gpu = check_model_gpu
