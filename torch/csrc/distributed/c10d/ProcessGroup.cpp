@@ -1,3 +1,4 @@
+#include <ATen/functorch/TensorWrapper.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
@@ -258,20 +259,29 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::mergeRemoteGroup(
 
 namespace {
 
+// recursively unwrap functorch TensorWrapper to get the underlying tensor
+const at::Tensor& recursive_unwrap(const at::Tensor& tensor) {
+  if (auto* wrapper = at::functorch::maybeGetTensorWrapper(tensor)) {
+    return recursive_unwrap(wrapper->value());
+  }
+  return tensor;
+}
+
 class WorkRegistry {
  public:
   void register_work(
       const at::Tensor& tensor,
       const c10::intrusive_ptr<c10d::Work>& work) {
-    if (!tensor.has_storage()) {
+    const at::Tensor& unwrapped = recursive_unwrap(tensor);
+    if (!unwrapped.has_storage()) {
       TORCH_WARN_ONCE(
           "Registering collective work for tensor without storage is not supported. "
           "Calling c10d_functional.wait_tensor() on this tensor will not wait for the collective to complete. "
           "Unsupported tensor type: " +
-          tensor.toString());
+          unwrapped.toString());
       return;
     }
-    auto storage = tensor.storage().getWeakStorageImpl();
+    auto storage = unwrapped.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
 
     auto it = registry_.find(storage);
@@ -303,7 +313,11 @@ class WorkRegistry {
 
   std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
       const at::Tensor& tensor) {
-    const auto storage = tensor.storage().getWeakStorageImpl();
+    const at::Tensor& unwrapped = recursive_unwrap(tensor);
+    if (!unwrapped.has_storage()) {
+      return {};
+    }
+    const auto storage = unwrapped.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto it = registry_.find(storage);
     if (it == registry_.end()) {
