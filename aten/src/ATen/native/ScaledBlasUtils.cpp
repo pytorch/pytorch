@@ -13,16 +13,10 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/tunable/Tunable.h>
-#include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/ScaledBlasUtils.h>
-#include <ATen/native/cuda/RowwiseScaledMM.h>
-#include <ATen/native/cuda/ScaledGroupMM.h>
-#include <ATen/native/cuda/GroupMM.h>
 #include <ATen/ceil_div.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
