@@ -91,7 +91,6 @@ def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=Fals
     op_infos.sort(key=itemgetter(count_idx), reverse=True)
 
     headers = ["Operator", "Schema", "Total Count", "Supported"]
-    # pyrefly: ignore [bad-argument-type]
     print(tabulate(op_infos, headers=headers))
 
     if output_csv:
@@ -103,5 +102,4 @@ def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=Fals
             csv_writer.writerow(headers)
             # Write each table row to the CSV file
             for row in op_infos:
-                # pyrefly: ignore [bad-argument-type]
                 csv_writer.writerow(row)
