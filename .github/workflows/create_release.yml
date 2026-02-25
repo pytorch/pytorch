@@ -54,11 +54,19 @@ jobs:
           tag_or_branch="${tag_or_branch#refs/heads/}"
           # replace directory separators with _ in branch name
           tag_or_branch="${tag_or_branch//\//_}"
+          # Set PYTORCH_BUILD_VERSION only for release/RC tags; convert to PEP 440
+          if [[ "$PT_GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
+            ver="${PT_GITHUB_REF#refs/tags/v}"
+            export PYTORCH_BUILD_VERSION="${ver/-rc/rc}"
+            export PYTORCH_BUILD_NUMBER=0
+          fi
           torch_version="$(python -c 'from tools.generate_torch_version import get_torch_version; print(get_torch_version())')"
           {
             echo "PT_RELEASE_NAME=pytorch-$tag_or_branch";
             echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz";
             echo "PT_PEP517_RELEASE_FILE=torch-${torch_version}.tar.gz";
+            echo "PYTORCH_BUILD_VERSION=${PYTORCH_BUILD_VERSION:-}";
+            echo "PYTORCH_BUILD_NUMBER=${PYTORCH_BUILD_NUMBER:-}";
           } >> "$GITHUB_ENV"
       - name: Checkout optional submodules
         run: python3 tools/optional_submodules.py
@@ -83,7 +91,7 @@ jobs:
         run: |
           pip install build==1.2.2.post1 || exit 1
           python -m build --sdist || exit 1
-          cd dist || exit 1
+          mv dist/$PT_PEP517_RELEASE_FILE . || exit 1
       - name: Upload source distribution for release
         if: ${{ github.event_name == 'release' }}
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
@@ -102,7 +110,7 @@ jobs:
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: ${{ env.PT_PEP517_RELEASE_FILE }}
-          path: dist/${{ env.PT_PEP517_RELEASE_FILE }}
+          path: ${{ env.PT_PEP517_RELEASE_FILE }}
       - name: Set output
         id: release_name
         run: |
