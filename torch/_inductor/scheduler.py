@@ -464,7 +464,10 @@ class SchedulerBuffer:
         if (
             self.node.get_inputs_that_alias_output()
             or self.node.get_mutation_names()
-            or isinstance(self.node.get_output_spec(), ir.CommBufferLayout)
+            or (
+                isinstance(self.node.get_output_spec(), ir.Layout)
+                and self.node.get_output_spec().allocator.is_symm_mem  # pyrefly: ignore[missing-attribute]
+            )
         ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
@@ -6752,7 +6755,10 @@ class Scheduler:
                 if (
                     isinstance(node, ir.ExternKernelOut)
                     and node.should_allocate()
-                    and not isinstance(node.get_output_spec(), ir.CommBufferLayout)
+                    and not (
+                        isinstance(node.get_output_spec(), ir.Layout)
+                        and node.get_output_spec().allocator.is_symm_mem  # pyrefly: ignore[missing-attribute]
+                    )
                     and node.get_device()
                     and node.get_device().type == "cuda"  # type: ignore[union-attr]
                 ):
