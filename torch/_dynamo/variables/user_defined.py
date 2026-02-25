@@ -427,7 +427,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # descriptor itself (descriptor.__get__(None, cls) is descriptor).
         # Build directly — no need to invoke __get__.
         if isinstance(cls_attr, (property, _collections._tuplegetter)):
-            return VariableTracker.build(tx, cls_attr, source)
+            if source:
+                return VariableTracker.build(tx, cls_attr, source)
+            return UserDefinedObjectVariable(cls_attr)
 
         # Comparison dunders inherited from object — defer to runtime.
         if name in cmp_name_to_op_mapping and not isinstance(
