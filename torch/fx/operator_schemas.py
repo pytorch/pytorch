@@ -42,6 +42,86 @@ class ArgsKwargsPair(NamedTuple):
 _manual_overrides: dict[Callable, list[inspect.Signature]] = {}
 
 
+def _fast_bind(
+    sig: inspect.Signature, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> inspect.BoundArguments:
+    """`inspect.Signature.bind` fast path
+    """
+
+    # fallback for complex signatures
+    for p in sig.parameters.values():
+        if p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            return sig.bind(*args, **kwargs)
+
+    params = list(sig.parameters.values())
+    len_args = len(args)
+
+    # max number of positional arguments (pos-only + pos-or-kw)
+    max_positional = 0
+    for p in params:
+        if p.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            max_positional += 1
+
+    if len_args > max_positional:
+        raise TypeError(
+            f"Too many positional arguments: expected max {max_positional}, got {len_args}"
+        )
+
+    arguments: dict[str, Any] = {}
+    arg_i = 0
+
+    for p in params:
+        name = p.name
+        kind = p.kind
+
+        if kind is inspect.Parameter.POSITIONAL_ONLY:
+            if name in kwargs:
+                raise TypeError(
+                    f"Got some positional-only arguments passed as keyword arguments: '{name}'"
+                )
+            if arg_i < len_args:
+                arguments[name] = args[arg_i]
+                arg_i += 1
+            elif p.default is inspect.Parameter.empty:
+                raise TypeError(f"Missing required argument '{name}'")
+
+        elif kind is inspect.Parameter.POSITIONAL_OR_KEYWORD:
+            if arg_i < len_args:
+                if name in kwargs:
+                    raise TypeError(f"Multiple values for argument '{name}'")
+                arguments[name] = args[arg_i]
+                arg_i += 1
+            elif name in kwargs:
+                arguments[name] = kwargs[name]
+            elif p.default is inspect.Parameter.empty:
+                raise TypeError(f"Missing required argument '{name}'")
+
+        elif kind is inspect.Parameter.KEYWORD_ONLY:
+            # keyword-only arguments cannot be consumed by positional arguments
+            if arg_i < len_args:
+                raise TypeError(
+                    f"Too many positional arguments (argument '{name}' is keyword-only)"
+                )
+            if name in kwargs:
+                arguments[name] = kwargs[name]
+            elif p.default is inspect.Parameter.empty:
+                raise TypeError(f"Missing required argument '{name}'")
+
+        else:
+            return sig.bind(*args, **kwargs)
+
+    # disallow extra keyword arguments not in the signature
+    # cause kwargs have been processed by sig.bind at the beginning
+    for name in kwargs:
+        if name not in sig.parameters:
+            raise TypeError(f"Got an unexpected keyword argument '{name}'")
+
+    return inspect.BoundArguments(sig, arguments)
+
+
 def _nonzero_schemas():
     signatures = []
 
@@ -183,7 +263,7 @@ def check_for_mutable_operation(
         # values. If none matches, `new_args_and_kwargs` will be None
         for candidate_signature, schema in zip(signatures, schemas):
             try:
-                candidate_signature.bind(*args, **kwargs)
+                _fast_bind(candidate_signature, args, kwargs)
                 matched_schemas.append((candidate_signature, schema))
             except TypeError:
                 continue
@@ -449,7 +529,7 @@ def normalize_function(
             # values. If none matches, `new_args_and_kwargs` will be None
             for candidate_signature in torch_op_schemas:
                 try:
-                    candidate_signature.bind(*args, **kwargs)
+                    _fast_bind(candidate_signature, args, kwargs)
                     matched_schemas.append(candidate_signature)
                 except TypeError:
                     continue
@@ -469,8 +549,8 @@ def normalize_function(
                     for candidate_signature in torch_op_schemas:
                         sig_matches = True
                         try:
-                            bound_types = candidate_signature.bind(
-                                *arg_types, **kwarg_types
+                            bound_types = _fast_bind(
+                                candidate_signature, arg_types, kwarg_types
                             )
                             for arg_name, arg_type in bound_types.arguments.items():
                                 param = candidate_signature.parameters[arg_name]
@@ -589,7 +669,7 @@ def _args_kwargs_to_normalized_args_kwargs(
         if list(sig.parameters.keys()) != ["input", "from", "to", "generator"]:
             return None
 
-    bound_args = sig.bind(*args, **kwargs)
+    bound_args = _fast_bind(sig, args, kwargs)
     bound_args.apply_defaults()
 
     new_kwargs: dict[str, Any] = {}
