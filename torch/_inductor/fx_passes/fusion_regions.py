@@ -312,13 +312,19 @@ def expand_fusion_regions(
             f"Expected submodule {subgraph_name} to exist"
         )
 
-        # Users of module_node are get_items that will be removed from the graph
-        for user in module_node.users:
-            if user.op == "call_function" and user.target == operator.getitem:
-                result[user] = None
-
         # Get the output arg from the subgraph to determine what will replace module_node
         output_arg = torch._inductor.utils.output_node(region.subgraph_module).args[0]
+
+        # Capture getitem users BEFORE inlining (they'll be erased by _inline_module)
+        getitem_users: list[tuple[fx.Node, int]] = []
+        if isinstance(output_arg, (list, tuple)):
+            for user in list(module_node.users):
+                if (
+                    user.op == "call_function"
+                    and user.target is operator.getitem
+                    and isinstance(user.args[1], int)
+                ):
+                    getitem_users.append((user, user.args[1]))
 
         # Inline the module and get the mapping from subgraph nodes to new nodes.
         # Skip DCE since the graph may not be in a topo ordered state
@@ -332,6 +338,17 @@ def expand_fusion_regions(
                 last_arg = output_arg[-1]
                 assert isinstance(last_arg, fx.Node)
                 result[module_node] = subgraph_to_new[last_arg]
+
+            # Map getitem users to their corresponding output elements
+            for getitem_node, idx in getitem_users:
+                if idx < len(output_arg):
+                    output_elem = output_arg[idx]
+                    if isinstance(output_elem, fx.Node) and output_elem in subgraph_to_new:
+                        result[getitem_node] = subgraph_to_new[output_elem]
+                    else:
+                        result[getitem_node] = None
+                else:
+                    result[getitem_node] = None
         elif isinstance(output_arg, fx.Node) and output_arg in subgraph_to_new:
             result[module_node] = subgraph_to_new[output_arg]
 
