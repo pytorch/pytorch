@@ -14,8 +14,8 @@
 #include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
-#include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
+#include <bit>
 
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
@@ -2668,7 +2668,7 @@ class DeviceCachingAllocator {
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
   // return 1280 as the nearest ceiling of power-2 division.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
-    if (llvm::isPowerOf2_64(size)) {
+    if (std::has_single_bit(size)) {
       return size;
     }
 
@@ -2676,9 +2676,8 @@ class DeviceCachingAllocator {
 
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
-    size_t power2_floor = llvm::PowerOf2Floor(size);
-    size_t power2_division =
-        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
+    size_t power2_floor = std::bit_floor(size);
+    size_t power2_division = power2_floor >> (63 - std::countl_zero(divisions));
     if (C10_UNLIKELY(power2_division == 0)) {
       return (power2_floor << 1);
     }
@@ -3927,7 +3926,7 @@ class DeviceCachingAllocator {
 
     if (record_history) {
       // Skip if action is in the skip_actions set
-      bool should_skip = skip_actions_list.count(action) > 0;
+      bool should_skip = skip_actions_list.contains(action);
       if (!should_skip) {
         alloc_buffer.insertEntries(te);
       }

@@ -5,7 +5,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/flat_hash_map.h>
-#include <c10/util/llvmMathExtras.h>
+#include <bit>
 #include <iostream>
 #include <optional>
 
@@ -298,7 +298,7 @@ struct CachingHostAllocatorImpl {
 
     // Round up the allocation to the nearest power of two to improve reuse.
     // These power of two sizes are also used to index into the free list.
-    size_t roundSize = c10::llvm::PowerOf2Ceil(size);
+    size_t roundSize = std::bit_ceil(size);
 
     // First, try to allocate from the free list of the chosen pool
     auto* block = get_free_block(roundSize, pool);
@@ -471,7 +471,7 @@ struct CachingHostAllocatorImpl {
   }
 
   inline size_t size_index(size_t size) {
-    return c10::llvm::Log2_64_Ceil(size);
+    return 64 - std::countl_zero(size - 1);
   }
 
   virtual bool pinned_use_background_threads() {
