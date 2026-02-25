@@ -2450,8 +2450,11 @@ class lookup_table:
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 
-    # Force custom op autotuning to always choose the decomposition (non-fallback) option.
-    force_custom_op_decomposition: bool = False
+    # Force custom op autotuning choice selection:
+    # - None: normal autotuning (default)
+    # - True: force decomposition to win
+    # - False: force fallback to win
+    force_custom_op_decomposition: Optional[bool] = None
 
     # Force custom op autotuning to prevent grouping ranges by implementation.
     # When True, each range is treated as a separate impl group, forcing torch.cond dispatch.
