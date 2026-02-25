@@ -907,6 +907,10 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
+        try:
+            self.backend_hash = torch.utils._triton.triton_hash_with_backend()
+        except Exception:
+            self.backend_hash = None
         self.inductor_config = config.save_config_portable(ignore_private_configs=False)
         # Custom post grad passes should provide an ID to hash.
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
