@@ -137,12 +137,12 @@ class _FalsePositiveMitigations:
 
     negated_sample: SampleInput | None = None
     negated_tensors: list[tuple[str, torch.Tensor]] | None = None
-    negated_ground_truth: torch.Tensor | None = None
+    negated_ground_truth: torch.Tensor | list[torch.Tensor] | None = None
     non_rounded_sample: SampleInput | None = None
-    non_rounded_ground_truth: torch.Tensor | None = None
+    non_rounded_ground_truth: torch.Tensor | list[torch.Tensor] | None = None
     non_rounded_negated_sample: SampleInput | None = None
     non_rounded_negated_tensors: list[tuple[str, torch.Tensor]] | None = None
-    non_rounded_negated_ground_truth: torch.Tensor | None = None
+    non_rounded_negated_ground_truth: torch.Tensor | list[torch.Tensor] | None = None
 
 
 def placement_tuple_to_str(placements: tuple[Placement, ...]) -> str:
@@ -314,8 +314,34 @@ def extract_tensors_from_sample(
     return tensors
 
 
+def _checkerboard_mask(
+    tensor: torch.Tensor, tensor_idx: int = 0, mask_shift: int = 0
+) -> torch.Tensor:
+    """Checkerboard mask that alternates in every dimension.
+
+    Unlike flat-index % 2, which can be uniform along even-stride dimensions
+    (causing all elements in a reduction group to get the same offset), the
+    checkerboard uses sum-of-coordinates mod 2 so adjacent elements differ
+    along every axis.
+
+    Returns a flat bool tensor of shape (numel,).
+    """
+    if tensor.ndim == 0:
+        return torch.tensor([(tensor_idx + mask_shift) % 2 == 0], device=tensor.device)
+    coords = [torch.arange(s, device=tensor.device) for s in tensor.shape]
+    grids = torch.meshgrid(*coords, indexing="ij")
+    coord_sum = grids[0].clone()
+    for g in grids[1:]:
+        coord_sum += g
+    return ((coord_sum + tensor_idx + mask_shift) % 2 == 0).flatten()
+
+
 def _create_partial_input(
-    tensor: torch.Tensor, placement: Partial, world_size: int, tensor_idx: int = 0
+    tensor: torch.Tensor,
+    placement: Partial,
+    world_size: int,
+    tensor_idx: int = 0,
+    mask_shift: int = 0,
 ) -> LocalTensor:
     """
     Create a LocalTensor with values that reduce to the original tensor.
@@ -345,14 +371,21 @@ def _create_partial_input(
     to falsely validate P(sum)->P(sum).
 
     Distinct magnitudes for P(min) vs P(max): P(min) offsets non-holding
-    ranks by +0.7 while P(max) offsets by -1.3. Using different
-    magnitudes prevents accidental cancellation when min and max
-    placements appear in the same combination.
+    ranks by +(range*2+1) while P(max) offsets by -(range*2+1), where
+    range is the tensor's value range. Using adaptive offsets that exceed
+    the value range ensures that index-returning ops (argmin/argmax)
+    produce different results on different ranks, correctly rejecting
+    P(min)/P(max) inputs for those ops. Using different signs for min vs
+    max prevents accidental cancellation when both appear in the same
+    combination.
 
-    Alternating rank ownership for P(min)/P(max): a mask alternating by
-    element (shifted by tensor index) controls which rank holds the true
-    value vs the offset value. This prevents the degenerate case where
-    one rank always holds all true values.
+    Alternating rank ownership for P(min)/P(max): a multi-dimensional
+    checkerboard mask (sum of coordinates mod 2) controls which rank holds
+    the true value vs the offset value. Unlike a flat-index mask which can
+    have uniform parity along an even-stride dimension, the checkerboard
+    guarantees alternation along EVERY dimension. The mask_shift parameter
+    allows re-validation with the complementary mask to catch ops where
+    the result coincidentally matches.
 
     """
     reduce_op = placement.reduce_op
@@ -365,9 +398,9 @@ def _create_partial_input(
         flat = tensor.flatten()
         offset_mag = flat.abs() + 1.0
         signs = torch.ones_like(flat)
-        signs[
-            (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
-        ] = -1.0
+        # Use checkerboard mask so offset sign alternates in every dimension,
+        # not just along flat index (which can be uniform along even-stride dims).
+        signs[_checkerboard_mask(tensor, tensor_idx, mask_shift)] = -1.0
         offset = (offset_mag * signs).reshape(tensor.shape)
 
         scale = world_size if reduce_op == "avg" else 1
@@ -382,30 +415,36 @@ def _create_partial_input(
     elif reduce_op == "min":
         # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        # Offset must exceed the tensor's value range so that the mask pattern
+        # determines argmin/argmax, not the original values.
+        value_range = (flat.max() - flat.min()).item()
+        min_offset = value_range * 2 + 1
+        mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
                 r_offset = torch.where(
-                    mask, torch.zeros_like(flat), torch.full_like(flat, 0.7)
+                    mask, torch.zeros_like(flat), torch.full_like(flat, min_offset)
                 )
             else:
                 r_offset = torch.where(
-                    mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
+                    mask, torch.full_like(flat, min_offset), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
     elif reduce_op == "max":
         # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        value_range = (flat.max() - flat.min()).item()
+        max_offset = -(value_range * 2 + 1)
+        mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
                 r_offset = torch.where(
-                    mask, torch.zeros_like(flat), torch.full_like(flat, -1.3)
+                    mask, torch.zeros_like(flat), torch.full_like(flat, max_offset)
                 )
             else:
                 r_offset = torch.where(
-                    mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
+                    mask, torch.full_like(flat, max_offset), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
@@ -422,9 +461,10 @@ def validate_combination(
     sample_input: SampleInput,
     tensors: list[tuple[str, torch.Tensor]],
     combination: PlacementCombination,
-    ground_truth: torch.Tensor,
+    ground_truth: torch.Tensor | list[torch.Tensor],
     world_size: int = 2,
     mesh: DeviceMesh | None = None,
+    mask_shift: int = 0,
 ) -> tuple[bool, str]:
     """
     Validate a single placement combination against ground truth.
@@ -440,7 +480,9 @@ def validate_combination(
         sample_input: The SampleInput with original arguments
         tensors: List of (name, tensor) pairs extracted from sample
         combination: The placement combination to validate
-        ground_truth: Expected output tensor
+        ground_truth: Expected output tensor(s). For multi-output ops, a list
+            of tensors where each element is validated independently against
+            the same output placement.
         world_size: Number of simulated ranks
         mesh: Optional pre-created device mesh (for performance)
 
@@ -458,7 +500,7 @@ def validate_combination(
         ):
             if isinstance(placement, Partial):
                 local_tensor = _create_partial_input(
-                    tensor, placement, world_size, tensor_idx
+                    tensor, placement, world_size, tensor_idx, mask_shift
                 )
             elif isinstance(placement, Replicate):
                 _tmp = {r: tensor.clone() for r in range(world_size)}
@@ -497,45 +539,66 @@ def validate_combination(
 
         local_output = op(local_input, *local_args, **local_kwargs)
 
-        if not isinstance(local_output, torch.Tensor):
-            return False, f"Local output is not a tensor: {type(local_output)}"
+        # Normalize to list for uniform handling of single/multi-output ops
+        if isinstance(local_output, (list, tuple)):
+            local_outputs = list(local_output)
+        else:
+            local_outputs = [local_output]
 
-        if not isinstance(local_output, LocalTensor):
-            return False, "LocalTensor inputs produced non-LocalTensor output"
+        if isinstance(ground_truth, list):
+            ground_truths = ground_truth
+        else:
+            ground_truths = [ground_truth]
 
-        output_dt = DTensor.from_local(
-            local_output,
-            mesh,
-            (combination.output_placement,),
-            shape=ground_truth.shape,
-            stride=ground_truth.stride(),
-        )
-
-        if isinstance(combination.output_placement, Replicate):
-            local_values = [local_output._local_tensors[r] for r in range(world_size)]
-            all_same = all(
-                torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5)
-                for lv in local_values[1:]
-            )
-            if not all_same:
-                return False, "Replicate output but local values differ across ranks"
-
-        full_output = output_dt.redistribute(mesh, (Replicate(),)).to_local()
-
-        if isinstance(full_output, LocalTensor):
-            full_output = full_output._local_tensors[0]
-
-        if ground_truth.shape != full_output.shape:
+        if len(local_outputs) != len(ground_truths):
             return (
                 False,
-                f"Shape mismatch: expected {ground_truth.shape}, got {full_output.shape}",
+                f"Output count mismatch: got {len(local_outputs)}, expected {len(ground_truths)}",
             )
 
-        if not torch.allclose(
-            ground_truth, full_output, atol=1e-5, rtol=1e-5, equal_nan=True
-        ):
-            max_diff = (ground_truth - full_output).abs().max().item()
-            return False, f"Value mismatch: max_diff={max_diff:.6f}"
+        for i, (local_out, gt) in enumerate(zip(local_outputs, ground_truths)):
+            if not isinstance(local_out, torch.Tensor):
+                return False, f"Local output[{i}] is not a tensor: {type(local_out)}"
+
+            if not isinstance(local_out, LocalTensor):
+                return False, f"LocalTensor inputs produced non-LocalTensor output[{i}]"
+
+            output_dt = DTensor.from_local(
+                local_out,
+                mesh,
+                (combination.output_placement,),
+                shape=gt.shape,
+                stride=gt.stride(),
+            )
+
+            if isinstance(combination.output_placement, Replicate):
+                local_values = [local_out._local_tensors[r] for r in range(world_size)]
+                all_same = all(
+                    torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5)
+                    for lv in local_values[1:]
+                )
+                if not all_same:
+                    return (
+                        False,
+                        f"Replicate output[{i}] but local values differ across ranks",
+                    )
+
+            full_output = output_dt.redistribute(mesh, (Replicate(),)).to_local()
+
+            if isinstance(full_output, LocalTensor):
+                full_output = full_output._local_tensors[0]
+
+            if gt.shape != full_output.shape:
+                return (
+                    False,
+                    f"Shape mismatch[{i}]: expected {gt.shape}, got {full_output.shape}",
+                )
+
+            if not torch.allclose(
+                gt, full_output, atol=1e-5, rtol=1e-5, equal_nan=True
+            ):
+                max_diff = (gt - full_output).abs().max().item()
+                return False, f"Value mismatch[{i}]: max_diff={max_diff:.6f}"
 
         return True, ""
 
@@ -609,14 +672,33 @@ def _extract_rules_from_op_strategy(
     input_shapes: tuple[tuple[int, ...], ...],
     output_shape: tuple[int, ...],
 ) -> set[ComboKey]:
-    """Extract normalized sharding rules from an OpStrategy."""
+    """Extract normalized sharding rules from an OpStrategy.
+
+    Called during rule comparison to collect DTensor's claimed-valid placement
+    combinations. These are compared against ground truth (brute-force
+    validation) to find false positives (DTensor claims valid but wrong) and
+    false negatives (valid but DTensor has no rule).
+    """
     rules: set[ComboKey] = set()
     if not isinstance(op_strategy, OpStrategy):
         return rules
     for spec in op_strategy.strategies:
         if spec.input_specs is None:
             continue
-        output_plc = spec.output_spec.placements[0]
+        if isinstance(spec.output_specs, tuple):
+            first_output_spec = spec.output_specs[0]
+            # output_specs tuple can contain None for non-tensor outputs
+            # (e.g. SDPA's philox_seed/offset, layer norm backward with
+            # output_mask). The validator doesn't support mixed outputs.
+            if first_output_spec is None:
+                raise NotImplementedError(
+                    f"Strategy has None in output_specs, indicating mixed "
+                    f"tensor/non-tensor outputs which the validator does not "
+                    f"support. output_specs: {spec.output_specs}"
+                )
+            output_plc = first_output_spec.placements[0]
+        else:
+            output_plc = spec.output_spec.placements[0]
         input_plcs = tuple(s.placements[0] for s in spec.input_specs)
         rule_key = (tuple(str(p) for p in input_plcs), str(output_plc))
         normalized_rule = normalize_combo_key(rule_key, input_shapes, output_shape)
@@ -806,6 +888,29 @@ def resolve_op_names(patterns: list[str]) -> list[str]:
     return resolved
 
 
+def _is_tensor_output(result: Any) -> bool:
+    """Check if a result is a tensor or list/tuple of tensors."""
+    if isinstance(result, torch.Tensor):
+        return True
+    if isinstance(result, (list, tuple)):
+        has_tensor = any(isinstance(t, torch.Tensor) for t in result)
+        all_tensor = all(isinstance(t, torch.Tensor) for t in result)
+        if has_tensor and not all_tensor:
+            raise NotImplementedError(
+                f"Mixed tensor/non-tensor tuple outputs are not supported by the "
+                f"validator. Got types: {[type(t).__name__ for t in result]}"
+            )
+        return all_tensor
+    return False
+
+
+def _to_ground_truth(result: Any) -> torch.Tensor | list[torch.Tensor]:
+    """Convert an op result to the ground truth format (tensor or list of tensors)."""
+    if isinstance(result, torch.Tensor):
+        return result
+    return list(result)
+
+
 def _prepare_false_positive_mitigations(
     op: Callable[..., Any],
     sample: SampleInput,
@@ -818,8 +923,8 @@ def _prepare_false_positive_mitigations(
         m.negated_sample = create_fully_negated_sample(sample)
         m.negated_tensors = negate_all_tensors(tensors)
         result = _run_op_on_sample(op, m.negated_sample)
-        if isinstance(result, torch.Tensor):
-            m.negated_ground_truth = result
+        if _is_tensor_output(result):
+            m.negated_ground_truth = _to_ground_truth(result)
         else:
             m.negated_sample = None
     except Exception:
@@ -837,17 +942,17 @@ def _prepare_false_positive_mitigations(
             sample.input, args=sample.args, kwargs=non_rounded_kwargs
         )
         result = _run_op_on_sample(op, m.non_rounded_sample)
-        if not isinstance(result, torch.Tensor):
+        if not _is_tensor_output(result):
             m.non_rounded_sample = None
         else:
-            m.non_rounded_ground_truth = result
+            m.non_rounded_ground_truth = _to_ground_truth(result)
             m.non_rounded_negated_sample = create_fully_negated_sample(
                 m.non_rounded_sample
             )
             m.non_rounded_negated_tensors = negate_all_tensors(tensors)
             nr_neg_result = _run_op_on_sample(op, m.non_rounded_negated_sample)
-            if isinstance(nr_neg_result, torch.Tensor):
-                m.non_rounded_negated_ground_truth = nr_neg_result
+            if _is_tensor_output(nr_neg_result):
+                m.non_rounded_negated_ground_truth = _to_ground_truth(nr_neg_result)
             else:
                 m.non_rounded_negated_sample = None
     except Exception:
@@ -964,9 +1069,9 @@ def _query_dtensor_rules(
                     args_schema.append(spec)
                 args_schema.extend(non_tensor_args)
                 op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
-                DecompShardingStrategy.ensure_schema_info(aten_op, propagator)
-                output_strategy = DecompShardingStrategy.propagate_strategy(
-                    op_schema, propagator
+                propagator.decomp_strategy.ensure_schema_info(aten_op)
+                output_strategy = propagator.decomp_strategy.propagate_strategy(
+                    op_schema,
                 )
                 if output_strategy is not None:
                     rules |= _extract_rules_from_op_strategy(
@@ -985,7 +1090,7 @@ def _validate_with_mitigations(
     tensors: list[tuple[str, torch.Tensor]],
     input_placements: tuple[Placement, ...],
     output_placement: Placement,
-    ground_truth: torch.Tensor,
+    ground_truth: torch.Tensor | list[torch.Tensor],
     world_size: int,
     mesh: DeviceMesh,
     mitigations: _FalsePositiveMitigations,
@@ -995,6 +1100,25 @@ def _validate_with_mitigations(
     is_valid, _ = validate_combination(
         op, sample, tensors, combo, ground_truth, world_size, mesh
     )
+
+    # Flipped-mask mitigation: the checkerboard mask that controls offset
+    # signs (for P(sum)/P(avg)) or rank ownership (for P(min)/P(max)) is
+    # deterministic per tensor_idx. Re-validate with the complementary mask
+    # to catch index-returning ops (argmin/argmax) where the result
+    # coincidentally matches because the dominant value happens to land on
+    # a position where both mask orientations preserve argmin/argmax.
+    if is_valid and has_any_partial(input_placements, output_placement):
+        flipped_valid, _ = validate_combination(
+            op,
+            sample,
+            tensors,
+            combo,
+            ground_truth,
+            world_size,
+            mesh,
+            mask_shift=1,
+        )
+        is_valid = is_valid and flipped_valid
 
     if (
         is_valid
@@ -1175,9 +1299,7 @@ def _print_discrepancy_section(
 
     for op_str in sorted(by_op.keys()):
         print(f"\n  [{op_str}]")
-        for (inp, out), discs in sorted(  # pyrefly: ignore[not-iterable]
-            by_op[op_str].items(), key=str
-        ):
+        for (inp, out), discs in sorted(by_op[op_str].items(), key=str):
             inp_str = ", ".join(inp)
             print(f"    {inp_str} -> {out}")
             if show_repro:
@@ -1270,16 +1392,29 @@ def compare_operator(
             total_samples += 1
 
             try:
-                ground_truth = _run_op_on_sample(op, sample)
-                if not isinstance(ground_truth, torch.Tensor):
+                ground_truth_raw = _run_op_on_sample(op, sample)
+                if isinstance(ground_truth_raw, (list, tuple)):
+                    if not all(isinstance(t, torch.Tensor) for t in ground_truth_raw):
+                        total_samples -= 1
+                        skip_reasons["non-tensor output"] += 1
+                        continue
+                    ground_truth = list(ground_truth_raw)
+                elif isinstance(ground_truth_raw, torch.Tensor):
+                    ground_truth = ground_truth_raw
+                else:
                     total_samples -= 1
                     skip_reasons["non-tensor output"] += 1
                     continue
-                if ground_truth.numel() > 0 and (ground_truth == 0).all():
+
+                # For skip checks, use the first tensor (or the only tensor)
+                first_gt = (
+                    ground_truth[0] if isinstance(ground_truth, list) else ground_truth
+                )
+                if first_gt.numel() > 0 and (first_gt == 0).all():
                     total_samples -= 1
                     skip_reasons["all-zero output"] += 1
                     continue
-                if ground_truth.numel() > 0 and ground_truth.isnan().all():
+                if first_gt.numel() > 0 and first_gt.isnan().all():
                     total_samples -= 1
                     skip_reasons["all-NaN output"] += 1
                     continue
@@ -1288,7 +1423,7 @@ def compare_operator(
                 continue
 
             input_shapes = tuple(t.shape for _, t in tensors)
-            output_shape = tuple(ground_truth.shape)
+            output_shape = tuple(first_gt.shape)
 
             scalar_args = tuple(
                 a for a in sample.args if not isinstance(a, torch.Tensor)
@@ -1305,7 +1440,7 @@ def compare_operator(
                 get_1d_input_placements_for_tensor(t, include_partial=True)
                 for _, t in tensors
             ]
-            output_placement_options = get_1d_output_placements_for_tensor(ground_truth)
+            output_placement_options = get_1d_output_placements_for_tensor(first_gt)
 
             aten_op, non_tensor_args, non_tensor_kwargs = get_aten_op_for_sample(
                 op, sample, opinfo.name

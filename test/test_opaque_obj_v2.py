@@ -2247,6 +2247,43 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(ref.grad, res.grad)
 
+    def test_value_type_subclass(self):
+        """Subclasses of registered opaque types should be recognized as opaque."""
+
+        class ExtendedConfig(ValueConfig):
+            def __init__(self, mode: str, scale: float):
+                super().__init__(mode)
+                self.scale = scale
+
+            def __eq__(self, other):
+                return (
+                    isinstance(other, ExtendedConfig)
+                    and self.mode == other.mode
+                    and self.scale == other.scale
+                )
+
+            def __hash__(self):
+                return hash((self.mode, self.scale))
+
+            def __fx_repr__(self):
+                return (
+                    f"ExtendedConfig(mode={self.mode!r}, scale={self.scale!r})",
+                    {"ExtendedConfig": ExtendedConfig},
+                )
+
+        self.assertTrue(is_opaque_type(ExtendedConfig))
+        self.assertTrue(is_opaque_value_type(ExtendedConfig))
+
+        cfg = ExtendedConfig("square", 2.0)
+
+        def foo(x):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(foo, fullgraph=True, backend="aot_eager")
+        res = opt_f(x)
+        self.assertEqual(res, foo(x))
+
     def test_opaque_object_with_inductor_backend(self):
         """Test that opaque objects work correctly with inductor's get_attr handling."""
 
@@ -2271,6 +2308,34 @@ class GraphModule(torch.nn.Module):
 
         expected = x * float(Color.RED.value)
         self.assertTrue(torch.allclose(result, expected))
+
+    def test_captured_opaque_object_export(self):
+        """Test that opaque objects captured from closures work with torch.export.
+
+        When an opaque object is captured via a module hook closure, it gets a
+        CellContentsSource instead of GetItemSource. The export path needs to
+        handle this gracefully.
+        """
+        rng = RNGState(42)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                torch.ops._TestOpaqueObject.noisy_inject(x, rng)
+                return self.linear(x)
+
+        ep = torch.export.export(Model(), (torch.randn(4, 4),), strict=True)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear,)""",  # noqa: B950
+        )
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
