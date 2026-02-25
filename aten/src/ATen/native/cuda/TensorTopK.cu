@@ -257,7 +257,11 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
-  __shared__ int smem[64];
+
+  // Maximum shared memory size for radix select (used in countRadixAggregateCounts): NUM_BUFFERS * MAX_WARPS * RADIX_SIZE.
+  // HIP workgroups have at most 1024 threads. Warp size is at least 32 (can be 64 on some
+  // architectures), so we use 32 for safety: 2 buffers * (1024/32) warps * 4 radix bins = 256.
+  __shared__ int smem[256];
   __shared__ int writeIndexStart; // index to track where to write results. This is shared by all threads in the block. Increases atomically.
 
   IndexType slice = getLinearBlockId<IndexType>();
