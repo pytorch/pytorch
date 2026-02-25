@@ -3,7 +3,7 @@
 """
 Contains utility functions for working with nested python data structures.
 
-A *pytree* is Python nested data structure. It is a tree in the sense that
+A *pytree* is a Python nested data structure. It is a tree in the sense that
 nodes are Python collections (e.g., list, tuple, dict) and the leaves are
 Python values. Furthermore, a pytree should not contain reference cycles.
 
@@ -28,6 +28,7 @@ from torch.utils._pytree import (
     DumpableContext,
     FlattenFunc,
     FlattenWithKeysFunc,
+    FromDumpableContextFn,
     FromDumpableContextFunc,
     is_namedtuple,
     is_namedtuple_class,
@@ -37,6 +38,7 @@ from torch.utils._pytree import (
     is_structseq_instance,
     KeyPath,
     PyTree,
+    ToDumpableContextFn,
     ToDumpableContextFunc,
     UnflattenFunc,
 )
@@ -62,6 +64,8 @@ __all__ = [
     "FlattenFunc",
     "UnflattenFunc",
     "DumpableContext",
+    "ToDumpableContextFn",  # deprecated
+    "FromDumpableContextFn",  # deprecated
     "ToDumpableContextFunc",
     "FromDumpableContextFunc",
     "PyTreeSpec",
@@ -160,7 +164,7 @@ def register_pytree_node(
     Example::
 
         >>> # xdoctest: +SKIP
-        >>> # Registry a Python type with lambda functions
+        >>> # Register a Python type with lambda functions
         >>> register_pytree_node(
         ...     set,
         ...     lambda s: (sorted(s), None, None),

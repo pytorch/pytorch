@@ -1103,7 +1103,9 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
   auto v_out = vA_out.mul(vB_out);
 
   // build (2, P) indices
-  auto out_indices = at::empty({2, P}, at::device(device).dtype(at::kLong)).contiguous();
+  auto out_indices = at::empty(
+      {2, P},
+      at::device(device).dtype(at::kLong).memory_format(c10::MemoryFormat::Contiguous));
   out_indices.select(0, 0).copy_(i_out);
   out_indices.select(0, 1).copy_(j_out);
 

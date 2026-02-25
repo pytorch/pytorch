@@ -3,7 +3,7 @@
 """
 Contains utility functions for working with nested python data structures.
 
-A *pytree* is Python nested data structure. It is a tree in the sense that
+A *pytree* is a Python nested data structure. It is a tree in the sense that
 nodes are Python collections (e.g., list, tuple, dict) and the leaves are
 Python values. Furthermore, a pytree should not contain reference cycles.
 
@@ -108,7 +108,7 @@ else:
             if name == "__name__":
                 return f"{__name__}.cxx"
             if name == "__file__":
-                return python.__file__.removesuffix("_python.py") + "_cxx_pytree.py"
+                return python.__file__.removesuffix("_pytree.py") + "_cxx_pytree.py"
 
             cxx = globals().get("cxx")
             if cxx is None:
@@ -215,7 +215,7 @@ def register_pytree_node(
         >>> # xdoctest: +SKIP
         >>> from collections import UserList
         ... class MyList(UserList): pass
-        >>> # Registry a Python type with lambda functions
+        >>> # Register a Python type with lambda functions
         ... register_pytree_node(
         ...     MyList,
         ...     lambda lst: (list(lst), None),
