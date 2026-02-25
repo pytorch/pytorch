@@ -13,16 +13,10 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/tunable/Tunable.h>
-#include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/native/ScaledBlasUtils.h>
-#include <ATen/native/cuda/RowwiseScaledMM.h>
-#include <ATen/native/cuda/ScaledGroupMM.h>
-#include <ATen/native/cuda/GroupMM.h>
 #include <ATen/ceil_div.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -60,14 +54,6 @@ namespace at::native::scaled {
 /**
  * Both inputs must be fp8,
  * Each needs a single scale, {Tensorwise (float)}
- */
-/*
- * NOTE(slayton58): As of this refactor commit, these symbols are not used in CPU
- *                  code, and thus get hidden by default. Then build fails under
- *                  linking as they don't get included in libtorch_cpu.so. WAR that for
- *                  now, when XPU scaled_mm_v2 (or other) code is added, this WAR can be
- *                  removed. Alternative would be to directly add this file to
- *                  libtorch_cuda.so
  */
 bool check_tensorwise_recipe(
     c10::ScalarType type_a,
