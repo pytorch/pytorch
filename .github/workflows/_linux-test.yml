@@ -148,7 +148,15 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
+
+      - name: Calculate docker image s390x (test-only, remove later)
+        id: calculate-docker-image-s390x
+        if: inputs.build-environment == 'linux-s390x-binary-manywheel'
+        uses: AlekseiNikiforovIBM/pytorch-test-infra/.github/actions/calculate-docker-image@s390x-calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image }}
           use-aws: ${{ inputs.build-environment != 'linux-s390x-binary-manywheel' }}
@@ -338,7 +346,7 @@ jobs:
           SCCACHE_BUCKET: ${{ !contains(matrix.runner, 'b200') && 'ossci-compiler-cache-circleci-v2' || '' }}
           SCCACHE_REGION: ${{ !contains(matrix.runner, 'b200') && 'us-east-1' || '' }}
           SHM_SIZE: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && '2g' || '1g' }}
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || steps.calculate-docker-image-s390x.outputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
