@@ -3052,6 +3052,39 @@ class GuardBuilder(GuardBuilderBase):
                     dispatch_keys,
                 )
 
+                excluded_sizes = metadata.get("excluded_sizes")
+                if (
+                    excluded_sizes
+                    and any(v is not None for v in excluded_sizes)
+                    and config.stable_graph_selection_for_automatic_dynamic
+                    and not config.enable_compiler_collectives
+                ):
+                    # excluded_sizes only has non-None values for dimensions
+                    # about to transition from static to dynamic in the most
+                    # recent merge step (pgo.py resets it fresh each merge).
+                    dims_and_values = [
+                        (i, v) for i, v in enumerate(excluded_sizes) if v is not None
+                    ]
+
+                    # Only add the exclusion if the current input doesn't
+                    # match all excluded dims. If it does, this graph was
+                    # compiled to handle that input and the exclusion would
+                    # reject the compilation's own input.
+                    if dims_and_values and not all(
+                        value.size(d) == v for d, v in dims_and_values
+                    ):
+
+                        def check_exclusion(x, dvs=dims_and_values):
+                            return not all(x.size(d) == v for d, v in dvs)
+
+                        guard_manager.add_lambda_guard(
+                            check_exclusion,
+                            get_verbose_code_parts(
+                                f"excluded_sizes({excluded_sizes})", guard
+                            ),
+                            guard.user_stack,
+                        )
+
                 # We consider TENSOR_MATCH guard to be important enough to be
                 # included in diff guard manager by default.
                 if not isinstance(value, torch.nn.Parameter):
@@ -3132,6 +3165,31 @@ class GuardBuilder(GuardBuilderBase):
 
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
+
+    def SCALAR_EXCLUSION(self, guard: Guard) -> None:
+        output_graph = self.check_fn_manager.output_graph
+        assert output_graph is not None
+        excluded_value = output_graph.input_source_to_excluded_scalar.get(
+            guard.originating_source
+        )
+        if (
+            excluded_value is not None
+            and config.stable_graph_selection_for_automatic_dynamic
+            and not config.enable_compiler_collectives
+        ):
+            value = self.get(guard)
+            # Don't reject the compilation's own input
+            if value != excluded_value:
+                guard_manager = self.get_guard_manager(guard)
+
+                def check_exclusion(x, ev=excluded_value):
+                    return x != ev
+
+                guard_manager.add_lambda_guard(
+                    check_exclusion,
+                    get_verbose_code_parts(f"excluded_scalar({excluded_value})", guard),
+                    guard.user_stack,
+                )
 
     # A util that in the case of export, adds data onto guards
     def _set_guard_export_info(

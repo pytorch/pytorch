@@ -2652,6 +2652,7 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         shape_env = self.tx.output.shape_env
+        frame_state_entry: FrameStateSizeEntry | None = None
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
@@ -2732,6 +2733,18 @@ class VariableBuilder:
 
         assert not isinstance(self.get_source(), RandomValueSource)
         install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
+
+        # When a scalar is about to transition from static to dynamic,
+        # install an exclusion guard so the dynamic graph doesn't shadow
+        # the earlier static graph for the original value.
+        if (
+            frame_state_entry is not None
+            and frame_state_entry.excluded_scalar is not None
+        ):
+            self.tx.output.input_source_to_excluded_scalar[self.source] = (
+                frame_state_entry.excluded_scalar
+            )
+            install_guard(self.get_source().make_guard(GuardBuilder.SCALAR_EXCLUSION))
 
         options = {"source": self.get_source()}
 
@@ -3973,6 +3986,7 @@ def _automatic_dynamic(
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         shape_ids=getattr(e, "_dynamo_shape_ids", None),
+        excluded_sizes=frame_state_entry.excluded_sizes,
     )
 
 
@@ -4092,6 +4106,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             tx.output.input_source_to_sizes_strides[source] = {
                 "size": fake_e.size(),
                 "stride": fake_e.stride(),
+                "excluded_sizes": getattr(symbolic_context, "excluded_sizes", None),
             }
 
         if (
