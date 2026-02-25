@@ -1367,19 +1367,17 @@ class GetAttrVariable(VariableTracker):
                 if tx.output.side_effects.has_pending_mutation_of_attr(obj, key):
                     return tx.output.side_effects.load_attr(obj, key)
 
-                # For non-mutated keys, read directly from __dict__
-                raw_value = obj.value.__dict__[key]
-
-                if obj.source and isinstance(obj.value.__dict__, dict):
-                    raw_source = DictGetItemSource(
-                        AttrSource(obj.source, "__dict__"), key
+                # For instance dicts, read directly from __dict__
+                if isinstance(obj.value.__dict__, dict):
+                    raw_value = obj.value.__dict__[key]
+                    raw_source = (
+                        DictGetItemSource(AttrSource(obj.source, "__dict__"), key)
+                        if obj.source
+                        else None
                     )
-                elif obj.source:
-                    raw_source = AttrSource(obj.source, key)
-                else:
-                    raw_source = None
+                    return VariableTracker.build(tx, raw_value, raw_source)
 
-                return VariableTracker.build(tx, raw_value, raw_source)
+                return obj.var_getattr(tx, key)
 
             # Return the default value for get
             if name == "get":
