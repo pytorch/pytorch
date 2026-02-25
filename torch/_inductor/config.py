@@ -1071,6 +1071,12 @@ class aten_distributed_optimizations:
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
 
+    # Bucket mode for collective bucketing.
+    # "default": plain torch.cat (visible to Inductor for fusion)
+    # "custom_ops": opaque custom op (FallbackKernel, no fusion)
+    # "custom_ops_multidtype": custom op with multi-dtype support
+    bucket_mode: Optional[str] = None
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

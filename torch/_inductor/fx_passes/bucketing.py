@@ -26,7 +26,9 @@ logger.setLevel(logging.INFO)
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
-BucketMode: TypeAlias = Literal["default", "custom_ops", "custom_ops_multidtype"]
+BucketMode: TypeAlias = Literal[
+    "default", "custom_ops", "custom_ops_multidtype", "coalesced"
+]
 
 
 # Helper functions moved to top for better organization
@@ -104,11 +106,17 @@ def _schedulable_wait_node(node: torch.fx.Node) -> bool:
     if not is_wait_tensor(node):
         return False
     assert isinstance(node.args[0], torch.fx.Node)
-    if not isinstance(node.args[0].target, Callable):
+    coll_node = node.args[0]
+    # For coalesced collectives, wait_tensor's arg is a getitem on the list result.
+    # Look through getitem to find the actual collective node.
+    if coll_node.op == "call_function" and coll_node.target is operator.getitem:
+        assert isinstance(coll_node.args[0], torch.fx.Node)
+        coll_node = coll_node.args[0]
+    if not isinstance(coll_node.target, Callable):
         return False
-    is_callable: bool = node.args[0].op == "call_function"
+    is_callable: bool = coll_node.op == "call_function"
     # pyrefly: ignore [missing-attribute]
-    coll: NCCL_COLL = get_collective_type_from_kernel_name(node.args[0].target.name())
+    coll: NCCL_COLL = get_collective_type_from_kernel_name(coll_node.target.name())
     is_collective: bool = coll != NCCL_COLL.UNSUPPORTED
     return is_callable and is_collective
 
@@ -624,6 +632,30 @@ def reduce_scatter_merge_fn_to_trace(
     return new_outs
 
 
+def reduce_scatter_merge_fn_coalesced(
+    rs_ins: list[torch.Tensor],
+    group_size: int,
+    group_name: str,
+    reduce_op: str,
+    reduce_dtype: torch.dtype,  # type: ignore[name-defined]
+    device: torch.device,  # type: ignore[name-defined]
+) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
+    """Zero-copy bucketed RS using reduce_scatter_tensor_coalesced.
+
+    Instead of cat-ing inputs into one buffer and doing a single RS,
+    passes the list of tensors to NCCL's coalesced API which batches
+    individual ncclReduceScatter calls in one ncclGroupStart/End block.
+    """
+    rs_ins_flat = [x.view(-1) for x in rs_ins]
+    new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
+
+    rs_outs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
+        rs_ins_flat, reduce_op, group_size, group_name
+    )
+    rs_outs = [torch.ops.c10d_functional.wait_tensor(o) for o in rs_outs]
+    return [o.view(s) for o, s in zip(rs_outs, new_out_sizes)]
+
+
 def all_reduce_merge_fn_to_trace(
     ar_ins: list[torch.Tensor],
     group_name: str,
@@ -1089,7 +1121,9 @@ def merge_reduce_scatter_bucket(
 
     # Choose merge function based on mode
     rs_merge_fn = reduce_scatter_merge_fn_to_trace
-    if mode and "custom_ops" in mode:
+    if mode == "coalesced":
+        rs_merge_fn = reduce_scatter_merge_fn_coalesced
+    elif mode and "custom_ops" in mode:
         rs_merge_fn = reduce_scatter_merge_fn_to_trace_custom_ops
 
     # Process bucket with lazy input collection
