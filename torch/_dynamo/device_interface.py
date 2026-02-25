@@ -571,7 +571,13 @@ class TpuInterface(DeviceInterface):
     def is_dtype_supported(
         cls, dtype: torch.dtype, including_emulation: bool = False
     ) -> bool:
-        return dtype not in (torch.float64, torch.complex32, torch.complex64, torch.complex128, torch.half)
+        return dtype not in (
+            torch.float64,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.half,
+        )
 
     @staticmethod
     def is_available() -> bool:
@@ -584,10 +590,6 @@ class TpuInterface(DeviceInterface):
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> str:
         return ""
-
-    @staticmethod
-    def synchronize(device: torch.types.Device = None) -> None:
-        pass
 
     # pyrefly: ignore [bad-override]
     class Worker:
