@@ -547,7 +547,10 @@ class OptimizedModule(torch.nn.Module):
     def __getattr__(self, name: str) -> Any:
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
-        return getattr(self._orig_mod, name)
+        try:
+            return getattr(self._orig_mod, name)
+        except AttributeError:
+            raise_observed_exception()
 
     def __setattr__(self, name: str, value: Any) -> None:
         # Allow patching over class attributes
