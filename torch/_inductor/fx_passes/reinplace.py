@@ -12,6 +12,7 @@ import torch
 import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_impls import infer_size
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -102,6 +103,7 @@ def _inplace_generalized_scatter(
         ):
             tmp = view.target(tmp, *fake_args, **fake_kwargs)
     try:
+        infer_size(src.shape, tmp.shape)
         tmp.copy_(src)
     except RuntimeError as e:
         raise RuntimeError(
