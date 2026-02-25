@@ -1039,11 +1039,13 @@ class aten_distributed_optimizations:
     # Method for estimating collective runtime
     # "analytical": Use bandwidth formulas (default)
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
+    # In deterministic mode, this setting is ignored and "analytical" is used.
     collective_estimator: Literal["analytical", "benchmark"] = "analytical"
 
     # Method for estimating compute (ATen op) runtime
     # "analytical": Use roofline model estimates (deterministic, no GPU sync)
     # "benchmark": Use GPU benchmarking (more accurate, requires GPU sync)
+    # In deterministic mode, this setting is ignored and "analytical" is used.
     compute_estimator: Literal["analytical", "benchmark"] = "benchmark"
 
     # Maximum memory increase above baseline for prefetch operations

@@ -11,6 +11,7 @@ from typing import Any, Literal
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor import config
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import (
     _schedulable_wait_node,
@@ -188,7 +189,7 @@ def estimate_roofline_runtime_ms(node: fx.Node) -> float:
 
     flat_args_kwargs, _ = tree_flatten((args, kwargs))
     flat_outs, _ = tree_flatten(out)
-    out_dtypes = {t.dtype for t in flat_outs if isinstance(t, torch.Tensor)}
+    out_dtypes = OrderedSet([t.dtype for t in flat_outs if isinstance(t, torch.Tensor)])
 
     # Compute time (FLOPs-based, only if op is in flop_registry)
     # May return SymFloat if shapes are symbolic (after flop division)
@@ -694,7 +695,9 @@ class OverlapScheduler:
             runtime_estimations_analytical.append(val_analytical)
 
             if self.compute_estimator == "benchmark":
-                val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
+                val, key = benchmark_node_with_cache_key(
+                    n, self.custom_runtime_estimation
+                )
             else:
                 # Use analytical estimation
                 val, key = val_analytical, None
@@ -748,14 +751,19 @@ class OverlapScheduler:
         # When both estimators are analytical, estimates are deterministic across ranks
         # (same shapes = same estimates), so skip the all_gather to avoid sync.
         import torch.distributed as dist
+
         world_size = dist.get_world_size()
 
-        if self.compute_estimator == "analytical" and self.collective_estimator == "analytical":
+        if (
+            self.compute_estimator == "analytical"
+            and self.collective_estimator == "analytical"
+        ):
             median_runtime_estimations = runtime_estimations
         else:
             # Single all_gather and compute medians
             from torch._subclasses.fake_tensor import unset_fake_temporarily
             from torch.distributed.distributed_c10d import _get_default_group
+
             pg = _get_default_group()
             with unset_fake_temporarily():
                 gathered_runtime_estimations: list[list[float]] = [
@@ -919,7 +927,10 @@ class OverlapScheduler:
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
         if is_compute_node(node):
-            return benchmark_node(node, self.custom_runtime_estimation)
+            if self.compute_estimator == "benchmark":
+                return benchmark_node(node, self.custom_runtime_estimation)
+            else:
+                return estimate_roofline_runtime_ms(node)
 
         # Use precomputed cost for fusion region call_module nodes
         # This takes priority even over custom estimation since fusion regions
