@@ -374,7 +374,7 @@ binary_additive_ops = [
 ]
 
 # Maps op -> whether R, P(x) -> P(x) is valid (linear in second arg).
-# True for mul (bilinear), False for div (only linear in numerator).
+# True for mul (linear in each argument), False for div (only linear in numerator).
 binary_multiplicative_ops: dict[OpOverload, bool] = {
     aten.div.Tensor: False,
     aten.div.out: False,
@@ -392,11 +392,11 @@ scalar_multiplicative_ops = [
     aten.mul_.Scalar,
 ]
 
-# Monotonic increasing unary ops: P(max)->P(max), P(min)->P(min)
-# Only ops that are monotonic on their ENTIRE domain belong here.
+# Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
+# Only ops that are non-decreasing on their ENTIRE domain belong here.
 # Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
 # because P(max) offsets can push inputs outside the valid domain.
-monotonic_increasing_unary_ops = [
+non_decreasing_unary_ops = [
     aten.asinh.default,
     aten.asinh.out,
     aten.asinh_.default,
@@ -450,9 +450,9 @@ monotonic_increasing_unary_ops = [
     aten.trunc_.default,
 ]
 
-# Monotonic decreasing unary ops: P(max)->P(min), P(min)->P(max)
+# Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
 # Note: acos excluded due to domain constraints [-1,1] causing validation failures
-monotonic_decreasing_unary_ops: list[OpOverload] = [
+non_increasing_unary_ops: list[OpOverload] = [
     aten.erfc.default,
     aten.erfc.out,
     aten.erfc_.default,
@@ -832,7 +832,7 @@ for op in scalar_multiplicative_ops:
     )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
 
 # Monotonic increasing unary: P(max)->P(max), P(min)->P(min)
-for op in monotonic_increasing_unary_ops:
+for op in non_decreasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(
@@ -845,7 +845,7 @@ for op in monotonic_increasing_unary_ops:
     )
 
 # Monotonic decreasing unary: P(max)->P(min), P(min)->P(max)
-for op in monotonic_decreasing_unary_ops:
+for op in non_increasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(
