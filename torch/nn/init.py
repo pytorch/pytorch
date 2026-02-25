@@ -107,38 +107,46 @@ def _no_grad_trunc_normal_(
         if p > 0.3:
             # Cast bounds to tensor dtype so the rejection mask is consistent
             # with the tensor's representable values.
-            lo = tensor.new_tensor(a).item()
-            hi = tensor.new_tensor(b).item()
+            lo = tensor.new_tensor(a, device="cpu").item()
+            hi = tensor.new_tensor(b, device="cpu").item()
             tensor.normal_(mean, std, generator=generator)
             while True:
-                mask = (tensor < lo) | (tensor > hi)
-                if not mask.any():
+                mask = tensor < lo
+                mask |= tensor > hi
+                count = int(mask.sum().item())
+                if count == 0:
                     break
-                tensor[mask] = torch.normal(
-                    mean,
-                    std,
-                    size=(mask.sum().item(),),
-                    dtype=tensor.dtype,
-                    device=tensor.device,
-                    generator=generator,
+                tensor.masked_scatter_(
+                    mask,
+                    torch.normal(
+                        mean,
+                        std,
+                        size=(count,),
+                        dtype=tensor.dtype,
+                        device=tensor.device,
+                        generator=generator,
+                    ),
                 )
         else:
             mode = max(a, min(mean, b))
             log_peak = -0.5 * ((mode - mean) / std) ** 2
 
-            accepted = torch.zeros(
-                tensor.shape, dtype=torch.bool, device=tensor.device
-            )
-            while not accepted.all():
-                pending = ~accepted
+            pending = torch.ones_like(tensor, dtype=torch.bool)
+            n = tensor.numel()
+            candidates = torch.empty(n, dtype=tensor.dtype, device=tensor.device)
+            accept_buf = torch.empty(n, dtype=tensor.dtype, device=tensor.device)
+            while True:
                 count = pending.sum().item()
-                tensor[pending] = torch.empty(
-                    count, dtype=tensor.dtype, device=tensor.device,
-                ).uniform_(a, b, generator=generator)
-                log_pdf = -0.5 * ((tensor[pending] - mean) / std) ** 2
-                accepted[pending] = torch.rand(
-                    count, dtype=tensor.dtype, device=tensor.device,
-                ).log() <= (log_pdf - log_peak)
+                if count == 0:
+                    break
+                s = candidates[:count]
+                u = accept_buf[:count]
+                tensor.masked_scatter_(pending, s.uniform_(a, b, generator=generator))
+                # log_pdf = -0.5 * ((s - mean) / std) ** 2
+                s.sub_(mean).div_(std).pow_(2).mul_(-0.5).sub_(log_peak)
+                pending.masked_scatter_(
+                    pending, u.uniform_(generator=generator).log_().gt(s)
+                )
 
         return tensor
 

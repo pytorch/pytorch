@@ -9,9 +9,7 @@ from operator import mul
 import torch
 import torch.nn.functional as F
 import torch.nn.init as init
-from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
@@ -612,17 +610,15 @@ class TestNNInitDeviceType(TestCase):
         )
 
     # Test that trunc_normal_ behaves well for narrow interval compared to std.
-    # bf16 excluded: only 65 representable values in [2, 3] makes the
-    # distribution visibly stepped, legitimately failing the KS test.
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     @parametrize_test(
         "dtype",
-        [torch.float32, torch.float64, torch.float16],
+        [torch.float32, torch.float64, torch.float16, torch.bfloat16],
     )
     def test_trunc_normal_narrow_interval(self, device, dtype):
         n = 10000
-        mean, std, a, b = 0.0, 1.0, 2.0, 3.0
+        mean, std, a, b = -3.0, 1.0, -0.5, 0.5
         t = torch.empty(n, dtype=dtype, device=device)
         init.trunc_normal_(t, mean=mean, std=std, a=a, b=b)
 
