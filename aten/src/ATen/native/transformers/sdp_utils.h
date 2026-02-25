@@ -23,8 +23,8 @@ void alloc_with_matching_layout(
   const auto q_strides = q.strides();
   std::stable_sort(
       fill_order.begin(), fill_order.end(), [&q_strides](int idx1, int idx2) {
-        int64_t s1 = q_strides[idx1] ? q_strides[idx1] : 1;
-        int64_t s2 = q_strides[idx2] ? q_strides[idx2] : 1;
+        int64_t s1 = q_strides[idx1] ? q_strides[idx1] : INT64_MAX;
+        int64_t s2 = q_strides[idx2] ? q_strides[idx2] : INT64_MAX;
         return s1 < s2;
       });
   std::vector<int64_t> ordered_strides(shape.size());
