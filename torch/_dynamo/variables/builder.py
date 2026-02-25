@@ -17,7 +17,6 @@ The builders in this module handle converting Python values into appropriate
 VariableTracker instances based on their type and usage context.
 """
 
-import _thread
 import abc
 import collections
 import contextlib
@@ -191,7 +190,6 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    RLockVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -1402,7 +1400,18 @@ class VariableBuilder:
             )
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
+            # Reconstruct the _lru_cache_wrapper object inside dynamo using the
+            # original function and the cache parameters.
+            wrapped = UserFunctionVariable(value.__wrapped__, source=self.source)
+            kwds = {
+                k: SourcelessBuilder.create(self.tx, v)
+                for k, v in value.cache_parameters().items()
+            }
+            return (
+                UserFunctionVariable(functools.lru_cache, source=self.source)
+                .call_function(self.tx, [], kwds)
+                .call_function(self.tx, [wrapped], {})
+            )
         elif value is sys.exc_info or (
             sys.version_info >= (3, 11) and value is sys.exception
         ):

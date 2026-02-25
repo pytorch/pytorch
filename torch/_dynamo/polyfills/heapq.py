@@ -5,44 +5,13 @@ Python polyfills for heapq
 from __future__ import annotations
 
 import heapq
-import importlib
-import sys
-from typing import TYPE_CHECKING, TypeVar
+from typing import TypeVar
 
 from ..decorators import substitute_in_graph
-
-
-if TYPE_CHECKING:
-    from types import ModuleType
+from . import import_fresh_module
 
 
 _T = TypeVar("_T")
-
-
-# Partially copied from CPython test/support/import_helper.py
-# https://github.com/python/cpython/blob/bb8791c0b75b5970d109e5557bfcca8a578a02af/Lib/test/support/import_helper.py
-def _save_and_remove_modules(names: set[str]) -> dict[str, ModuleType]:
-    orig_modules = {}
-    prefixes = tuple(name + "." for name in names)
-    for modname in list(sys.modules):
-        if modname in names or modname.startswith(prefixes):
-            orig_modules[modname] = sys.modules.pop(modname)
-    return orig_modules
-
-
-def import_fresh_module(name: str, blocked: list[str]) -> ModuleType:
-    # Keep track of modules saved for later restoration as well
-    # as those which just need a blocking entry removed
-    names = {name, *blocked}
-    orig_modules = _save_and_remove_modules(names)
-    for modname in blocked:
-        sys.modules[modname] = None  # type: ignore[assignment]
-
-    try:
-        return importlib.import_module(name)
-    finally:
-        _save_and_remove_modules(names)
-        sys.modules.update(orig_modules)
 
 
 # Import the pure Python heapq module, blocking the C extension

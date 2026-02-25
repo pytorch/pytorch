@@ -1599,6 +1599,10 @@ class BuiltinVariable(VariableTracker):
     call_int = _call_int_float
     call_float = _call_int_float
 
+    def call_object(self, tx: "InstructionTranslator") -> VariableTracker:
+        # no source since object is created inside dynamo
+        return variables.ObjectVariable(object())
+
     def call_bool(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:

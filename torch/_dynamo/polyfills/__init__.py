@@ -6,6 +6,8 @@ Python polyfills for common builtins.
 #       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
 #          Add it in the TYPE_CHECKING block below as well.
 
+import importlib
+import sys as pysys
 import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
@@ -170,6 +172,32 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
                 return True
         return False
     raise TypeError(f"argument of type {type(b)} is not iterable")
+
+
+# Partially copied from CPython test/support/import_helper.py
+# https://github.com/python/cpython/blob/bb8791c0b75b5970d109e5557bfcca8a578a02af/Lib/test/support/import_helper.py
+def _save_and_remove_modules(names: set[str]) -> dict[str, types.ModuleType]:
+    orig_modules = {}
+    prefixes = tuple(name + "." for name in names)
+    for modname in list(pysys.modules):
+        if modname in names or modname.startswith(prefixes):
+            orig_modules[modname] = pysys.modules.pop(modname)
+    return orig_modules
+
+
+def import_fresh_module(name: str, blocked: list[str]) -> types.ModuleType:
+    # Keep track of modules saved for later restoration as well
+    # as those which just need a blocking entry removed
+    names = {name, *blocked}
+    orig_modules = _save_and_remove_modules(names)
+    for modname in blocked:
+        pysys.modules[modname] = None  # type: ignore[assignment]
+
+    try:
+        return importlib.import_module(name)
+    finally:
+        _save_and_remove_modules(names)
+        pysys.modules.update(orig_modules)
 
 
 def accumulate_grad(x: torch.Tensor, new_grad: torch.Tensor | None) -> None:
