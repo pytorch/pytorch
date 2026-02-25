@@ -197,9 +197,8 @@ template <
     ::metal::enable_if_t<
         is_scalar_integral_v<T> && is_scalar_integral_v<U>,
         bool> = true>
-inline common_dtype<T, U> safe_mod(T x, U y) {
-  volatile auto tmp = x;
-  return tmp % y;
+inline common_dtype<T, U> safe_mod(volatile T x, U y) {
+  return x % y;
 }
 
 // fmod
