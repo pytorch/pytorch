@@ -60,23 +60,167 @@ unary_linear_ops = [aten.to.dtype]
 
 binary_additive_ops = [
     aten.add.Tensor,
+    aten.add.out,
     aten.add_.Tensor,
     aten.sub.Tensor,
+    aten.sub.out,
     aten.sub_.Tensor,
+    aten._foreach_add.List,
+    aten._foreach_add_.List,
+    aten._foreach_sub.List,
+    aten._foreach_sub_.List,
 ]
 
-# mul: partials propagate through either arg. div: only through numerator.
-binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor]
-binary_div_ops = [aten.div.Tensor, aten.div_.Tensor]
+# Maps op -> whether R, P(x) -> P(x) is valid (linear in second arg).
+# True for mul (linear in each argument), False for div (only linear in numerator).
+binary_multiplicative_ops: dict[OpOverload, bool] = {
+    aten.div.Tensor: False,
+    aten.div.out: False,
+    aten.div_.Tensor: False,
+    aten.mul.Tensor: True,
+    aten.mul.out: True,
+    aten.mul_.Tensor: True,
+    aten._foreach_div.List: False,
+    aten._foreach_div.Tensor: False,
+    aten._foreach_div_.List: False,
+    aten._foreach_div_.Tensor: False,
+    aten._foreach_mul.List: True,
+    aten._foreach_mul.Tensor: True,
+    aten._foreach_mul_.List: True,
+    aten._foreach_mul_.Tensor: True,
+}
 
+# Scalar linear ops: multiplying/dividing/adding/subtracting by scalar is linear
 scalar_linear_ops = [
     aten.div.Scalar,
     aten.div_.Scalar,
     aten.mul.Scalar,
     aten.mul_.Scalar,
+    aten._foreach_add.Scalar,
+    aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
+    aten._foreach_div.Scalar,
+    aten._foreach_div.ScalarList,
+    aten._foreach_div_.Scalar,
+    aten._foreach_div_.ScalarList,
+    aten._foreach_mul.Scalar,
+    aten._foreach_mul.ScalarList,
+    aten._foreach_mul_.Scalar,
+    aten._foreach_mul_.ScalarList,
+    aten._foreach_sub.Scalar,
+    aten._foreach_sub.ScalarList,
+    aten._foreach_sub_.Scalar,
+    aten._foreach_sub_.ScalarList,
 ]
 
-neg_ops = [aten.neg.default, aten.neg_.default]
+# Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
+# Only ops that are non-decreasing on their ENTIRE domain belong here.
+# Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
+# because P(max) offsets can push inputs outside the valid domain.
+non_decreasing_unary_ops = [
+    aten.asinh.default,
+    aten.asinh.out,
+    aten.asinh_.default,
+    aten.atan.default,
+    aten.atan.out,
+    aten.atan_.default,
+    aten.ceil.default,
+    aten.ceil.out,
+    aten.ceil_.default,
+    aten.erf.default,
+    aten.erf.out,
+    aten.erf_.default,
+    aten.exp.default,
+    aten.exp.out,
+    aten.exp_.default,
+    aten.exp2.default,
+    aten.exp2.out,
+    aten.exp2_.default,
+    aten.expm1.default,
+    aten.expm1.out,
+    aten.expm1_.default,
+    aten.floor.default,
+    aten.floor.out,
+    aten.floor_.default,
+    aten.relu.default,
+    aten.relu.out,
+    aten.relu_.default,
+    aten.round.decimals,
+    aten.round.decimals_out,
+    aten.round.default,
+    aten.round.out,
+    aten.round_.decimals,
+    aten.round_.default,
+    aten.sgn.default,
+    aten.sgn.out,
+    aten.sgn_.default,
+    aten.sigmoid.default,
+    aten.sigmoid.out,
+    aten.sigmoid_.default,
+    aten.sign.default,
+    aten.sign.out,
+    aten.sign_.default,
+    aten.sinh.default,
+    aten.sinh.out,
+    aten.sinh_.default,
+    aten.tanh.default,
+    aten.tanh.out,
+    aten.tanh_.default,
+    aten.trunc.default,
+    aten.trunc.out,
+    aten.trunc_.default,
+]
+
+# Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
+# Note: acos excluded due to domain constraints [-1,1] causing validation failures
+non_increasing_unary_ops: list[OpOverload] = [
+    aten.erfc.default,
+    aten.erfc.out,
+    aten.erfc_.default,
+    aten.special_erfcx.default,
+    aten.special_erfcx.out,
+]
+
+# All-partial-preserving unary ops: P(x)->P(x) for all x
+# These ops preserve the exact value for each element, only transforming units/representation
+all_partial_preserving_unary_ops = [
+    aten.deg2rad.default,
+    aten.deg2rad.out,
+    aten.deg2rad_.default,
+    aten.nan_to_num.default,
+    aten.nan_to_num.out,
+    aten.nan_to_num_.default,
+    aten.rad2deg.default,
+    aten.rad2deg.out,
+    aten.rad2deg_.default,
+]
+
+# Binary ops that are monotonically increasing in both arguments.
+# All get base rules P(max/min)+R→P(max/min) (monotonicity guarantees
+# correctness). Ops that ARE max/min additionally preserve P(max/min)
+# when both inputs carry the same partial: value maps to which partial
+# type to add ("max", "min"), or None for base rules only.
+monotonic_binary_ops: dict[torch._ops.OpOverload, str | None] = {
+    aten.clamp_max.Tensor: "min",
+    aten.clamp_max.Tensor_out: "min",
+    aten.clamp_min.Tensor: "max",
+    aten.clamp_min.Tensor_out: "max",
+    aten.fmax.default: "max",
+    aten.fmax.out: "max",
+    aten.fmin.default: "min",
+    aten.fmin.out: "min",
+    aten.logaddexp.default: None,
+    aten.logaddexp.out: None,
+    aten.logaddexp2.default: None,
+    aten.logaddexp2.out: None,
+    aten.maximum.default: "max",
+    aten.maximum.out: "max",
+    aten.minimum.default: "min",
+    aten.minimum.out: "min",
+    prims.fmax.default: "max",
+    prims.fmin.default: "min",
+    aten._foreach_maximum_.List: "max",
+}
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
@@ -160,8 +304,6 @@ pointwise_ops = [
     aten.clamp.out,
     aten.clamp_.default,
     aten.clamp_.Tensor,
-    aten.clamp_min.default,
-    aten.clamp_max.default,
     aten.clip.default,
     aten.clip.out,
     aten.clip_.default,
@@ -201,8 +343,6 @@ pointwise_ops = [
     aten.float_power.Tensor_Tensor_out,
     aten.float_power_.Scalar,
     aten.float_power_.Tensor,
-    aten.fmax.default,
-    aten.fmin.default,
     aten.fmod.Scalar,
     aten.fmod.Scalar_out,
     aten.fmod.Tensor,
@@ -406,174 +546,6 @@ pointwise_ops = [
     aten._foreach_log_.default,
     aten._amp_foreach_non_finite_check_and_unscale_.default,
 ]
-
-# Linear pointwise ops, split by linearity type.
-unary_linear_ops = [aten.to.dtype]
-
-binary_additive_ops = [
-    aten.add.Tensor,
-    aten.add.out,
-    aten.add_.Tensor,
-    aten.sub.Tensor,
-    aten.sub.out,
-    aten.sub_.Tensor,
-    aten._foreach_add.List,
-    aten._foreach_add_.List,
-    aten._foreach_sub.List,
-    aten._foreach_sub_.List,
-]
-
-# Maps op -> whether R, P(x) -> P(x) is valid (linear in second arg).
-# True for mul (linear in each argument), False for div (only linear in numerator).
-binary_multiplicative_ops: dict[OpOverload, bool] = {
-    aten.div.Tensor: False,
-    aten.div.out: False,
-    aten.div_.Tensor: False,
-    aten.mul.Tensor: True,
-    aten.mul.out: True,
-    aten.mul_.Tensor: True,
-    aten._foreach_div.List: False,
-    aten._foreach_div.Tensor: False,
-    aten._foreach_div_.List: False,
-    aten._foreach_div_.Tensor: False,
-    aten._foreach_mul.List: True,
-    aten._foreach_mul.Tensor: True,
-    aten._foreach_mul_.List: True,
-    aten._foreach_mul_.Tensor: True,
-}
-
-# Scalar linear ops: multiplying/dividing/adding/subtracting by scalar is linear
-scalar_linear_ops = [
-    aten.div.Scalar,
-    aten.div_.Scalar,
-    aten.mul.Scalar,
-    aten.mul_.Scalar,
-    aten._foreach_add.Scalar,
-    aten._foreach_add_.Scalar,
-    aten._foreach_add_.ScalarList,
-    aten._foreach_div.Scalar,
-    aten._foreach_div.ScalarList,
-    aten._foreach_div_.Scalar,
-    aten._foreach_div_.ScalarList,
-    aten._foreach_mul.Scalar,
-    aten._foreach_mul.ScalarList,
-    aten._foreach_mul_.Scalar,
-    aten._foreach_mul_.ScalarList,
-    aten._foreach_sub.Scalar,
-    aten._foreach_sub.ScalarList,
-    aten._foreach_sub_.Scalar,
-    aten._foreach_sub_.ScalarList,
-]
-
-# Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
-# Only ops that are non-decreasing on their ENTIRE domain belong here.
-# Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
-# because P(max) offsets can push inputs outside the valid domain.
-non_decreasing_unary_ops = [
-    aten.asinh.default,
-    aten.asinh.out,
-    aten.asinh_.default,
-    aten.atan.default,
-    aten.atan.out,
-    aten.atan_.default,
-    aten.ceil.default,
-    aten.ceil.out,
-    aten.ceil_.default,
-    aten.erf.default,
-    aten.erf.out,
-    aten.erf_.default,
-    aten.exp.default,
-    aten.exp.out,
-    aten.exp_.default,
-    aten.exp2.default,
-    aten.exp2.out,
-    aten.exp2_.default,
-    aten.expm1.default,
-    aten.expm1.out,
-    aten.expm1_.default,
-    aten.floor.default,
-    aten.floor.out,
-    aten.floor_.default,
-    aten.relu.default,
-    aten.relu.out,
-    aten.relu_.default,
-    aten.round.decimals,
-    aten.round.decimals_out,
-    aten.round.default,
-    aten.round.out,
-    aten.round_.decimals,
-    aten.round_.default,
-    aten.sgn.default,
-    aten.sgn.out,
-    aten.sgn_.default,
-    aten.sigmoid.default,
-    aten.sigmoid.out,
-    aten.sigmoid_.default,
-    aten.sign.default,
-    aten.sign.out,
-    aten.sign_.default,
-    aten.sinh.default,
-    aten.sinh.out,
-    aten.sinh_.default,
-    aten.tanh.default,
-    aten.tanh.out,
-    aten.tanh_.default,
-    aten.trunc.default,
-    aten.trunc.out,
-    aten.trunc_.default,
-]
-
-# Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
-# Note: acos excluded due to domain constraints [-1,1] causing validation failures
-non_increasing_unary_ops: list[OpOverload] = [
-    aten.erfc.default,
-    aten.erfc.out,
-    aten.erfc_.default,
-    aten.special_erfcx.default,
-    aten.special_erfcx.out,
-]
-
-# All-partial-preserving unary ops: P(x)->P(x) for all x
-# These ops preserve the exact value for each element, only transforming units/representation
-all_partial_preserving_unary_ops = [
-    aten.deg2rad.default,
-    aten.deg2rad.out,
-    aten.deg2rad_.default,
-    aten.nan_to_num.default,
-    aten.nan_to_num.out,
-    aten.nan_to_num_.default,
-    aten.rad2deg.default,
-    aten.rad2deg.out,
-    aten.rad2deg_.default,
-]
-
-# Binary ops that are monotonically increasing in both arguments.
-# All get base rules P(max/min)+R→P(max/min) (monotonicity guarantees
-# correctness). Ops that ARE max/min additionally preserve P(max/min)
-# when both inputs carry the same partial: value maps to which partial
-# type to add ("max", "min"), or None for base rules only.
-monotonic_binary_ops: dict[torch._ops.OpOverload, str | None] = {
-    aten.clamp_max.Tensor: "min",
-    aten.clamp_max.Tensor_out: "min",
-    aten.clamp_min.Tensor: "max",
-    aten.clamp_min.Tensor_out: "max",
-    aten.fmax.default: "max",
-    aten.fmax.out: "max",
-    aten.fmin.default: "min",
-    aten.fmin.out: "min",
-    aten.logaddexp.default: None,
-    aten.logaddexp.out: None,
-    aten.logaddexp2.default: None,
-    aten.logaddexp2.out: None,
-    aten.maximum.default: "max",
-    aten.maximum.out: "max",
-    aten.minimum.default: "min",
-    aten.minimum.out: "min",
-    prims.fmax.default: "max",
-    prims.fmin.default: "min",
-    aten._foreach_maximum_.List: "max",
-}
-
 
 # Rule constants for partial placement propagation
 _UNARY_LINEAR_RULES: list[list[Placement]] = [
