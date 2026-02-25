@@ -3059,13 +3059,11 @@ class GuardBuilder(GuardBuilderBase):
                     and config.stable_graph_selection_for_automatic_dynamic
                     and not config.enable_compiler_collectives
                 ):
-                    # Only exclude on dimensions that are dynamic in this
-                    # graph (size[i] is None). Static dimensions are already
-                    # handled by the tensor match guard.
+                    # excluded_sizes only has non-None values for dimensions
+                    # that transitioned from static to dynamic in the most
+                    # recent merge step (pgo.py resets it fresh each merge).
                     dims_and_values = [
-                        (i, v)
-                        for i, v in enumerate(excluded_sizes)
-                        if v is not None and i < len(size) and size[i] is None
+                        (i, v) for i, v in enumerate(excluded_sizes) if v is not None
                     ]
 
                     # Only add the exclusion if the current input doesn't

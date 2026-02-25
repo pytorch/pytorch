@@ -2734,6 +2734,9 @@ class VariableBuilder:
         assert not isinstance(self.get_source(), RandomValueSource)
         install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
+        # When a scalar transitions from static to dynamic, install an
+        # exclusion guard so the dynamic graph doesn't shadow the earlier
+        # static graph for the original value.
         if (
             frame_state_entry is not None
             and frame_state_entry.excluded_scalar is not None
