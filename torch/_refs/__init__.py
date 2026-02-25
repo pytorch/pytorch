@@ -5361,14 +5361,14 @@ def arange(
 
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
-    if dtype == torch.int64 or integer_args:
+    if dtype == torch.int64 and integer_args:
         # Uses floordiv to avoid ceil in inductor.
         sgn = bool(xstep > 0) - bool(xstep < 0)  # type: ignore[possibly-undefined]
         length = (xend - xstart + xstep - sgn) // xstep  # type: ignore[possibly-undefined]
     else:
         length = math.ceil((end - start) / step)
 
-    if is_integer:
+    if is_integer and integer_args:
         return prims.iota(
             length,
             start=xstart,  # type: ignore[possibly-undefined]
@@ -5391,13 +5391,18 @@ def arange(
         torch.long if integer_args else utils.get_acc_type(dtype, device)
     )
     index = _maybe_convert_to_dtype(index, computation_dtype)
-    result = start + step * index
+
+    if is_integer:
+        # ATen C++ truncates start and step before sequence generation
+        result = xstart + xstep * index  # type: ignore[possibly-undefined]
+    else:
+        result = start + step * index
+
     result = _maybe_convert_to_dtype(result, dtype)
 
     if requires_grad:
         result.requires_grad_(True)
     return result
-
 
 @register_decomposition(aten.lerp)
 @out_wrapper()
