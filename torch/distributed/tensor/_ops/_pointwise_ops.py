@@ -584,11 +584,13 @@ pointwise_ops = [
 ]
 
 
-def _shard_only_pointwise_strategy(
+def single_mesh_dim_common_pointwise_strategy(
     args_schema: ArgsType,
+    linearity: int = -1,
+    scalar_tensor_idx: Optional[int] = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    """Generate Shard placement strategies for pointwise ops based on tensor shapes."""
-    tensor_arg_metas: list[TensorMeta] = [
+    # TODO rename
+    tensor_arg_strategies: list[TensorMeta] = [
         arg for arg in args_schema if isinstance(arg, TensorMeta)
     ]
     common_shape = torch.broadcast_shapes(
@@ -596,17 +598,67 @@ def _shard_only_pointwise_strategy(
     )
     placements_list: list[list[Placement | _ShardingPlaceholder]] = []
     for i in range(len(common_shape)):
+        # Shard output dim i, and then shard the corresponding arguments if they have a corresponding (non broadcast) dim
         shard_placements: list[Placement | _ShardingPlaceholder] = [
             _ShardingPlaceholder(i)
         ]
-        for arg in tensor_arg_metas:
+        for arg in tensor_arg_strategies:
             common_dim_to_arg_dim = infer_broadcast_dims_map(common_shape, arg.shape)
             if common_dim_to_arg_dim[i] >= 0:
                 shard_placements.append(_ShardingPlaceholder(common_dim_to_arg_dim[i]))
             else:
                 shard_placements.append(Replicate())
+
         placements_list.append(shard_placements)
+
+    if linearity == 0:
+        # unary op (e.g. to_copy), and also binary ops like mul.scalar
+        # input, output can be partial
+        assert len(tensor_arg_strategies) == 1, (
+            "expected single tensor input for linearity==0 op"
+        )
+        placements_list.append([Partial("sum"), Partial("sum")])
+        # TODO: do i need to check scalar_tensor_index and assign a replicate to that one, or do i omit a placement for it
+        # TODO: can mul.scalar work with avg or only sum? i think only sum works. common_pointwise_strategy seems
+        # to support both.
+        # TODO: also, i'll be replacing 'Partial(sum)' here with some kind of 'PartialPlaceholder', not yet designed
+        placements_list.append([Partial("avg"), Partial("avg")])
+
+    elif linearity == 1:
+        # binary add ops
+        # (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
+        assert len(tensor_arg_strategies) == 2, (
+            "expected two tensor inputs for linearity==1 op"
+        )
+        placements_list.append([Partial("sum"), Partial("sum"), Partial("sum")])
+    elif linearity == 2:
+        # binary mul ops (2 tensor inputs)
+        # (A * B1) + (A * B2) == A * (B1 + B2)
+        assert len(tensor_arg_strategies) == 2, (
+            "expected two tensor inputs for linearity==2 op"
+        )
+        placements_list.append([Partial("sum"), Partial("sum"), Replicate()])
+        placements_list.append([Partial("sum"), Replicate(), Partial("sum")])
+
+    # TODO: handle scalar_tensor_idx
     return placements_list
+
+
+def single_mesh_dim_pointwise_strategy(
+    op: OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+    linearity: int = -1,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
+
+
+def single_mesh_dim_linear_pointwise_strategy(
+    linearity: int = -1,
+) -> Callable[
+    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+]:
+    return functools.partial(single_mesh_dim_pointwise_strategy, linearity=linearity)
 
 
 def _make_partial_strategy(
@@ -621,9 +673,30 @@ def _make_partial_strategy(
         args_schema: ArgsType,
         kwargs_schema: KwargsType,
     ) -> list[list[Placement | _ShardingPlaceholder]]:
-        placements = _shard_only_pointwise_strategy(args_schema)
+        tensor_arg_metas: list[TensorMeta] = [
+            arg for arg in args_schema if isinstance(arg, TensorMeta)
+        ]
+        common_shape = torch.broadcast_shapes(
+            *[arg.shape for arg in args_schema if isinstance(arg, TensorMeta)]
+        )
+        placements: list[list[Placement | _ShardingPlaceholder]] = []
+        for i in range(len(common_shape)):
+            shard_placements: list[Placement | _ShardingPlaceholder] = [
+                _ShardingPlaceholder(i)
+            ]
+            for arg in tensor_arg_metas:
+                common_dim_to_arg_dim = infer_broadcast_dims_map(
+                    common_shape, arg.shape
+                )
+                if common_dim_to_arg_dim[i] >= 0:
+                    shard_placements.append(
+                        _ShardingPlaceholder(common_dim_to_arg_dim[i])
+                    )
+                else:
+                    shard_placements.append(Replicate())
+            placements.append(shard_placements)
         if extra_rules:
-            n_tensors = sum(1 for arg in args_schema if isinstance(arg, TensorMeta))
+            n_tensors = len(tensor_arg_metas)
             expected_len = 1 + n_tensors
             for rule in extra_rules:
                 if len(rule) == expected_len:
