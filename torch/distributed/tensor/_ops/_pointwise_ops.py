@@ -191,6 +191,7 @@ _MONOTONIC_DECREASING_RULES: list[list[Placement]] = [
     [Partial("max"), Partial("min")],
 ]
 
+# neg is linear: -(A1 + A2) = -A1 + -A2
 neg_ops = [aten.neg.default, aten.neg.out, aten.neg_.default]
 
 _NEG_RULES: list[list[Placement]] = _UNARY_LINEAR_RULES + _MONOTONIC_DECREASING_RULES
@@ -251,13 +252,17 @@ _monotone_binary_base_rules: list[list[Placement]] = [
     [Partial("min"), Replicate(), Partial("min")],
 ]
 
+# Ops that preserve specific Partial types through the operation.
+# For example, torch.maximum preserves Partial("max") because
+# max(max(a), max(b)) == max(a, b).
 # .out variants stay on old path until PR2 adds out-variant infrastructure
 partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.maximum.out: "max",
     aten.minimum.out: "min",
 }
 
-# Reconstruct the original linear_pointwise_ops dict for the existing registration path.
+# The linear pointwise ops map, key is op, value is the type of linearity.
+# Reconstructed from category lists for the existing registration path.
 linear_pointwise_ops: dict[OpOverload, int] = {
     **dict.fromkeys(unary_linear_ops, 0),
     **dict.fromkeys(binary_additive_ops, 1),
@@ -627,12 +632,21 @@ def pointwise_strategy(
     max_ndim = -1
 
     if op_schema.is_inplace_op():
+        # inplace op should follow the first arg strategy
         followed_strategy = op_schema.args_schema[0]
         followed_strategy_index = 0
     elif op_schema.is_out_variant_op():
+        # out variant op should follow the out kwarg strategy
         followed_strategy = op_schema.kwargs_schema["out"]
+        # out variant is technically a kwarg for the strategy to follow so it does not
+        # have an "index", we set it to a reasonably large number just to indicate it's
+        # not a valid index
         followed_strategy_index = 100
     else:
+        # normal pointwise op, we choose to follow the arg with
+        # the max shards in case operands needs reshard
+        # in case of multiple operands with max shard, we take
+        # the one with the max number of dimensions
         for idx, arg_strategy in enumerate(op_schema.args_schema):
             if not isinstance(arg_strategy, OpStrategy):
                 continue
@@ -676,7 +690,13 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
-    """Strategy for pointwise ops that preserve specific Partial types."""
+    """
+    Strategy for pointwise ops that preserve specific Partial types.
+
+    For example, torch.maximum preserves Partial("max") placements because
+    max(max(a), max(b)) == max(a, b). Similarly, torch.minimum preserves
+    Partial("min") placements.
+    """
     preserve_partial = partial_preserving_ops.get(op_schema.op)
     return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
 
@@ -897,6 +917,7 @@ for op in linear_pointwise_ops:
             op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
         )(linear_pointwise_strategy)
 
+# Keep .out variants on old register_op_strategy path
 for op in partial_preserving_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         partial_preserving_pointwise_strategy
@@ -910,6 +931,7 @@ register_op_strategy(
     prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
 )(copy_strategy)
 
+# Keep pointwise_ops on old path (single-dim registrations above take precedence)
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
