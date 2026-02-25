@@ -862,6 +862,9 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   auto indices =
       at::native::expandTensors(*std::get<1>(mask_self_expanded),
                                 c10::List<std::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
+
+  TORCH_CHECK(indices[0].numel() <= source.numel(), "Number of elements of source < number of ones in mask");
+
   // next broadcast all index tensors together
   try {
     indices = at::expand_outplace(indices);
@@ -879,7 +882,9 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   for (const auto index : indices) {
     final_indices.push_back(index);
   }
-  return at::index_put_out(self, *std::get<1>(mask_self_expanded), final_indices, source.resize_(indices[0].numel()));
+
+  return at::index_put_out(
+      self, *std::get<1>(mask_self_expanded), final_indices, source.flatten().narrow(0, 0, indices[0].numel()));
 }
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
