@@ -4176,6 +4176,36 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_allocation_traceback(self):
+        def this_is_a_funky_allocator():
+            return torch.rand(311, 411, device="cuda")
+
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history("all", stacks="python")
+
+            x = this_is_a_funky_allocator()
+            frames = torch.cuda.memory._allocation_traceback(x.data_ptr())
+            self.assertIsInstance(frames, list)
+            self.assertGreater(len(frames), 0)
+            func_names = [f["name"] for f in frames]
+            self.assertIn("this_is_a_funky_allocator", func_names)
+
+            # freed pointer should return None
+            ptr = x.data_ptr()
+            del x
+            torch.cuda.empty_cache()
+            self.assertIsNone(torch.cuda.memory._allocation_traceback(ptr))
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    def test_allocation_traceback_no_recording(self):
+        x = torch.rand(64, device="cuda")
+        self.assertIsNone(torch.cuda.memory._allocation_traceback(x.data_ptr()))
+
     @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
     def test_direct_traceback(self):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks  # @manual
