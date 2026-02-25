@@ -17,7 +17,7 @@
 
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
