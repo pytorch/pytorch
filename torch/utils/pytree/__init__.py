@@ -17,7 +17,7 @@ collection support for PyTorch APIs.
 import os as _os
 import sys as _sys
 from types import ModuleType as _ModuleType
-from typing import Any as _Any, Optional as _Optional, TYPE_CHECKING as _TYPE_CHECKING
+from typing import Any as _Any, TYPE_CHECKING as _TYPE_CHECKING
 
 import torch.utils._pytree as python
 from torch.utils._pytree import (  # these type aliases are identical in both implementations
