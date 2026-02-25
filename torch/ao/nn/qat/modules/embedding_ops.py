@@ -50,7 +50,6 @@ class Embedding(nn.Embedding):
             scale_grad_by_freq,
             sparse,
             _weight,
-            # pyrefly: ignore [bad-argument-type]
             **factory_kwargs,
         )
         if not qconfig:
