@@ -2277,11 +2277,15 @@ class TritonTemplate(KernelTemplate):
 
 
 class ExternKernelChoice:
-    """Represents an external kernel choice for algorithm selection.
+    """Represents an external kernel that can participate in autotuning.
 
-    Wraps an external kernel function and provides methods to bind it to
-    specific inputs/layouts for benchmarking and code generation.
+    Each instance is registered as a singleton by name in ``_registry`` and
+    on the ``extern_kernels`` module so that codegen can emit a stable
+    reference.  Use ``lookup(name)`` to retrieve an existing instance
+    before creating a new one to avoid duplicate registrations.
     """
+
+    _registry: dict[str, "ExternKernelChoice"] = {}
 
     def __init__(
         self,
@@ -2297,14 +2301,11 @@ class ExternKernelChoice:
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        # Only register if not already present - reuse existing registration
-        if hasattr(extern_kernels, name):
-            log.debug("Reusing existing extern kernel: %s", name)
-        else:
-            setattr(extern_kernels, name, kernel)
+        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
+        setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
         self.kernel_creator = kernel_creator
@@ -2314,6 +2315,11 @@ class ExternKernelChoice:
         self.src_hash = None
         # By default GraphModule is None for extern kernels if not set
         self.gm = None
+        ExternKernelChoice._registry[name] = self
+
+    @classmethod
+    def lookup(cls, name: str) -> Optional["ExternKernelChoice"]:
+        return cls._registry.get(name)
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
