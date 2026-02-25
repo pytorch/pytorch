@@ -605,6 +605,34 @@ class TestLocalTensorWorld3(LocalTensorWorldTest):
             print(lt_output_tensor)
             self.assertEqual(lt_output_tensor, expected_output)
 
+    def test_reduce_scatter_list_collective(self):
+        """Test that reduce_scatter (list API) works correctly with LocalTensor."""
+        fake_pg = torch.distributed.distributed_c10d._get_default_group()
+
+        with LocalTensorMode(self.world_size) as mode:
+            # Each rank has [0..6] + rank*10, split into uneven chunks [3, 2, 2]
+            x = mode.rank_map(
+                lambda r: torch.arange(7, dtype=torch.float) + r * 10
+            )
+            input_list = list(torch.split(x, [3, 2, 2], dim=0))
+            output = mode.rank_map(
+                lambda r: torch.empty([3, 2, 2][r], dtype=torch.float)
+            )
+
+            dist.reduce_scatter(output, input_list, op=dist.ReduceOp.SUM)
+
+            # rank 0: [0,1,2] + [10,11,12] + [20,21,22] = [30,33,36]
+            # rank 1: [3,4] + [13,14] + [23,24] = [39,42]
+            # rank 2: [5,6] + [15,16] + [25,26] = [45,48]
+            expected = LocalTensor(
+                {
+                    0: torch.tensor([30.0, 33.0, 36.0]),
+                    1: torch.tensor([39.0, 42.0]),
+                    2: torch.tensor([45.0, 48.0]),
+                }
+            )
+            self.assertEqual(output, expected)
+
     def test_all_gather_into_tensor_collective(self):
         """Test that all_gather_into_tensor collective operation works correctly with LocalTensor."""
         # Create different tensors for each rank
