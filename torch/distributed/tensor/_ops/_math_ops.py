@@ -4,7 +4,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, Union
+from typing import Any, cast, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -16,6 +16,10 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     RuntimeSchemaInfo,
     TupleStrategy,
+)
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import (
     as_list,
@@ -324,10 +328,8 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.mean.dim: "avg",
     aten.mean.out: "avg",
     aten.max.default: "max",
-    aten.max.dim: "max",
     aten.max.out: "max",
     aten.min.default: "min",
-    aten.min.dim: "min",
     aten.min.out: "min",
     aten.amax.default: "max",
     aten.amax.out: "max",
@@ -367,6 +369,39 @@ def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
         reduction_linear=True,
         reduction_op=reduction_op,
     )
+
+
+# max.dim/min.dim return (values, indices). Indices are local to each shard
+# and cannot be combined across ranks, so we force Replicate on reduction dims
+# (same approach as argmax/argmin).
+@register_single_dim_strategy(
+    [aten.max.dim, aten.min.dim], schema_info=RuntimeSchemaInfo(1)
+)
+def max_min_dim_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    assert isinstance(input_meta, TensorMeta)
+    ndim = len(input_meta.shape)
+    dim = normalize_dim(cast(int, args_schema[1]), ndim)
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d == dim:
+            continue
+        out_d = d if keep_dim or d < dim else d - 1
+        # [values, indices, input]: shard on non-reduction dim
+        strategies.append(
+            [
+                _ShardingPlaceholder(out_d),
+                _ShardingPlaceholder(out_d),
+                _ShardingPlaceholder(d),
+            ]
+        )
+    return strategies
 
 
 @register_op_strategy(list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
