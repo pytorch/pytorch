@@ -55,6 +55,28 @@ prims = torch.ops.prims
 #     "real",  # complex data type only
 # ]
 
+# Linear pointwise ops, split by linearity type.
+unary_linear_ops = [aten.to.dtype]
+
+binary_additive_ops = [
+    aten.add.Tensor,
+    aten.add_.Tensor,
+    aten.sub.Tensor,
+    aten.sub_.Tensor,
+]
+
+# mul: partials propagate through either arg. div: only through numerator.
+binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor]
+binary_div_ops = [aten.div.Tensor, aten.div_.Tensor]
+
+scalar_linear_ops = [
+    aten.div.Scalar,
+    aten.div_.Scalar,
+    aten.mul.Scalar,
+    aten.mul_.Scalar,
+]
+
+neg_ops = [aten.neg.default, aten.neg_.default]
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
@@ -139,9 +161,7 @@ pointwise_ops = [
     aten.clamp_.default,
     aten.clamp_.Tensor,
     aten.clamp_min.default,
-    aten.clamp_min.Tensor,
     aten.clamp_max.default,
-    aten.clamp_max.Tensor,
     aten.clip.default,
     aten.clip.out,
     aten.clip_.default,
@@ -499,6 +519,7 @@ monotonic_binary_ops: dict[torch._ops.OpOverload, str | None] = {
     prims.fmax.default: "max",
     prims.fmin.default: "min",
 }
+
 
 # Rule constants for partial placement propagation
 _UNARY_LINEAR_RULES: list[list[Placement]] = [
