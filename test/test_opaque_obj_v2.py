@@ -2058,6 +2058,52 @@ class GraphModule(torch.nn.Module):
         self.assertIs(out3._counter, counter3b)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_shared_opaque_no_guard_when_output_plain(self):
+        """When inputs share an opaque but the output is a plain tensor
+        (no subclass), the shared opaque isn't needed for output remapping
+        and no identity guard should be installed. Breaking the sharing
+        should NOT trigger recompilation.
+
+        Counterpart to test_shared_opaque_identity_guard where the output
+        IS a subclass and breaking sharing DOES recompile.
+        """
+
+        def fn(x, y):
+            return x.a + y.a
+
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+
+        x = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter, size)
+        y = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter, size)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt_fn(x, y)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertNotIsInstance(out, TensorWithCounter)
+        self.assertEqual(out, x.a + y.a)
+
+        # Same sharing pattern → no recompile
+        counter2 = Counter(start=3, end=10)
+        size2 = SizeStore(4)
+        x2 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter2, size2)
+        y2 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter2, size2)
+        opt_fn(x2, y2)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Sharing broken → should NOT recompile.
+        # The output is a plain tensor, so the shared opaques aren't
+        # referenced in any output remapping. No identity guard exists,
+        # and the value-based guard passes because both counters are equal.
+        counter3a = Counter(start=3, end=10)
+        counter3b = Counter(start=3, end=10)
+        size3 = SizeStore(4)
+        x3 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter3a, size3)
+        y3 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter3b, size3)
+        opt_fn(x3, y3)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_shared_direct_opaque_identity_guard(self):
         """When the same opaque is passed as multiple direct function
         arguments, breaking the sharing should trigger recompilation.
