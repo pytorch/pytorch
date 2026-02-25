@@ -6,7 +6,6 @@
 #include <ATen/core/class_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/stack.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
