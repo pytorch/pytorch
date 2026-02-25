@@ -311,7 +311,6 @@ def meta_fft_c2c(self, dim, normalization, forward):
     if not dim:
         return self.clone()
 
-    # PocketFFT writes into a contiguous empty tensor directly
     if device_hint(self) == "cpu" and not torch.backends.mkl.is_available():
         return self.new_empty(self.size())
 
@@ -394,7 +393,6 @@ def meta_fft_r2c(self, dim, normalization, onesided):
         return _exec_fft(output, self, out_sizes, sorted_dims, forward=True)
 
     else:
-        # PocketFFT writes into a contiguous empty tensor
         return self.new_empty(
             out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
         )
@@ -511,7 +509,6 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
         return _exec_fft(out, input, out_sizes, dim, forward=False)
 
     else:
-        # PocketFFT writes into a contiguous empty tensor
         out_sizes = list(self.size())
         out_sizes[dim[-1]] = lastdim
         return self.new_empty(out_sizes, dtype=toRealValueType(self.dtype))
