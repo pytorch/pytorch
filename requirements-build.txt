@@ -1,5 +1,5 @@
 # Build System requirements
-setuptools>=70.1.0
+setuptools>=70.1.0,<82
 cmake>=3.27
 ninja
 numpy

@@ -1,13 +1,16 @@
 # Owner(s): ["oncall: distributed"]
 
+import gc
 import random
 import sys
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
 from torch import distributed as dist
+from torch.distributed.fsdp._common_utils import _get_param_to_fqns
 from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -133,6 +136,63 @@ class TestUtils(TestCase):
         x = _apply_to_tensors(fill_fn, x)
         x, _ = nn.utils.rnn.pad_packed_sequence(x)
         self.assertEqual(torch.sum(x), 0)
+
+    def test_get_param_to_fqns_scales_linearly(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/168329.
+
+        _apply_to_modules had O(N_submodules * N_params) complexity when
+        filter_fqns was large, causing multi-minute hangs on MoE + LoRA models.
+
+        Instead of asserting on absolute elapsed time (which varies across
+        machines), we measure the scaling ratio: increasing model size by 8x
+        should scale ~8x for O(N) but ~64x for O(N^2). We use the minimum
+        elapsed time over multiple iterations to reduce noise from GC pauses
+        and scheduling jitter.
+        """
+
+        class Expert(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.up = nn.Linear(dim, dim, bias=False)
+                self.down = nn.Linear(dim, dim, bias=False)
+
+        class MoELayer(nn.Module):
+            def __init__(self, dim, n_experts):
+                super().__init__()
+                self.experts = nn.ModuleList([Expert(dim) for _ in range(n_experts)])
+
+        def make_model(n_layers):
+            return nn.Sequential(*[MoELayer(16, 128) for _ in range(n_layers)])
+
+        num_iters = 5
+        warmup = make_model(1)
+        _get_param_to_fqns(warmup)
+        model_n = make_model(2)
+        model_8n = make_model(16)
+        gc.collect()
+        gc.disable()
+        try:
+            elapsed_n = float("inf")
+            for _ in range(num_iters):
+                t0 = time.process_time()
+                result_n = _get_param_to_fqns(model_n)  # noqa: F841
+                elapsed_n = min(elapsed_n, time.process_time() - t0)
+            elapsed_8n = float("inf")
+            for _ in range(num_iters):
+                t0 = time.process_time()
+                result_8n = _get_param_to_fqns(model_8n)  # noqa: F841
+                elapsed_8n = min(elapsed_8n, time.process_time() - t0)
+        finally:
+            gc.enable()
+        ratio = elapsed_8n / elapsed_n
+        self.assertLess(
+            ratio,
+            25.0,
+            f"_get_param_to_fqns scaling ratio {ratio:.2f}x when 8x-ing "
+            f"model size (elapsed_n={elapsed_n:.4f}s, elapsed_8n={elapsed_8n:.4f}s), "
+            f"expected <25x for O(N) but got ~64x indicating O(N^2) "
+            f"(see https://github.com/pytorch/pytorch/issues/168329)",
+        )
 
 
 devices = ("cuda", "hpu", "xpu")
