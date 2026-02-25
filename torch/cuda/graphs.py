@@ -4,7 +4,7 @@ from __future__ import annotations
 import gc
 import typing
 from collections.abc import Callable
-from typing import overload, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, overload, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -217,6 +217,7 @@ class graph:
         pool: _POOL_HANDLE | None = None,
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
+        tracked_inputs: dict[str, Any] | None = None,
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -233,6 +234,11 @@ class graph:
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
+        self._fx_tracer = None
+        if tracked_inputs is not None:
+            from torch.cuda._cuda_graph_fx_tracer import CudaGraphFxTracer
+
+            self._fx_tracer = CudaGraphFxTracer(tracked_inputs)
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -261,10 +267,17 @@ class graph:
             capture_error_mode=self.capture_error_mode,
         )
 
+        if self._fx_tracer is not None:
+            self._fx_tracer.__enter__()
+
     def __exit__(self, *args: object) -> None:
+        if self._fx_tracer is not None:
+            self._fx_tracer.__exit__(*args)
+            self.cuda_graph.graph_module = (  # pyrefly: ignore [missing-attribute]
+                self._fx_tracer.finalize()
+            )
         self.cuda_graph.capture_end()
         self.stream_ctx.__exit__(*args)
-        # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
 
 
 _ModuleOrCallable: TypeAlias = Union["torch.nn.Module", Callable[..., object]]
