@@ -175,7 +175,7 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
             range(fixed),
             device_index=boxed_device_index.value,
             is_backward=False,
-            is_inference=False,  # Q: should forward is_inference here?
+            is_inference=is_inference,
             stack_traces=get_stack_traces(aot_model),
             placeholders=get_placeholder_info(aot_model.graph),
             mutated_input_idxs=find_input_mutations(aot_model.graph),
@@ -264,7 +264,6 @@ def cudagraphs_inner(
     """This isn't registered as a backend, but is used in some benchmarks"""
     assert isinstance(inputs, (list, tuple))
     if copy_inputs:
-        # pyrefly: ignore [bad-argument-type]
         static_inputs = [torch.zeros_like(x) for x in inputs]
     else:
         static_inputs = list(inputs)

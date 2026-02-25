@@ -1555,7 +1555,8 @@ def error_inputs_multi_margin_loss(op, device, **kwargs):
                      error_regex=r'Expected non-empty vector or matrix with optional 0-dim batch size, but got: \[0\]')
     # invalid target
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={}),
-                     error_type=RuntimeError, error_regex=r'inconsistent target size, expected 5 but got \[5, 4\]')
+                     error_type=RuntimeError,
+                     error_regex=r'target tensor should be 1-D with size equal to.*Expected target size \[5\].*but got \[5, 4\]')
     # invalid target dtype
     yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5,),), kwargs={}),
                      error_type=RuntimeError, error_regex='expected scalar type Long but found Float')
@@ -2043,10 +2044,11 @@ def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
             yield SampleInput(t, dim)
 
 def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
-    yield SampleInput(
-        make_tensor((S, S), dtype=dtype, device=device,
-                    low=None, high=None,
-                    requires_grad=requires_grad))
+    make_arg = partial(make_tensor, device=device, dtype=dtype,
+                       requires_grad=requires_grad, low=None, high=None)
+    # Square, tall (rows > cols), wide (rows < cols), single row/col (#171704)
+    for shape in ((S, S), (S + 2, S), (S, S + 2), (1, S), (S, 1)):
+        yield SampleInput(make_arg(shape))
 
 
 def error_inputs_trace(op, device):
@@ -4052,9 +4054,11 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_conv1d(opinfo, device, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=torch.float64)
+    dtype = torch.float64 if device != 'mps:0' else torch.float32
+    cdtype = torch.complex128 if device != 'mps:0' else torch.complex64
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
     make_int_arg = partial(make_tensor, device=device, dtype=torch.int64)
-    make_complex_arg = partial(make_tensor, device=device, dtype=torch.complex128)
+    make_complex_arg = partial(make_tensor, device=device, dtype=cdtype)
 
     # error inputs for different dtypes of input tensor and bias
     yield ErrorInput(
@@ -4112,9 +4116,11 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
 
 
 def error_inputs_conv2d(opinfo, device, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=torch.float64)
+    dtype = torch.float64 if device != 'mps:0' else torch.float32
+    cdtype = torch.complex128 if device != 'mps:0' else torch.complex64
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
     make_int_arg = partial(make_tensor, device=device, dtype=torch.int64)
-    make_complex_arg = partial(make_tensor, device=device, dtype=torch.complex128)
+    make_complex_arg = partial(make_tensor, device=device, dtype=cdtype)
 
     # error inputs for different dtypes of input tensor and bias
     yield ErrorInput(
@@ -4249,9 +4255,11 @@ def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_conv3d(opinfo, device, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=torch.float64)
+    dtype = torch.float64 if device != 'mps:0' else torch.float32
+    cdtype = torch.complex128 if device != 'mps:0' else torch.complex64
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
     make_int_arg = partial(make_tensor, device=device, dtype=torch.int64)
-    make_complex_arg = partial(make_tensor, device=device, dtype=torch.complex128)
+    make_complex_arg = partial(make_tensor, device=device, dtype=cdtype)
 
     # error inputs for different dtypes of input tensor and bias
     yield ErrorInput(
@@ -12109,6 +12117,14 @@ op_db: list[OpInfo] = [
                            unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
                            device_type='cpu', dtypes=(torch.complex64,)
                        ),
+                       DecorateInfo(
+                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
+                           device_type='cuda', dtypes=(torch.complex64,)
+                       ),
+                       DecorateInfo(
+                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
+                           device_type='cuda', dtypes=(torch.complex64,)
+                       ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
                            unittest.expectedFailure, 'TestOutputConsistencyFullGraph', 'test_complex_output_match_opinfo_',
@@ -13587,23 +13603,7 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_out=True,
            supports_forward_ad=True,
-           skips=(
-               # The following dtypes did not work in forward but are listed by the OpInfo: {torch.complex64}
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # RuntimeError: Failed to create function state object for: cross_float2
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
-                   device_type='mps', dtypes=(torch.complex64,)
-               ),
-           ),),
+           ),
     OpInfo('cumsum',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
@@ -14773,15 +14773,9 @@ op_db: list[OpInfo] = [
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
                # Exception: RuntimeError not raised : inplace variant either incorrectly allowed resizing
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               # Exception: Tensor-likes are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                # Exception: "masked_scatter_ only supports boolean masks" does not match
                # "masked_scatter: expected BoolTensor or ByteTensor for mask"
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
-               # The following dtypes did not work in backward but are listed by
-               # the OpInfo: {torch.float32, torch.float16, torch.complex64,
-               # torch.bfloat16}.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -16076,6 +16070,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=9e-2, rtol=9e-2), }),
                    'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestOperators', 'test_vjpvmap', device_type='cuda'
+               ),
+               DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
            skips=(
@@ -16139,8 +16137,6 @@ op_db: list[OpInfo] = [
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
                # The following dtypes did not work in forward but are listed by the OpInfo: {torch.int64}.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
@@ -16187,9 +16183,6 @@ op_db: list[OpInfo] = [
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the
-               # MPS framework doesn't support float64
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
@@ -16234,6 +16227,18 @@ op_db: list[OpInfo] = [
                    'TestOperators', 'test_vjpvmap',
                ),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestOperators', 'test_jvpvjp', device_type="cuda"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestOperators', 'test_vjp', device_type="cuda"
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-6)}),
+                   'TestCompositeCompliance', 'test_backward', device_type="cuda"
+               ),
+               DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive',
                ),
@@ -16250,9 +16255,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the
-               # MPS framework doesn't support float64
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',

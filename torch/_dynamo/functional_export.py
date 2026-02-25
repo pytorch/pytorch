@@ -19,7 +19,6 @@ from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
-from torch.export import _restore_state_dict
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.symbolic_shapes import (
@@ -131,13 +130,13 @@ def clean_nn_module_stack_and_source_fn(
                 name, cls = item
                 if isinstance(name, str):
                     clean_name = clean_export_root_string(name)
-                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append((clean_name, cls))
                 else:
-                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append(item)
             else:
+                # pyrefly: ignore [bad-argument-type]
                 cleaned_stack.append(item)
+        # pyrefly: ignore [bad-return]
         return cleaned_stack
 
     for node in graph_module.graph.nodes:
@@ -381,16 +380,14 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
                 # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore [bad-index, index-error]
-                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index]
                     "dynamo_flat_name_to_original_fqn"
                 ]
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
                 # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore [bad-index, index-error]
-                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index]
                     "dynamo_compile_id"
                 ]
 
@@ -494,6 +491,7 @@ class InputProcessor:
         self, inputs: tuple[object, ...]
     ) -> tuple[tuple[object, ...], dict[str, object]]:
         args = inputs
+        # pyrefly: ignore [implicit-any]
         kwargs = {}
         if len(args) > self.num_args:
             kwargs = dict(zip(self.kwarg_names, args[self.num_args :]))
@@ -632,7 +630,9 @@ def create_fx_graph_from_captured_output(
 
                 try:
                     self.forward = types.MethodType(patched_forward, self)
+                    # pyrefly: ignore [implicit-any]
                     self._forward_hooks = {}
+                    # pyrefly: ignore [implicit-any]
                     self._forward_pre_hooks = {}
                     # pyrefly: ignore [invalid-argument]
                     return super(type(self), self).__call__(*args, **kwargs)
@@ -641,6 +641,7 @@ def create_fx_graph_from_captured_output(
                     self._forward_hooks = fwd_hooks
                     self._forward_pre_hooks = fwd_pre_hooks
 
+            # pyrefly: ignore [bad-assignment]
             graph_module._wrapped_call.cls_call = dynamo_wrapped_call
 
     root = graph_module if isinstance(root, torch.nn.Module) else root
@@ -678,7 +679,9 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     def __init__(
         self,
         orig_arg_names: list[str],
+        # pyrefly: ignore [implicit-any]
         dynamo_bytecode_flatten: Callable,
+        # pyrefly: ignore [implicit-any]
         dynamo_bytecode_unflatten: Callable,
     ) -> None:
         super().__init__()
@@ -744,10 +747,31 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
 
 
 def dynamo_graph_capture_for_export(
-    mod: Callable[..., Any],
+    fn: Callable[..., Any],
     constraints: Optional[list[Constraint]] = None,
-    restore_state_dict: bool = False,
 ) -> Callable[..., Any]:
+    if isinstance(fn, torch._ops.OpOverload):
+
+        def default_annotation(arg: torch.Argument) -> str:
+            if arg.has_default_value():
+                return f"={arg.default_value!r}"
+            return ""
+
+        has_kwarg_only = False
+        arg_list = []
+        for arg in fn._schema.arguments:
+            if arg.kwarg_only and not has_kwarg_only:
+                has_kwarg_only = True
+                arg_list.append("*")
+            arg_list.append(arg.name + default_annotation(arg))
+        func_str = f"""
+def op_overload_wrapper({", ".join(arg_list)}):
+    return op({", ".join([f"{arg.name}={arg.name}" for arg in fn._schema.arguments])})
+"""
+        out = {}
+        exec(func_str, {"op": fn}, out)
+        fn = out["op_overload_wrapper"]  # type: ignore[assignment]
+
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
@@ -758,14 +782,12 @@ def dynamo_graph_capture_for_export(
             dynamo_timed("fullgraph_capture"),
         ):
             out = fullgraph_capture(
-                mod,
+                fn,
                 args,
                 kwargs,
                 constraints=constraints,
             )
-        graph_module = create_fx_graph_from_captured_output(out, mod, args, kwargs)
-        if restore_state_dict:
-            _restore_state_dict(mod, graph_module)
+        graph_module = create_fx_graph_from_captured_output(out, fn, args, kwargs)
         return graph_module
 
     return inner
