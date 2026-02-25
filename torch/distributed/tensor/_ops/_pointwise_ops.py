@@ -55,10 +55,10 @@ prims = torch.ops.prims
 # ]
 
 
-# Monotonic increasing unary ops: f(max(a,b)) = max(f(a),f(b)).
+# Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
 # Only ops monotonic on their ENTIRE domain belong here.
 # Ops with restricted domains (e.g. log on (0,inf), asin on [-1,1]) do NOT qualify.
-monotonic_increasing_unary_ops = [
+non_decreasing_unary_ops = [
     aten.asinh.default,
     aten.asinh_.default,
     aten.atan.default,
@@ -439,7 +439,7 @@ pointwise_ops = [
     prims.ne.default,
     prims.spherical_bessel_j0.default,
     prims.zeta.default,
-] + monotonic_increasing_unary_ops
+] + non_decreasing_unary_ops
 
 # Linear pointwise ops, split by linearity type.
 unary_linear_ops = [aten.to.dtype]
