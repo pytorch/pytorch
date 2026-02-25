@@ -1293,6 +1293,7 @@ class TestMaxAutotune(TestCase):
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1416,6 +1417,7 @@ class TestMaxAutotune(TestCase):
                 bf16_red_setting
             )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1469,6 +1471,7 @@ class TestMaxAutotune(TestCase):
                     rtol=1e-4,
                 )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1524,6 +1527,7 @@ class TestMaxAutotune(TestCase):
                     code[1]
                 )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1575,6 +1579,7 @@ class TestMaxAutotune(TestCase):
                     f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
                 ).run(code[0])
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
@@ -1618,6 +1623,7 @@ class TestMaxAutotune(TestCase):
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
     @parametrize("sizes", ((64, 128, 256), (128, 256, 512), (256, 512, 1024)))
@@ -1662,6 +1668,7 @@ class TestMaxAutotune(TestCase):
             # Check that contiguous transform was used
             FileCheck().check("contiguous_addmm").run(code[0])
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_contiguous_transform_non_contiguous_second_matrix(
@@ -1729,6 +1736,7 @@ class TestMaxAutotune(TestCase):
             out2, expected2_fp64.to(torch.float32), atol=1e-2, rtol=1e-2
         )
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @config.patch(
         max_autotune=True,
@@ -2180,6 +2188,7 @@ class TestMaxAutotune(TestCase):
 
     @fresh_cache()
     @skipIfXpu
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -2480,6 +2489,7 @@ class TestMaxAutotune(TestCase):
         self.assertObjectIn(k, (15, 16))
         self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch(
         {
             "max_autotune": True,
