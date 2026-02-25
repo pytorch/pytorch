@@ -1852,6 +1852,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                     val, source=self.source and AttrSource(self.source, name)
                 ),
             )
+        elif name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
         else:
             if fn_dict.contains(name):
                 return fn_dict.getitem(name)
