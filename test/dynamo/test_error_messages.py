@@ -292,7 +292,7 @@ Attempted to call function marked as skipped
   Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
-  Developer debug context: module: unittest.case, qualname: skip, skip reason: <missing reason>
+  Developer debug context: module: unittest.case, qualname: skip, skip reason: file is in unittest directory
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
@@ -306,6 +306,13 @@ from user code:
         def fn():
             torch._dynamo.disable()
 
+        def post_munge(s):
+            return re.sub(
+                r"file is under skip directory \(.*?\)",
+                "file is under skip directory (<path>)",
+                s,
+            )
+
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(),
@@ -314,13 +321,14 @@ Attempted to call function marked as skipped
   Explanation: Dynamo developers have intentionally marked that the function `disable` in file `_dynamo/decorators.py` should not be traced.
   Hint: Avoid calling the function `disable`.
 
-  Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: <missing reason>
+  Developer debug context: module: torch._dynamo.decorators, qualname: disable, skip reason: file is under skip directory (<path>)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
     torch._dynamo.disable()""",
+            post_munge=post_munge,
         )
 
     def test_skipfile_inline(self):
@@ -343,7 +351,7 @@ Attempted to inline function marked as skipped
   Hint: Apply `@torch._dynamo.dont_skip_tracing` to the function `skip` to force tracing into the function. More graph breaks may occur as a result of attempting to trace into the function.
   Hint: Please file an issue to PyTorch.
 
-  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: skipped according trace_rules.lookup unittest
+  Developer debug context: qualname: skip, name: skip, filename: `case.py`, skip reason: file is in unittest directory
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0008.html
 
@@ -408,7 +416,7 @@ Attempted to call function marked as skipped
   Hint: If you are attempting to call a logging function (e.g. `_warnings.warn`), you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.
   Hint: Please file an issue on GitHub so the PyTorch team can add support for it.
 
-  Developer debug context: module: _warnings, qualname: warn, skip reason: <missing reason>
+  Developer debug context: module: _warnings, qualname: warn, skip reason: cannot determine source file for _warnings (likely a C extension or builtin)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
@@ -456,7 +464,7 @@ Attempted to call function marked as skipped
   Explanation: Dynamo cannot trace optree C/C++ function optree.<path>.make_from_collection.
   Hint: Consider using torch.utils._pytree - https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py
 
-  Developer debug context: module: optree._C, qualname: <path>.make_from_collection, skip reason: <missing reason>
+  Developer debug context: module: optree._C, qualname: <path>.make_from_collection, skip reason: cannot determine source file for optree._C (likely a C extension or builtin)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
@@ -510,7 +518,7 @@ Attempted to call function marked as skipped
   Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
   Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
 
-  Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: <missing reason>
+  Developer debug context: module: mylib, qualname: PyCapsule.foobar, skip reason: cannot determine source file for mylib (likely a C extension or builtin)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html""",
         )
@@ -708,7 +716,7 @@ Attempted to call function marked as skipped
   Hint: If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
   Hint: If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
 
-  Developer debug context: module: builtins, qualname: __build_class__, skip reason: <missing reason>
+  Developer debug context: module: builtins, qualname: __build_class__, skip reason: cannot determine source file for builtins (likely a C extension or builtin)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0007.html
 
