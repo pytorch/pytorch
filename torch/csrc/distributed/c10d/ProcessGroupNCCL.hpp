@@ -153,7 +153,7 @@ constexpr const char* kStoreErrorSignalKey = "remote_error";
 constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
 constexpr auto kProcessGroupNCCLDefaultTimeout =
-    std::chrono::milliseconds(10 * 60 * 1000);
+    std::chrono::milliseconds(120 * 60 * 1000);
 
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
