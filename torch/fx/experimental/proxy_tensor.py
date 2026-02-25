@@ -71,7 +71,7 @@ from torch.utils._python_dispatch import (
     autograd_would_have_decomposed,
     TorchDispatchMode,
 )
-from torch.utils._stats import count
+from torch.utils._stats import count, count_label
 from torch.utils._thunk import Thunk
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
 
@@ -488,9 +488,11 @@ def _get_proxies(t: torch.Tensor) -> list[Proxy]:
 @functools.cache
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
-    Returns a dict converting sympy functions to python operators
-    (i.e. `sympy.Mul` -> `operator.mul`)
+    Returns a dict mapping sympy types to Python callables
+    (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
     """
+    import sympy
+
     import torch.utils._sympy.interp
 
     handlers = {}
@@ -498,6 +500,11 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
         op = getattr(operator, v, None)
         if op is not None:
             handlers[k] = op
+
+    # sympy.Add is n-ary (e.g. Add(a, b, c)) but operator.add is binary.
+    # torch.sym_sum handles n-ary integer addition and accepts both
+    # sym_sum([a, b, c]) and sym_sum(a, b, c).
+    handlers[sympy.Add] = torch.sym_sum
     return handlers
 
 
@@ -592,17 +599,15 @@ def _build_proxy_for_sym_expr(
         if (arg_value := _build_proxy_for_sym_expr(tracer, arg)) is None:
             return None
         args.append(arg_value)
-    args = tuple(args)
 
     func: OpOverload | None = _sympy_handlers().get(expr.func)  # type: ignore[assignment]
     if not func:
-        # Handler not found
         return None
 
     if out is None:
         out = func(*args)
     else:
-        _sym_register(tracer, func, args, out)
+        _sym_register(tracer, func, tuple(args), out)
     return out
 
 
@@ -1035,20 +1040,30 @@ def _maybe_record_pointwise_barrier(
 
 def _fetch_proxies_and_all_constant_flag(
     flat_args_kwargs: Union[list[object], tuple[object, ...]], tracer: _ProxyTracer
-) -> tuple[list[object], tuple[object, ...], bool]:
+) -> tuple[list[object], tuple[object, ...], bool, bool, bool]:
     """
     Given flat arguments, fetch the proxies and whether they are all constants.
     This is later used in proxy_call or when someone is trying to stitch together
     graph node in tf or td modes.
+
+    Returns (f_flat_args_kwargs, proxy_flat_args_kwargs, all_constant,
+    has_sym_scalars, has_symbolic_sizes).
+    All three flags are computed in a single pass to avoid redundant iteration.
     """
-    f_flat_args_kwargs = [
-        (
-            fetch_object_proxy(tracer, x)
-            if isinstance(x, (Tensor, _AnyScriptObject)) or is_opaque_value(x)
-            else x
-        )
-        for x in flat_args_kwargs
-    ]
+    f_flat_args_kwargs: list[object] = []
+    has_sym_scalars = False
+    has_symbolic_sizes = False
+
+    for x in flat_args_kwargs:
+        if isinstance(x, py_sym_types):
+            has_sym_scalars = True
+            f_flat_args_kwargs.append(x)
+        elif isinstance(x, (Tensor, _AnyScriptObject)) or is_opaque_value(x):
+            if isinstance(x, Tensor) and x._has_symbolic_sizes_strides:
+                has_symbolic_sizes = True
+            f_flat_args_kwargs.append(fetch_object_proxy(tracer, x))
+        else:
+            f_flat_args_kwargs.append(x)
 
     # If there are SymInts, we also should not consider this constant.
     # However, fake tensor handling of SymInts is sufficiently broken that
@@ -1061,7 +1076,7 @@ def _fetch_proxies_and_all_constant_flag(
         )
         # TODO: maybe constant SymInts should also be allowed?  Not sure if
         # this can happen
-        and not any(isinstance(x, py_sym_types) for x in flat_args_kwargs)
+        and not has_sym_scalars
     )
 
     proxy_flat_args_kwargs = [
@@ -1073,7 +1088,13 @@ def _fetch_proxies_and_all_constant_flag(
         for e in proxy_flat_args_kwargs
     ]
 
-    return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
+    return (
+        f_flat_args_kwargs,
+        tuple(proxy_flat_args_kwargs),
+        all_constant,
+        has_sym_scalars,
+        has_symbolic_sizes,
+    )
 
 
 def proxy_call(
@@ -1134,9 +1155,13 @@ def proxy_call(
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
-    f_flat_args_kwargs, proxy_flat_args_kwargs, all_constant = (
-        _fetch_proxies_and_all_constant_flag(flat_args_kwargs, tracer)
-    )
+    (
+        f_flat_args_kwargs,
+        proxy_flat_args_kwargs,
+        all_constant,
+        has_sym_scalars,
+        has_symbolic_sizes,
+    ) = _fetch_proxies_and_all_constant_flag(flat_args_kwargs, tracer)
 
     if torch.Tag.data_dependent_output in func.tags:
         # Check if all of the Tensor inputs are constants
@@ -1209,64 +1234,38 @@ def proxy_call(
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
 
-    # Try to bypass proxy mode and call fake tensor dispatch directly for eligible ops
-    # This avoids re-entering the proxy mode dispatch for simple operations
+    # Try to bypass proxy mode and call fake tensor dispatch directly for eligible ops.
+    # This avoids re-entering the proxy mode dispatch for simple operations.
+    # Static op-level eligibility is cached on OpOverload (_can_bypass_proxy_dispatch).
+    # Dynamic checks (has_sym_scalars, has_symbolic_sizes) are both computed in
+    # _fetch_proxies_and_all_constant_flag in a single pass over flat args.
     out = None
     bypass_succeeded = False
 
-    # Check if we can bypass: no symbolic integers in args and no data-dependent ops
-    def _has_symbolic_ints(obj):
-        """Check if obj contains any SymInt/SymFloat/SymBool values"""
-        if isinstance(obj, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-            return True
-        if isinstance(obj, Tensor):
-            # Check for symbolic sizes/strides
-            try:
-                for s in obj.shape:
-                    if isinstance(s, torch.SymInt):
-                        return True
-                for s in obj.stride():
-                    if isinstance(s, torch.SymInt):
-                        return True
-            except Exception:
-                pass
-        if isinstance(obj, (list, tuple)):
-            return any(_has_symbolic_ints(x) for x in obj)
-        if isinstance(obj, dict):
-            return any(_has_symbolic_ints(v) for v in obj.values())
-        return False
-
-    # Determine if we should attempt bypass
-    # Skip ops with multiple returns (structured return types) as they behave differently
-    schema = func._schema
-    has_multiple_returns = len(schema.returns) > 1
-
-    can_bypass = (
-        torch.Tag.data_dependent_output not in func.tags
-        and not has_multiple_returns
-        and not _has_symbolic_ints(args)
-        and not _has_symbolic_ints(kwargs)
-    )
-
-    if can_bypass:
-        # Get the fake mode from the dispatch stack
+    if (
+        func._can_bypass_proxy_dispatch
+        and not has_sym_scalars
+        and not has_symbolic_sizes
+    ):
         fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
         if fake_mode is not None:
             try:
-                # Temporarily unset fake mode to avoid re-entry guard in __torch_dispatch__
+                # Temporarily unset fake mode to avoid re-entry guard, then call
+                # dispatch() directly (skips the assertion in __torch_dispatch__)
                 with unset_fake_temporarily():
-                    # Use types passed from __torch_dispatch__ if available
                     dispatch_types = types if types is not None else ()
                     with _enable_thunkify(proxy_mode.tracer):
-                        out = fake_mode.__torch_dispatch__(
+                        out = fake_mode.dispatch(
                             func, dispatch_types, args, kwargs or {}
                         )
                     bypass_succeeded = True
+                    count_label("proxy_call.bypass_succeeded")
             except Exception:
-                # Fall back to original path
                 bypass_succeeded = False
+                count_label("proxy_call.bypass_failed")
 
     if not bypass_succeeded:
+        count_label("proxy_call.normal_dispatch")
         with _enable_thunkify(proxy_mode.tracer):
             out = func(*args, **kwargs)
 
@@ -1772,7 +1771,9 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             torch._functorch.predispatch._vmap_decrement_nesting,
             torch._functorch.vmap.lazy_load_decompositions,
         ]:
-            _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
+            _, proxies, _, _, _ = _fetch_proxies_and_all_constant_flag(
+                args, self.tracer
+            )
             out_proxy = self.tracer.create_proxy(
                 "call_function",
                 func,

@@ -576,7 +576,7 @@ class BytecodeHookTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(hook)
         try:
-            opt_fn = torch.compile(fn)
+            opt_fn = torch.compile(fn, backend="eager")
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
         finally:

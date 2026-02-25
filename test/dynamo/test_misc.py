@@ -1913,7 +1913,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             f(x)
 
     def test_assert(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn1(x):
             assert x.shape != x.shape
 
@@ -3301,7 +3301,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_numpy_gt(self):
         x = np.arange(10)
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(y):
             return y >= 3
 
@@ -3312,7 +3312,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_numpy_min(self):
         x = np.arange(10)
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(y):
             return min(y, 3), min(y, y - 1)
 
@@ -3516,7 +3516,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     # NB this may involve a graph break
     @torch._dynamo.config.patch(use_numpy_random_stream=True)
     def test_numpy_random_config_to_numpy(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn():
             return np.random.uniform(size=13)
 
@@ -4245,6 +4245,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         torch._dynamo.testing.standard_test(self, fn=fn1, nargs=3)
 
+    def test_class_reassignment_graph_break(self):
+        class BaseClass:
+            def __init__(self, x):
+                self.x = x
+
+        class DerivedClass(BaseClass):
+            def __init__(self, x):
+                super().__init__(x)
+                self.y = x * 2
+
+        def fn(x):
+            obj = BaseClass(5)
+            obj.__class__ = DerivedClass
+            is_derived = isinstance(obj, DerivedClass)
+            has_y = hasattr(obj, "y")
+            return x + 1, is_derived, has_y
+
+        x = torch.ones(1)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(eager_result, compiled_result)
+
     def test_user_defined_class_python_type(self):
         class MyClass1:
             pass
@@ -4676,7 +4698,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             # Calling `inner` so Dynamo won't skip this frame.
             return inner(), inner
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def root():
             return get_inner()
 
@@ -9500,14 +9522,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def _result_type_dict(dtype):
             return {bool: torch.float32}[dtype]
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def f():
             return torch.ones(3, dtype=_result_type_dict(bool))
 
         self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
 
     def test_inline_dict_function_passed_as_arg(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(d, x, y):
             if d[x] is torch.float32:
                 return y.cos()
@@ -10612,7 +10634,7 @@ def ___make_guard_fn():
 
             return inner
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def start():
             # Obtain the `inner` function, which holds reference to `x`.
             inner = fn()
@@ -11801,7 +11823,7 @@ ShapeEnv not equal: field values don't match:
         )
 
     def test_default_dtype_change(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def foo():
             def inner(a, b, res_dtype):
                 print(a, b, res_dtype)
@@ -11840,7 +11862,7 @@ ShapeEnv not equal: field values don't match:
 
     @wrapDeterministicFlagAPITest
     def test_backward_deterministic_mode_mismatch_warning(self):
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def func(a, b):
             return a + b
 
@@ -12665,6 +12687,41 @@ fn
         # signature_cache should have exactly 2 entries (one per unique method)
         self.assertEqual(unique_calls, 2)
 
+    def test_inspect_variable_redirect(self):
+        """Test that InspectVariable is used and redirects property accesses."""
+        import inspect
+        from unittest.mock import patch
+
+        from torch._dynamo.variables.user_defined import InspectVariable
+
+        redirected_attrs = []
+        original_var_getattr = InspectVariable.var_getattr
+
+        def tracking_var_getattr(self, tx, name):
+            redirects = self._PROPERTY_REDIRECTS.get(type(self.value), {})
+            if name in redirects:
+                redirected_attrs.append(name)
+            return original_var_getattr(self, tx, name)
+
+        def fn(x, gn):
+            sig = inspect.signature(gn)
+            params = sig.parameters
+            param = params["a"]
+            return x + param.kind + len(param.name)
+
+        def gn(a: torch.Tensor, b: int) -> torch.Tensor:
+            return a + b
+
+        x = torch.randn(2, 3)
+        with patch.object(InspectVariable, "var_getattr", tracking_var_getattr):
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            result = opt_fn(x, gn)
+
+        self.assertEqual(result, fn(x, gn))
+        self.assertIn("parameters", redirected_attrs)
+        self.assertIn("kind", redirected_attrs)
+        self.assertIn("name", redirected_attrs)
+
     def test_grad_none(self):
         def fn(x, y):
             x.grad = torch.abs(y)
@@ -13329,6 +13386,12 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+")
+    def test_CALL_INTRINSIC(self):
+        from torch.testing._internal.py312_intrinsics import Foo
+
+        Foo.test_default_update(self)
 
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_RAISE_VARARGS_0(self):
