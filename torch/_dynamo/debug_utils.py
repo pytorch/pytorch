@@ -582,6 +582,9 @@ class NopInputReader:
     def symint(self, *args: Any, **kwargs: Any) -> Optional[int]:
         pass
 
+    def opaque(self, script_class_name: str) -> None:
+        self.total += 1
+
 
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
@@ -664,6 +667,9 @@ class InputReader:
     def symint(self, val: Any) -> Any:
         self.args.append(val)
         return val  # for BC
+
+    def opaque(self, script_class_name: str) -> None:
+        self.args.append(None)
 
 
 # Here is our writer strategy:
@@ -800,6 +806,9 @@ class InputWriter:
         if isinstance(val, torch.SymInt):
             val = val.node.hint
         self._lines.append(f"reader.symint({val!r})  # {name}")
+
+    def opaque(self, name: str, script_class_name: str) -> None:
+        self._lines.append(f"reader.opaque({script_class_name!r})  # {name}")
 
 
 def aot_graph_input_parser(

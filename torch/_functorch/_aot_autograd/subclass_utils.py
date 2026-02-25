@@ -7,7 +7,7 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 import collections
 import typing
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeGuard, TypeVar, Union
+from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -70,7 +70,7 @@ from .schemas import MemoryFormatMeta
 
 def maybe_suggest_memory_format(
     t: Tensor, with_memory_format: bool
-) -> Optional[MemoryFormatMeta]:
+) -> MemoryFormatMeta | None:
     if not with_memory_format:
         return None
 
@@ -155,13 +155,13 @@ def create_subclass_metadata(
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[list[Any], tuple[Any, ...]],
+    curr_args: list[Any] | tuple[Any, ...],
     *,
     count_symints: bool = True,
     with_memory_format: bool = False,
-) -> list[Union[PlainTensorMeta, SubclassCreationMeta]]:
+) -> list[PlainTensorMeta | SubclassCreationMeta]:
     idx = 0
-    infos: list[Union[PlainTensorMeta, SubclassCreationMeta]] = []
+    infos: list[PlainTensorMeta | SubclassCreationMeta] = []
     for a in curr_args:
         if is_traceable_wrapper_subclass(a):
             if not isinstance(a, Tensor):
@@ -197,7 +197,7 @@ def enumerate_filter_symints(lst: Iterable[IntLikeType]) -> list[tuple[int, SymI
     return [(i, s) for i, s in enumerate(lst) if symint_check(s)]
 
 
-def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> list[bool]:
+def compute_symint_placeholders(lst: Iterable[None | int | SymInt]) -> list[bool]:
     # Non-nested symints are replaced with None in `make_runtime_safe()`
     return [s is None for s in lst]
 
