@@ -1777,10 +1777,10 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 PyObject* getNeedsInputGrad(PyObject* obj, void* _unused) {
   auto self = (THPFunction*)obj;
   auto cdata = self->cdata.lock();
-  TORCH_CHECK(
-      cdata,
-      "needs_input_grad is only accessible during backward (cdata expired)");
-
+  if (!cdata) {
+    // No PyNode — e.g., during forward or manually constructed context
+    return getObject<&THPFunction::needs_input_grad>(obj, _unused);
+  }
 
   const auto exec_info = get_current_graph_task_exec_info();
   if (!exec_info || exec_info->empty()) {
