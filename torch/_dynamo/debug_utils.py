@@ -582,6 +582,12 @@ class NopInputReader:
     def symint(self, *args: Any, **kwargs: Any) -> Optional[int]:
         pass
 
+    def const(self, name: str) -> None:
+        pass
+
+    def unsupported(self, name: str) -> None:
+        pass
+
 
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
@@ -664,6 +670,12 @@ class InputReader:
     def symint(self, val: Any) -> Any:
         self.args.append(val)
         return val  # for BC
+
+    def const(self, name: str) -> None:
+        self.args.append(None)
+
+    def unsupported(self, name: str) -> None:
+        self.args.append(None)
 
 
 # Here is our writer strategy:
@@ -774,7 +786,9 @@ class InputWriter:
 
     def unsupported(self, name: str, arg: Any) -> None:
         # NB: Try hard not to /print/ a tensor, that will be very slow
-        self._lines.append(f"# {name} was unsupported type for dumping: {type(arg)}")
+        self._lines.append(
+            f"reader.unsupported({name!r})  # unsupported type for dumping: {type(arg)}"
+        )
         # Best effort dump as much useful stuff we can lol, in case you want
         # to repair the repro
         if isinstance(arg, (list, tuple)):

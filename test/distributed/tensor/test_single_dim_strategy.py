@@ -39,7 +39,11 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
 )
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
-from torch.distributed.tensor.placement_types import _StridedShard, Placement
+from torch.distributed.tensor.placement_types import (
+    _MaskPartial,
+    _StridedShard,
+    Placement,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
@@ -1006,6 +1010,169 @@ class TestExpandPlaceholder(TestCase):
                 op_schema.args_meta,
                 op_schema.kwargs_meta,
             )
+
+    def test_expand_filters_mixed_partial_types(self):
+        """Test that expand_to_full_mesh_op_strategy filters out mixed partial types.
+
+        When single-dim strategies are expanded to a multi-dimensional mesh, some
+        combinations could create specs with mixed Partial reduce types (e.g.,
+        Partial("sum") and Partial("max") in the same placement list). These
+        combinations should be filtered out since mixed partial types don't commute.
+
+        The exception is sum+avg which DO commute and should be allowed.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Create input spec with Replicate placement
+        input_spec = DTensorSpec(mesh, (Replicate(), Replicate()), meta)
+
+        # Create OpSchema
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.Tensor,
+            args_schema=(
+                OpStrategy([OpSpec(input_spec)]),
+                OpStrategy([OpSpec(input_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        # Define strategies that would create mixed partials when expanded:
+        # - Strategy 1: Partial("sum") for all tensors
+        # - Strategy 2: Partial("max") for all tensors
+        # When expanded to 2D mesh, combinations like (P_sum, P_max) should be filtered
+        single_mesh_dim_strategies = [
+            [Partial("sum"), Partial("sum"), Partial("sum")],
+            [Partial("max"), Partial("max"), Partial("max")],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+        )
+
+        # Verify no strategy has mixed partial types (except sum+avg)
+        for strategy in result.strategies:
+            output_spec = strategy.output_spec
+            partial_reduce_ops = {
+                p.reduce_op for p in output_spec.placements if isinstance(p, Partial)
+            }
+            # Either 0 or 1 partial type, or exactly {"sum", "avg"}
+            if len(partial_reduce_ops) > 1:
+                self.assertEqual(
+                    partial_reduce_ops,
+                    {"sum", "avg"},
+                    f"Found invalid mixed partials: {partial_reduce_ops}",
+                )
+
+        # Verify that homogeneous partial strategies ARE included
+        # (P_sum, P_sum) and (P_max, P_max) should be valid
+        found_all_sum = False
+        found_all_max = False
+        for strategy in result.strategies:
+            output_spec = strategy.output_spec
+            if all(
+                isinstance(p, Partial) and p.reduce_op == "sum"
+                for p in output_spec.placements
+            ):
+                found_all_sum = True
+            if all(
+                isinstance(p, Partial) and p.reduce_op == "max"
+                for p in output_spec.placements
+            ):
+                found_all_max = True
+
+        self.assertTrue(found_all_sum, "Should include (P_sum, P_sum) strategy")
+        self.assertTrue(found_all_max, "Should include (P_max, P_max) strategy")
+
+    def test_expand_filters_partial_subclass_with_same_reduce_op(self):
+        """Partial subclasses with the same reduce_op should still be treated as mixed."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+        input_spec = DTensorSpec(mesh, (Replicate(), Replicate()), meta)
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.Tensor,
+            args_schema=(
+                OpStrategy([OpSpec(input_spec)]),
+                OpStrategy([OpSpec(input_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        # _MaskPartial() defaults to reduce_op="sum", same as Partial("sum"),
+        # but they have different reduction semantics and should not be mixed.
+        single_mesh_dim_strategies = [
+            [Partial("sum"), Partial("sum"), Partial("sum")],
+            [_MaskPartial(), _MaskPartial(), _MaskPartial()],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+        )
+
+        for strategy in result.strategies:
+            output_spec = strategy.output_spec
+            partial_types = {
+                type(p) for p in output_spec.placements if isinstance(p, Partial)
+            }
+            self.assertLessEqual(
+                len(partial_types),
+                1,
+                f"Should not mix Partial subclasses: {output_spec.placements}",
+            )
+
+    def test_expand_allows_sum_avg_partial_mix(self):
+        """Test that sum+avg partial mix is allowed since they commute."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        input_spec = DTensorSpec(mesh, (Replicate(), Replicate()), meta)
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.Tensor,
+            args_schema=(
+                OpStrategy([OpSpec(input_spec)]),
+                OpStrategy([OpSpec(input_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        # Define strategies with sum and avg partials
+        single_mesh_dim_strategies = [
+            [Partial("sum"), Partial("sum"), Partial("sum")],
+            [Partial("avg"), Partial("avg"), Partial("avg")],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+        )
+
+        # Verify that (P_sum, P_avg) combinations ARE included
+        found_sum_avg_mix = False
+        for strategy in result.strategies:
+            output_spec = strategy.output_spec
+            partial_reduce_ops = {
+                p.reduce_op for p in output_spec.placements if isinstance(p, Partial)
+            }
+            if partial_reduce_ops == {"sum", "avg"}:
+                found_sum_avg_mix = True
+                break
+
+        self.assertTrue(
+            found_sum_avg_mix,
+            "Should include mixed (P_sum, P_avg) strategies since sum+avg commute",
+        )
 
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())

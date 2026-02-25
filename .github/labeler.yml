@@ -133,12 +133,22 @@
 
 "ci-refresh-hf-cache":
 - .github/ci_commit_pins/vllm.txt
+- .ci/docker/ci_commit_pins/timm.txt
+- .ci/docker/ci_commit_pins/huggingface-requirements.txt
+- .ci/docker/ci_commit_pins/torchbench.txt
 
 "ciflow/inductor-pallas":
 - torch/_inductor/codegen/pallas.py
+- torch/utils/_pallas.py
 - test/inductor/test_pallas.py
 - test/inductor/pallas_expected_failures/**
+- test/inductor/pallas_skip_tests/**
 - .github/workflows/inductor-pallas.yml
+- .ci/docker/ci_commit_pins/jax.txt
+- .ci/docker/common/install_jax.sh
+- .ci/docker/common/install_torch_tpu.sh
+- .ci/docker/common/requirements_tpu.txt
+- .github/ci_commit_pins/torch_tpu.txt
 
 "ciflow/b200":
 - test/test_matmul_cuda.py

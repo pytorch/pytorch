@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - nightly  # Trigger when nightly branch is updated
+    tags:
+      - ciflow/rocm-nightly/*
   workflow_dispatch:  # Allow manual triggering
 
 concurrency:
