@@ -3870,6 +3870,123 @@ with torch.cuda.graph(g):
                 .strip()
             )
 
+    def _cuda_graph_warmup(self, fn):
+        fn()
+        torch.cuda.synchronize()
+
+    def test_cuda_graph_fx_tracer_simple(self):
+        from torch._dynamo.testing import normalize_gm
+
+        a = torch.randn(4, 4, device="cuda")
+        b = torch.randn(4, 4, device="cuda")
+        self._cuda_graph_warmup(lambda: torch.relu(torch.mm(a, b)))
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, tracked_inputs={"a": a, "b": b}):
+            c = torch.mm(a, b)
+            d = torch.relu(c)
+
+        self.assertExpectedInline(
+            normalize_gm(g.graph_module.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, a_0: "f32[4, 4]", b_1: "f32[4, 4]"):
+        mm_default: "f32[4, 4]" = torch.ops.aten.mm.default(a_0, b_1);  a_0 = b_1 = None
+        relu_default: "f32[4, 4]" = torch.ops.aten.relu.default(mm_default);  mm_default = relu_default = None
+        return None
+""",
+        )
+
+    def test_cuda_graph_fx_tracer_multi_output(self):
+        from torch._dynamo.testing import normalize_gm
+
+        a = torch.randn(4, 4, device="cuda")
+        self._cuda_graph_warmup(lambda: torch.max(a, dim=1))
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, tracked_inputs={"a": a}):
+            vals, idxs = torch.max(a, dim=1)
+
+        self.assertExpectedInline(
+            normalize_gm(g.graph_module.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, a_0: "f32[4, 4]"):
+        max_dim = torch.ops.aten.max.dim(a_0, 1);  a_0 = None
+        getitem: "f32[4]" = max_dim[0];  getitem = None
+        getitem_1: "i64[4]" = max_dim[1];  max_dim = getitem_1 = None
+        return None
+""",
+        )
+
+    def test_cuda_graph_fx_tracer_inplace(self):
+        from torch._dynamo.testing import normalize_gm
+
+        a = torch.randn(4, 4, device="cuda")
+        self._cuda_graph_warmup(lambda: a.relu_())
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, tracked_inputs={"a": a}):
+            a.relu_()
+
+        self.assertExpectedInline(
+            normalize_gm(g.graph_module.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, a_0: "f32[4, 4]"):
+        relu__default: "f32[4, 4]" = torch.ops.aten.relu_.default(a_0);  a_0 = relu__default = None
+        return None
+""",
+        )
+
+    def test_cuda_graph_fx_tracer_untracked_tensor(self):
+        from torch._dynamo.testing import normalize_gm
+
+        a = torch.randn(4, 4, device="cuda")
+        b = torch.randn(4, 4, device="cuda")
+        self._cuda_graph_warmup(lambda: torch.mm(a, b))
+
+        g = torch.cuda.CUDAGraph()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            with torch.cuda.graph(g, tracked_inputs={"a": a}):
+                c = torch.mm(a, b)
+
+        untracked_warnings = [x for x in w if "not in tracked_inputs" in str(x.message)]
+        self.assertTrue(len(untracked_warnings) > 0)
+
+        self.assertExpectedInline(
+            normalize_gm(g.graph_module.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, a_0: "f32[4, 4]", _implicit_1: "f32[4, 4]"):
+        mm_default: "f32[4, 4]" = torch.ops.aten.mm.default(a_0, _implicit_1);  a_0 = _implicit_1 = mm_default = None
+        return None
+""",
+        )
+
+    def test_cuda_graph_fx_tracer_module(self):
+        from torch._dynamo.testing import normalize_gm
+
+        model = nn.Linear(4, 4, device="cuda")
+        x = torch.randn(2, 4, device="cuda")
+        self._cuda_graph_warmup(lambda: model(x))
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g, tracked_inputs={"model": model, "x": x}):
+            y = model(x)
+
+        self.assertExpectedInline(
+            normalize_gm(g.graph_module.print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, model_weight_0: "Parameter(f32[4, 4])", model_bias_1: "Parameter(f32[4])", x_2: "f32[2, 4]"):
+        t_default: "f32[4, 4]" = torch.ops.aten.t.default(model_weight_0);  model_weight_0 = None
+        addmm_default: "f32[2, 4]" = torch.ops.aten.addmm.default(model_bias_1, x_2, t_default);  model_bias_1 = x_2 = t_default = addmm_default = None
+        return None
+""",  # noqa: B950
+        )
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device="cuda")
         mean, invstd = torch.batch_norm_gather_stats(
