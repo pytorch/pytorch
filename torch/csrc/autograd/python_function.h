@@ -134,6 +134,11 @@ struct THPFunction {
   bool clear_saved_tensors_on_access;
   bool saved_tensors_accessed_and_cleared;
 
+  // When true, the getter for needs_input_grad returns the stored tuple
+  // instead of dynamically computing it. Set by the setter when
+  // needs_input_grad is explicitly overridden (e.g., by supports_tensorlist).
+  bool needs_input_grad_is_overridden{false};
+
   PyObject* saved_for_forward;
   // The actual PyNode (in the autograd graph) that this data was
   // saved for.  This field may be NULL (because a user can construct

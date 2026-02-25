@@ -1767,6 +1767,55 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
   Py_RETURN_TRUE;
 }
 
+// During backward, needs_input_grad should reflect which gradients are actually
+// needed by the current graph task (e.g., when inputs= is specified in
+// backward()). We compute this dynamically via task_should_compute_output
+// rather than mutating the stored tuple, which would be unsafe under concurrent
+// backward passes on a shared graph (the GIL does not provide sufficient
+// atomicity since it can be released during torch operations within the user's
+// backward function).
+PyObject* getNeedsInputGrad(PyObject* obj, void* _unused) {
+  auto self = (THPFunction*)obj;
+  auto cdata = self->cdata.lock();
+  check_legacy_fn_attr_access(cdata, "needs_input_grad");
+
+  // If overridden (e.g. by supports_tensorlist), return the stored value.
+  if (self->needs_input_grad_is_overridden) {
+    return getObject<&THPFunction::needs_input_grad>(obj, _unused);
+  }
+
+  const auto exec_info = get_current_graph_task_exec_info();
+  if (!exec_info || exec_info->empty()) {
+    return getObject<&THPFunction::needs_input_grad>(obj, _unused);
+  }
+
+  auto& is_variable_input = self->is_variable_input;
+  Py_ssize_t size = static_cast<Py_ssize_t>(is_variable_input.size());
+  PyObject* result = PyTuple_New(size);
+  if (!result)
+    return nullptr;
+
+  size_t edge_idx = 0;
+  for (const auto i : c10::irange(is_variable_input.size())) {
+    PyObject* value;
+    if (is_variable_input[i]) {
+      value =
+          cdata->task_should_compute_output(edge_idx++) ? Py_True : Py_False;
+    } else {
+      value = Py_False;
+    }
+    Py_INCREF(value);
+    PyTuple_SET_ITEM(result, i, value);
+  }
+  return result;
+}
+
+int setNeedsInputGrad(PyObject* obj, PyObject* value, void* _unused) {
+  auto self = (THPFunction*)obj;
+  self->needs_input_grad_is_overridden = true;
+  return setObject<&THPFunction::needs_input_grad>(obj, value, _unused);
+}
+
 } // namespace
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -1812,8 +1861,8 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr},
     {"needs_input_grad",
-     &getObject<&THPFunction::needs_input_grad>,
-     &setObject<&THPFunction::needs_input_grad>,
+     getNeedsInputGrad,
+     setNeedsInputGrad,
      nullptr,
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
