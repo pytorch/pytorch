@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#include <ATen/core/enum_type.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <gmock/gmock.h>

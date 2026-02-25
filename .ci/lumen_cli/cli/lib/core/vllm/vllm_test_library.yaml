@@ -85,8 +85,7 @@ vllm_multi_model_test_28_failure_test:
   package_install:
     - git+https://github.com/TIGER-AI-Lab/Mantis.git
   steps:
-    - pytest -v -s models/multimodal/generation/test_voxtral.py -k 'not 5-128-half'
-    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/generation/test_voxtral.py -k 5-128-half
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/generation/test_voxtral.py
     - pytest -v -s models/multimodal/pooling
 
 vllm_pytorch_compilation_unit_tests:

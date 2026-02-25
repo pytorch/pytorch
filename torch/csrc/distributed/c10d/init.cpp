@@ -52,7 +52,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #ifdef USE_NVSHMEM
-#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
 #endif
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
