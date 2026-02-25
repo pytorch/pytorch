@@ -108,6 +108,26 @@ buf0 = reader.storage('49ebab3961d6221e64c4c72b0aefd976bdd2afc4', 1440)
 reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         )
 
+    def test_dump_opaque(self):
+        """save_graph_repro should emit reader.opaque() for FakeScriptObject args."""
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        fake_obj = FakeScriptObject(object(), "__torch__.MyClass", None)
+
+        def f(x):
+            return (x * x,)
+
+        args = [torch.randn(4), fake_obj]
+        gm = make_fx(f)(args[0])
+        with gm.graph.inserting_before(next(iter(gm.graph.nodes))):
+            gm.graph.placeholder("obj")
+        gm.recompile()
+
+        buf = io.StringIO()
+        save_graph_repro(buf, gm, args, "inductor_accuracy")
+        r = buf.getvalue()
+        self.assertIn("reader.opaque('__torch__.MyClass')", r)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

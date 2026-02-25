@@ -8,7 +8,7 @@ import collections
 import typing
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, TypeGuard, TypeVar, Union
+from typing import Any, TypeGuard, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -56,27 +56,13 @@ class OpaqueObjectRemapping:
     dst: int  # Target in the metadata tuple
 
 
-def _is_opaque_value_or_fake(item: Any) -> bool:
-    """Check if item is an opaque value, handling FakeScriptObject wrappers."""
-    from torch._library.fake_class_registry import FakeScriptObject
-
-    if isinstance(item, FakeScriptObject):
-        return is_opaque_value(item.real_obj)
-    return is_opaque_value(item)
-
-
 def _get_opaque_identity_key(item: Any) -> Any:
     """Get identity key for opaque matching.
 
     For reference types: use id() since identity matters.
     For value types: use the object itself (uses __hash__/__eq__).
-    For FakeScriptObjects: unwrap to real_obj first.
     """
-    from torch._library.fake_class_registry import FakeScriptObject
     from torch._library.opaque_object import is_opaque_value_type
-
-    if isinstance(item, FakeScriptObject):
-        item = item.real_obj
 
     if is_opaque_value_type(type(item)):
         return item
@@ -98,10 +84,7 @@ def _build_opaque_remappings(
 
     results: list[OpaqueObjectRemapping] = []
     for meta_idx, item in enumerate(metadata):
-        if (
-            _is_opaque_value_or_fake(item)
-            and _get_opaque_identity_key(item) in opaque_lookup
-        ):
+        if is_opaque_value(item) and _get_opaque_identity_key(item) in opaque_lookup:
             results.append(
                 OpaqueObjectRemapping(
                     opaque_lookup[_get_opaque_identity_key(item)], meta_idx
@@ -131,7 +114,7 @@ def _collect_opaques_from_subclass_meta(
     # Collect opaques from this level's metadata
     if isinstance(subclass_meta.meta, (list, tuple)):
         for meta_idx, item in enumerate(subclass_meta.meta):
-            if _is_opaque_value_or_fake(item):
+            if is_opaque_value(item):
                 src_key = (arg_idx,) + path + (meta_idx,)
                 if _get_opaque_identity_key(item) not in opaque_lookup:
                     opaque_lookup[_get_opaque_identity_key(item)] = src_key
@@ -179,7 +162,7 @@ def _extract_runtime_opaques(
     attrs, metadata = tensor.__tensor_flatten__()
     if isinstance(metadata, (list, tuple)):
         for meta_idx, item in enumerate(metadata):
-            if _is_opaque_value_or_fake(item):
+            if is_opaque_value(item):
                 out[prefix + (meta_idx,)] = item
 
     for attr_idx, (attr_name, attr_meta) in enumerate(meta.attrs.items()):
@@ -212,7 +195,7 @@ from .schemas import MemoryFormatMeta
 
 def maybe_suggest_memory_format(
     t: Tensor, with_memory_format: bool
-) -> Optional[MemoryFormatMeta]:
+) -> MemoryFormatMeta | None:
     if not with_memory_format:
         return None
 
@@ -307,13 +290,13 @@ def create_subclass_metadata(
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[list[Any], tuple[Any, ...]],
+    curr_args: list[Any] | tuple[Any, ...],
     *,
     count_symints: bool = True,
     with_memory_format: bool = False,
     input_opaques: dict[tuple[int, ...], OpaqueType] | None = None,
 ) -> tuple[
-    list[Union[PlainTensorMeta, SubclassCreationMeta]],
+    list[PlainTensorMeta | SubclassCreationMeta],
     dict[tuple[int, ...], OpaqueType],
 ]:
     # Build lookup table mapping opaque identity keys to their source locations.
@@ -328,7 +311,7 @@ def create_subclass_meta(
             opaque_lookup[_get_opaque_identity_key(opaque)] = src_key
 
     idx = 0
-    infos: list[Union[PlainTensorMeta, SubclassCreationMeta]] = []
+    infos: list[PlainTensorMeta | SubclassCreationMeta] = []
     for arg_idx, a in enumerate(curr_args):
         if is_traceable_wrapper_subclass(a):
             if not isinstance(a, Tensor):
@@ -363,7 +346,7 @@ def create_subclass_meta(
             cnt = 1
 
             # Collect direct opaque inputs (for DCE'd tensor subclass case)
-            if input_opaques is None and _is_opaque_value_or_fake(a):
+            if input_opaques is None and is_opaque_value(a):
                 src_key = (arg_idx,)
                 if _get_opaque_identity_key(a) not in opaque_lookup:
                     opaque_lookup[_get_opaque_identity_key(a)] = src_key
@@ -381,7 +364,7 @@ def enumerate_filter_symints(lst: Iterable[IntLikeType]) -> list[tuple[int, SymI
     return [(i, s) for i, s in enumerate(lst) if symint_check(s)]
 
 
-def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> list[bool]:
+def compute_symint_placeholders(lst: Iterable[None | int | SymInt]) -> list[bool]:
     # Non-nested symints are replaced with None in `make_runtime_safe()`
     return [s is None for s in lst]
 

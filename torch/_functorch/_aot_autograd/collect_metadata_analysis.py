@@ -13,7 +13,7 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -171,7 +171,7 @@ def run_functionalized_fw_and_collect_metadata(
     # TODO: refactor to kill this flag
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
-    static_input_indices: Optional[list[int]] = None,
+    static_input_indices: list[int] | None = None,
     pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
@@ -325,7 +325,7 @@ def run_functionalized_fw_and_collect_metadata(
         ] = collections.defaultdict(int)
 
         out_storage_to_metadata_key_to_tensors: collections.defaultdict[
-            Optional[StorageWeakRef],
+            StorageWeakRef | None,
             collections.defaultdict[MetadataKey, set[torch.Tensor]],
         ] = collections.defaultdict(lambda: collections.defaultdict(set))
 
