@@ -3,7 +3,7 @@ import inspect
 import itertools
 import logging
 import weakref
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -269,9 +269,9 @@ class WrapWithAutocast(HigherOrderOperator):
     def __call__(
         self,
         device_type: str,
-        dtype: Optional[_dtype],
+        dtype: _dtype | None,
         enabled: bool,
-        cache_enabled: Optional[bool],
+        cache_enabled: bool | None,
         wrapped_func,
         *args,
         **kwargs,
