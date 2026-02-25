@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import functools
+import hashlib
 import json
 import logging
 import os
@@ -16,13 +17,18 @@ import shutil
 import time
 import traceback
 from copy import copy
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.trace_rules import torch_non_c_binding_in_graph_functions
-from torch._dynamo.utils import chromium_event_log_active, CompileEventLogger, counters
+from torch._dynamo.utils import (
+    chromium_event_log_active,
+    CompileEventLogger,
+    counters,
+    warn_once,
+)
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -515,6 +521,85 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             }
         )
 
+    # pyrefly: ignore [bad-override]
+    def reducer_override(self, obj: Any) -> Any:
+        """
+        Override to handle tensor subclasses (like DTensor) that aren't caught
+        by the dispatch_table's exact type matching.
+
+        The dispatch_table only matches exact types, so subclasses like DTensor
+        fall through to the default __reduce_ex__ which includes non-deterministic
+        storage addresses. This method catches those cases using isinstance checks.
+        """
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        # Handle tensor subclasses that aren't exactly torch.Tensor
+        # dispatch_table already handles torch.Tensor exactly
+        if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
+            if hasattr(obj, "_stable_hash_for_caching"):
+                return (_ident, (obj._stable_hash_for_caching(),))
+            if is_traceable_wrapper_subclass(obj):
+                warn_once(
+                    f"{type(obj).__name__} does not implement _stable_hash_for_caching. "
+                    "For PT2-compatible tensor subclasses, it is recommended to implement "
+                    "_stable_hash_for_caching(self) -> str for stable AOT autograd caching."
+                )
+                return (_ident, (self._default_stable_hash_for_caching(obj),))
+            return self._reduce_tensor(obj)
+        # Return NotImplemented to fall back to default behavior
+        return NotImplemented
+
+    # [NOTE] Tensor subclass stable hashing for AOT autograd cache
+    # Python's hash() varies with PYTHONHASHSEED, making cache keys unstable
+    # across processes. We use blake2b for cross-process determinism.
+    #
+    # EXTENSION POINT: Traceable wrapper subclasses can override cache key
+    # generation by implementing _stable_hash_for_caching(self) -> str.
+    # This method should return a deterministic string that uniquely identifies
+    # the tensor's metadata for caching purposes. See DTensor for an example.
+    #
+    # We can't define a default method on subclasses because there is no abstract
+    # base subclass, and we don't want to pollute torch.Tensor. Instead, we provide
+    # a default implementation here that uses __tensor_flatten__ to recursively
+    # hash inner tensors and metadata.
+
+    def _get_stable_hash(self, tensor: torch.Tensor) -> str:
+        """
+        Get stable hash for a tensor, dispatching to custom or default implementation.
+        """
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        if hasattr(tensor, "_stable_hash_for_caching"):
+            return tensor._stable_hash_for_caching()
+        elif is_traceable_wrapper_subclass(tensor):
+            return self._default_stable_hash_for_caching(tensor)
+        else:
+            # Regular tensor
+            metadata = extract_tensor_metadata_for_cache_key(tensor)
+            return hashlib.blake2b(pickle.dumps(metadata), digest_size=16).hexdigest()
+
+    def _default_stable_hash_for_caching(self, tensor: torch.Tensor) -> str:
+        """
+        Default stable hash implementation for traceable wrapper subclasses.
+        """
+        inner_tensor_names, subclass_metadata = tensor.__tensor_flatten__()  # type: ignore[attr-defined]
+
+        # Recursively get hashes of inner tensors
+        inner_hashes = {}
+        for name in inner_tensor_names:
+            inner_tensor = getattr(tensor, name)
+            inner_hashes[name] = self._get_stable_hash(inner_tensor)
+
+        cache_data = pickle.dumps(
+            (
+                tensor.shape,
+                tensor.requires_grad,
+                subclass_metadata,
+                inner_hashes,
+            )
+        )
+        return hashlib.blake2b(cache_data, digest_size=16).hexdigest()
+
     def _reduce_aot_config(
         self, aot_config: AOTConfig
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
@@ -769,7 +854,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
                 )
-                result: Optional[tuple[GenericAOTAutogradResult[Any, Any], bytes]] = (
+                result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
                     AOTAutogradCache._lookup(
                         cache_key, local, remote, args, cache_info, aot_config
                     )
@@ -903,7 +988,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @classmethod
     def generate_guards_expression(
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
-    ) -> Optional[str]:
+    ) -> str | None:
         shape_env = cls._get_shape_env()
 
         if shape_env is None:
@@ -980,7 +1065,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         aot_config: AOTConfig | None,
     ) -> tuple[GenericAOTAutogradResult[Any, Any], bytes] | None:
         """Given a key generated by AOTAutogradCachePickler, look up its location in the cache."""
-        remote_cache: Optional[RemoteCache[JsonDataTy]] = None
+        remote_cache: RemoteCache[JsonDataTy] | None = None
         if remote:
             remote_cache = AOTAutogradCache.get_remote_cache()
 
@@ -1047,7 +1132,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def _find_unpicklable_field(
         entry: GenericAOTAutogradResult[Any, Any],
-    ) -> Optional[str]:
+    ) -> str | None:
         """Find which field of entry is causing pickle to fail."""
         # pyrefly: ignore [implicit-any]
         fields = []
@@ -1066,7 +1151,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def _pickle_entry(
         entry: GenericAOTAutogradResult[Any, Any], remote: bool
-    ) -> Optional[bytes]:
+    ) -> bytes | None:
         """Pickle entry, returning None on failure."""
         try:
             return pickle.dumps(entry)
@@ -1108,7 +1193,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def save(key: str, entry: GenericAOTAutogradResult[Any, Any], remote: bool) -> None:
         """Save a single entry into the cache."""
-        content: Optional[bytes] = None
+        content: bytes | None = None
         try:
             entry.pre_save()
             content = AOTAutogradCache._pickle_entry(entry, remote)
@@ -1148,7 +1233,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
 
     @staticmethod
     @functools.cache
-    def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+    def get_remote_cache() -> RemoteCache[JsonDataTy] | None:
         """
         Attempts to load the remote cache, returns None on error.
         """
@@ -1163,22 +1248,22 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def make_entry(
         compiled_fw_func: OutputCode,
-        compiled_bw_func: Optional[OutputCode],
-        aot_joint_graph_str: Optional[str],
-        aot_forward_graph_str: Optional[str],
-        aot_backward_graph_str: Optional[str],
+        compiled_bw_func: OutputCode | None,
+        aot_joint_graph_str: str | None,
+        aot_forward_graph_str: str | None,
+        aot_backward_graph_str: str | None,
         runtime_metadata: ViewAndMutationMeta,
         dispatch_wrappers: list[CompilerWrapper],
-        maybe_subclass_meta: Optional[SubclassMeta],
-        num_fw_outs_saved_for_bw: Optional[int],
+        maybe_subclass_meta: SubclassMeta | None,
+        num_fw_outs_saved_for_bw: int | None,
         indices_of_inps_to_detach: list[int],
         forward_time_taken_ns: int,
         backward_time_taken_ns: int,
         sanitized_aot_config: AOTConfig,
-        guards_expr: Optional[str],
-        backward_state_indices: Optional[list[int]],
-        num_symints_saved_for_bw: Optional[int],
-        serialized_bw_module: Optional[SerializedGraphModule],
+        guards_expr: str | None,
+        backward_state_indices: list[int] | None,
+        num_symints_saved_for_bw: int | None,
+        serialized_bw_module: SerializedGraphModule | None,
     ) -> GenericAOTAutogradResult[Any, Any]:
         if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
