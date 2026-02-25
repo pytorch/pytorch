@@ -11,7 +11,11 @@ from typing import Any, Literal
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
+from torch._inductor.comm_analysis import (
+    estimate_fx_collective_memory_footprint,
+    get_collective_type_from_kernel_name,
+    NCCL_COLL,
+)
 from torch._inductor.fx_passes.bucketing import (
     _schedulable_wait_node,
     bucket_key,
@@ -367,7 +371,7 @@ class OverlapScheduler:
         bucket_exposed_first: bool | None = None,
         enable_fusion_regions: bool = False,
         bucket_only_internode_comms: bool = False,
-        bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_mode: BucketMode = "default",
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
     ):
@@ -697,15 +701,15 @@ class OverlapScheduler:
             compute_key_count += 1
 
         # Log compute estimations
-        from torch._inductor.fx_passes.node_runtime_estimation import (
-            _log_compute_estimations,
-        )
+        # from torch._inductor.fx_passes.node_runtime_estimation import (
+        #     _log_compute_estimations,
+        # )
 
-        _log_compute_estimations(
-            self.compute_nodes,
-            runtime_estimations,
-            runtime_estimations_analytical,
-        )
+        # _log_compute_estimations(
+        #     self.compute_nodes,
+        #     runtime_estimations,
+        #     runtime_estimations_analytical,
+        # )
 
         # Benchmark collectives if enabled (only CUDA events - others are deterministic)
         # Skip if custom estimation is provided for collectives
@@ -938,6 +942,9 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
+        # Annotate critical/overlapped collectives for pg_alloc before bucketing
+        self._annotate_pg_alloc_collectives()
+
         # Finalize: bucket collectives (if enabled), inline fusions, apply deps
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             finalize_overlap_scheduling,
@@ -954,6 +961,7 @@ class OverlapScheduler:
             region_of=self.region_of,
             bucket_exposed_first=self.bucket_exposed_first,
             bucket_only_internode_comms=self.bucket_only_internode_comms,
+            bucket_mode=self.bucket_mode,
         )
 
         if self.log_final_collectives_estimations:
@@ -1499,6 +1507,66 @@ class OverlapScheduler:
 
         self.reorder_graph()
 
+    def _annotate_pg_alloc_collectives(self) -> None:
+        """
+        Mark collectives for pg_alloc based on config.pg_alloc_strategy.
+
+        Budget is enforced at inductor level (AllocateLine.plan) where buffer
+        liveness is known, not here.
+        """
+        strategy = torch._inductor.config.pg_alloc_strategy
+        use_pg_alloc = torch._inductor.config.bucket_ops_use_pg_alloc
+        log.info(
+            "pg_alloc config: bucket_ops_use_pg_alloc=%s, strategy=%s, "
+            "budget_gb=%s",
+            use_pg_alloc,
+            strategy,
+            torch._inductor.config.pg_alloc_memory_budget_increase_gb,
+        )
+        if strategy == "none" or not use_pg_alloc:
+            return
+
+        def _is_reduce_scatter(info: CollectiveInfo) -> bool:
+            return (
+                get_collective_type_from_kernel_name(info.start_node.target.name())
+                == NCCL_COLL.REDUCE_SCATTER
+            )
+
+        all_colls = list(self.collective_info.values())
+
+        if strategy == "rs_exposed":
+            candidates = [i for i in all_colls
+                          if _is_reduce_scatter(i) and i.exposed_time_ms > 0]
+            candidates.sort(key=lambda c: -c.exposed_time_ms)
+        elif strategy == "rs_all":
+            candidates = [i for i in all_colls if _is_reduce_scatter(i)]
+            candidates.sort(key=lambda c: -c.exposed_time_ms)
+        elif strategy == "all_exposed":
+            candidates = [i for i in all_colls if i.exposed_time_ms > 0]
+            candidates.sort(key=lambda c: -c.exposed_time_ms)
+        elif strategy == "all":
+            candidates = all_colls
+            candidates.sort(key=lambda c: -c.exposed_time_ms)
+        elif strategy == "topk":
+            k = torch._inductor.config.pg_alloc_topk_count
+            candidates = sorted(all_colls, key=lambda c: -c.exposed_time_ms)[:k]
+        else:
+            log.warning("Unknown pg_alloc_strategy: %s", strategy)
+            return
+
+        total_bytes = 0
+        for info in candidates:
+            group_name = get_group_name(info.start_node)
+            info.start_node.meta["pg_alloc_group_name"] = group_name
+            total_bytes += info.size_bytes
+
+        log.info(
+            "pg_alloc strategy=%s: %d collectives annotated, %.2f MB total",
+            strategy,
+            len(candidates),
+            total_bytes / (1024 * 1024),
+        )
+
     def _bucket_collectives(self) -> None:
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             OverlapPreservingBucketer,
@@ -1574,6 +1642,7 @@ def schedule_overlap_bucketing(
     bucket_only_internode_comms=False,
     prioritize_bucketing_during_scheduling: bool = True,
     max_off_bucket_gb: float | None = 0.5,
+    bucket_mode: BucketMode = "default",
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1597,6 +1666,7 @@ def schedule_overlap_bucketing(
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
+        bucket_mode: Bucketing mode for collective operations.
     """
     if not any(is_wait_tensor(n) for n in gm.graph.nodes):
         return gm
@@ -1627,6 +1697,7 @@ def schedule_overlap_bucketing(
         bucket_only_internode_comms=bucket_only_internode_comms,
         prioritize_bucketing_during_scheduling=prioritize_bucketing_during_scheduling,
         max_off_bucket_gb=max_off_bucket_gb,
+        bucket_mode=bucket_mode,
     ).run()
     trace_structured(
         "artifact",
@@ -1672,6 +1743,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "bucket_only_internode_comms",
         "enable_fusion_regions",
         "prioritize_bucketing_during_scheduling",
+        "bucket_mode",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:

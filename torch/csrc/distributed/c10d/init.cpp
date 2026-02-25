@@ -3142,6 +3142,10 @@ Arguments:
               py::arg("device"),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "is_initialized",
+              &::c10d::Backend::isInitialized,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "allocate_tensor",
               [](::c10d::Backend& self,
                  long size,
