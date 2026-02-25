@@ -59,6 +59,12 @@ void neg_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
+// Use signum with typed return to speed up conversions from bool
+// and avoid compilation issues
+inline C10_HOST_DEVICE BFloat16 signum(BFloat16 x) {
+  return c10::signum_indicator(x);
+}
+
 void sign_kernel_cuda(TensorIteratorBase& iter){
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a){
