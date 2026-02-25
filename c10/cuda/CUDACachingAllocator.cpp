@@ -17,6 +17,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <c10/util/static_tracepoint.h>
+#include <bit>
 
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
