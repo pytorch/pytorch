@@ -592,7 +592,7 @@ pointwise_ops = [
 ]
 
 
-def single_mesh_dim_common_pointwise_strategy(
+def _shard_only_pointwise_strategy(
     args_schema: ArgsType,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """Generate Shard placement strategies for pointwise ops based on tensor shapes."""
@@ -617,37 +617,12 @@ def single_mesh_dim_common_pointwise_strategy(
     return placements_list
 
 
-def _make_partial_strategy(
-    extra_rules: list[list[Placement]] | None = None,
-) -> Callable[
-    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
-]:
-    """Factory for single-dim strategies that add partial placement rules."""
-
-    def strategy(
-        op: OpOverload,
-        args_schema: ArgsType,
-        kwargs_schema: KwargsType,
-    ) -> list[list[Placement | _ShardingPlaceholder]]:
-        placements = single_mesh_dim_common_pointwise_strategy(args_schema)
-        if extra_rules:
-            n_tensors = sum(1 for arg in args_schema if isinstance(arg, TensorMeta))
-            expected_len = 1 + n_tensors
-            for rule in extra_rules:
-                if len(rule) == expected_len:
-                    # pyrefly: ignore [bad-argument-type]
-                    placements.append(rule)
-        return placements
-
-    return strategy
-
-
-def _single_mesh_dim_common_pointwise_strategy_legacy(
+def single_mesh_dim_common_pointwise_strategy(
     args_schema: ArgsType,
     linearity: int = -1,
+    scalar_tensor_idx: Optional[int] = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    """Legacy version with linearity param, kept for test compatibility."""
-    placements = single_mesh_dim_common_pointwise_strategy(args_schema)
+    placements = _shard_only_pointwise_strategy(args_schema)
     n_tensors = sum(1 for arg in args_schema if isinstance(arg, TensorMeta))
     if linearity == 0:
         placements.append([Partial("sum"), Partial("sum")])
@@ -662,13 +637,38 @@ def _single_mesh_dim_common_pointwise_strategy_legacy(
     return placements
 
 
+def _make_partial_strategy(
+    extra_rules: list[list[Placement]] | None = None,
+) -> Callable[
+    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+]:
+    """Factory for single-dim strategies that add partial placement rules."""
+
+    def strategy(
+        op: OpOverload,
+        args_schema: ArgsType,
+        kwargs_schema: KwargsType,
+    ) -> list[list[Placement | _ShardingPlaceholder]]:
+        placements = _shard_only_pointwise_strategy(args_schema)
+        if extra_rules:
+            n_tensors = sum(1 for arg in args_schema if isinstance(arg, TensorMeta))
+            expected_len = 1 + n_tensors
+            for rule in extra_rules:
+                if len(rule) == expected_len:
+                    # pyrefly: ignore [bad-argument-type]
+                    placements.append(rule)
+        return placements
+
+    return strategy
+
+
 def single_mesh_dim_pointwise_strategy(
     op: OpOverload,
     args_schema: ArgsType,
     kwargs_schema: KwargsType,
     linearity: int = -1,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    return _single_mesh_dim_common_pointwise_strategy_legacy(args_schema, linearity)
+    return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
 
 
 def single_mesh_dim_linear_pointwise_strategy(
