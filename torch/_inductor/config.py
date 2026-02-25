@@ -443,6 +443,25 @@ bucket_all_reduces_fx_bucket_size_determinator: Optional[Callable[[int], int]] =
 # performance. Set via config or USE_PG_ALLOC env var.
 bucket_ops_use_pg_alloc: bool = os.environ.get("USE_PG_ALLOC", "0") == "1"
 
+# Strategy for selecting which collectives use pg_alloc (NCCL registered memory).
+# "none"       - disabled (default)
+# "rs_exposed" - only reduce_scatters on critical path (exposed_time > 0)
+# "rs_all"     - all reduce_scatters (exposed + overlapped)
+# "all_exposed"- all collective types on critical path
+# "all"        - all collectives regardless of overlap status
+# "topk"       - top K collectives by exposed time (K = pg_alloc_topk_count)
+pg_alloc_strategy: str = os.environ.get("PG_ALLOC_STRATEGY", "none")
+
+# For "topk" strategy: max number of collectives to annotate.
+pg_alloc_topk_count: int = int(os.environ.get("PG_ALLOC_TOPK_COUNT", "10"))
+
+# Max additional memory (GB) allowed for pg_alloc above baseline peak.
+# pg_alloc buffers come from NCCL's pool (separate from CUDA caching allocator),
+# so they increase total GPU memory usage. None means no limit.
+pg_alloc_memory_budget_increase_gb: float | None = (
+    float(v) if (v := os.environ.get("PG_ALLOC_MEMORY_BUDGET_GB")) else None
+)
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
@@ -574,11 +593,14 @@ force_same_precision: bool = Config(
 # as expected before turning it on for everyone.
 multi_kernel_hints: list[int] = []
 
+
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# NVGEMM: NVIDIA Universal GEMM via cutlass_api (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.

@@ -417,6 +417,7 @@ class MemoryPlanningState:
             CommBufferReuseKey, list[FreeIfNotReusedLine]
         ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
+        self.total_pg_alloc_bytes: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:
         return bool(self.reuse_pool.get(key, None))
@@ -727,7 +728,7 @@ class EfficientPeakEstimate:
         )
 
     def _get_size(self, node: BufferLike) -> int:
-        return V.graph.sizevars.size_hint(
+        return V.graph.sizevars.optimization_hint(
             V.graph.get_allocation_storage_size(node), fallback=0
         ) * get_dtype_size(node.get_dtype())
 
@@ -782,13 +783,35 @@ class AllocateLine(MemoryPlanningLine):
                 return ReuseLine(
                     self.wrapper, free_line.node, self.node, comm_buffer=True
                 )
+            # New pg_alloc allocation — check budget
+            layout = self.node.get_output_spec()
+            if (
+                isinstance(layout, ir.CommBufferLayout)
+                and layout.comm_buffer_type == ir.CommBufferType.PG_ALLOC
+            ):
+                alloc_bytes = self._pg_alloc_size_bytes()
+                budget_gb = config.pg_alloc_memory_budget_increase_gb
+                if budget_gb is not None:
+                    budget_bytes = int(budget_gb * (1024**3))
+                    if state.total_pg_alloc_bytes + alloc_bytes > budget_bytes:
+                        log.warning(
+                            "pg_alloc budget exceeded (%.2f MB + %.2f MB > %.2f MB), "
+                            "falling back to regular alloc for %s",
+                            state.total_pg_alloc_bytes / (1024 * 1024),
+                            alloc_bytes / (1024 * 1024),
+                            budget_bytes / (1024 * 1024),
+                            self.node.get_name(),
+                        )
+                        self._downgrade_to_regular_alloc()
+                        return self
+                state.total_pg_alloc_bytes += alloc_bytes
             return self
 
         # Regular buffer reuse
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
-            size = V.graph.sizevars.size_hint(
+            size = V.graph.sizevars.optimization_hint(
                 V.graph.get_allocation_storage_size(self.node), fallback=0
             ) * get_dtype_size(self.node.get_dtype())
             if self.should_reuse_buffer(free_line, size):
@@ -807,6 +830,25 @@ class AllocateLine(MemoryPlanningLine):
                 )
 
         return self
+
+    def _pg_alloc_size_bytes(self) -> int:
+        storage_size = V.graph.sizevars.size_hint(
+            V.graph.get_allocation_storage_size(self.node)
+        )
+        return storage_size * get_dtype_size(self.node.get_dtype())
+
+    def _downgrade_to_regular_alloc(self) -> None:
+        """Convert CommBufferLayout back to FixedLayout — falls back to torch.empty()."""
+        layout = self.node.get_output_spec()
+        assert isinstance(layout, ir.CommBufferLayout)
+        self.node.layout = ir.FixedLayout(
+            device=layout.device,
+            dtype=layout.dtype,
+            size=layout.size,
+            stride=layout.stride,
+            offset=layout.offset,
+        )
+        self.comm_buffer = False
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
@@ -841,6 +883,20 @@ class AllocateLine(MemoryPlanningLine):
                 f'group_name="{group_name}", '
                 f"alloc_id={random.randint(0, 2**64 - 1)})"
             )
+        elif comm_buffer_type == ir.CommBufferType.PG_ALLOC:
+            storage_size = V.graph.sizevars.size_hint(
+                V.graph.get_allocation_storage_size(self.node)
+            )
+            line = (
+                f"{name} = _pg_alloc_tensor("
+                f"{storage_size}, "
+                f"{dtype}, "
+                f'torch.device("cuda:{device.index}"), '
+                f'"{group_name}")'
+            )
+            # _pg_alloc_tensor returns a 1D flat tensor; reshape if needed
+            if len(shape) > 1:
+                line += f".view({self.wrapper.codegen_shape_tuple(shape)})"
         else:
             raise NotImplementedError(
                 f"Unsupported comm buffer type: {comm_buffer_type}"
@@ -874,8 +930,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
         if config.allow_buffer_reuse:
-            if self.comm_buffer:
-                # Comm buffers use separate pool (comm-comm reuse only)
+            layout = self.node.get_output_spec()
+            if isinstance(layout, ir.CommBufferLayout):
                 key = comm_buffer_reuse_key(self.node)
                 state.comm_buffer_push(key, self)
             else:
@@ -887,15 +943,14 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         assert self.node.get_name() not in V.graph.removed_buffers
         if not self.is_reused:
             line = self.wrapper.make_buffer_free(self.node)
-            if self.comm_buffer:
-                layout = self.node.get_output_spec()
-                assert isinstance(layout, ir.CommBufferLayout)
+            layout = self.node.get_output_spec()
+            if isinstance(layout, ir.CommBufferLayout):
                 code.writeline(f"{line} # {layout.comm_buffer_type.value} buffer free")
             else:
                 code.writeline(line)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
-        if self.comm_buffer:
+        if isinstance(self.node.get_output_spec(), ir.CommBufferLayout):
             return converter._generate_comm_buffer_free
         return converter._generate_free_if_not_reused
 
@@ -1259,6 +1314,26 @@ class PythonWrapperCodegen(CodeGen):
             self.header.splice(
                 """
                 empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+                """,
+                strip=True,
+            )
+        except (AttributeError, ImportError):
+            pass
+        try:
+            # Add _pg_alloc_tensor() for process group-based buffer allocation
+            from torch.distributed.distributed_c10d import (  # noqa: F401
+                _resolve_process_group,
+            )
+
+            self.header.splice(
+                """
+                def _pg_alloc_tensor(numel, dtype, device, group_name):
+                    from torch.distributed.distributed_c10d import _resolve_process_group
+                    _pg = _resolve_process_group(group_name)
+                    _backend = _pg._get_backend(device)
+                    if _backend.supports_tensor_alloc(device):
+                        return _backend.allocate_tensor(numel, dtype=dtype, device=device)
+                    return torch.empty(numel, dtype=dtype, device=device)
                 """,
                 strip=True,
             )
@@ -1979,6 +2054,14 @@ class PythonWrapperCodegen(CodeGen):
         _total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
         )
+        total_pg_alloc = sum(
+            s.total_pg_alloc_bytes for s in past_planning_states
+        )
+        if total_pg_alloc > 0:
+            log.warning(
+                "pg_alloc memory planned: %.2f MB",
+                total_pg_alloc / (1024 * 1024),
+            )
 
     def run_wrapper_ir_passes(self, is_inference: bool):
         # We disable planning during training because it presently increases peak memory consumption.
@@ -2333,14 +2416,13 @@ class PythonWrapperCodegen(CodeGen):
                         f"torch.cuda.default_generators[{value.device.index}].graphsafe_get_state()",
                     )
                 else:
-                    shape = [
-                        V.graph.sizevars.optimization_hint(x, fallback=42)
-                        for x in value.get_size()
-                    ]
-                    stride = [
-                        V.graph.sizevars.size_hint(x, fallback=42)
-                        for x in value.get_stride()
-                    ]
+                    shape = V.graph.sizevars.optimization_hints(
+                        value.get_size(), fallback=42
+                    )
+                    stride = V.graph.sizevars.optimization_hints(
+                        value.get_stride(), fallback=42
+                    )
+
                     add_fake_input(
                         name,
                         shape,
@@ -2787,7 +2869,7 @@ class PythonWrapperCodegen(CodeGen):
                     name,
                     ws.device,
                     ws.dtype,
-                    shape=(V.graph.sizevars.size_hint(ws.count),),
+                    shape=(V.graph.sizevars.optimization_hint(ws.count),),
                     stride=(1,),
                 )
             )

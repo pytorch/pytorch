@@ -4,8 +4,6 @@
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <cstdlib>
-#include <cstring>
 #include <utility>
 
 namespace {
@@ -30,32 +28,9 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
   return it->second;
 }
 
-bool usePgAllocator() {
-  // Reads from same env var as torch._inductor.config.bucket_ops_use_pg_alloc
-  // Default is disabled (only enabled if env var is set to "1")
-  static const char* env = std::getenv("USE_PG_ALLOC");
-  static bool enabled = env != nullptr && std::strcmp(env, "1") == 0;
-  return enabled;
-}
-
-// Size thresholds for selective pgalloc usage (in bytes)
-// Based on profiling: small collectives (<1MB) hurt from pgalloc overhead,
-// large collectives (>100MB) don't benefit significantly
-constexpr int64_t kPgAllocMinSizeBytes = 1000000;   // 1MB
-constexpr int64_t kPgAllocMaxSizeBytes = 100000000; // 100MB
-
-bool shouldUsePgAllocator(int64_t size_bytes) {
-  if (!usePgAllocator()) {
-    return false;
-  }
-  // Only use pgalloc for medium-sized collectives
-  return size_bytes > kPgAllocMinSizeBytes && size_bytes < kPgAllocMaxSizeBytes;
-}
-
 at::Tensor allocate_all_gather_output(
     const at::Tensor& input,
-    int64_t group_size,
-    const c10::intrusive_ptr<c10d::ProcessGroup>& group = nullptr) {
+    int64_t group_size) {
   TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
   if (output_size.empty()) {
@@ -63,32 +38,14 @@ at::Tensor allocate_all_gather_output(
   } else {
     output_size[0] *= group_size;
   }
-  auto options =
-      at::TensorOptions().dtype(input.dtype()).device(input.device());
-
-  // Compute output size in bytes for heuristic
-  int64_t total_elements = 1;
-  for (auto dim : output_size) {
-    total_elements *= dim;
-  }
-  int64_t size_bytes = total_elements * input.dtype().itemsize();
-
-  // Use comm-optimized allocator if heuristic allows and backend available
-  if (shouldUsePgAllocator(size_bytes) && group != nullptr) {
-    auto backend = group->getBackend(input.device().type());
-    if (backend->supportsTensorAlloc(input.device().index()) &&
-        backend->isInitialized()) {
-      return backend->allocateTensor(total_elements, options).view(output_size);
-    }
-  }
-
-  return at::empty(output_size, options);
+  return at::empty(
+      output_size,
+      at::TensorOptions().dtype(input.dtype()).device(input.device()));
 }
 
 at::Tensor allocate_reduce_scatter_output(
     const at::Tensor& input,
-    const int64_t group_size,
-    const c10::intrusive_ptr<c10d::ProcessGroup>& group = nullptr) {
+    const int64_t group_size) {
   TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
   if (output_size[0] % group_size != 0) {
@@ -97,26 +54,9 @@ at::Tensor allocate_reduce_scatter_output(
                  << group_size << ").";
   }
   output_size[0] /= group_size;
-  auto options =
-      at::TensorOptions().dtype(input.dtype()).device(input.device());
-
-  // Compute output size in bytes for heuristic
-  int64_t total_elements = 1;
-  for (auto dim : output_size) {
-    total_elements *= dim;
-  }
-  int64_t size_bytes = total_elements * input.dtype().itemsize();
-
-  // Use comm-optimized allocator if heuristic allows and backend available
-  if (shouldUsePgAllocator(size_bytes) && group != nullptr) {
-    auto backend = group->getBackend(input.device().type());
-    if (backend->supportsTensorAlloc(input.device().index()) &&
-        backend->isInitialized()) {
-      return backend->allocateTensor(total_elements, options).view(output_size);
-    }
-  }
-
-  return at::empty(output_size, options);
+  return at::empty(
+      output_size,
+      at::TensorOptions().dtype(input.dtype()).device(input.device()));
 }
 
 } // namespace
@@ -196,15 +136,14 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
     int64_t group_size,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
-  auto group = c10d::resolve_process_group(group_name);
-
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     TORCH_CHECK(tensor.is_contiguous());
-    outputs.push_back(allocate_all_gather_output(tensor, group_size, group));
+    outputs.push_back(allocate_all_gather_output(tensor, group_size));
   }
 
+  auto group = c10d::resolve_process_group(group_name);
   auto work = group->allgather_into_tensor_coalesced(outputs, inputs);
   for (const auto& tensor : outputs) {
     c10d::register_work(tensor, work);
@@ -247,16 +186,14 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
     std::string group_name) {
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
-  auto group = c10d::resolve_process_group(group_name);
-
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     TORCH_CHECK(tensor.is_contiguous());
-    outputs.push_back(
-        allocate_reduce_scatter_output(tensor, group_size, group));
+    outputs.push_back(allocate_reduce_scatter_output(tensor, group_size));
   }
 
+  auto group = c10d::resolve_process_group(group_name);
   auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
     c10d::register_work(tensor, work);
