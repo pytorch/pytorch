@@ -71,26 +71,27 @@ binary_additive_ops = [
     aten._foreach_sub_.List,
 ]
 
-# Maps op -> whether R, P(x) -> P(x) is valid (linear in second arg).
-# True for mul (linear in each argument), False for div (only linear in numerator).
-binary_multiplicative_ops: dict[OpOverload, bool] = {
-    aten.div.Tensor: False,
-    aten.div.out: False,
-    aten.div_.Tensor: False,
-    aten.mul.Tensor: True,
-    aten.mul.out: True,
-    aten.mul_.Tensor: True,
-    aten._foreach_div.List: False,
-    aten._foreach_div.Tensor: False,
-    aten._foreach_div_.List: False,
-    aten._foreach_div_.Tensor: False,
-    aten._foreach_mul.List: True,
-    aten._foreach_mul.Tensor: True,
-    aten._foreach_mul_.List: True,
-    aten._foreach_mul_.Tensor: True,
-}
+# mul: partials propagate through either arg. div: only through numerator.
+binary_mul_ops = [
+    aten.mul.Tensor,
+    aten.mul.out,
+    aten.mul_.Tensor,
+    aten._foreach_mul.List,
+    aten._foreach_mul.Tensor,
+    aten._foreach_mul_.List,
+    aten._foreach_mul_.Tensor,
+]
+binary_div_ops = [
+    aten.div.Tensor,
+    aten.div.out,
+    aten.div_.Tensor,
+    aten._foreach_div.List,
+    aten._foreach_div.Tensor,
+    aten._foreach_div_.List,
+    aten._foreach_div_.Tensor,
+]
 
-# Scalar linear ops: multiplying/dividing/adding/subtracting by scalar is linear
+
 scalar_linear_ops = [
     aten.div.Scalar,
     aten.div_.Scalar,
@@ -111,6 +112,14 @@ scalar_linear_ops = [
     aten._foreach_sub.ScalarList,
     aten._foreach_sub_.Scalar,
     aten._foreach_sub_.ScalarList,
+]
+
+neg_ops = [
+    aten.neg.default,
+    aten.neg.out,
+    aten.neg_.default,
+    aten._foreach_neg.default,
+    aten._foreach_neg_.default,
 ]
 
 # Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
@@ -195,32 +204,37 @@ all_partial_preserving_unary_ops = [
     aten.rad2deg_.default,
 ]
 
-# Binary ops that are monotonically increasing in both arguments.
-# All get base rules P(max/min)+R→P(max/min) (monotonicity guarantees
-# correctness). Ops that ARE max/min additionally preserve P(max/min)
-# when both inputs carry the same partial: value maps to which partial
-# type to add ("max", "min"), or None for base rules only.
-monotonic_binary_ops: dict[torch._ops.OpOverload, str | None] = {
-    aten.clamp_max.Tensor: "min",
-    aten.clamp_max.Tensor_out: "min",
-    aten.clamp_min.Tensor: "max",
-    aten.clamp_min.Tensor_out: "max",
-    aten.fmax.default: "max",
-    aten.fmax.out: "max",
-    aten.fmin.default: "min",
-    aten.fmin.out: "min",
-    aten.logaddexp.default: None,
-    aten.logaddexp.out: None,
-    aten.logaddexp2.default: None,
-    aten.logaddexp2.out: None,
-    aten.maximum.default: "max",
-    aten.maximum.out: "max",
-    aten.minimum.default: "min",
-    aten.minimum.out: "min",
-    prims.fmax.default: "max",
-    prims.fmin.default: "min",
-    aten._foreach_maximum_.List: "max",
-}
+# Binary ops monotonically increasing in both arguments.
+# max-preserving: P(max)+P(max)->P(max) because max(max(a),max(b)) = max(a,b)
+monotonic_max_preserving_binary_ops = [
+    aten.clamp_min.Tensor,
+    aten.clamp_min.Tensor_out,
+    aten.fmax.default,
+    aten.fmax.out,
+    aten.maximum.default,
+    aten.maximum.out,
+    prims.fmax.default,
+    aten._foreach_maximum_.List,
+]
+
+# min-preserving: P(min)+P(min)->P(min) because min(min(a),min(b)) = min(a,b)
+monotonic_min_preserving_binary_ops = [
+    aten.clamp_max.Tensor,
+    aten.clamp_max.Tensor_out,
+    aten.fmin.default,
+    aten.fmin.out,
+    aten.minimum.default,
+    aten.minimum.out,
+    prims.fmin.default,
+]
+
+# Monotonic increasing in both args but don't preserve any specific partial type.
+monotonic_binary_ops = [
+    aten.logaddexp.default,
+    aten.logaddexp.out,
+    aten.logaddexp2.default,
+    aten.logaddexp2.out,
+]
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
@@ -890,20 +904,24 @@ for op in binary_additive_ops:
 # _UNARY_LINEAR_RULES handles the scalar promotion case: Python's __mul__/__truediv__
 # promote scalars to 0-dim tensors, so aten.mul.Scalar dispatches as aten.mul.Tensor
 # with n_tensors=1, matching the length-2 unary rules.
-for op, linear_in_second_arg in binary_multiplicative_ops.items():
-    rules: list[list[Placement]] = [
-        [Partial("sum"), Partial("sum"), Replicate()],
-        [Partial("avg"), Partial("avg"), Replicate()],
-    ]
-    if linear_in_second_arg:
-        # pyrefly: ignore[bad-assignment]
-        rules += [
-            [Partial("sum"), Replicate(), Partial("sum")],
-            [Partial("avg"), Replicate(), Partial("avg")],
-        ]
-    _register(op, _UNARY_LINEAR_RULES + rules)
+_MUL_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum"), Replicate()],
+    [Partial("avg"), Partial("avg"), Replicate()],
+    [Partial("sum"), Replicate(), Partial("sum")],
+    [Partial("avg"), Replicate(), Partial("avg")],
+]
 
-# Scalar linear ops: static_argnum=1 because first arg is scalar
+_DIV_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum"), Replicate()],
+    [Partial("avg"), Partial("avg"), Replicate()],
+]
+
+for op in binary_mul_ops:
+    _register(op, _UNARY_LINEAR_RULES + _MUL_RULES)
+
+for op in binary_div_ops:
+    _register(op, _UNARY_LINEAR_RULES + _DIV_RULES)
+
 for op in scalar_linear_ops:
     _register(op, _UNARY_LINEAR_RULES, static_argnum=1)
 
@@ -917,23 +935,30 @@ for op in all_partial_preserving_unary_ops:
     _register(op, _ALL_PARTIAL_PRESERVING_RULES)
 
 # neg: linear + monotonic decreasing
-for op in [
-    aten.neg.default,
-    aten.neg.out,
-    aten.neg_.default,
-    aten._foreach_neg.default,
-    aten._foreach_neg_.default,
-]:
+for op in neg_ops:
     _register(op, _NEG_RULES)
 
-# Monotonic binary ops
-for op, preserve in monotonic_binary_ops.items():
-    rules = list(_monotone_binary_base_rules)
-    if preserve == "max":
-        rules.append([Partial("max"), Partial("max"), Partial("max")])
-    elif preserve == "min":
-        rules.append([Partial("min"), Partial("min"), Partial("min")])
-    _register(op, rules)
+# Monotonic binary ops: max-preserving
+for op in monotonic_max_preserving_binary_ops:
+    _register(
+        op,
+        # pyrefly: ignore[bad-argument-type]
+        _monotone_binary_base_rules
+        + [[Partial("max"), Partial("max"), Partial("max")]],
+    )
+
+# Monotonic binary ops: min-preserving
+for op in monotonic_min_preserving_binary_ops:
+    _register(
+        op,
+        # pyrefly: ignore[bad-argument-type]
+        _monotone_binary_base_rules
+        + [[Partial("min"), Partial("min"), Partial("min")]],
+    )
+
+# Monotonic binary ops: no specific partial preservation
+for op in monotonic_binary_ops:
+    _register(op, _monotone_binary_base_rules)
 
 # copy_(self, src): preserves all Partial types (2 tensor inputs → 3-element rules)
 _register(
