@@ -7,13 +7,17 @@ from typing import cast
 import torch
 from torch import Tensor
 from torch._prims_common import DimsType
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
     RuntimeSchemaInfo,
     StrategyType,
+)
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
@@ -24,6 +28,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -765,10 +770,21 @@ register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
+    aten.squeeze.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.squeeze_.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
     aten.view.default,
     Tensor.view,
     schema_info=RuntimeSchemaInfo(1),
     strict_view=True,
+)
+register_op_strategy_map(
+    aten.view_copy.default,
+    Tensor.view,
+    schema_info=RuntimeSchemaInfo(1),
 )
 register_op_strategy_map(
     aten.reshape.default, torch.reshape, schema_info=RuntimeSchemaInfo(1)
@@ -786,6 +802,9 @@ register_op_strategy_map(
     aten.expand.default, Tensor.expand, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
+    aten.expand_copy.default, Tensor.expand, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
     aten.permute.default, torch.permute, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
@@ -794,5 +813,22 @@ register_op_strategy_map(
 register_op_strategy_map(
     aten.transpose.int, torch.transpose, schema_info=RuntimeSchemaInfo(1)
 )
-register_op_strategy_map(aten.view_as_complex.default, torch.view_as_complex)
+
+
+@register_single_dim_strategy(aten.view_as_complex.default)
+def view_as_complex_single_dim_strategy(op, args_schema, kwargs_schema):
+    # view_as_complex: float [..., 2] -> complex [...]
+    # Dims 0..ndim-2 map 1:1; last dim (real/imag pair) is consumed.
+    # P(max)/P(min) invalid: complex numbers have no total ordering.
+    input_meta = args_schema[0]
+    assert isinstance(input_meta, TensorMeta)
+    ndim = len(input_meta.shape)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim - 1):
+        strategies.append([_ShardingPlaceholder(d), _ShardingPlaceholder(d)])
+    strategies.append([Partial("sum"), Partial("sum")])
+    strategies.append([Partial("avg"), Partial("avg")])
+    return strategies
+
+
 register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)

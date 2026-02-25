@@ -186,7 +186,9 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
         else:
             # Backwards compatibility with old serialized artifacts
             entry = bundle
+            # pyrefly: ignore [implicit-any]
             triton_kernels = {}
+            # pyrefly: ignore [implicit-any]
             triton_constant_args = {}
 
         # See Note: [Triton Kernel Side Table Serialization]
