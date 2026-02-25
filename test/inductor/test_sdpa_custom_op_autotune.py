@@ -162,6 +162,99 @@ class TestCustomOpAutotuneSDPA(TestCase):
             torch._dynamo.reset()
 
     @skipIfXpu
+    def test_sdpa_defer_benchmark(self):
+        """Test deferred benchmarking mode for custom op autotuning.
+
+        When defer_benchmark=True, autotuning returns a MultiTemplateBuffer
+        instead of selecting immediately. The scheduler finalizes the choice
+        after scheduling/fusion, enabling more accurate benchmark results.
+        """
+        orig_flash = torch.backends.cuda.flash_sdp_enabled()
+        orig_mem = torch.backends.cuda.mem_efficient_sdp_enabled()
+        orig_cudnn = torch.backends.cuda.cudnn_sdp_enabled()
+
+        try:
+            torch.backends.cuda.enable_flash_sdp(False)
+            torch.backends.cuda.enable_mem_efficient_sdp(False)
+            torch.backends.cuda.enable_cudnn_sdp(False)
+
+            test_op_name = f"test_lib::sdpa_defer_{id(self)}"
+
+            def decomp_aten_sdpa(
+                query: torch.Tensor,
+                key: torch.Tensor,
+                value: torch.Tensor,
+                is_causal: bool = True,
+            ) -> torch.Tensor:
+                return F.scaled_dot_product_attention(
+                    query, key, value, is_causal=is_causal
+                )
+
+            def decomp_manual_sdpa(
+                query: torch.Tensor,
+                key: torch.Tensor,
+                value: torch.Tensor,
+                is_causal: bool = True,
+            ) -> torch.Tensor:
+                scale = query.shape[-1] ** -0.5
+                attn = torch.matmul(query * scale, key.transpose(-2, -1))
+                if is_causal:
+                    L, S = attn.shape[-2], attn.shape[-1]
+                    mask = torch.ones(
+                        L, S, dtype=torch.bool, device=query.device
+                    ).tril()
+                    attn = attn.masked_fill(~mask, float("-inf"))
+                attn = torch.softmax(attn, dim=-1)
+                return torch.matmul(attn, value)
+
+            @torch.library.custom_op(test_op_name, mutates_args=())
+            def sdpa_op(
+                query: torch.Tensor,
+                key: torch.Tensor,
+                value: torch.Tensor,
+                is_causal: bool = True,
+            ) -> torch.Tensor:
+                return F.scaled_dot_product_attention(
+                    query, key, value, is_causal=is_causal
+                )
+
+            @sdpa_op.register_fake
+            def _(query, key, value, is_causal=True):
+                return torch.empty_like(query)
+
+            register_custom_op_autotuning(
+                sdpa_op,
+                configs=[
+                    CustomOpConfig(decomp_aten_sdpa),
+                    CustomOpConfig(decomp_manual_sdpa),
+                ],
+                name=f"test_sdpa_defer_{id(self)}",
+                input_gen_fns={
+                    "query": lambda t: torch.randn_like(t),
+                    "key": lambda t: torch.randn_like(t),
+                    "value": lambda t: torch.randn_like(t),
+                },
+                defer_benchmark=True,
+            )
+
+            B, H, L, D = 1, 4, 64, 64
+            query = torch.randn(B, H, L, D, device=self.device, dtype=self.dtype)
+            key = torch.randn(B, H, L, D, device=self.device, dtype=self.dtype)
+            value = torch.randn(B, H, L, D, device=self.device, dtype=self.dtype)
+
+            expected = F.scaled_dot_product_attention(query, key, value, is_causal=True)
+
+            self._run_sdpa_autotune_test(
+                sdpa_op, (query, key, value), expected, "SDPA_defer_benchmark"
+            )
+
+        finally:
+            torch.backends.cuda.enable_flash_sdp(orig_flash)
+            torch.backends.cuda.enable_mem_efficient_sdp(orig_mem)
+            torch.backends.cuda.enable_cudnn_sdp(orig_cudnn)
+            torch._dynamo.reset()
+
+    @skipIfXpu
     def test_sdpa_multiple_shapes(self):
         """Test autotuning across multiple shapes.
 
