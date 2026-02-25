@@ -985,6 +985,59 @@ def forward(self, x_1):
         fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
         self.assertEqual(fake_mode, existing_fake_mode)
 
+    def test_bypass_proxy_dispatch_counts(self):
+        # cos, sin, add are all bypass-eligible: exactly 3 bypass successes, 0 normal.
+        from torch.utils._stats import simple_call_counter
+
+        def f(x):
+            return x.cos() + x.sin()
+
+        simple_call_counter.clear()
+        make_fx(f, tracing_mode="fake")(torch.randn(4))
+        self.assertEqual(simple_call_counter.get("proxy_call.bypass_succeeded", 0), 3)
+        self.assertEqual(simple_call_counter.get("proxy_call.normal_dispatch", 0), 0)
+
+    def test_bypass_static_eligibility(self):
+        # Verify _can_bypass_proxy_dispatch is pre-computed correctly on OpOverload.
+        # Simple pointwise ops are eligible.
+        self.assertTrue(aten.cos.default._can_bypass_proxy_dispatch)
+        self.assertTrue(aten.add.Tensor._can_bypass_proxy_dispatch)
+        # Multi-return ops (var_mean returns (var, mean)) are not eligible.
+        self.assertFalse(aten.var_mean.correction._can_bypass_proxy_dispatch)
+        # topk also returns multiple tensors.
+        self.assertFalse(aten.topk.default._can_bypass_proxy_dispatch)
+
+    def test_bypass_not_taken_for_symbolic_tracing(self):
+        # In symbolic tracing mode all tensors have symbolic sizes so bypass
+        # must never fire.
+        from torch.utils._stats import simple_call_counter
+
+        def f(x):
+            return x.cos() + x.sin()
+
+        simple_call_counter.clear()
+        make_fx(f, tracing_mode="symbolic")(torch.randn(4))
+        self.assertEqual(simple_call_counter.get("proxy_call.bypass_succeeded", 0), 0)
+
+    def test_bypass_correctness(self):
+        # The traced graph from the bypass path must produce correct results.
+        def f(x, y):
+            return (x + y).cos() * x.sin()
+
+        x, y = torch.randn(3, 4), torch.randn(3, 4)
+        gm = make_fx(f, tracing_mode="fake")(x, y)
+        self.assertEqual(gm(x, y), f(x, y))
+
+    def test_bypass_preserves_val_metadata(self):
+        # Every non-output node in the graph must have 'val' metadata when bypass is active.
+        def f(x):
+            return x.cos().sin()
+
+        gm = make_fx(f, tracing_mode="fake")(torch.randn(5, 5))
+        for n in gm.graph.nodes:
+            if n.op != "output":
+                self.assertIn("val", n.meta, f"Node {n} missing 'val' metadata")
+
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
         if cond(n):
