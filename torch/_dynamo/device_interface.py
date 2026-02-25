@@ -523,7 +523,7 @@ class CpuInterface(DeviceInterface):
 class MpsInterface(DeviceInterface):
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
-        return torch.backends.mps.is_macos_or_newer(14, 0)
+        return True
 
     @classmethod
     def is_dtype_supported(
@@ -531,7 +531,7 @@ class MpsInterface(DeviceInterface):
     ) -> bool:
         if dtype in [torch.float64, torch.complex128]:
             return False
-        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
+        return True
 
     @staticmethod
     def is_available() -> bool:
