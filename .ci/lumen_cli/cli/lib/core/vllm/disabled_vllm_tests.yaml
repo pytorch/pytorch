@@ -18,4 +18,6 @@
 #     configs:
 #       - vllm_pytorch_compilation_unit_tests
 
-disabled_tests: []
+disabled_tests:                                                                                                                                                                   
+    - test: basic_correctness/test_basic_correctness.py::test_vllm_gc_disabled                                                                                                      
+      issue: https://github.com/pytorch/pytorch/issues/99999     
