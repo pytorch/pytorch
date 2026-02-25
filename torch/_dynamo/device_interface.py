@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
 import torch
+from torch.utils._pallas import has_torch_tpu
 
 
 get_cuda_stream: Optional[Callable[[int], int]]
@@ -576,8 +577,7 @@ class TpuInterface(DeviceInterface):
 
     @staticmethod
     def is_available() -> bool:
-        # TODO: call torch_tpu API to check device availability.
-        return True
+        return has_torch_tpu()
 
     @staticmethod
     def current_device() -> int:
@@ -603,9 +603,6 @@ class TpuInterface(DeviceInterface):
         def current_device() -> int:
             return 0
 
-
-device_interfaces: dict[str, type[DeviceInterface]] = {}
-_device_initialized = False
 
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
