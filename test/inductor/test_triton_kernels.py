@@ -1160,6 +1160,7 @@ def forward(self, x_1, output_1):
         if (
             inductor_config.cpp_wrapper
             and not inductor_config.triton.autotune_at_compile_time
+            and has_triton_tensor_descriptor_host_tma()
         ):
             # Lazy kernel compilation may conditionally construct tensordescriptor
             # using aoti_torch_empty_strided
