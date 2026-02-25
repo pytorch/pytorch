@@ -642,6 +642,43 @@ def _make_partial_strategy(
     return strategy
 
 
+def _single_mesh_dim_common_pointwise_strategy_legacy(
+    args_schema: ArgsType,
+    linearity: int = -1,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Legacy version with linearity param, kept for test compatibility."""
+    placements = single_mesh_dim_common_pointwise_strategy(args_schema)
+    n_tensors = sum(1 for arg in args_schema if isinstance(arg, TensorMeta))
+    if linearity == 0:
+        placements.append([Partial("sum"), Partial("sum")])
+        placements.append([Partial("avg"), Partial("avg")])
+    elif linearity == 1:
+        assert n_tensors == 2
+        placements.append([Partial("sum"), Partial("sum"), Partial("sum")])
+    elif linearity == 2:
+        assert n_tensors == 2
+        placements.append([Partial("sum"), Partial("sum"), Replicate()])
+        placements.append([Partial("sum"), Replicate(), Partial("sum")])
+    return placements
+
+
+def single_mesh_dim_pointwise_strategy(
+    op: OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+    linearity: int = -1,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return _single_mesh_dim_common_pointwise_strategy_legacy(args_schema, linearity)
+
+
+def single_mesh_dim_linear_pointwise_strategy(
+    linearity: int = -1,
+) -> Callable[
+    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+]:
+    return functools.partial(single_mesh_dim_pointwise_strategy, linearity=linearity)
+
+
 def pointwise_strategy(
     op_schema: OpSchema,
     linearity: int = -1,
