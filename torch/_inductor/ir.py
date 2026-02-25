@@ -228,6 +228,10 @@ class GraphPartitionSignature:
     # name of constants read/written by the graph partition
     constant_names: list[str]
 
+    # Buffers whose allocation is hoisted into this partition from a later
+    # non-cudagraph partition.
+    hoisted_alloc_buffers: tuple[Buffer, ...] = ()
+
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
     def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:
