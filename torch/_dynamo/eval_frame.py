@@ -53,6 +53,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
+from torch._dynamo.exc import raise_observed_exception
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -547,7 +548,10 @@ class OptimizedModule(torch.nn.Module):
     def __getattr__(self, name: str) -> Any:
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
-        return getattr(self._orig_mod, name)
+        try:
+            return getattr(self._orig_mod, name)
+        except AttributeError:
+            raise_observed_exception()
 
     def __setattr__(self, name: str, value: Any) -> None:
         # Allow patching over class attributes
