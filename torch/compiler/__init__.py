@@ -661,7 +661,6 @@ def skip_all_guards_unsafe(guard_entries):
 def nested_compile_region(
     fn=None,
     options: NestedCompileRegionOptions | None = None,
-    is_pure: bool = False,
 ):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
@@ -692,9 +691,6 @@ def nested_compile_region(
         options: Optional backend to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
-        is_pure: When True, asserts that repeated calls to the same function
-            always produce the same subgraph, allowing Dynamo to skip tracing
-            on subsequent calls.
     """
 
     if options is not None:
@@ -709,7 +705,7 @@ def nested_compile_region(
         mark_compile_region as _mark_compile_region,
     )
 
-    return _mark_compile_region(fn, options=options, is_pure=is_pure)
+    return _mark_compile_region(fn, options=options)
 
 
 def load_compiled_function(
