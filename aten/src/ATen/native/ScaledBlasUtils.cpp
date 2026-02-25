@@ -55,14 +55,6 @@ namespace at::native::scaled {
  * Both inputs must be fp8,
  * Each needs a single scale, {Tensorwise (float)}
  */
-/*
- * NOTE(slayton58): As of this refactor commit, these symbols are not used in CPU
- *                  code, and thus get hidden by default. Then build fails under
- *                  linking as they don't get included in libtorch_cpu.so. WAR that for
- *                  now, when XPU scaled_mm_v2 (or other) code is added, this WAR can be
- *                  removed. Alternative would be to directly add this file to
- *                  libtorch_cuda.so
- */
 bool check_tensorwise_recipe(
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
