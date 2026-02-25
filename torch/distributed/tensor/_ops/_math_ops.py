@@ -4,7 +4,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, Union
+from typing import Any, cast, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -16,6 +16,10 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     RuntimeSchemaInfo,
     TupleStrategy,
+)
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import (
     as_list,
@@ -367,59 +371,37 @@ def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
-# max.dim/min.dim return (values, indices). Values can use Partial(max/min)
-# but indices cannot be meaningfully reduced — replace Partial with Replicate.
-MAX_MIN_DIM_OPS = {
-    aten.max.dim: "max",
-    aten.min.dim: "min",
-}
+# max.dim/min.dim return (values, indices). Indices are local to each shard
+# and cannot be combined across ranks, so we force Replicate on reduction dims
+# (same approach as argmax/argmin).
+@register_single_dim_strategy(
+    [aten.max.dim, aten.min.dim], schema_info=RuntimeSchemaInfo(1)
+)
+def max_min_dim_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    assert isinstance(input_meta, TensorMeta)
+    ndim = len(input_meta.shape)
+    dim = normalize_dim(cast(int, args_schema[1]), ndim)
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
 
-
-@register_op_strategy(list(MAX_MIN_DIM_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
-def max_min_dim_strategy(op_schema: OpSchema) -> OpStrategy:
-    args_schema = op_schema.args_schema
-    input_strategy = args_schema[0]
-    if not isinstance(input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
-
-    dims = None
-    if len(op_schema.args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
-
-    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
-    keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
-    reduction_op = MAX_MIN_DIM_OPS[op_schema.op]
-
-    values_strategy = common_reduction_strategy(
-        input_strategy,
-        reduce_dims,
-        keep_dim=keep_dim,
-        reduction_linear=True,
-        reduction_op=reduction_op,
-    )
-
-    # Build per-output tuple specs: values keep their placements (including
-    # Partial), indices replace Partial with Replicate since index values
-    # cannot be combined across ranks with max/min reduction.
-    output_strategy = OpStrategy([])
-    for op_spec in values_strategy.strategies:
-        values_spec = op_spec.output_spec
-        indices_placements = tuple(
-            Replicate() if isinstance(p, Partial) else p for p in values_spec.placements
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d == dim:
+            continue
+        out_d = d if keep_dim or d < dim else d - 1
+        # [values, indices, input]: shard on non-reduction dim
+        strategies.append(
+            [
+                _ShardingPlaceholder(out_d),
+                _ShardingPlaceholder(out_d),
+                _ShardingPlaceholder(d),
+            ]
         )
-        indices_spec = DTensorSpec(
-            mesh=values_spec.mesh,
-            placements=indices_placements,
-        )
-        output_strategy.strategies.append(
-            OpSpec(
-                output_specs=(values_spec, indices_spec),
-                input_specs=op_spec.input_specs,
-                redistribute_cost=op_spec.redistribute_cost,
-            )
-        )
-
-    return output_strategy
+    return strategies
 
 
 @register_op_strategy(list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
