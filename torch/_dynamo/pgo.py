@@ -370,14 +370,14 @@ class FrameStateSizeEntry:
         # fall through to the earlier static graph in the cache.
         if isinstance(self.size, tuple) and isinstance(other.size, tuple):
             if len(self.size) == len(other.size):
-                excluded = list(self.excluded_sizes or (None,) * len(self.size))
+                excluded = [None] * len(self.size)
                 for i in range(len(self.size)):
                     si = self.size[i]
                     if (
                         type(si) is int
                         and type(other.size[i]) is int
                         and si != other.size[i]
-                        and excluded[i] is None
+                 
                     ):
                         excluded[i] = si
                 self.excluded_sizes = tuple(excluded)
