@@ -1812,7 +1812,7 @@ PyObject* getNeedsInputGrad(PyObject* obj, void* _unused) {
 
 int setNeedsInputGrad(PyObject* obj, PyObject* value, void* _unused) {
   auto self = (THPFunction*)obj;
-  self->needs_input_grad_is_overridden = (value != nullptr);
+  self->needs_input_grad_is_overridden = true;
   return setObject<&THPFunction::needs_input_grad>(obj, value, _unused);
 }
 
