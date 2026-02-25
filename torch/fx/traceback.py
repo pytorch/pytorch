@@ -115,9 +115,7 @@ class NodeSource:
                 name=node.name, target=str(node.target), graph_id=id(node.graph)
             )
             self.from_node = (
-                copy.deepcopy(node.meta["from_node"])
-                if "from_node" in node.meta
-                else []
+                node.meta["from_node"].copy() if "from_node" in node.meta else []
             )
         else:
             self.node_info = None
