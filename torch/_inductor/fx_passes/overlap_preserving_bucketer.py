@@ -139,7 +139,7 @@ class OverlapPreservingBucketer:
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         collective_bucketing: bool = True,
-        bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_mode: BucketMode = "default",
         bucket_exposed_first: bool | None = None,
         region_of: dict[fx.Node, Any] | None = None,
         bucket_only_internode_comms: bool = False,
@@ -324,6 +324,11 @@ class OverlapPreservingBucketer:
                 buckets = self._find_buckets(collective_group, internode_pgs)
                 all_buckets.extend(buckets)
 
+        import sys
+        print(
+            f"XXX bucketing: mode={self.bucket_mode}, found {len(all_buckets)} buckets, sizes={[len(b.collectives) for b in all_buckets]}",
+            file=sys.stderr,
+        )
         for coll_bucket in all_buckets:
             if len(coll_bucket.collectives) <= 1:
                 continue
@@ -379,6 +384,8 @@ class OverlapPreservingBucketer:
         Steps 2-3 MUST happen before step 4, because control deps need to
         reference the final inlined nodes, not the erased fusion modules.
         """
+        import sys
+        print(f"XXX bucket_collectives called, collective_bucketing={self.collective_bucketing}", file=sys.stderr, flush=True)
         # Step 1: Bucket collectives
         all_buckets: list[CollBucket] | None = None
         if self.collective_bucketing:
@@ -995,18 +1002,19 @@ class OverlapPreservingBucketer:
         # The wait_insertion_point feature tries to move waits to a specific location,
         # but this can cause issues when that location is one of the nodes being erased
         # Create bucketed collective (this will erase old nodes)
+        mode = self.bucket_mode
         if is_all_gather(bucket[0]):
             new_nodes, replacements = merge_all_gather_bucket(
                 self.graph,
                 bucket,
                 insert_before=next_node,
-                mode="custom_ops",
+                mode=mode,
             )
         elif is_all_reduce_tensor(bucket[0]):
             new_nodes, replacements = merge_all_reduce_bucket(
                 self.graph,
                 bucket,
-                mode="custom_ops",
+                mode=mode,
                 insert_before=next_node,
             )
         else:
@@ -1015,7 +1023,7 @@ class OverlapPreservingBucketer:
                 self.graph,
                 bucket,
                 insert_before=next_node,
-                mode="custom_ops",
+                mode=mode,
             )
 
         # Get new nodes
@@ -1034,20 +1042,22 @@ class OverlapPreservingBucketer:
             erased_to_new[old_wait] = new_wait
 
         # Handle convert_element_type nodes that were fused and erased
-        # The bucketed operation may have a _pre_bucket op that handles dtype conversion
+        # In custom_ops mode, the _pre_bucket op handles dtype conversion explicitly.
+        # In default mode, _foreach_copy_ handles conversion implicitly.
         if fused_convert_dtypes:
-            # all gather bucketing may fuse in dtype conversion into the bucketing
-            # if so, we need to transfer hiding deps from the old dtype conversion
-            # to the new bucketing node
-            new_convert_dtypes_node = new_start.kwargs["out"]
-            assert isinstance(new_convert_dtypes_node, fx.Node)
-            assert (
-                new_convert_dtypes_node.target
-                == torch.ops.bucketing._pre_bucket_all_gather.default
-            )
-
-            for n in fused_convert_dtypes:
-                erased_to_new[n] = new_convert_dtypes_node
+            if mode and "custom_ops" in mode:
+                new_convert_dtypes_node = new_start.kwargs["out"]
+                assert isinstance(new_convert_dtypes_node, fx.Node)
+                assert (
+                    new_convert_dtypes_node.target
+                    == torch.ops.bucketing._pre_bucket_all_gather.default
+                )
+                for n in fused_convert_dtypes:
+                    erased_to_new[n] = new_convert_dtypes_node
+            else:
+                # In default mode, map erased convert nodes to the new start
+                for n in fused_convert_dtypes:
+                    erased_to_new[n] = new_start
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
@@ -1065,6 +1075,7 @@ def finalize_overlap_scheduling(
     region_of: dict[fx.Node, Any] | None = None,
     bucket_exposed_first: bool | None = None,
     bucket_only_internode_comms: bool = False,
+    bucket_mode: BucketMode = "default",
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
@@ -1096,5 +1107,6 @@ def finalize_overlap_scheduling(
         bucket_exposed_first=bucket_exposed_first,
         bucket_only_internode_comms=bucket_only_internode_comms,
         region_of=region_of,
+        bucket_mode=bucket_mode,
     )
     bucketer.bucket_collectives()

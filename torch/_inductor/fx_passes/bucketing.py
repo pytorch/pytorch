@@ -1,5 +1,6 @@
 import collections
 import logging
+import math
 import operator
 from collections import defaultdict
 from collections.abc import Callable
@@ -10,12 +11,14 @@ import torch.distributed as dist
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode
+import torch._inductor.config
 from torch._inductor.comm_analysis import (
     get_collective_type_from_kernel_name,
     NCCL_COLL,
 )
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
+from torch.distributed.distributed_c10d import _resolve_process_group
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.traceback import NodeSource, NodeSourceAction
 from torch.utils._ordered_set import OrderedSet
@@ -25,6 +28,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
+
 
 BucketMode: TypeAlias = Literal["default", "custom_ops", "custom_ops_multidtype"]
 
@@ -557,15 +561,25 @@ def bucket_all_reduce(
 def _pre_bucket_reduce_scatter(
     rs_ins: list[torch.Tensor],
     group_size: int,
+    group_name: str,
 ) -> torch.Tensor:
     rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
-    new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
+    x = rs_ins[0]
+    size = sum(t.numel() for t in rs_ins)
+    if torch._inductor.config.bucket_ops_use_pg_alloc:
+        pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
+        backend = pg._get_backend(x.device)
+        out = backend.allocate_tensor(size, dtype=x.dtype, device=x.device)
+        new_rs_in = torch.cat(rs_ins_flattened, dim=1, out=out).flatten()
+    else:
+        new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
     return new_rs_in
 
 
 def _pre_bucket_reduce_scatter_fake(
     rs_ins: list[torch.Tensor],
     group_size: int,
+    group_name: str,
 ) -> torch.Tensor:
     out_numel = sum(rs_in.numel() for rs_in in rs_ins)
     return torch.empty((out_numel,), device=rs_ins[0].device, dtype=rs_ins[0].dtype)
@@ -585,15 +599,29 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
     new_out_numels = [x.numel() // group_size for x in rs_ins]
 
-    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(rs_ins, group_size)
-
-    # TODO - either use torch.cat or make sure inductor foreach codegen
-    # fires more reliably
-    new_rs_out = torch.ops.c10d_functional.wait_tensor(
-        torch.ops._c10d_functional.reduce_scatter_tensor.default(
-            new_rs_in, reduce_op, group_size, group_name
-        )
+    new_rs_in = torch.ops.bucketing._pre_bucket_reduce_scatter(
+        rs_ins, group_size, group_name
     )
+
+    if torch._inductor.config.bucket_ops_use_pg_alloc:
+        pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
+        backend = pg._get_backend(new_rs_in.device)
+        size = list(new_rs_in.shape)
+        size[0] //= group_size
+        new_rs_out = backend.allocate_tensor(
+            math.prod(size), dtype=new_rs_in.dtype, device=new_rs_in.device
+        ).view(size)
+        torch.ops.c10d_functional.wait_tensor(
+            torch.ops._c10d_functional.reduce_scatter_tensor_out.default(
+                new_rs_in, reduce_op, group_size, group_name, out=new_rs_out
+            )
+        )
+    else:
+        new_rs_out = torch.ops.c10d_functional.wait_tensor(
+            torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                new_rs_in, reduce_op, group_size, group_name
+            )
+        )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
     new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
     return new_outs
@@ -613,10 +641,13 @@ def reduce_scatter_merge_fn_to_trace(
     new_out_numels = [x.numel() // group_size for x in rs_ins]
 
     new_rs_in = torch.cat(rs_ins_flattened, dim=1).flatten()
+    new_rs_out = torch.empty(
+        new_rs_in.numel() // group_size, dtype=new_rs_in.dtype, device=device
+    )
 
     new_rs_out = torch.ops.c10d_functional.wait_tensor(
-        torch.ops._c10d_functional.reduce_scatter_tensor.default(
-            new_rs_in, reduce_op, group_size, group_name
+        torch.ops._c10d_functional.reduce_scatter_tensor_out.default(
+            new_rs_in, reduce_op, group_size, group_name, out=new_rs_out
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
@@ -690,7 +721,18 @@ def _pre_bucket_all_gather(
     ]
     ag_input_numel = sum(ins_split_sizes)
     device = ag_ins[0].device
-    new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
+    total_size_bytes = sum(ins_split_sizes_bytes) * group_size
+
+    if torch._inductor.config.bucket_ops_use_pg_alloc:
+        pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
+        backend = pg._get_backend(device)
+        size = ag_input_numel * group_size
+        new_ag_out = backend.allocate_tensor(size, dtype=dtype, device=device)
+    else:
+        new_ag_out = torch.empty(
+            ag_input_numel * group_size, dtype=dtype, device=device
+        )
+
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
     # View each destination slice as its output dtype, then copy
@@ -1103,7 +1145,7 @@ def merge_reduce_scatter_bucket(
             device,
         )
 
-    return process_collective_bucket(
+    new_nodes, replacements = process_collective_bucket(
         g,
         rs_nodes,
         rs_merge_fn,
@@ -1111,6 +1153,23 @@ def merge_reduce_scatter_bucket(
         insert_before=insert_before,
         wait_insertion_point=wait_insertion_point,
     )
+
+    # Annotate for pg_alloc: tag the reduce_scatter_tensor_out node so
+    # inductor's lowering can realize its buffers from pg.allocate_tensor.
+    # Also propagate if overlap scheduler annotated any source node.
+    should_pg_alloc = torch._inductor.config.bucket_ops_use_pg_alloc or any(
+        n.meta.get("pg_alloc_group_name") for n in rs_nodes
+    )
+    if should_pg_alloc:
+        for node in new_nodes:
+            if (
+                node.op == "call_function"
+                and node.target
+                is torch.ops._c10d_functional.reduce_scatter_tensor_out.default
+            ):
+                node.meta["pg_alloc_group_name"] = group_name
+
+    return new_nodes, replacements
 
 
 def merge_all_reduce_bucket(
@@ -1146,7 +1205,7 @@ def merge_all_reduce_bucket(
             device,
         )
 
-    return process_collective_bucket(
+    new_nodes, replacements = process_collective_bucket(
         g,
         ar_nodes,
         ar_merge_fn,
@@ -1154,6 +1213,21 @@ def merge_all_reduce_bucket(
         insert_before=insert_before,
         wait_insertion_point=wait_insertion_point,
     )
+
+    # Annotate for pg_alloc: tag the all_reduce node so inductor's lowering
+    # can realize its input buffer from pg.allocate_tensor.
+    should_pg_alloc = torch._inductor.config.bucket_ops_use_pg_alloc or any(
+        n.meta.get("pg_alloc_group_name") for n in ar_nodes
+    )
+    if should_pg_alloc:
+        for node in new_nodes:
+            if (
+                node.op == "call_function"
+                and node.target is torch.ops._c10d_functional.all_reduce.default
+            ):
+                node.meta["pg_alloc_group_name"] = group_name
+
+    return new_nodes, replacements
 
 
 def merge_all_gather_bucket(
@@ -1195,13 +1269,29 @@ def merge_all_gather_bucket(
             rank,
         )
 
-    return process_collective_bucket(
+    new_nodes, replacements = process_collective_bucket(
         g,
         ag_nodes,
         ag_merge_fn,
         create_trace_args,
         wait_insertion_point=wait_insertion_point,
     )
+
+    # Annotate for pg_alloc: tag the all_gather_into_tensor_out node so
+    # inductor's lowering can realize its output buffer from pg.allocate_tensor.
+    should_pg_alloc = torch._inductor.config.bucket_ops_use_pg_alloc or any(
+        n.meta.get("pg_alloc_group_name") for n in ag_nodes
+    )
+    if should_pg_alloc:
+        for node in new_nodes:
+            if (
+                node.op == "call_function"
+                and node.target
+                is torch.ops._c10d_functional.all_gather_into_tensor_out.default
+            ):
+                node.meta["pg_alloc_group_name"] = group_name
+
+    return new_nodes, replacements
 
 
 def merge_reduce_scatter(
