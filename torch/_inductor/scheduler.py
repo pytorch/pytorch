@@ -537,6 +537,8 @@ class BaseSchedulerNode:
     # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
     # For non-"grouped" nodes (i.e. regular SchedulerNode),
     # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
+    min_input_distance: int
+    max_input_distance: int
     min_order: int
     max_order: int
     mpi_node: MemoryPlanningInfoForNode
@@ -558,6 +560,8 @@ class BaseSchedulerNode:
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node = node
         self.ancestors = OrderedSet()
+        self.min_input_distance = 0
+        self.max_input_distance = 0
         self.last_usage = OrderedSet[
             str
         ]()  # buffers that won't be used after this kernel
@@ -592,6 +596,8 @@ class BaseSchedulerNode:
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
+{name}.min_input_distance = {self.min_input_distance}
+{name}.max_input_distance = {self.max_input_distance}
 {name}.outputs = [
         """
         )
@@ -1858,6 +1864,12 @@ def init_group_node(
 
     group_snode.min_order = min(x.min_order for x in group_snode.snodes)
     group_snode.max_order = max(x.max_order for x in group_snode.snodes)
+    group_snode.min_input_distance = min(
+        x.min_input_distance for x in group_snode.snodes
+    )
+    group_snode.max_input_distance = max(
+        x.max_input_distance for x in group_snode.snodes
+    )
     group_snode.outputs_by_name = {
         buf.get_name(): buf for buf in group_snode.get_outputs()
     }
@@ -2398,6 +2410,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
             self.min_order = min([prev_node_1.min_order, prev_node_2.min_order])
             self.max_order = max([prev_node_1.max_order, prev_node_2.max_order])
+            self.min_input_distance = min(
+                prev_node_1.min_input_distance, prev_node_2.min_input_distance
+            )
+            self.max_input_distance = max(
+                prev_node_1.max_input_distance, prev_node_2.max_input_distance
+            )
 
             if prev_node_1.is_foreach():
                 assert isinstance(prev_node_1, ForeachKernelSchedulerNode)
@@ -2946,6 +2964,7 @@ class Scheduler:
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
+        self.compute_input_distances()
 
         # pyrefly: ignore [bad-assignment]
         metrics.ir_nodes_pre_fusion += len(self.nodes)
@@ -3659,6 +3678,36 @@ class Scheduler:
         for order, node in enumerate(self.nodes):
             node.min_order = order
             node.max_order = order
+
+    def compute_input_distances(self) -> None:
+        """
+        Populate each node's min/max_input_distance with the depth from graph
+        inputs, measured as dependency hops before fusion. Nodes whose
+        dependencies are all satisfied by graph inputs/constants have depth 0.
+        """
+        name_to_min_distance: dict[str, int] = {}
+        name_to_max_distance: dict[str, int] = {}
+        for node in self.nodes:
+            if not node.unmet_dependencies:
+                min_dist = 0
+                max_dist = 0
+            else:
+                dep_min_dists = [
+                    name_to_min_distance[self.name_to_buf[dep.name].defining_op_name()]
+                    + 1
+                    for dep in node.unmet_dependencies
+                ]
+                dep_max_dists = [
+                    name_to_max_distance[self.name_to_buf[dep.name].defining_op_name()]
+                    + 1
+                    for dep in node.unmet_dependencies
+                ]
+                min_dist = min(dep_min_dists)
+                max_dist = max(dep_max_dists)
+            name_to_min_distance[node.get_name()] = min_dist
+            name_to_max_distance[node.get_name()] = max_dist
+            node.min_input_distance = min_dist
+            node.max_input_distance = max_dist
 
     def merge_loops(self) -> None:
         if not config.loop_ordering_after_fusion:
