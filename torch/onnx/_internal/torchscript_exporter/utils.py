@@ -323,7 +323,10 @@ def export(
         input_names (list of str, default empty list): names to assign to the
             input nodes of the graph, in order.
         output_names (list of str, default empty list): names to assign to the
-            output nodes of the graph, in order.
+            output nodes of the graph, in order. These are labels only and do not
+            affect the order of outputs. If the model returns a dictionary, outputs
+            are flattened in the dictionary's iteration order regardless of the
+            names specified here.
         operator_export_type (enum, default OperatorExportTypes.ONNX):
 
             .. warning::
