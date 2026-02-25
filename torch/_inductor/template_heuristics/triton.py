@@ -2006,11 +2006,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         # Extract dtype and device_type from kernel_inputs
         dtype = kernel_inputs.dtype()
         device = kernel_inputs.device()
-        c_stride, a_stride, b_stride = kernel_inputs.strides_symbolic()
-
+        strides = kernel_inputs.strides_symbolic()
+        a_stride = strides[kernel_inputs._mat1_idx]
+        b_stride = strides[kernel_inputs._mat2_idx]
+        out_layout = kernel_inputs.output_layout(flexible=False)
+        c_stride = out_layout.stride
         # Get the appropriate config generator
         configs = self._get_config_generator()
-
         # Generate and process configs
         if (torch.version.hip is not None) and config.origami:
             try:
