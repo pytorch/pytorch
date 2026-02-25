@@ -5610,7 +5610,7 @@ class WorkSharing:
                 # Thread count differs from system (user probably set it so hardcode)
                 use_dynamic = False
 
-            if use_dynamic:
+            if use_dynamic or config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
             else:
                 self.code.writeline(f"#pragma omp parallel num_threads({threads})")

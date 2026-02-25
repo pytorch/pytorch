@@ -208,7 +208,7 @@ GEMM_TEMPLATE = r"""
 {%- endif %}
 
 {%- if num_threads > 1 %}
-    {%- set use_dynamic_threads = (config.cpp.threads < 1) and (num_threads == cpu_count) %}
+    {%- set use_dynamic_threads = ((config.cpp.threads < 1) and (num_threads == cpu_count)) or config.cpp.dynamic_threads %}
     {%- if use_dynamic_threads %}
     #pragma omp parallel
     {%- else %}
