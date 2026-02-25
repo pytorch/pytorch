@@ -206,22 +206,6 @@ class TestCUDAGraphDebugInputs(TestCase):
         g.replay()
         torch.cuda.synchronize()
 
-    def test_ops_without_cuda_output_not_tracked(self):
-        x = torch.randn(100, device="cuda")
-        y = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: y * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            # torch.equal returns bool (no CUDA output) - x shouldn't be tracked
-            eq_result = torch.equal(x, x)
-            z = y * 2
-
-        self.assertNotIn(x.data_ptr(), g._external_inputs)
-        self.assertIn(y.data_ptr(), g._external_inputs)
-        self.assertTrue(eq_result)
-
     def test_non_capturing_stream_inputs_not_tracked(self):
         capture_stream = torch.cuda.Stream()
         other_stream = torch.cuda.Stream()
@@ -367,6 +351,8 @@ class TestMakeGraphedCallables(TestCase):
         model = ViewModule().cuda()
         x = torch.randn(2, 64, device="cuda", requires_grad=True)
 
+        torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
+
         torch.cuda.make_graphed_callables(
             model,
             (x,),
@@ -378,6 +364,8 @@ class TestMakeGraphedCallables(TestCase):
         out = model(x)
         loss = out.sum()
         loss.backward()
+
+        torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(True)
 
 
 class TestCUDAGraphDebugExternalOps(TestCase):

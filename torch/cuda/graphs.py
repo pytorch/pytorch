@@ -261,13 +261,6 @@ class CUDAGraph(_CUDAGraph):
                 where input tensors are garbage collected between capture and replay. Default: ``False``.
 
                 .. note::
-                    This tracking covers both CUDA tensors and pinned host memory tensors used during capture.
-                    Tensors allocated from the graph's own memory pool (e.g., outputs from a previous graph
-                    sharing the same pool) are automatically excluded from tracking since they're managed
-                    by the pool. Operations that don't produce CUDA tensor outputs (e.g., returning only
-                    CPU values like booleans) also don't cause their inputs to be tracked.
-
-                .. note::
                     Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
                     tracked by this mechanism.
         """  # noqa: B950
@@ -365,13 +358,6 @@ class graph:
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
-
-            .. note::
-                This tracking covers both CUDA tensors and pinned host memory tensors used during capture.
-                Tensors allocated from the graph's own memory pool (e.g., outputs from a previous graph
-                sharing the same pool) are automatically excluded from tracking since they're managed
-                by the pool. Operations that don't produce CUDA tensor outputs (e.g., returning only
-                CPU values like booleans) also don't cause their inputs to be tracked.
 
             .. note::
                 Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
