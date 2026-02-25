@@ -6,6 +6,22 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <vector>
 
+// __CUDA_ARCH_LIST__ has the compute capabilities sorted from lowest
+// to highest. Thus, we know we are compiling only for Volta or higher
+// if the first value of the list is at least 700.
+
+// https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/#virtual-architecture-macros
+#define __MTA_CUDA_ARCH_LIST_HEAD_IMPL(a, ...) a
+#define __MTA_CUDA_ARCH_LIST_HEAD(...) \
+  __MTA_CUDA_ARCH_LIST_HEAD_IMPL(__VA_ARGS__)
+#if (                              \
+    defined(__CUDA_ARCH_LIST__) && \
+    __MTA_CUDA_ARCH_LIST_HEAD(__CUDA_ARCH_LIST__) >= 700)
+#define __MTA_COMPILE_FOR_VOLTA_AND_HIGHER 1
+#else
+#define __MTA_COMPILE_FOR_VOLTA_AND_HIGHER 0
+#endif
+
 namespace at::native {
 
 namespace {
@@ -14,14 +30,54 @@ static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kBlockSize = 512;
 
-// TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
-// TensorListMetadata has to be < 4KB - the limit for kernel launch argument
+// [NOTE: MultiTensorApply parameter size]
+
+// Originally, users could pass only 4 KiB of data to a CUDA kernel
+// via the kernel parameters. i.e., the entire of your parameters to a
+// kernel must be less than 4 KiB in size (including
+// alignment). multi_tensor_apply_kernel was originally written with
+// this constraint in mind, but as of 2026, these constraints have
+// started to cause poor performance. In particular, only 320 thread
+// blocks (depth_to_max_blocks) could be launched per kernel launch,
+// and each thread block could work on only kChunkSize values, causing
+// poor occupancy.
+
+// Fortunately, the kernel parameter buffer size was increased to 32
+// KiB with CUDA 12.1, for Volta and newer GPU's, which allows us to
+// drastically improve occupancy. To compute the new maximum number of
+// blocks, I simply assumed that the max_tensors would always be 256,
+// and that the largest scalar size would be 8 bytes. Then a basic
+// linear programming problem can be solved to compute depth_to_max_blocks:
+// https://chatgpt.com/s/t_699e2a7d21c881919a49a449de4d54b4
+
+// sizoef(c10::complex<double>) == 16, so I compensate by reducing
+// the maximum number of tensors when this causes a parameter buffer
+// to be too large.
+
+// Unfortunately, since Pascal GPU's are still supported in Pytorch as
+// of today's writing, we cannot simply change the values of
+// depth_to_max_blocks. Instead, we must support both code
+// paths. Since you current GPU is known only at runtime, we must
+// compile for both code paths at build time.
+
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
 static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
 static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
-static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
+static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[4] = {
     72,
+    60,
+    60,
     60};
+
+static constexpr int depth_to_max_tensors_large_params[5] =
+    {256, 256, 256, 256, 256};
+static constexpr int depth_to_max_blocks_large_params[5] =
+    {5272, 4863, 4453, 4044, 3634};
+static constexpr int depth_to_max_tensors_scalarlist_large_params[5] =
+    {256, 256, 256, 256, 256};
+static constexpr int
+    depth_to_max_tensors_scalarlist_of_complex_double_large_params[4] =
+        {194, 182, 170, 158};
 
 template <typename T>
 __device__ __forceinline__ bool is_aligned(T* p) {
@@ -38,60 +94,153 @@ __device__ __forceinline__ void load_store(
   ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
 }
 
-template <int n>
+// using `namespace detail` instead of mta_detail causes an error when
+// compiling aten/src/ATen/native/cuda/ForeachReduceOp.cu. The proper
+// fix is to get rid of the anonymous namespace, which I assume was
+// intended to keep these symbols private, but anonymous namespace
+// doesn't actually do that.
+namespace mta_detail {
+
+template <bool IS_VOLTA_OR_HIGHER, int depth>
+struct MTAConfig {
+  static constexpr int max_tensors = IS_VOLTA_OR_HIGHER
+      ? depth_to_max_tensors_large_params[depth - 1]
+      : depth_to_max_tensors[depth - 1];
+  static constexpr int max_blocks = IS_VOLTA_OR_HIGHER
+      ? depth_to_max_blocks_large_params[depth - 1]
+      : depth_to_max_blocks[depth - 1];
+  static constexpr int max_tensors_scalarlist = IS_VOLTA_OR_HIGHER
+      ? depth_to_max_tensors_scalarlist_large_params[depth - 1]
+      : depth_to_max_tensors_scalarlist[depth - 1];
+};
+
+template <bool IS_VOLTA_OR_HIGHER, int depth>
+struct MTAComplexDoubleConfig {
+  static constexpr int max_tensors = IS_VOLTA_OR_HIGHER
+      ? depth_to_max_tensors_scalarlist_of_complex_double_large_params
+            [depth - 1]
+      : depth_to_max_tensors_scalarlist_of_complex_double[depth - 1];
+};
+
+} // namespace mta_detail
+
+template <int n, bool IS_VOLTA_OR_HIGHER = __MTA_COMPILE_FOR_VOLTA_AND_HIGHER>
 struct TensorListMetadata {
-  const void* addresses[n][depth_to_max_tensors[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
+ private:
+  using Config = mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, n>;
+
+ public:
+  const void* addresses[n][Config::max_tensors];
+  int64_t numel_for_tensor[Config::max_tensors];
+  unsigned char block_to_tensor[Config::max_blocks];
+  int block_to_chunk[Config::max_blocks];
   int start_tensor_this_launch;
 };
 
-template <typename scalar_vals_t, int n>
+template <
+    typename scalar_vals_t,
+    int n,
+    bool IS_VOLTA_OR_HIGHER = __MTA_COMPILE_FOR_VOLTA_AND_HIGHER>
 struct TensorListScalarListMetadata {
-  const void* addresses[n][depth_to_max_tensors_scalarlist[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors_scalarlist[n - 1]];
-  scalar_vals_t scalar_vals[depth_to_max_tensors_scalarlist[n - 1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
+ private:
+  using Config = mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, n>;
+
+ public:
+  const void* addresses[n][Config::max_tensors_scalarlist];
+  int64_t numel_for_tensor[Config::max_tensors_scalarlist];
+  scalar_vals_t scalar_vals[Config::max_tensors_scalarlist];
+  unsigned char block_to_tensor[Config::max_blocks];
+  int block_to_chunk[Config::max_blocks];
 };
 
-// note(mkozuki): `n` of 1&2 violate the limit of cuda kernel argument size of
-// 4kb with `c10::complex<double>`
-template <>
-struct TensorListScalarListMetadata<c10::complex<double>, 1> {
-  const void* addresses[1]
-                       [depth_to_max_tensors_scalarlist_of_complex_double[0]];
-  int64_t
-      numel_for_tensor[depth_to_max_tensors_scalarlist_of_complex_double[0]];
-  c10::complex<double>
-      scalar_vals[depth_to_max_tensors_scalarlist_of_complex_double[0]];
-  unsigned char block_to_tensor[depth_to_max_blocks[1 - 1]];
-  int block_to_chunk[depth_to_max_blocks[1 - 1]];
+// note(mkozuki): On toolchains with a 4 KiB launch parameter limit, `n` of 1&2
+// violate the limit with `c10::complex<double>`.
+template <bool IS_VOLTA_OR_HIGHER>
+struct TensorListScalarListMetadata<
+    c10::complex<double>,
+    1,
+    IS_VOLTA_OR_HIGHER> {
+ private:
+  using Config = mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, 1>;
+  using ComplexDoubleConfig =
+      mta_detail::MTAComplexDoubleConfig<IS_VOLTA_OR_HIGHER, 1>;
+
+ public:
+  const void* addresses[1][ComplexDoubleConfig::max_tensors];
+  int64_t numel_for_tensor[ComplexDoubleConfig::max_tensors];
+  c10::complex<double> scalar_vals[ComplexDoubleConfig::max_tensors];
+  unsigned char block_to_tensor[Config::max_blocks];
+  int block_to_chunk[Config::max_blocks];
 };
 
-template <>
-struct TensorListScalarListMetadata<c10::complex<double>, 2> {
-  const void* addresses[2]
-                       [depth_to_max_tensors_scalarlist_of_complex_double[1]];
-  int64_t
-      numel_for_tensor[depth_to_max_tensors_scalarlist_of_complex_double[1]];
-  c10::complex<double>
-      scalar_vals[depth_to_max_tensors_scalarlist_of_complex_double[1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[2 - 1]];
-  int block_to_chunk[depth_to_max_blocks[2 - 1]];
+template <bool IS_VOLTA_OR_HIGHER>
+struct TensorListScalarListMetadata<
+    c10::complex<double>,
+    2,
+    IS_VOLTA_OR_HIGHER> {
+ private:
+  using Config = mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, 2>;
+  using ComplexDoubleConfig =
+      mta_detail::MTAComplexDoubleConfig<IS_VOLTA_OR_HIGHER, 2>;
+
+ public:
+  const void* addresses[2][ComplexDoubleConfig::max_tensors];
+  int64_t numel_for_tensor[ComplexDoubleConfig::max_tensors];
+  c10::complex<double> scalar_vals[ComplexDoubleConfig::max_tensors];
+  unsigned char block_to_tensor[Config::max_blocks];
+  int block_to_chunk[Config::max_blocks];
+};
+
+template <bool IS_VOLTA_OR_HIGHER>
+struct TensorListScalarListMetadata<
+    c10::complex<double>,
+    3,
+    IS_VOLTA_OR_HIGHER> {
+ private:
+  using Config = mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, 3>;
+  using ComplexDoubleConfig =
+      mta_detail::MTAComplexDoubleConfig<IS_VOLTA_OR_HIGHER, 3>;
+
+ public:
+  const void* addresses[3][ComplexDoubleConfig::max_tensors];
+  int64_t numel_for_tensor[ComplexDoubleConfig::max_tensors];
+  c10::complex<double> scalar_vals[ComplexDoubleConfig::max_tensors];
+  unsigned char block_to_tensor[Config::max_blocks];
+  int block_to_chunk[Config::max_blocks];
+};
+
+template <bool IS_VOLTA_OR_HIGHER>
+struct TensorListScalarListMetadata<
+    c10::complex<double>,
+    4,
+    IS_VOLTA_OR_HIGHER> {
+ private:
+  using Config = mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, 4>;
+  using ComplexDoubleConfig =
+      mta_detail::MTAComplexDoubleConfig<IS_VOLTA_OR_HIGHER, 4>;
+
+ public:
+  const void* addresses[4][ComplexDoubleConfig::max_tensors];
+  int64_t numel_for_tensor[ComplexDoubleConfig::max_tensors];
+  c10::complex<double> scalar_vals[ComplexDoubleConfig::max_tensors];
+  unsigned char block_to_tensor[Config::max_blocks];
+  int block_to_chunk[Config::max_blocks];
 };
 
 // NOTE(crcrpar): This is a conservative resolution to handle `state_steps`
 // whose each element is `at::Tensor` of 1 element representing the number of
 // `step`s called so far.
-template <int n>
+template <int n, bool IS_VOLTA_OR_HIGHER = false>
 struct FusedOptimizerTensorListMetadata {
-  const void* addresses[n][depth_to_max_tensors[n - 1]];
-  int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
-  const void* state_steps_addresses[depth_to_max_tensors_scalarlist[n - 1]];
-  unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
-  int block_to_chunk[depth_to_max_blocks[n - 1]];
+ private:
+  using Config = mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, n>;
+
+ public:
+  const void* addresses[n][Config::max_tensors];
+  int64_t numel_for_tensor[Config::max_tensors];
+  const void* state_steps_addresses[Config::max_tensors_scalarlist];
+  unsigned char block_to_tensor[Config::max_blocks];
+  int block_to_chunk[Config::max_blocks];
   int start_tensor_this_launch;
 };
 
@@ -108,6 +257,14 @@ __global__ void multi_tensor_apply_kernel(
 
 } // namespace
 
+inline bool is_current_device_volta_or_higher() {
+#if defined(USE_ROCM)
+  return false;
+#else
+  return at::cuda::getCurrentDeviceProperties()->major >= 7;
+#endif
+}
+
 // multi_tensor_apply enables horizontal fusion across lists of tensors.
 // For example, whereas you once had a for-loop of a + b = c, where a, b,
 // and c are individual tensors in lists as, bs, and cs, you can now with
@@ -122,8 +279,13 @@ __global__ void multi_tensor_apply_kernel(
 // due to blocksize constraints, we may need to launch multiple kernels.
 // Each kernel launch is defined by one tensorListMeta construct, which we
 // use to track and reset the necessary metadata for each launch.
-template <int depth, typename scalar_T, typename T, typename... ArgTypes>
-void multi_tensor_apply(
+template <
+    bool IS_VOLTA_OR_HIGHER,
+    int depth,
+    typename scalar_T,
+    typename T,
+    typename... ArgTypes>
+void multi_tensor_apply_impl(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     at::ArrayRef<Scalar> scalars,
     T callable,
@@ -133,7 +295,8 @@ void multi_tensor_apply(
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
   using scalar_vals_t = typename T::opmath_t;
-  TensorListScalarListMetadata<scalar_vals_t, depth> tensorListMeta;
+  TensorListScalarListMetadata<scalar_vals_t, depth, IS_VOLTA_OR_HIGHER>
+      tensorListMeta;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -167,10 +330,13 @@ void multi_tensor_apply(
       // a tensor is not considered full unless all its chunks have been
       // processed
       const bool tensors_full =
-          (loc_tensor_info == depth_to_max_tensors_scalarlist[depth - 1] &&
+          (loc_tensor_info ==
+               mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, depth>::
+                   max_tensors_scalarlist &&
            chunk == chunks - 1);
       const bool blocks_full =
-          (loc_block_info == depth_to_max_blocks[depth - 1]);
+          (loc_block_info ==
+           mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, depth>::max_blocks);
 
       if (tensors_full || blocks_full) {
         multi_tensor_apply_kernel<<<
@@ -214,8 +380,28 @@ void multi_tensor_apply(
   }
 }
 
-template <int depth, typename T, typename... ArgTypes>
+template <int depth, typename scalar_T, typename T, typename... ArgTypes>
 void multi_tensor_apply(
+    std::vector<std::vector<at::Tensor>>& tensor_lists,
+    at::ArrayRef<Scalar> scalars,
+    T callable,
+    ArgTypes... args) {
+#if __MTA_COMPILE_FOR_VOLTA_AND_HIGHER
+  multi_tensor_apply_impl<true, depth, scalar_T>(
+      tensor_lists, scalars, callable, args...);
+#else
+  if (is_current_device_volta_or_higher()) {
+    multi_tensor_apply_impl<true, depth, scalar_T>(
+        tensor_lists, scalars, callable, args...);
+  } else {
+    multi_tensor_apply_impl<false, depth, scalar_T>(
+        tensor_lists, scalars, callable, args...);
+  }
+#endif
+}
+
+template <bool IS_VOLTA_OR_HIGHER, int depth, typename T, typename... ArgTypes>
+void multi_tensor_apply_impl(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     T callable,
     ArgTypes... args) {
@@ -223,7 +409,7 @@ void multi_tensor_apply(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth.");
   const size_t n_tensors = tensor_lists[0].size();
-  TensorListMetadata<depth> tensorListMeta;
+  TensorListMetadata<depth, IS_VOLTA_OR_HIGHER> tensorListMeta;
   tensorListMeta.start_tensor_this_launch = 0;
 
   int loc_block_info = 0;
@@ -253,15 +439,17 @@ void multi_tensor_apply(
       loc_block_info++;
 
       const bool tensors_full =
-          (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
+          (loc_tensor_info ==
+               mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, depth>::max_tensors &&
            chunk == chunks - 1);
       const bool blocks_full =
-          (loc_block_info == depth_to_max_blocks[depth - 1]);
+          (loc_block_info ==
+           mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, depth>::max_blocks);
 
       if (tensors_full || blocks_full) {
         multi_tensor_apply_kernel<<<
-            loc_block_info,
-            kBlockSize,
+            loc_block_info, // number of blocks
+            kBlockSize, // threads per block
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             tensorListMeta, callable, args...);
@@ -298,7 +486,23 @@ void multi_tensor_apply(
 }
 
 template <int depth, typename T, typename... ArgTypes>
-void multi_tensor_apply_for_fused_optimizer(
+void multi_tensor_apply(
+    std::vector<std::vector<at::Tensor>>& tensor_lists,
+    T callable,
+    ArgTypes... args) {
+#if __MTA_COMPILE_FOR_VOLTA_AND_HIGHER
+  multi_tensor_apply_impl<true, depth>(tensor_lists, callable, args...);
+#else
+  if (is_current_device_volta_or_higher()) {
+    multi_tensor_apply_impl<true, depth>(tensor_lists, callable, args...);
+  } else {
+    multi_tensor_apply_impl<false, depth>(tensor_lists, callable, args...);
+  }
+#endif
+}
+
+template <bool IS_VOLTA_OR_HIGHER, int depth, typename T, typename... ArgTypes>
+void multi_tensor_apply_for_fused_optimizer_impl(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     at::TensorList state_steps,
     T callable,
@@ -307,7 +511,7 @@ void multi_tensor_apply_for_fused_optimizer(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth");
   const auto num_tensors = tensor_lists[0].size();
-  FusedOptimizerTensorListMetadata<depth> tensorListMeta;
+  FusedOptimizerTensorListMetadata<depth, IS_VOLTA_OR_HIGHER> tensorListMeta;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -336,9 +540,11 @@ void multi_tensor_apply_for_fused_optimizer(
       loc_block_info++;
 
       const auto tensor_full =
-          (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
+          (loc_tensor_info ==
+               mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, depth>::max_tensors &&
            chunk == chunks - 1);
-      const auto blocks_full = loc_block_info == depth_to_max_blocks[depth - 1];
+      const auto blocks_full = loc_block_info ==
+          mta_detail::MTAConfig<IS_VOLTA_OR_HIGHER, depth>::max_blocks;
 
       if (tensor_full || blocks_full) {
         multi_tensor_apply_kernel<<<
@@ -377,6 +583,26 @@ void multi_tensor_apply_for_fused_optimizer(
         at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
+}
+
+template <int depth, typename T, typename... ArgTypes>
+void multi_tensor_apply_for_fused_optimizer(
+    std::vector<std::vector<at::Tensor>>& tensor_lists,
+    at::TensorList state_steps,
+    T callable,
+    ArgTypes... args) {
+#if __MTA_COMPILE_FOR_VOLTA_AND_HIGHER
+  multi_tensor_apply_for_fused_optimizer_impl<true, depth>(
+      tensor_lists, state_steps, callable, args...);
+#else
+  if (is_current_device_volta_or_higher()) {
+    multi_tensor_apply_for_fused_optimizer_impl<true, depth>(
+        tensor_lists, state_steps, callable, args...);
+  } else {
+    multi_tensor_apply_for_fused_optimizer_impl<false, depth>(
+        tensor_lists, state_steps, callable, args...);
+  }
+#endif
 }
 
 } // namespace at::native
