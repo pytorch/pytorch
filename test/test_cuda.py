@@ -674,6 +674,13 @@ print(t.is_pinned())
             )
             self.assertEqual(expected, r)
 
+        # explicitly check default when no env vars are set
+        if not any(
+            os.environ.get(v)
+            for v in ("TORCH_BLAS_PREFER_CUBLASLT", "TORCH_BLAS_PREFER_HIPBLASLT")
+        ):
+            _check_default()
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally
     def test_cublas_workspace_explicit_allocation(self):
