@@ -166,13 +166,13 @@ WelfordDataLN cuWelfordCombine(
     U count = dataA.count + dataB.count;
     U mean, sigma2;
     if (count > decltype(dataB.count){0}) {
-    // TODO: should this use __fdividef?
-    auto fn_rcp = [](auto a) {return 1.0f / a;};
+      // TODO: should this use __fdividef?
+      auto fn_rcp = [](auto a) {return 1.0f / a;};
 #if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
 //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-    auto coef = __builtin_amdgcn_processor_is("gfx90a") ? fn_rcp(count): __builtin_amdgcn_rcpf(count);
+      auto coef = __builtin_amdgcn_processor_is("gfx90a") ? fn_rcp(count): __builtin_amdgcn_rcpf(count);
 #else
-    auto coef = fn_rcp(count); //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
+      auto coef = fn_rcp(count); //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
 #endif
       auto nA = dataA.count * coef;
       auto nB = dataB.count * coef;
