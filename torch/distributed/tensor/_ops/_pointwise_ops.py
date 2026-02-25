@@ -652,7 +652,7 @@ pointwise_ops = [
 ]
 
 
-def single_mesh_dim_common_pointwise_strategy(
+def _shard_only_pointwise_strategy(
     args_schema: ArgsType,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """Generate Shard placement strategies for pointwise ops based on tensor shapes."""
@@ -689,7 +689,7 @@ def _make_partial_strategy(
         args_schema: ArgsType,
         kwargs_schema: KwargsType,
     ) -> list[list[Placement | _ShardingPlaceholder]]:
-        placements = single_mesh_dim_common_pointwise_strategy(args_schema)
+        placements = _shard_only_pointwise_strategy(args_schema)
         if extra_rules:
             n_tensors = sum(1 for arg in args_schema if isinstance(arg, TensorMeta))
             expected_len = 1 + n_tensors
