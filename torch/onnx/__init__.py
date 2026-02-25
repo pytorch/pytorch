@@ -128,6 +128,9 @@ def export(
         verbose: Whether to enable verbose logging.
         input_names: names to assign to the input nodes of the graph, in order.
         output_names: names to assign to the output nodes of the graph, in order.
+            These are labels only and do not affect the order of outputs. If the model
+            returns a dictionary, outputs are flattened in the dictionary's iteration
+            order regardless of the names specified here.
         opset_version: The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
             to target. You should set ``opset_version`` according to the supported opset versions
