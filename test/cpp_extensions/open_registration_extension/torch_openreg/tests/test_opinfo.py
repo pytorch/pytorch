@@ -22,7 +22,12 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps
-from torch.testing._internal.common_utils import noncontiguous_like, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    first_sample,
+    noncontiguous_like,
+    run_tests,
+    TestCase,
+)
 
 
 # supported operators for OpenReg - expand as more are implemented
@@ -35,8 +40,6 @@ openreg_ops = [op for op in op_db if op.name in OPENREG_OPS]
 # skips
 noncontiguous_skips = {
     skip("empty"),
-    skip("zeros"),
-    skip("ones"),
 }
 
 
@@ -51,22 +54,15 @@ class TestOpInfo(TestCase):
     def test_op_basic_functionality(self, device, dtype, op):
         device_type = torch.device(device).type
 
-        samples = op.sample_inputs(device, dtype)
-        tested = False
-        for sample in samples:
-            result = op(sample.input, *sample.args, **sample.kwargs)
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+        result = op(sample.input, *sample.args, **sample.kwargs)
 
-            if isinstance(result, torch.Tensor):
-                self.assertEqual(result.device.type, device_type)
-            elif isinstance(result, (tuple, list)):
-                for r in result:
-                    if isinstance(r, torch.Tensor):
-                        self.assertEqual(r.device.type, device_type)
-            tested = True
-            break
-
-        if not tested:
-            self.skipTest(f"No sample inputs available for {op.name}")
+        if isinstance(result, torch.Tensor):
+            self.assertEqual(result.device.type, device_type)
+        elif isinstance(result, (tuple, list)):
+            for r in result:
+                if isinstance(r, torch.Tensor):
+                    self.assertEqual(r.device.type, device_type)
 
     @ops(
         [op for op in openreg_ops if op.supports_out],
@@ -75,13 +71,10 @@ class TestOpInfo(TestCase):
     def test_out_argument(self, device, dtype, op):
         device_type = torch.device(device).type
 
-        samples = op.sample_inputs(device, dtype)
-        for sample in samples:
-            expected = op(sample.input, *sample.args, **sample.kwargs)
+        sample = first_sample(self, op.sample_inputs(device, dtype))
+        expected = op(sample.input, *sample.args, **sample.kwargs)
 
-            if not isinstance(expected, torch.Tensor):
-                continue
-
+        if isinstance(expected, torch.Tensor):
             out = torch.empty_like(expected)
             original_data_ptr = out.data_ptr()
             result = op(sample.input, *sample.args, **sample.kwargs, out=out)
@@ -90,7 +83,6 @@ class TestOpInfo(TestCase):
             self.assertEqual(out.device.type, device_type)
             self.assertEqual(out.data_ptr(), original_data_ptr)
             self.assertEqual(out, expected)
-            break
 
     @ops(openreg_ops, allowed_dtypes=(torch.float32,))
     @skipOps("TestOpInfo", "test_noncontiguous_samples", noncontiguous_skips)
