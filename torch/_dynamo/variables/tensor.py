@@ -47,6 +47,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    ObservedAttributeError,
     raise_observed_exception,
     TorchRuntimeError,
     unimplemented,
@@ -518,7 +519,7 @@ class TensorVariable(VariableTracker):
             # in the event that TensorVariable returns NotImplemented
             # BuiltinVariable.call_getattr returns GetAttrVariable
             ret_val = not isinstance(var, GetAttrVariable)
-        except AttributeError:
+        except (AttributeError, ObservedAttributeError):
             ret_val = False
 
         if self.source:
