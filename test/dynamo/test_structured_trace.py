@@ -799,6 +799,7 @@ class StructuredTraceTest(TestCase):
 
         self.assertParses()
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @requires_tlparse
     def test_graph_breaks(self):
         @torch.compile(backend="inductor")
