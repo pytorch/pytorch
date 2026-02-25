@@ -1,5 +1,5 @@
 import copy
-from queue import SimpleQueue
+import heapq
 from typing import Optional as _Optional
 
 import torch.fx
@@ -13,27 +13,30 @@ from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-d
 
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
-    # sort nodes according to the topological order
+    # Stable topological sort: among nodes with no dependency between them,
+    # preserve their relative order in the input list. This uses a min-heap
+    # keyed by original position instead of a FIFO queue.
     indegree_map = dict.fromkeys(nodes, 0)
-    candidates: SimpleQueue[Node] = SimpleQueue()
+    position = {node: i for i, node in enumerate(nodes)}
+    candidates: list[tuple[int, Node]] = []
 
     for node in nodes:
         for n in node.all_input_nodes:
             if n in indegree_map:
                 indegree_map[node] += 1
         if indegree_map[node] == 0:
-            candidates.put(node)
+            heapq.heappush(candidates, (position[node], node))
 
     sorted_nodes: NodeList = []
-    while not candidates.empty():
-        node = candidates.get()
+    while candidates:
+        _, node = heapq.heappop(candidates)
         sorted_nodes.append(node)
 
         for n in node.users:
             if n in indegree_map:
                 indegree_map[n] -= 1
                 if indegree_map[n] == 0:
-                    candidates.put(n)
+                    heapq.heappush(candidates, (position[n], n))
 
     if len(nodes) != len(sorted_nodes):
         raise AssertionError(

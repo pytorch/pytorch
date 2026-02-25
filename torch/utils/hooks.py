@@ -145,7 +145,6 @@ class BackwardHook:
 
                 res = out
 
-            # pyrefly: ignore [bad-assignment]
             self.grad_outputs = None
 
             return self._unpack_none(self.input_tensors_index, res)
