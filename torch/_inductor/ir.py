@@ -5430,6 +5430,47 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = self._make_kernel_renders[None]
 
 
+@dataclasses.dataclass
+class VariantGroup:
+    """A group of IR nodes representing one inlined decomposition variant."""
+
+    name: str
+    output_node: Any  # TensorBox — final output of this variant
+    ir_node_names: set[str]  # Buffer names belonging to this variant
+    choice: Any  # SubgraphChoiceCaller reference
+
+
+class DeferredChoiceBuffer(Buffer):
+    """
+    Holds multiple inlined decomposition variants for deferred autotuning.
+
+    All variants are inlined at lowering time and participate in the main graph's
+    fusion pass. After fusion, the variants are benchmarked and the winner is
+    selected; losers are pruned.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        variants: list[VariantGroup],
+    ) -> None:
+        super().__init__(name="deferred_choice", layout=layout)
+        self.inputs = inputs
+        self.variants = variants
+
+    def get_read_writes(self):
+        reads = set()
+        for v in self.variants:
+            out = v.output_node
+            if hasattr(out, "data") and hasattr(out.data, "data"):
+                reads.add(dependencies.StarDep(out.data.data.get_name()))
+        return dependencies.ReadWrites(reads, set(), set(), [], None)
+
+    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet()
+
+
 class CUTLASSTemplateBuffer(TemplateBuffer):
     def __init__(
         self,

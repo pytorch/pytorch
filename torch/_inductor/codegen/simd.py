@@ -1309,6 +1309,19 @@ class SIMDScheduling(BaseScheduling):
         ):
             return scheduler.ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
+        # Deferred autotuning fusion barrier: don't fuse nodes from different variants
+        def _get_variant_id(node):
+            if isinstance(node, scheduler.SchedulerNode) and hasattr(
+                node.node, "_variant_id"
+            ):
+                return node.node._variant_id
+            return None
+
+        v1 = _get_variant_id(node1)
+        v2 = _get_variant_id(node2)
+        if v1 is not None and v2 is not None and v1 != v2:
+            return False
+
         _, (numel1, rnumel1) = node1.group
         _, (numel2, rnumel2) = node2.group
         why = WhyNoFuse(node1, node2)
