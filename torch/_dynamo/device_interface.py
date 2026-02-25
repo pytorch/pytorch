@@ -571,9 +571,7 @@ class TpuInterface(DeviceInterface):
     def is_dtype_supported(
         cls, dtype: torch.dtype, including_emulation: bool = False
     ) -> bool:
-        if dtype in [torch.float64, torch.complex128]:
-            return False
-        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
+        return dtype not in (torch.float64, torch.complex32, torch.complex64, torch.complex128, torch.half)
 
     @staticmethod
     def is_available() -> bool:
