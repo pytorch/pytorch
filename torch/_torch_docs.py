@@ -9340,8 +9340,17 @@ repeated values or unexpected rounding. For precise sequences, it is recommended
 integer dtypes instead of floating-point dtypes.
 
 Note that non-integer :attr:`step` is subject to floating point rounding errors when
-comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon from :attr:`end`
-in such cases.
+comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon
+from :attr:`end` in such cases. Additionally, when the output is an integer dtype,
+a floating-point :attr:`step` is truncated to an integer before the sequence is generated.
+In the special case where :attr:`step` is within the range (-1, 1), it will be truncated to 0,
+yielding a sequence of identical values.
+
+Note: If :attr:`start`, :attr:`end`, or :attr:`step` are floating-point numbers but the resulting
+:attr:`dtype` is an integer (either explicitly specified or inferred from an integer ``out`` tensor),
+the sequence is computed using floating-point math and then cast to the requested integer dtype.
+For example, an integer tensor with a step of `0.5` will safely compute `[0.0, 0.5, 1.0, 1.5, ...]`
+and then cast it to yield `[0, 0, 1, 1, ...]`.
 
 .. math::
     \text{out}_{{i+1}} = \text{out}_{i} + \text{step}

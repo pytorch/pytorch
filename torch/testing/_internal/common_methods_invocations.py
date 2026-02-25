@@ -824,6 +824,12 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
         (1., 5. + 1e-6, 2.),
         (0., -8., -4.),
         (1., 5., 2.),
+        # start and end: int or float, step: float
+        (0, 5, 0.5),
+        (0, 5., 0.5),
+        (0., 5, 0.5),
+        (0., 5., 0.25),
+        (5., 1., -0.01),
         *(to_float(start, end, step) for (start, end, step) in int_samples),
     )
 
