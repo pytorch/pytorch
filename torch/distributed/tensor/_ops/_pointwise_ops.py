@@ -115,10 +115,15 @@ non_decreasing_unary_ops = [
     aten.tanh_.default,
     aten.trunc.default,
     aten.trunc_.default,
+    # nan_to_num is non-decreasing on its entire domain (including nan/inf):
+    # it maps -inf→min, nan→0, inf→max, and is identity elsewhere.
+    aten.nan_to_num.default,
+    aten.nan_to_num_.default,
 ]
 
 # Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
-non_increasing_unary_ops = [
+# Note: acos excluded due to domain constraints [-1,1] causing validation failures
+non_increasing_unary_ops: list[OpOverload] = [
     aten.erfc.default,
     aten.erfc_.default,
     aten.special_erfcx.default,
@@ -365,9 +370,7 @@ pointwise_ops = (
         aten.mvlgamma_.default,
         aten.native_dropout_backward.default,
         aten.native_dropout_backward.out,
-        aten.nan_to_num.default,
         aten.nan_to_num.out,
-        aten.nan_to_num_.default,
         aten.ne.Scalar,
         aten.neg.out,
         aten.nextafter.default,
