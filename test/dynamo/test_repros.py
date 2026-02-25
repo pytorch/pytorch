@@ -1178,9 +1178,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x = torch.roll(x, shifts=-1, dims=0)
             return torch.as_strided(x, (5, 10), (4, 1), 0)
 
-        x = torch.arange(100).reshape(2, 5, 2, 5).to(
-            memory_format=torch.channels_last
-        )
+        x = torch.arange(100).reshape(2, 5, 2, 5).to(memory_format=torch.channels_last)
         eager_out = fn(x)
         compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
         compiled_out = compiled_fn(x)
