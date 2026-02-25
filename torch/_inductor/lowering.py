@@ -1943,9 +1943,38 @@ def cat(inputs, dim=0):
 
         # horizontal fuse in case all inputs will require a copy kernel anyway.
         # only horizontally fuse pointwise kernels
+        #
+        # Skip horizontal fusion when any input has multiple consumers.
+        # pointwise_cat inlines the input computation into the cat kernel,
+        # but if the input is also used elsewhere (e.g., by addmm), it must
+        # be realized separately — causing the computation to run twice.
+        # ConcatKernel avoids this by writing the input into a slice of the
+        # output buffer (via NonOwningLayout), so all consumers share one copy.
+        def any_input_has_multi_consumers() -> bool:
+            cat_node = V.current_node
+            if cat_node is None:
+                return False
+            # For aten.cat nodes, args[0] is a list of input FX nodes.
+            # For other nodes (e.g., constant_pad_nd calling cat internally),
+            # we need to walk the args to find all FX input nodes.
+            fx_args = cat_node.args[0]
+            if isinstance(fx_args, (list, tuple)):
+                input_nodes = fx_args
+            else:
+                # Collect all FX node args (e.g., when called from _pad_as_cat,
+                # V.current_node is constant_pad_nd whose args are (x, padding, fill_value))
+                input_nodes = [
+                    arg for arg in cat_node.args
+                    if isinstance(arg, torch.fx.Node)
+                ]
+            return any(
+                hasattr(arg, "users") and len(arg.users) > 1
+                for arg in input_nodes
+            )
+
         horizontal_fuse_cat = all(
             should_lower_cat_input(inp) for inp in inputs
-        ) and not any(can_fuse_reduction(t) for t in inputs)
+        ) and not any(can_fuse_reduction(t) for t in inputs) and not any_input_has_multi_consumers()
         if fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction):
             return pointwise_cat(inputs, dim)
 
@@ -4611,6 +4640,69 @@ def inplace_constant_pad_nd(
     return resized_x
 
 
+def _pad_as_cat(
+    x: TensorBox, padding: Sequence[int], fill_value: float
+) -> Optional[TensorBox]:
+    """
+    Rewrite constant_pad_nd as ConcatKernel([x, fill_tensor]) to leverage
+    pre-allocate + realize-into-slice zero-copy mechanism.
+
+    Only supports right-pad on a single dimension. Only fires when x has
+    multiple consumers (where ConcatKernel avoids duplicate computation)
+    or when x can realize into a slice without copy.
+    """
+    sizes = x.get_size()
+    ndim = len(sizes)
+    pad_pairs = list(zip(padding[::2], padding[1::2]))
+
+    # Only support single-dimension right-pad
+    pad_dim = None
+    pad_amount = None
+    for i, (left, right) in enumerate(pad_pairs):
+        if left != 0:
+            return None
+        if right != 0:
+            if pad_dim is not None:
+                return None  # multi-dim pad
+            pad_dim = ndim - 1 - i  # padding format is reversed dim order
+            pad_amount = right
+
+    if pad_dim is None or pad_amount is None:
+        return None
+
+    # Only use ConcatKernel when the pad input has multiple consumers.
+    # With multiple consumers, the default masked Pointwise inlines the input
+    # computation into the pad kernel, but the input must also be realized
+    # separately for other consumers — causing duplicate computation.
+    # ConcatKernel avoids this: x is realized once into the output buffer's
+    # slice (via NonOwningLayout), and all consumers share that single copy.
+    # For single-consumer pads, the default masked Pointwise is optimal.
+    pad_node = V.current_node
+    if pad_node is None:
+        return None
+    input_nodes = [
+        arg for arg in pad_node.args
+        if isinstance(arg, torch.fx.Node)
+    ]
+    if not any(len(arg.users) > 1 for arg in input_nodes):
+        return None
+
+    # Build the fill tensor for the padding region
+    pad_shape = list(sizes)
+    pad_shape[pad_dim] = pad_amount
+    dtype = x.get_dtype()
+    device = x.get_device()
+    fill_value_typed = dtype_to_type(dtype)(fill_value)
+    pad_tensor = tensor_constructor(fill_value_typed)(
+        pad_shape, dtype=dtype, device=device
+    )
+
+    # Call ConcatKernel.create() directly, bypassing the cat() lowering
+    # and its pointwise_cat heuristic.
+    counters["inductor"]["pad_as_cat"] += 1
+    return TensorBox(ir.ConcatKernel.create([x, pad_tensor], pad_dim))
+
+
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
@@ -4622,6 +4714,15 @@ def constant_pad_nd(x, padding, fill_value=0):
         if out:
             return out
             # fall through if can not inplace the padding
+
+    # Rewrite right-pad as cat(x, fill_tensor) to leverage ConcatKernel's
+    # pre-allocate + realize-into-slice mechanism. This avoids an intermediate
+    # buffer and copy when x is an unrealized Pointwise with multiple consumers.
+    # We call the cat() lowering (not ConcatKernel directly) so it can choose
+    # pointwise_cat for single-consumer cases and ConcatKernel for multi-consumer.
+    out = _pad_as_cat(x, padding, fill_value)
+    if out is not None:
+        return out
 
     sizes = x.get_size()
 
