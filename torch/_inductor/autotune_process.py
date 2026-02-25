@@ -456,6 +456,7 @@ class BenchmarkRequest:
             self.output_tensor_meta: TensorMeta = output_tensor_meta
 
         self.extra_args = extra_args
+        self.benchmark_with_cudagraphs = False
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, out: torch.Tensor
@@ -505,7 +506,10 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        res = self.do_bench(fn, *input_tensors, out)
+        if self.benchmark_with_cudagraphs:
+            res = benchmarker.benchmark_gpu_with_cuda_graph(fn)
+        else:
+            res = self.do_bench(fn, *input_tensors, out)
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -776,6 +780,10 @@ class ExternKernelBenchmarkRequest(BenchmarkRequest):
                     out_new, tuple(out.size()), tuple(out.stride())
                 )
                 out.copy_(out_new)  # for correctness checking
+            if self.benchmark_with_cudagraphs:
+                return benchmarker.benchmark_gpu_with_cuda_graph(
+                    lambda: algo(*input_tensors)
+                )
             if config.profile_bandwidth_with_do_bench_using_profiling:
                 return do_bench_using_profiling(lambda: algo(*input_tensors))
             return benchmarker.benchmark(algo, input_tensors, {})
@@ -809,53 +817,6 @@ class ExternKernelGPUBenchmarkRequest(
 class ExternKernelCPUBenchmarkRequest(
     CPUDeviceBenchmarkMixin, ExternKernelBenchmarkRequest
 ):
-    pass
-
-
-class SubgraphBenchmarkRequest(BenchmarkRequest):
-    """
-    Benchmark request for subgraph choices.
-
-    Pre-compiles the subgraph in the main process and stores
-    the module path/cache key for loading in subprocess.
-    """
-
-    def __init__(
-        self,
-        kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        extra_args: Iterable[Any],
-        module_path: str,
-        module_cache_key: str,
-        sym_input_values: list[int],
-    ) -> None:
-        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
-        self.module_path = module_path
-        self.module_cache_key = module_cache_key
-        self.sym_input_values = sym_input_values
-
-    def make_run_fn(
-        self, *input_tensors: torch.Tensor, out: torch.Tensor
-    ) -> Callable[[], None]:
-        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-        sym_input_values = self.sym_input_values
-        # Create a new list each call since mod.call does args.clear()
-        return lambda: mod.call([*sym_input_values, *input_tensors])
-
-    def precompile(self) -> None:
-        # Module is already compiled in main process, no precompilation needed
-        pass
-
-    def __str__(self) -> str:
-        return f"SubgraphBenchmarkRequest({self.kernel_name}, {self.module_path})"
-
-
-class SubgraphGPUBenchmarkRequest(GPUDeviceBenchmarkMixin, SubgraphBenchmarkRequest):
-    pass
-
-
-class SubgraphCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, SubgraphBenchmarkRequest):
     pass
 
 
@@ -1321,10 +1282,9 @@ def run_autotune_in_subprocess(
         return timing
 
     except Exception:
-        autotuning_log.warning(
+        autotuning_log.error(
             "Failed to benchmark choice %s",
             benchmark_request,
-            exc_info=True,
         )
         # Use infinity for failed benchmarks so they're not selected
         return float("inf")

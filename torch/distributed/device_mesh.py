@@ -6,7 +6,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
@@ -636,19 +636,21 @@ else:
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
+        def _hash_key(self) -> tuple[Any, ...]:
+            """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
+            return (
+                self._flatten_rank_map,
+                self._layout,
+                self._device_type,
+                self._mesh_dim_names,
+                self._thread_id,
+            )
+
         def __hash__(self):
             # lazily compute hash
             self._hash = getattr(self, "_hash", None)
             if not self._hash:
-                self._hash = hash(
-                    (
-                        self._flatten_rank_map,
-                        self._layout,
-                        self._device_type,
-                        self._mesh_dim_names,
-                        self._thread_id,
-                    )
-                )
+                self._hash = hash(self._hash_key())
             return self._hash
 
         def __eq__(self, other: object) -> bool:
@@ -663,6 +665,17 @@ else:
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
             )
+
+        def _stable_hash(self) -> str:
+            """
+            Return a stable hash for AOT autograd caching.
+            [See note: Tensor subclass stable hashing for AOT autograd cache]
+            """
+            import hashlib
+
+            return hashlib.blake2b(
+                repr(self._hash_key()).encode(), digest_size=16
+            ).hexdigest()
 
         def __getitem__(self, mesh_dim_names: str | tuple[str, ...]) -> "DeviceMesh":
             """
@@ -1550,3 +1563,24 @@ else:
         )
 
         return device_mesh
+
+
+def _register_distributed_opaque_types():
+    """
+    Register DeviceMesh as an opaque type for torch.compile.
+    This must happen before any custom ops that use DeviceMesh in their schema.
+    Called lazily to avoid circular import issues.
+    """
+    from torch._library.opaque_object import MemberType, register_opaque_type
+
+    register_opaque_type(
+        ProcessGroup,
+        typ="reference",
+        members={
+            "size": MemberType.USE_REAL,
+            "rank": MemberType.USE_REAL,
+            "_get_backend_name": MemberType.USE_REAL,
+            "group_name": MemberType.USE_REAL,
+            "__eq__": MemberType.USE_REAL,
+        },
+    )

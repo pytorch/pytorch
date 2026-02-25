@@ -1736,7 +1736,8 @@ class CppVecOverrides(CppOverrides):
                 V.kernel.compute,
                 code,
             )
-            result.is_vec = True
+            assert isinstance(csevar, CppCSEVariable)
+            csevar.is_vec = True
         elif result.is_vec:
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {body_code_vec} : {other_code_vec}"
@@ -2200,18 +2201,7 @@ class CppKernel(Kernel):
             # chunk size to balance accuracy and performance
             chunk_size = 4096
 
-            # use acc helper If cannot get size_hint
-            try:
-                reduction_size_hint = V.graph.sizevars.size_hint(reduction_size)
-            except Exception:
-                return True
-
-            if reduction_size_hint > chunk_size:
-                # use helper if the reduction size is too large
-                V.graph.sizevars.check_lt(chunk_size, reduction_size)
-                return True
-            else:
-                V.graph.sizevars.check_leq(reduction_size, chunk_size)
+            return V.graph.sizevars.guard_or_false(sympy.Gt(reduction_size, chunk_size))
         return False
 
     def _acc_helper_init(

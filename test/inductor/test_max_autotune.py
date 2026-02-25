@@ -1365,7 +1365,7 @@ class TestMaxAutotune(TestCase):
                 ).run(code[0])
             else:
                 FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
+                    "triton_.*_fused_0.run"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
@@ -1379,7 +1379,7 @@ class TestMaxAutotune(TestCase):
                 ).run(code[0])
             else:
                 FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
+                    "triton_.*_fused_mm_0.run"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
@@ -1516,7 +1516,7 @@ class TestMaxAutotune(TestCase):
                 out.backward()
 
                 FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                    "triton_.*_fused_.*.run"
+                    "triton_.*_fused_0.run"
                 ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                     r"256\*s[0-9]+"
                 ).check_regex("s[0-9]+ = 8").run(
@@ -2485,7 +2485,6 @@ class TestMaxAutotune(TestCase):
             "max_autotune": True,
             "max_autotune_gemm_backends": "ATEN,TRITON",
             "force_pointwise_cat": True,
-            "max_autotune_defer_layout_freezing": True,
         }
     )
     @parametrize("epilogue", (True, False))
@@ -2531,6 +2530,67 @@ class TestMaxAutotune(TestCase):
             # Despite Triton being 10x faster in benchmarks, the layout conflict
             # should force fallback to extern_kernels.bmm
             FileCheck().check_not("triton_tem").run(code[0])
+
+    @parametrize("always_freeze", [True, False])
+    def test_mm_layout_freezing_behavior(self, always_freeze):
+        """Test that mm layout freezing behavior depends on always_freeze_layout.
+
+        When always_freeze_layout=True, FlexibleLayout should be frozen to FixedLayout.
+        When always_freeze_layout=False (default), FlexibleLayout should remain flexible
+        and use layout constraints instead.
+        """
+        from torch._inductor import ir
+        from torch._inductor.kernel.mm import mm_template
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        flexible_layout_called = False
+        orig_stride_call = TritonTemplateKernel.get_stride_and_maybe_freeze_layout
+
+        def tracking_get_stride(self, node):
+            nonlocal flexible_layout_called
+            flexible_layout = isinstance(node.data.layout, ir.FlexibleLayout)
+            result = orig_stride_call(self, node)
+            if flexible_layout:
+                flexible_layout_called = True
+                if always_freeze:
+                    assert isinstance(node.data.layout, ir.FixedLayout)
+                else:
+                    assert isinstance(node.data.layout, ir.FlexibleLayout)
+            return result
+
+        def fn(x, y):
+            # Add intermediate computation to create FlexibleLayout buffer
+            x = x + 1
+            return torch.mm(x, y)
+
+        M, K, N = 256, 128, 256
+        x = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        y = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+
+        # Save original value to restore later
+        original_always_freeze = mm_template.always_freeze_layout
+
+        with (
+            fresh_cache(),
+            patch.object(
+                TritonTemplateKernel,
+                "get_stride_and_maybe_freeze_layout",
+                tracking_get_stride,
+            ),
+            config.patch({"test_configs.max_mm_configs": 1}),
+        ):
+            torch._dynamo.reset()
+            mm_template.always_freeze_layout = always_freeze
+            try:
+                # Temporarily set always_freeze_layout on mm_template
+                mm_template.always_freeze_layout = always_freeze
+                compiled_f = torch.compile(fn, mode="max-autotune")
+                compiled_f(x, y)
+            finally:
+                # Restore original value
+                mm_template.always_freeze_layout = original_always_freeze
+
+        self.assertTrue(flexible_layout_called)
 
 
 @instantiate_parametrized_tests
@@ -4280,10 +4340,16 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
     """Tests for AsyncPipelinedAutotuning path."""
 
     SKIP_TESTS = {
+        "test_max_autotune_decompose_k": "Subgraphs not supported with async pipelining",
         "test_inf_timing": "Logs not consistent with async pipelined autotuning",
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
+        # Contiguous transform tests - SubgraphChoiceCaller not supported with async pipelining
+        "test_max_autotune_contiguous_transform_mm": "Subgraphs not supported with async pipelining",
+        "test_max_autotune_contiguous_transform_addmm": "Subgraphs not supported with async pipelining",
+        "test_max_autotune_contiguous_transform_non_contiguous_second_matrix": "Subgraphs not supported with async pipelining",
+        "test_max_autotune_contiguous_transform_with_epilogue": "Subgraphs not supported with async pipelining",
         # XPU specific skips due to lack of multiprocess tensor reduction support (issue #170636)
         "test_max_autotune_addmm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
         "test_max_autotune_regular_mm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",

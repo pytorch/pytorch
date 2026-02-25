@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
+import hashlib
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -13,7 +14,11 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.device_mesh import (
+    _mesh_resources,
+    _register_distributed_opaque_types,
+    DeviceMesh,
+)
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
@@ -374,6 +379,15 @@ class DTensor(torch.Tensor):
             # pyrefly: ignore [unexpected-keyword]
             requires_grad=requires_grad,
         )
+
+    def _stable_hash_for_caching(self) -> str:
+        """
+        Return a stable hash for AOT autograd caching.
+        [See note: Tensor subclass stable hashing for AOT autograd cache]
+        """
+        # Combine spec's stable hash with requires_grad
+        cache_data = self._spec._stable_hash() + str(self.requires_grad)
+        return hashlib.blake2b(cache_data.encode(), digest_size=16).hexdigest()
 
     def __coerce_tangent_metadata__(self):
         if not any(isinstance(p, Partial) for p in self.placements):
@@ -1467,3 +1481,6 @@ def zeros(  # type: ignore[no-untyped-def]
         device_mesh=device_mesh,
         placements=placements,
     )
+
+
+_register_distributed_opaque_types()

@@ -304,7 +304,6 @@ class StreamVariable(StreamContextVariable):
 
         self.proxy = proxy
         self.value = value
-        # pyrefly: ignore [read-only]
         self.device = value.device
 
         self.user_object_index = user_object_index
