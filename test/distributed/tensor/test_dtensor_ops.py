@@ -200,8 +200,6 @@ dtensor_fails = {
     xfail("nn.functional.conv_transpose3d"),
     # in-place op requires placement change during decomposition
     xfail("nn.functional.cosine_similarity"),
-    # Shard(0) causes local tensor index out of bounds for value broadcasting
-    xfail("index_put"),
     # "cannot resize variables that require grad" from test harness
     xfail("resize_"),
     xfail("resize_as_"),
