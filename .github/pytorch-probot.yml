@@ -41,6 +41,7 @@ ciflow_push_tags:
 - ciflow/rocm-mi300
 - ciflow/rocm-mi355
 - ciflow/rocm-navi31
+- ciflow/rocm-nightly
 - ciflow/s390
 - ciflow/slow
 - ciflow/slow-rocm-mi200
