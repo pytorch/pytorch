@@ -45,7 +45,6 @@ class ReduceAdd {
   #endif
   }
 };
-
 static ReduceAdd reduce_add;
 
 class ReduceMean {

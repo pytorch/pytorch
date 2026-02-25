@@ -402,12 +402,14 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     }
   }
 
+
   //Once the correct crnt_val is determined, only the leader thread does the update to the dest addr
   if (__lane_id() == leader) {
     fastAtomicAdd(self_ptr, index, numel, crnt_val, true);
   }
 }
 #endif
+
 #undef ATOMICADD
 #undef NATIVE_ZERO_BF16
 
