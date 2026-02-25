@@ -485,7 +485,12 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    def test_attribute_error_caught_from_getattr(self):
+    def test_attribute_error_caught_from_user_getattr(self):
+        """
+        This test specifically covers AttributeError propagation when 
+        overriding the default __getattr__ implementation to ensure 
+        compatibility with hasattr() under torch.compile.
+        """
         class Obj:
             def __getattr__(self, name):
                 raise AttributeError("boom")
