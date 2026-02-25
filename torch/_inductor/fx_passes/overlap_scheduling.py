@@ -1065,8 +1065,12 @@ class OverlapScheduler:
         """Handle scheduling compute or other nodes and attempt to overlap with collectives."""
         runtime_estimate = self.get_non_collective_runtime_estimate(node)
 
-        # TODO: we could consider skipping overlapping for overlapable, unary chains to collectives.
-        # using these nodes for overlap prevents bucketing. potentially if chain time < latency
+        # Skip overlapping for dtype conversions that will be fused into a
+        # bucketed all_gather.  Using them for overlap adds extra_deps that
+        # become self-dependencies after bucketing merges them.
+        if runtime_estimate is not None and self._is_fuseable_all_gather_dtype(node):
+            runtime_estimate = None
+
         if runtime_estimate is None:
             assert not is_compute_node(node), "should have estimate for compute nodes"
             self._schedule(node)
@@ -1140,6 +1144,18 @@ class OverlapScheduler:
         return getattr(node.target, "is_view", False) or torch.Tag.pointwise in getattr(
             node.target, "tags", ()
         )
+
+    @staticmethod
+    def _is_fuseable_all_gather_dtype(node: fx.Node) -> bool:
+        """Check if node is a dtype conversion that will be fused into a bucketed all_gather."""
+        from torch._inductor.fx_passes.bucketing import (
+            has_mergeable_all_gather_convert_dtype,
+        )
+
+        if len(node.users) != 1:
+            return False
+        user = next(iter(node.users))
+        return has_mergeable_all_gather_convert_dtype(user)
 
     def in_overlappable_collective_unary_chain(self, curr: fx.Node) -> bool:
         while True:

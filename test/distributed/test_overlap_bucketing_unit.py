@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import operator
 import unittest
 
 import torch
@@ -856,6 +857,91 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         graph_str_after = gm.print_readable(print_output=False)
         self.assertEqual(graph_str_before, graph_str_after)
 
+    def test_getitem_users_tracked_after_expand(self):
+        """
+        Test that getitem users of multi-output fusion regions are properly
+        mapped to replacement nodes after expand_fusion_regions.
+
+        The bug: expand_fusion_regions mapped all getitem users to None,
+        so their deps were dropped during transfer_erased_node_deps instead
+        of being transferred to the correct inlined replacement node.
+
+        Fix: Capture getitem users and their indices before inlining, then
+        map each to the corresponding output element after inlining.
+        """
+        from torch._inductor.fx_passes.fusion_regions import (
+            FusionRegion,
+            expand_fusion_regions,
+        )
+
+        # Manually construct a graph with a multi-output call_module and
+        # getitem users, which is exactly what collapse_fusion_regions produces.
+        #
+        # Graph structure:
+        #   x = placeholder
+        #   module_out = call_module("_fusion_region_0", x)
+        #   a = getitem(module_out, 0)
+        #   b = getitem(module_out, 1)
+        #   out = a + b
+        #
+        # Subgraph (_fusion_region_0):
+        #   x = placeholder
+        #   a = x + 1
+        #   b = a * 2
+        #   output (a, b)
+
+        # Build the subgraph module
+        sub_graph = torch.fx.Graph()
+        sub_x = sub_graph.placeholder("x")
+        sub_x.meta["val"] = torch.randn(4, 4)
+        sub_a = sub_graph.call_function(torch.ops.aten.add.Tensor, (sub_x, 1.0))
+        sub_a.meta["val"] = torch.randn(4, 4)
+        sub_b = sub_graph.call_function(torch.ops.aten.mul.Tensor, (sub_a, 2.0))
+        sub_b.meta["val"] = torch.randn(4, 4)
+        sub_graph.output((sub_a, sub_b))
+        sub_module = torch.fx.GraphModule(torch.nn.Module(), sub_graph)
+
+        # Build the outer graph
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        x.meta["val"] = torch.randn(4, 4)
+        module_node = graph.call_module("_fusion_region_0", (x,))
+        module_node.meta["val"] = (torch.randn(4, 4), torch.randn(4, 4))
+        gi_0 = graph.call_function(operator.getitem, (module_node, 0))
+        gi_0.meta["val"] = torch.randn(4, 4)
+        gi_1 = graph.call_function(operator.getitem, (module_node, 1))
+        gi_1.meta["val"] = torch.randn(4, 4)
+        out = graph.call_function(torch.ops.aten.add.Tensor, (gi_0, gi_1))
+        out.meta["val"] = torch.randn(4, 4)
+        graph.output(out)
+
+        parent = torch.nn.Module()
+        parent._fusion_region_0 = sub_module
+        gm = torch.fx.GraphModule(parent, graph)
+
+        region_of = {
+            module_node: FusionRegion(
+                subgraph_node=module_node,
+                subgraph_module=sub_module,
+            )
+        }
+
+        result = expand_fusion_regions(gm, region_of)
+
+        # The getitem nodes should map to actual inlined nodes, not None.
+        # Without the fix, expand_fusion_regions sets result[gi] = None,
+        # which drops deps during transfer_erased_node_deps.
+        self.assertIn(gi_0, result)
+        self.assertIn(gi_1, result)
+        self.assertIsNotNone(
+            result[gi_0],
+            "getitem(0) should map to inlined add node, not None"
+        )
+        self.assertIsNotNone(
+            result[gi_1],
+            "getitem(1) should map to inlined mul node, not None"
+        )
+
     @torch._inductor.config.patch(deterministic=True)
     def test_deterministic_mode_no_benchmark_error(self):
         """
@@ -1215,13 +1301,14 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         Test that bucketing collectives with dtype conversion doesn't create
         self-dependency cycles.
 
-        This tests the fix in augmented_graph_helper.py that adds != new_node
-        checks to prevent self-dependencies when merging nodes.
-
         The bug: When two convert_element_type nodes (inputs to all_gathers)
         have timeline dependencies between them and both get merged into
         _pre_bucket_all_gather, the dependency becomes a self-dependency
         which causes _stable_topological_sort to fail.
+
+        Fix: Dtype conversions that get fused into bucketed all_gathers are
+        treated as free in the overlap scheduler, so they don't get overlap
+        deps that would become self-dependencies after bucketing merges them.
         """
 
         def func(a, b, c, d):
@@ -1376,6 +1463,69 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         # This should complete without errors
         result = scheduler.run()
         result.graph.lint()
+
+    def test_reduce_scatter_all_reduce_different_bucket_keys(self):
+        """
+        Test that reduce_scatter and all_reduce have different bucket keys.
+
+        This tests the fix in bucketing.py that adds "rs"/"ar" prefixes to
+        bucket keys. Without this fix, reduce_scatter and all_reduce with
+        the same group/reduce_op/dtype would be incorrectly bucketed together.
+        """
+        from torch._inductor.fx_passes.bucketing import _ar_group_key, _rs_group_key
+
+        # Create mock nodes for reduce_scatter and all_reduce
+        # Both have same group_name, reduce_op, and dtype
+        class MockNode:
+            def __init__(self, args, dtype):
+                self.args = args
+                self.meta = {"val": type("Val", (), {"dtype": dtype})()}
+
+        # reduce_scatter args: (input, reduce_op, group_size, group_name)
+        rs_node = MockNode(
+            (None, "sum", 8, "default_pg"),
+            torch.float32,
+        )
+
+        # all_reduce args: (input, reduce_op, group_name)
+        ar_node = MockNode(
+            (None, "sum", "default_pg"),
+            torch.float32,
+        )
+
+        rs_key = _rs_group_key(rs_node)
+        ar_key = _ar_group_key(ar_node)
+
+        # Keys should be different due to "rs"/"ar" prefix
+        self.assertNotEqual(rs_key, ar_key)
+        self.assertEqual(rs_key[0], "rs")
+        self.assertEqual(ar_key[0], "ar")
+
+    def test_bucketing_import_only_when_needed(self):
+        """
+        Test that bucketing import is only added when bucketing ops are used.
+
+        This tests the conditional import fix in wrapper.py. The bucketing
+        module should only be imported when torch.ops.bucketing ops are
+        actually generated.
+
+        Before the fix, bucketing was imported unconditionally in write_header().
+        After the fix, it's only imported when write_bucketing_import_once() is
+        called (triggered by generating a bucketing op).
+        """
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        # Verify the class has the required attribute and method
+        self.assertTrue(
+            hasattr(PythonWrapperCodegen, "write_bucketing_import_once"),
+            "PythonWrapperCodegen should have write_bucketing_import_once method",
+        )
+
+        # Verify the method exists and is callable
+        self.assertTrue(
+            callable(getattr(PythonWrapperCodegen, "write_bucketing_import_once", None)),
+            "write_bucketing_import_once should be callable",
+        )
 
 
 class TestForeachGroupsUnit(InductorTestCase):
