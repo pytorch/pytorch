@@ -1083,6 +1083,7 @@ for op in pointwise_ops:
     _register(op)
 
 
+
 # TODO: add all for_each ops
 for_each_ops = [
     aten._foreach_abs.default,
