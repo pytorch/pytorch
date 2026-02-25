@@ -312,7 +312,7 @@ def meta_fft_c2c(self, dim, normalization, forward):
         return self.clone()
 
     # PocketFFT writes into a contiguous empty tensor directly
-    if device_hint(self) == "cpu" and not torch._C.has_mkl:
+    if device_hint(self) == "cpu" and not torch.backends.mkl.is_available():
         return self.new_empty(self.size())
 
     sorted_dims = _sort_dims(self, dim)
@@ -385,7 +385,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
-    elif torch._C.has_mkl:
+    elif torch.backends.mkl.is_available():
         # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         sorted_dims = _sort_dims(self, dim, exclude_last=True)
         output = self.new_empty(
@@ -497,7 +497,7 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
                 temp = self.clone(memory_format=torch.contiguous_format)
             return _exec_fft(output, temp, out_sizes, [dim[-1]], forward=False)
 
-    elif torch._C.has_mkl:
+    elif torch.backends.mkl.is_available():
         # _fft_c2r_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         input = self
         if len(dim) > 1:
