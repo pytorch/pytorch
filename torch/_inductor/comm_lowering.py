@@ -533,12 +533,16 @@ def register_symm_mem_lowerings():
         data = _get_data(inp)
         if isinstance(data, ir.InputBuffer):
             # Layout approach: mark allocator constraint on InputBuffer.
-            # The CG tree / wrapper will allocate P2P and copy at call time,
+            # The wrapper will allocate P2P and DMA .copy_() at call time,
             # avoiding an extra Triton identity kernel inside the graph.
             #
-            # This requires static shapes because the persistent P2P buffer
-            # is allocated at module level (import time). If any dimension
-            # is symbolic, fall back to the identity copy (Path 3).
+            # CUDAGraph-safe: CUDAPeerAllocInfo uses cudaMalloc (not the
+            # caching allocator), so rendezvous inside a CG private pool
+            # context no longer creates untracked allocations.
+            #
+            # This requires static shapes because the P2P buffer is
+            # allocated with a fixed alloc_id. If any dimension is
+            # symbolic, fall back to the identity copy.
             layout = data.get_output_spec()
             assert isinstance(layout, ir.Layout)
             has_symbolic = any(is_symbolic(s) for s in layout.size) or any(
@@ -551,12 +555,8 @@ def register_symm_mem_lowerings():
                     size=layout.size,
                     stride=layout.stride,
                     offset=layout.offset,
-                    allocator=ir.AllocatorType.SYMM_MEM,
+                    allocator=ir.AllocatorType(kind="symm_mem", group_name=group_name),
                 )
-                # TODO(#138280): group_name is attached as an ad-hoc
-                # attribute. The long-term Layout refactor should make this
-                # a proper field (or embed it in AllocatorType).
-                data.layout.group_name = group_name  # type: ignore[attr-defined]
                 return inp
 
         return _copy_input_to_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]

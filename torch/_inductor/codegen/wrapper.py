@@ -1269,13 +1269,13 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             self.header.writeline("import triton.profiler as proton")
             self.header.writeline("import triton.profiler.language as pl")
-            self.header.writeline(
+            self.prefix.writeline(
                 "from triton.profiler.hooks import HookManager as _ProtonHookManager"
             )
             self.header.writeline("import triton")
             self.header.writeline("import atexit")
             self.header.writeline("import os")
-            self.header.writeline(
+            self.prefix.writeline(
                 "triton.set_allocator(lambda size, align, stream: "
                 "torch.empty(size, dtype=torch.uint8, device='cuda'))"
             )
@@ -1288,7 +1288,7 @@ class PythonWrapperCodegen(CodeGen):
             group_by_sm = config.triton.proton_group_by_sm
             split_invocations = config.triton.proton_split_invocations
             per_cta_occupancy = config.triton.proton_per_cta_occupancy
-            self.header.writeline(
+            self.prefix.writeline(
                 "from torch._inductor.runtime.proton_utils import process_proton_trace as _proton_process_trace"
             )
             self.header.splice(
@@ -1306,7 +1306,7 @@ class PythonWrapperCodegen(CodeGen):
                 """
             )
             # Start proton before kernel compilation (instrumentation backend needs to hook JIT)
-            self.header.writeline(
+            self.prefix.writeline(
                 "if not _ProtonHookManager.active_hooks: "
                 f'proton.start({proton_name}, backend="instrumentation", data="trace"); '
                 "atexit.register(_proton_finalize_and_postprocess)"
@@ -1491,8 +1491,8 @@ class PythonWrapperCodegen(CodeGen):
         Collect graph inputs whose layout carries AllocatorType.SYMM_MEM.
 
         Returns a list of (index, name, InputBuffer) for each P2P-constrained
-        input.  These are inputs where _maybe_realize_symm_mem took Path 2
-        (InputBuffer layout annotation) instead of the identity-copy fallback.
+        input.  These are inputs where _maybe_realize_symm_mem took the
+        layout-annotate path instead of the identity-copy fallback.
         """
         result: list[tuple[int, str, ir.InputBuffer]] = []
         for idx, (name, buf) in enumerate(V.graph.graph_inputs.items()):
@@ -1503,16 +1503,18 @@ class PythonWrapperCodegen(CodeGen):
                 continue
             layout = original.get_output_spec()
             assert isinstance(layout, ir.Layout)
-            if layout.allocator == ir.AllocatorType.SYMM_MEM:
+            if layout.allocator.is_symm_mem:
                 result.append((idx, name, original))
         return result
 
     def codegen_p2p_input_copies(self) -> None:
         """
-        For graph inputs annotated with AllocatorType.SYMM_MEM, generate:
-        1. A persistent P2P buffer allocation at module level (allocated once).
-        2. A .copy_() inside call() from the caller's arg to the P2P buffer.
-        3. Variable reassignment so downstream kernels use the P2P buffer.
+        For graph inputs annotated with AllocatorType(kind="symm_mem"), generate
+        code inside call() that:
+        1. Allocates a persistent P2P buffer via empty_strided_p2p (first call
+           does cuMemCreate; subsequent calls reuse via alloc_id hashmap lookup).
+        2. DMA .copy_() from the caller's arg to the P2P buffer.
+        3. Reassigns the variable name so downstream kernels use the P2P buffer.
 
         This replaces the Triton identity-copy kernel with a DMA .copy_(),
         which runs on the copy engine and doesn't consume compute SMs.
@@ -1535,12 +1537,14 @@ class PythonWrapperCodegen(CodeGen):
             dtype = layout.dtype
             shape = tuple(layout.size)
             stride = tuple(layout.stride)
-            group_name = getattr(layout, "group_name", "0")
+            group_name = layout.allocator.group_name or "0"
 
             p2p_buf_name = f"_p2p_buf_{name}"
 
-            # Module-level: allocate persistent P2P buffer (runs once at import).
-            self.header.writeline(
+            # Inside call(): allocate persistent P2P buffer (first call does
+            # cuMemCreate; subsequent calls reuse via alloc_id hashmap lookup),
+            # then DMA .copy_() from the caller's arg to the P2P buffer.
+            self.prefix.writeline(
                 f"{p2p_buf_name} = empty_strided_p2p("
                 f"{self.codegen_shape_tuple(shape)}, "
                 f"{self.codegen_shape_tuple(stride)}, "
@@ -1548,13 +1552,6 @@ class PythonWrapperCodegen(CodeGen):
                 f'torch.device("cuda:{device.index}"), '
                 f'group_name="{group_name}", '
                 f"alloc_id={random.randint(0, 2**64 - 1)})"
-            )
-
-            # Inside call(): copy from caller's input to P2P buffer, then
-            # reassign the variable name so downstream kernels use P2P memory.
-            self.prefix.writeline(
-                "# Layout approach: DMA copy to P2P buffer "
-                "(avoids Triton identity kernel)"
             )
             self.prefix.writeline(f"{p2p_buf_name}.copy_({name})")
             self.prefix.writeline(f"{name} = {p2p_buf_name}")
@@ -1578,8 +1575,8 @@ class PythonWrapperCodegen(CodeGen):
 
             self.codegen_inputs()
 
-            # For inputs annotated with AllocatorType.SYMM_MEM (Layout
-            # approach Path 2), generate .copy_() from caller arg to P2P buf.
+            # For inputs annotated with AllocatorType.SYMM_MEM (layout-annotate
+            # approach), generate .copy_() from caller arg to P2P buf.
             self.codegen_p2p_input_copies()
 
             # avoid duplicating asserts for both partition functions and

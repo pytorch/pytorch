@@ -3804,7 +3804,7 @@ class Layout(OutputSpec):
         self._offset = offset
         self.is_pinned = is_pinned
         if allocator is None:
-            allocator = AllocatorType.DEFAULT
+            allocator = DEFAULT_ALLOCATOR
         self.allocator = allocator
         # is_pinned implies cpu
         assert (not self.is_pinned) or (self.device.type == "cpu"), (
@@ -4036,6 +4036,7 @@ class Layout(OutputSpec):
             self.stride,
             self.offset,
             self.is_pinned,
+            self.allocator,
         )
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
@@ -4053,6 +4054,7 @@ class Layout(OutputSpec):
             and self.stride == other.stride
             and self.offset == other.offset
             and self.is_pinned == other.is_pinned
+            and self.allocator == other.allocator
         )
 
     def storage_size(self) -> Expr:
@@ -4339,7 +4341,8 @@ class CommBufferType(Enum):
     SYMM_MEM = "symm_mem"
 
 
-class AllocatorType(Enum):
+@dataclasses.dataclass(frozen=True)
+class AllocatorType:
     """
     Allocator type for buffer allocation.
 
@@ -4347,12 +4350,19 @@ class AllocatorType(Enum):
     proposed in https://github.com/pytorch/pytorch/issues/138280 which
     separates Layout into orthogonal stride and allocator dimensions.
 
-    DEFAULT: CUDA caching allocator (empty_strided_cuda)
-    SYMM_MEM: P2P symmetric memory (empty_strided_p2p)
+    kind="default": CUDA caching allocator (empty_strided_cuda)
+    kind="symm_mem": P2P symmetric memory (empty_strided_p2p)
     """
 
-    DEFAULT = "default"
-    SYMM_MEM = "symm_mem"
+    kind: str = "default"
+    group_name: Optional[str] = None
+
+    @property
+    def is_symm_mem(self) -> bool:
+        return self.kind == "symm_mem"
+
+
+DEFAULT_ALLOCATOR = AllocatorType()
 
 
 class CommBufferLayout(FixedLayout):
@@ -4393,7 +4403,7 @@ class CommBufferLayout(FixedLayout):
         self.comm_buffer_type = comm_buffer_type
         self.group_name = group_name
         if comm_buffer_type == CommBufferType.SYMM_MEM:
-            self.allocator = AllocatorType.SYMM_MEM
+            self.allocator = AllocatorType(kind="symm_mem", group_name=group_name)
 
 
 @ir_dataclass
