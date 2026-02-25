@@ -1301,6 +1301,7 @@ class TestPatternMatcher(TestCase):
             "max_autotune_gemm_backends": "TRITON",
         }
     )
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_original_aten_preserved_split_addmm(self):
         # addmm -> elementwise should be decomposed into mm -> add -> elementwise
         def fn(x, y, z):
