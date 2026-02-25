@@ -701,7 +701,7 @@ from a multi-output view call"
                 # its base but has no grad_fn and does not participate in
                 # differentiation.
                 requires_grad_for_backward=requires_grad
-                and (o._base is None or o.grad_fn is not None),
+                and (o._base is None or grad_fn is not None),
                 view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
