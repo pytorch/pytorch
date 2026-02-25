@@ -116,12 +116,13 @@ def comm_buffer_reuse_key(node: BufferLike) -> CommBufferReuseKey:
     storage_size = V.graph.get_allocation_storage_size(node)
     layout = node.get_output_spec()
     assert isinstance(layout, ir.CommBufferLayout)
+    assert layout.allocator.is_symm_mem
     return (
         node.get_device_or_error(),
         node.get_dtype(),
         sympy_str(V.graph.sizevars.simplify(storage_size)),
         layout.comm_buffer_type,
-        layout.group_name,
+        layout.allocator.group_name,  # pyrefly: ignore[bad-return]
     )
 
 
@@ -828,8 +829,9 @@ class AllocateLine(MemoryPlanningLine):
         stride = tuple(self.node.get_stride())
         layout = self.node.get_output_spec()
         assert isinstance(layout, ir.CommBufferLayout)
+        assert layout.allocator.is_symm_mem
         comm_buffer_type = layout.comm_buffer_type
-        group_name = layout.group_name
+        group_name = layout.allocator.group_name
 
         if comm_buffer_type == ir.CommBufferType.SYMM_MEM:
             line = (
@@ -890,6 +892,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
             if self.comm_buffer:
                 layout = self.node.get_output_spec()
                 assert isinstance(layout, ir.CommBufferLayout)
+                assert layout.allocator.is_symm_mem
                 code.writeline(f"{line} # {layout.comm_buffer_type.value} buffer free")
             else:
                 code.writeline(line)
@@ -3472,7 +3475,8 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(ReinterpretLine(self, input_buffer, buffer, layout))
             return
 
-        if isinstance(layout, ir.CommBufferLayout):
+        assert isinstance(layout, ir.Layout)
+        if layout.allocator.is_symm_mem:
             self.writeline(AllocateLine(self, buffer, comm_buffer=True))
             return
 
@@ -3486,7 +3490,9 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(FreeLine(self, buffer))
             return
 
-        if isinstance(buffer.get_output_spec(), ir.CommBufferLayout):
+        if (
+            buffer.get_output_spec().allocator.is_symm_mem
+        ):  # pyrefly: ignore[missing-attribute]
             # Comm buffers are not eligible for in-place reuse. Their reuse is
             # achieved exclusively via buffer planning.
             self.writeline(FreeIfNotReusedLine(self, buffer, comm_buffer=True))

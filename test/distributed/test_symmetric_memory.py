@@ -1589,46 +1589,90 @@ class LoweringTest(MultiProcContinuousTest):
 
     def test_layout_allocator_type_propagation(self):
         """
-        Verify that Layout.as_fixed() propagates the allocator field and that
-        Layout.__eq__ distinguishes layouts with different allocators.
-
-        These are unit-level checks for the AllocatorType plumbing in ir.py,
-        ensuring that FlexibleLayout → FixedLayout conversion does not lose
-        the allocator annotation and that buffer-reuse comparisons are correct.
+        Verify AllocatorType dataclass plumbing:
+        - as_fixed() propagates allocator (including group_name)
+        - __eq__ distinguishes different allocators
+        - frozen dataclass is hashable (for dict keys / sets)
+        - is_symm_mem property works
+        - CommBufferLayout sets allocator with group_name
         """
-        from torch._inductor.ir import AllocatorType, FixedLayout, FlexibleLayout
+        from torch._inductor.ir import (
+            AllocatorType,
+            CommBufferLayout,
+            CommBufferType,
+            DEFAULT_ALLOCATOR,
+            FixedLayout,
+            FlexibleLayout,
+        )
 
         device = torch.device("cuda", 0)
         size = [8, 8]
 
-        # as_fixed() should propagate AllocatorType(kind="symm_mem")
+        # Step A: AllocatorType dataclass basics
+        default = AllocatorType()
+        self.assertEqual(default.kind, "default")
+        self.assertIsNone(default.group_name)
+        self.assertFalse(default.is_symm_mem)
+
+        symm = AllocatorType(kind="symm_mem", group_name="0")
+        self.assertTrue(symm.is_symm_mem)
+        self.assertEqual(symm.group_name, "0")
+
+        # frozen dataclass is hashable
+        s = {default, symm}
+        self.assertEqual(len(s), 2)
+
+        # DEFAULT_ALLOCATOR singleton
+        self.assertEqual(DEFAULT_ALLOCATOR, AllocatorType())
+
+        # as_fixed() propagates allocator with group_name.
         # FlexibleLayout.__init__ has its own signature (stride_order, etc.)
         # without allocator, so set it after construction.
         flex = FlexibleLayout(device, torch.float32, size)
-        flex.allocator = AllocatorType(kind="symm_mem")
+        flex.allocator = AllocatorType(kind="symm_mem", group_name="test_group")
         fixed = flex.as_fixed()
         self.assertIsInstance(fixed, FixedLayout)
-        self.assertEqual(fixed.allocator, AllocatorType(kind="symm_mem"))
+        self.assertTrue(fixed.allocator.is_symm_mem)
+        self.assertEqual(fixed.allocator.group_name, "test_group")
 
-        # as_fixed() on DEFAULT should also work
+        # as_fixed() on DEFAULT
         flex_default = FlexibleLayout(device, torch.float32, size)
         fixed_default = flex_default.as_fixed()
-        self.assertEqual(fixed_default.allocator, AllocatorType())
+        self.assertFalse(fixed_default.allocator.is_symm_mem)
 
         # __eq__: same allocator → equal
         fixed_a = FixedLayout(
-            device, torch.float32, size, allocator=AllocatorType(kind="symm_mem")
+            device,
+            torch.float32,
+            size,
+            allocator=AllocatorType(kind="symm_mem", group_name="0"),
         )
         fixed_b = FixedLayout(
-            device, torch.float32, size, allocator=AllocatorType(kind="symm_mem")
+            device,
+            torch.float32,
+            size,
+            allocator=AllocatorType(kind="symm_mem", group_name="0"),
         )
         self.assertEqual(fixed_a, fixed_b)
 
         # __eq__: different allocator → not equal
-        fixed_default2 = FixedLayout(
-            device, torch.float32, size, allocator=AllocatorType()
+        fixed_c = FixedLayout(device, torch.float32, size)
+        self.assertNotEqual(fixed_a, fixed_c)
+
+        # __eq__: same kind but different group_name → not equal
+        fixed_d = FixedLayout(
+            device,
+            torch.float32,
+            size,
+            allocator=AllocatorType(kind="symm_mem", group_name="1"),
         )
-        self.assertNotEqual(fixed_a, fixed_default2)
+        self.assertNotEqual(fixed_a, fixed_d)
+
+        # Step B: CommBufferLayout sets allocator with group_name
+        base_layout = FixedLayout(device, torch.float32, size)
+        comm_layout = CommBufferLayout(base_layout, CommBufferType.SYMM_MEM, "my_group")
+        self.assertTrue(comm_layout.allocator.is_symm_mem)
+        self.assertEqual(comm_layout.allocator.group_name, "my_group")
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)

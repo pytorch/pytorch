@@ -70,7 +70,8 @@ def can_realize_as_comm_buffer(
         return False
 
     layout = data.get_output_spec()
-    if isinstance(layout, ir.CommBufferLayout):
+    assert isinstance(layout, ir.Layout)
+    if layout.allocator.is_symm_mem:
         return True
 
     if isinstance(layout, ir.FixedLayout):
@@ -119,7 +120,10 @@ def _propagate_comm_layout_to_upstream(
         if not upstream_buf.should_allocate():
             continue
         upstream_layout = upstream_buf.get_output_spec()
-        if isinstance(upstream_layout, ir.CommBufferLayout):
+        if (
+            isinstance(upstream_layout, ir.Layout)
+            and upstream_layout.allocator.is_symm_mem
+        ):
             converted_upstream = upstream_buf
             break
         if not isinstance(upstream_layout, (ir.FlexibleLayout, ir.FixedLayout)):
@@ -160,7 +164,8 @@ def realize_as_comm_buffer(
     assert isinstance(buffer, ir.Buffer)
 
     layout = buffer.get_output_spec()
-    if isinstance(layout, ir.CommBufferLayout):
+    assert isinstance(layout, ir.Layout)
+    if layout.allocator.is_symm_mem:
         return
 
     # The buffer may have already been frozen to FixedLayout if it was used
