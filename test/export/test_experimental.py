@@ -19,6 +19,9 @@ from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import (
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+)
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.utils import _pytree as pytree
 
@@ -439,7 +442,10 @@ def forward(self, args_0):
         ):
             _dynamo_graph_capture_for_export(module)(x)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
     def test_aot_export_flex_attention_callable_mask_mod(self):
         """Test flex_attention AOT export with callable class as mask_mod.
 
@@ -493,7 +499,7 @@ def forward(self, args_0):
                     mask_mod, B=B, H=self.num_heads, Q_LEN=L, KV_LEN=L, device=x.device
                 )
                 out = flex_attention(q, k, v, block_mask=block_mask)
-                return out.transpose(1, 2).contiguous().view(B, L, D)
+                return (out.transpose(1, 2).contiguous().view(B, L, D),)
 
         embed_dim, num_heads, seq_len = 64, 2, 128
         model = FlexAttentionModel(embed_dim, num_heads).cuda()
@@ -501,10 +507,12 @@ def forward(self, args_0):
 
         gm, signature = aot_export_module(model, [x], trace_joint=False)
 
-        out_eager = model(x)
-        out_export = gm(x)
-        self.assertEqual(out_eager.shape, out_export[0].shape)
-        self.assertTrue(torch.allclose(out_eager, out_export[0], atol=1e-5))
+        # aot_export_module flattens params/buffers into the graph signature
+        params = [p for p in model.parameters()]
+        out_eager = model(x)[0]
+        out_export = gm(*params, x)[0]
+        self.assertEqual(out_eager.shape, out_export.shape)
+        self.assertTrue(torch.allclose(out_eager, out_export, atol=1e-5))
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
@@ -781,6 +789,34 @@ def forward(self, x):
         res_eager = Foo()(*eager_inputs[0], **eager_inputs[1])
 
         self.assertEqual(res_export, res_eager)
+
+    def test_single_op(self):
+        # from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+        x, y = (torch.randn(2, 3), torch.randn(2, 3))
+        graph = dynamo_graph_capture_for_export(torch.ops.aten.add.Tensor)(x, y)
+        self.assertExpectedInline(
+            graph.code.strip("\r\n "),
+            """\
+def forward(self, other):
+    _fn_args = (self, other)
+    self, L_self_ , L_other_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_self_ = L_self_
+    l_other_ = L_other_
+    add_tensor = torch.ops.aten.add.Tensor(self = l_self_, other = l_other_, alpha = 1);  l_self_ = l_other_ = None
+    return self._dynamo_bytecode_unflatten((add_tensor,), _fn_args)""",
+        )
+        out = torch.empty(10)
+        graph = dynamo_graph_capture_for_export(torch.ops.aten.range.out)(0, 9, out=out)
+        self.assertExpectedInline(
+            graph.code.strip("\r\n "),
+            """\
+def forward(self, start, end, out):
+    _fn_args = (start, end, out)
+    L_out_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_out_ = L_out_
+    range_out = torch.ops.aten.range.out(start = 0, end = 9, step = 1, out = l_out_);  l_out_ = None
+    return self._dynamo_bytecode_unflatten((range_out,), _fn_args)""",
+        )
 
     def test_export_leaf(self):
         class Foo(torch.nn.Module):

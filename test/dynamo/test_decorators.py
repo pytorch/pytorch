@@ -11,7 +11,7 @@ import torch
 import torch._dynamo.config as config
 import torch._dynamo.testing
 from torch._dynamo.decorators import leaf_function
-from torch._dynamo.exc import IncorrectUsage, Unsupported
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
@@ -252,7 +252,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 3)
 
     def test_incorrect_usage_disallow_in_graph(self):
-        with self.assertRaises(IncorrectUsage):
+        with self.assertRaisesRegex(RuntimeError, "disallow_in_graph is expected"):
 
             @torch._dynamo.disallow_in_graph
             def fn1(x):
@@ -1466,7 +1466,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         y = torch.tensor([1])
         x = torch.tensor(1)
 
-        self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+        self.assertEqual(fn(x, y), torch.compile(fn, backend="eager")(x, y))
 
     def test_justknobs_check(self):
         def fn(x, y):
@@ -2298,8 +2298,8 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             )
 
             # check the model is compilable
-            torch.compile(model)
-            torch.compile(other_model)
+            torch.compile(model, backend="eager")
+            torch.compile(other_model, backend="eager")
 
     def test_disable_class_and_instance_method(self):
         # Test that decorating a method at class definition time and then
