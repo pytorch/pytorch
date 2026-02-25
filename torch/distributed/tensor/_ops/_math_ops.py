@@ -8,7 +8,7 @@ from typing import cast, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -1095,11 +1095,45 @@ def _common_norm_forward_strategy(
                 generate_redistribute_costs(bias_strategy, bias_target_spec)
             )
 
-        # the output spec is the same as input spec
-        output_target_spec = input_target_spec
+        # Build per-output specs with correct tensor_meta.
+        # out: same shape as input, contiguous strides
+        # mean/rstd: shape = input_shape[:axis], contiguous strides
+        input_tm = input_src_spec.tensor_meta
+        assert input_tm is not None
+        input_shape = input_tm.shape
+        out_placements = input_target_spec.placements
+
+        out_strides = torch._prims_common.make_contiguous_strides_for(input_shape)
+        out_spec = DTensorSpec(
+            mesh=mesh,
+            placements=out_placements,
+            tensor_meta=TensorMeta(
+                shape=input_shape,
+                stride=out_strides,
+                dtype=input_tm.dtype,
+            ),
+        )
+
+        stat_shape = torch.Size(input_shape[:axis])
+        stat_strides = torch._prims_common.make_contiguous_strides_for(stat_shape)
+        stat_spec = DTensorSpec(
+            mesh=mesh,
+            placements=out_placements,
+            tensor_meta=TensorMeta(
+                shape=stat_shape,
+                stride=stat_strides,
+                dtype=input_tm.dtype,
+            ),
+        )
+
+        if rms_norm:
+            output_specs = (out_spec, stat_spec)
+        else:
+            output_specs = (out_spec, stat_spec, stat_spec)
+
         output_strategy.strategies.append(
             OpSpec(
-                output_specs=output_target_spec,
+                output_specs=output_specs,
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
             )
