@@ -1779,6 +1779,11 @@ PyObject* getNeedsInputGrad(PyObject* obj, void* _unused) {
   auto cdata = self->cdata.lock();
   check_legacy_fn_attr_access(cdata, "needs_input_grad");
 
+  // If overridden (e.g. by supports_tensorlist), return the stored value.
+  if (self->needs_input_grad_is_overridden) {
+    return getObject<&THPFunction::needs_input_grad>(obj, _unused);
+  }
+
   const auto exec_info = get_current_graph_task_exec_info();
   if (!exec_info || exec_info->empty()) {
     return getObject<&THPFunction::needs_input_grad>(obj, _unused);
@@ -1803,6 +1808,12 @@ PyObject* getNeedsInputGrad(PyObject* obj, void* _unused) {
     PyTuple_SET_ITEM(result, i, value);
   }
   return result;
+}
+
+int setNeedsInputGrad(PyObject* obj, PyObject* value, void* _unused) {
+  auto self = (THPFunction*)obj;
+  self->needs_input_grad_is_overridden = (value != nullptr);
+  return setObject<&THPFunction::needs_input_grad>(obj, value, _unused);
 }
 
 } // namespace
@@ -1851,7 +1862,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr},
     {"needs_input_grad",
      getNeedsInputGrad,
-     &setObject<&THPFunction::needs_input_grad>,
+     setNeedsInputGrad,
      nullptr,
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
