@@ -646,12 +646,24 @@ def do_auto_functionalize_v2(
     if not isinstance(op, get_args(_MutableOpType)):
         raise AssertionError(f"Expected _MutableOpType, got {type(op)}")
 
-    def _functionalize_callable(arg: Any):
-        if callable(arg):
+    subgraph_arg_names = {
+        arg_info.name
+        for arg_info in schema.arguments
+        if isinstance(arg_info.type, torch._C.AnyType)
+    }
+
+    def _maybe_functionalize(name: str, arg: Any) -> Any:
+        if name in subgraph_arg_names and callable(arg):
             return FunctionalCallableWithEpilogue(arg)
         return arg
 
-    args, kwargs = pytree.tree_map(_functionalize_callable, (args, kwargs))
+    args = tuple(
+        _maybe_functionalize(schema.arguments[i].name, a)
+        if i < len(schema.arguments)
+        else a
+        for i, a in enumerate(args)
+    )
+    kwargs = {k: _maybe_functionalize(k, v) for k, v in kwargs.items()}
 
     for idx, arg in enumerate(schema.arguments):
         # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
@@ -1027,10 +1039,15 @@ def auto_functionalized_v2_proxy(
             HopInstance(_mutable_op, schema), tuple(), new_kwargs
         )
 
-        # Only replace the callabes in kwargs with the materialized subgraphs.
+        # Only replace the callables in kwargs with the materialized subgraphs.
         # The rest of the kwargs are kept unchanged.
+        subgraph_arg_names = {
+            arg_info.name
+            for arg_info in schema.arguments
+            if isinstance(arg_info.type, torch._C.AnyType)
+        }
         for k, v in kwargs.items():
-            if callable(v):
+            if k in subgraph_arg_names and callable(v):
                 if k not in materialized_kwargs or not isinstance(
                     materialized_kwargs[k], torch.fx.GraphModule
                 ):

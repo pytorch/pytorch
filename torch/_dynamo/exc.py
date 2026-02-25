@@ -623,10 +623,13 @@ def unimplemented(
             past_real_stack = from_exc.real_stack
         if isinstance(from_exc, Unsupported):
             msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
+            # noqa: GB_REGISTRY
             raise Unsupported(msg, gb_type, skip_frame, real_stack=past_real_stack)
+        # noqa: GB_REGISTRY
         raise Unsupported(
             msg, gb_type, skip_frame, real_stack=past_real_stack
         ) from from_exc
+    # noqa: GB_REGISTRY
     raise Unsupported(msg, gb_type, skip_frame)
 
 

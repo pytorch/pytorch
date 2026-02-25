@@ -1736,7 +1736,8 @@ class CppVecOverrides(CppOverrides):
                 V.kernel.compute,
                 code,
             )
-            result.is_vec = True
+            assert isinstance(csevar, CppCSEVariable)
+            csevar.is_vec = True
         elif result.is_vec:
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {body_code_vec} : {other_code_vec}"
@@ -2368,9 +2369,8 @@ class CppKernel(Kernel):
 
     def size_hint(self):
         assert self.call_ranges is not None
-        return V.graph.sizevars.size_hint(
-            sympy_product(self.call_ranges), fallback=8192
-        )
+        expr = sympy_product(self.call_ranges)
+        return V.graph.sizevars.optimization_hint(expr)
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         assert isinstance(self, CppKernelProxy)
@@ -3926,7 +3926,7 @@ class TilingSelect:
                     if tiling_indice < 0 or tiling_indice >= len(call_ranges):
                         continue
                     if has_free_symbols(call_ranges):
-                        call_range = V.graph.sizevars.size_hint(
+                        call_range = V.graph.sizevars.optimization_hint(
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:

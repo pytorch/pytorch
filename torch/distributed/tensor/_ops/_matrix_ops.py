@@ -41,6 +41,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 
 
 aten = torch.ops.aten
@@ -671,7 +672,7 @@ def constant_pad_nd_single_dim_strategy(
     # the last dim backwards. Determine which dims have non-zero padding.
     padded_dims = set()
     for i in range(len(pad) // 2):
-        if pad[i * 2] != 0 or pad[i * 2 + 1] != 0:
+        if not guard_or_false(pad[i * 2] == 0) and guard_or_false(pad[i * 2 + 1] == 0):
             padded_dims.add(ndim - 1 - i)
 
     # Shard on any non-padded dim: output and input share the same placement.
@@ -684,7 +685,7 @@ def constant_pad_nd_single_dim_strategy(
     # Linearity: pad(a+b, 0) == pad(a, 0) + pad(b, 0), but only when the
     # pad value is 0. Non-zero pad values would be duplicated across shards.
     value = args_schema[2] if len(args_schema) > 2 else 0
-    if value == 0:
+    if guard_or_false(value == 0):
         strategies.append([Partial(), Partial()])
 
     return strategies

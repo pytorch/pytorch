@@ -3694,6 +3694,25 @@ class TestUnbacked(TestCase):
             ):
                 func_negative(x)
 
+    def test_meta_copy(self):
+        """
+        Test that meta_copy_ does not raise when self and src have different
+        unbacked symint sizes.
+        """
+        from torch._meta_registrations import meta_copy_
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+
+            self_tensor = torch.empty((u0, 256))
+            src_tensor = torch.empty((u1, 256))
+
+            meta_copy_(self_tensor, src_tensor)
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
