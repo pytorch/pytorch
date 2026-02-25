@@ -389,6 +389,28 @@ static PyObject* NamespaceBase_rename_object(
   Py_RETURN_NONE;
 }
 
+static PyObject* NamespaceBase_getstate(
+    PyObject* self,
+    PyObject* Py_UNUSED(ignored)) {
+  NamespaceBase* ns = reinterpret_cast<NamespaceBase*>(self);
+  return Py_BuildValue(
+      "(OOO)", ns->obj_to_name, ns->used_names, ns->base_count);
+}
+
+static PyObject* NamespaceBase_setstate(PyObject* self, PyObject* state) {
+  NamespaceBase* ns = reinterpret_cast<NamespaceBase*>(self);
+  PyObject *obj_to_name = nullptr, *used_names = nullptr, *base_count = nullptr;
+  if (!PyArg_ParseTuple(state, "OOO", &obj_to_name, &used_names, &base_count))
+    return nullptr;
+  Py_XDECREF(ns->obj_to_name);
+  Py_XDECREF(ns->used_names);
+  Py_XDECREF(ns->base_count);
+  ns->obj_to_name = Py_NewRef(obj_to_name);
+  ns->used_names = Py_NewRef(used_names);
+  ns->base_count = Py_NewRef(base_count);
+  Py_RETURN_NONE;
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef NamespaceBase_methods[] = {
     {"create_name",
@@ -403,6 +425,14 @@ static PyMethodDef NamespaceBase_methods[] = {
      (PyCFunction)(void*)NamespaceBase_rename_object,
      METH_FASTCALL,
      "Update the name associated with an object."},
+    {"__getstate__",
+     NamespaceBase_getstate,
+     METH_NOARGS,
+     "Return state for pickling."},
+    {"__setstate__",
+     NamespaceBase_setstate,
+     METH_O,
+     "Restore state from pickling."},
     {nullptr, nullptr, 0, nullptr} // Sentinel
 };
 
