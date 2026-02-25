@@ -421,7 +421,7 @@ jobs:
     needs:
       - manywheel-py3_10-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -540,7 +540,7 @@ jobs:
     needs:
       - manywheel-py3_10-rocm7_2-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1112,7 +1112,7 @@ jobs:
     needs:
       - manywheel-py3_11-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1231,7 +1231,7 @@ jobs:
     needs:
       - manywheel-py3_11-rocm7_2-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1803,7 +1803,7 @@ jobs:
     needs:
       - manywheel-py3_12-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -1922,7 +1922,7 @@ jobs:
     needs:
       - manywheel-py3_12-rocm7_2-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -2494,7 +2494,7 @@ jobs:
     needs:
       - manywheel-py3_13-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -2613,7 +2613,7 @@ jobs:
     needs:
       - manywheel-py3_13-rocm7_2-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3185,7 +3185,7 @@ jobs:
     needs:
       - manywheel-py3_13t-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3304,7 +3304,7 @@ jobs:
     needs:
       - manywheel-py3_13t-rocm7_2-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3876,7 +3876,7 @@ jobs:
     needs:
       - manywheel-py3_14-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -3995,7 +3995,7 @@ jobs:
     needs:
       - manywheel-py3_14-rocm7_2-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -4567,7 +4567,7 @@ jobs:
     needs:
       - manywheel-py3_14t-rocm7_1-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -4686,7 +4686,7 @@ jobs:
     needs:
       - manywheel-py3_14t-rocm7_2-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
