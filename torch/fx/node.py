@@ -345,8 +345,7 @@ def _format_node_impl(
             current Node.
     """
     if node.op == "placeholder":
-        assert isinstance(node.target, str)
-        arg_str = node.target
+        arg_str = str(node.target)
         arg_str += arg_str + f": {_type_repr(node.type)}" if node.type else ""
         if placeholder_names:
             placeholder_names.append(arg_str)
