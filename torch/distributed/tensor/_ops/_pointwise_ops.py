@@ -17,7 +17,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._math_ops import _NormPartial
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
@@ -220,10 +223,9 @@ _monotone_binary_base_rules: list[list[Placement]] = [
 # Ops that preserve specific Partial types through the operation.
 # For example, torch.maximum preserves Partial("max") because
 # max(max(a), max(b)) == max(a, b).
+# .out variants stay on old path until PR2 adds out-variant infrastructure
 partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
-    aten.maximum.default: "max",
     aten.maximum.out: "max",
-    aten.minimum.default: "min",
     aten.minimum.out: "min",
 }
 
@@ -569,15 +571,6 @@ pointwise_ops = [
     prims.ne.default,
     prims.spherical_bessel_j0.default,
     prims.zeta.default,
-    # Categorized ops below are also in the new category lists above.
-    # They remain here for registration via register_op_strategy until
-    # a follow-up PR switches them to register_single_dim_strategy.
-    *non_decreasing_unary_ops,
-    *non_increasing_unary_ops,
-    *all_partial_preserving_unary_ops,
-    *monotonic_binary_ops,
-    *[op for op in monotonic_max_preserving_binary_ops if op not in partial_preserving_ops],
-    *[op for op in monotonic_min_preserving_binary_ops if op not in partial_preserving_ops],
 ]
 
 
@@ -940,10 +933,105 @@ register_op_strategy(
     prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
 )(copy_strategy)
 
+# Keep .out variants on old register_op_strategy path until PR2
+for op in partial_preserving_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        partial_preserving_pointwise_strategy
+    )
+
+# Keep pointwise_ops on old path (single-dim registrations above take precedence)
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
     )
+
+# Register new single-dim strategies for categorized ops.
+
+for op in unary_linear_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
+
+for op in binary_additive_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_BINARY_ADDITIVE_RULES))
+
+for op in binary_mul_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES + _MUL_RULES))
+
+for op in binary_div_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES + _DIV_RULES))
+
+for op in scalar_linear_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
+
+for op in non_decreasing_unary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_MONOTONIC_INCREASING_RULES))
+
+for op in non_increasing_unary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_MONOTONIC_DECREASING_RULES))
+
+for op in all_partial_preserving_unary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_ALL_PARTIAL_PRESERVING_RULES))
+
+register_single_dim_strategy(
+    neg_ops,
+    schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
+)(_make_partial_strategy(extra_rules=_NEG_RULES))
+
+# Monotonic binary ops: max-preserving
+for op in monotonic_max_preserving_binary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _make_partial_strategy(
+            # pyrefly: ignore[bad-argument-type]
+            extra_rules=_monotone_binary_base_rules
+            + [[Partial("max"), Partial("max"), Partial("max")]]
+        )
+    )
+
+# Monotonic binary ops: min-preserving
+for op in monotonic_min_preserving_binary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _make_partial_strategy(
+            # pyrefly: ignore[bad-argument-type]
+            extra_rules=_monotone_binary_base_rules
+            + [[Partial("min"), Partial("min"), Partial("min")]]
+        )
+    )
+
+# Monotonic binary ops: no specific partial preservation
+for op in monotonic_binary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(_make_partial_strategy(extra_rules=_monotone_binary_base_rules))
+
+# copy_(self, src): preserves all Partial types (2 tensor inputs → 3-element rules)
+register_single_dim_strategy(
+    aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(
+    _make_partial_strategy(
+        extra_rules=[
+            [Partial(r), Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
+        ]
+    )
+)
 
 # TODO: add all for_each ops
 for_each_ops = [
