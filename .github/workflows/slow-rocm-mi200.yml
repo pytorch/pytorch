@@ -5,13 +5,13 @@ name: slow-rocm-mi200
 
 on:
   push:
-    branches:
-      - release/*
+    #branches:
+      #- release/*
     tags:
       - ciflow/slow/*
       - ciflow/slow-rocm-mi200/*
-  schedule:
-    - cron: 0 */3 * * *
+  #schedule:
+    #- cron: 0 */3 * * *
   workflow_dispatch:
 
 concurrency:

@@ -285,7 +285,9 @@ class ActivationCheckpointingViaTagsTests(
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
-                    return torch.compile(gm, fullgraph=False)(*runtime_args)
+                    return torch.compile(
+                        gm, fullgraph=False, backend="aot_eager_decomp_partition"
+                    )(*runtime_args)
 
                 return runtime_wrapper
 
@@ -1714,7 +1716,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             torch.manual_seed(0)
             ref = gn(*args)
 
-            opt_gn = torch.compile(gn)
+            opt_gn = torch.compile(gn, backend="aot_eager_decomp_partition")
             torch.manual_seed(0)
             res = opt_gn(*args)
             self.assertEqual(ref, res)
@@ -1737,7 +1739,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             return torch.utils.checkpoint.checkpoint(mod, x, use_reentrant=True)
 
         x = torch.randn(4, 4).to(device)
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager_decomp_partition")
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "User-inserted graph break"
         ):
@@ -1764,7 +1766,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         y = torch.randn(4, 4).to(device)
         z = torch.randn(4, 4).to(device)
         ref = fn(x, [y, z])
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
@@ -1821,7 +1823,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         prefer_cudnn = (
             cudnn_version > 91500 and dprops.major in (9, 10) and dprops.minor in (0, 3)
         )
-        if prefer_cudnn:
+        if prefer_cudnn and torch.version.cuda:
             sdpa_op = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         else:
             sdpa_op = torch.ops.aten._scaled_dot_product_flash_attention.default
@@ -1854,7 +1856,9 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         mod = dist_checkpoint_wrapper(MockModule())
         x = torch.randn(4, 4)
         ref = mod(x)
-        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        opt_mod = torch.compile(
+            mod, backend="aot_eager_decomp_partition", fullgraph=True
+        )
         res = opt_mod(x)
         self.assertEqual(ref, res)
 
@@ -1867,7 +1871,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             CheckpointWrapper,
         )
 
-        cnt = CompileCounterWithBackend("eager")
+        cnt = CompileCounterWithBackend("aot_eager_decomp_partition")
 
         lin = torch.nn.Linear(1, 1)
         mod = torch.nn.Sequential(lin, lin)
@@ -1936,7 +1940,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(counter, 2)
         counter = 0
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
         opt_fn(x).sum().backward()
         # The mutation is not reapplied in the backward because the flag was on.
         self.assertEqual(counter, 1)
@@ -1963,7 +1967,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(4, 4, requires_grad=True)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
@@ -2107,7 +2111,11 @@ class GraphModule(torch.nn.Module):
                 x=input_eager.x.detach().clone().requires_grad_(True)
             )
             torch.manual_seed(0)
-            compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
+            compiled_fn = torch.compile(
+                checkpointed_forward,
+                fullgraph=True,
+                backend="aot_eager_decomp_partition",
+            )
             output_compiled = compiled_fn(input_compiled)
             output_compiled.y.sum().backward()
 
