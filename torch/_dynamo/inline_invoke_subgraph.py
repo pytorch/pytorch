@@ -8,8 +8,8 @@ def inline_invoke_subgraph(gm: GraphModule) -> GraphModule:
     """Inline all invoke_subgraph HOPs, producing a flat FX graph.
 
     This is useful when downstream compilers don't support HOPs but we still
-    want the Dynamo tracing-time benefits of is_pure (trace once, stamp out
-    cached calls).
+    want the Dynamo tracing-time benefits of auto-caching (trace once, stamp
+    out cached calls).
     """
     # First, recursively inline any nested invoke_subgraph calls inside
     # subgraph modules themselves.
