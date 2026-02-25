@@ -24,7 +24,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.precompile_context import BackendCacheArtifact
@@ -137,7 +137,7 @@ CompiledFxGraphLoadable: type[BundledOutputCodeLoadable[CompiledFxGraph]] = (
 @dataclass
 class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     fx_graph_cache_info: tuple[str, list[str]]
-    fx_graph_guard_expr: Optional[str]
+    fx_graph_guard_expr: str | None
 
     def pre_save(self) -> None:
         return
@@ -337,13 +337,13 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
     # Forward and Backward info
     compiled_fw: TForward
-    compiled_bw: Optional[TBackward]
+    compiled_bw: TBackward | None
 
     # Code of the joint graph using print_readable()
     # Used for logging purposes
-    aot_joint_graph_str: Optional[str]
-    aot_forward_graph_str: Optional[str]
-    aot_backward_graph_str: Optional[str]
+    aot_joint_graph_str: str | None
+    aot_forward_graph_str: str | None
+    aot_backward_graph_str: str | None
 
     # Runtime_metadata saved right before compilation
     runtime_metadata: ViewAndMutationMeta
@@ -352,8 +352,8 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     dispatch_wrappers: list[CompilerWrapper]
 
     # Used by AOTSubclassWrapper
-    maybe_subclass_meta: Optional[SubclassMeta]
-    num_fw_outs_saved_for_bw: Optional[int]
+    maybe_subclass_meta: SubclassMeta | None
+    num_fw_outs_saved_for_bw: int | None
 
     # Used by RuntimeWrapper
     indices_of_inps_to_detach: list[int]
@@ -367,10 +367,10 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     # Used by standalone_compile
     sanitized_aot_config: AOTConfig
 
-    guards_expr: Optional[str]
+    guards_expr: str | None
 
     # Used by Compiled Autograd
-    serialized_bw_module: Optional[SerializedGraphModule]
+    serialized_bw_module: SerializedGraphModule | None
 
     def pre_save(self) -> None:
         """

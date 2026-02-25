@@ -740,16 +740,12 @@ static inline scalar_t lowest_value() {
 template <typename scalar_t>
 static inline scalar_t index_reduce_init_value(ReductionType reduction_type) {
   if (reduction_type == ReductionType::PROD) {
-    std::cout << "reduction_type=PROD" << std::endl;
     return 1;
   } else if (reduction_type == ReductionType::MEAN) {
-    std::cout << "reduction_type=MEAN" << std::endl;
     return 0;
   } else if (reduction_type == ReductionType::MAX) {
-    std::cout << "reduction_type=MAX" << std::endl;
     return lowest_value<scalar_t>();
   } else if (reduction_type == ReductionType::MIN) {
-    std::cout << "reduction_type=MIN" << std::endl;
     return highest_value<scalar_t>();
   } else {
     TORCH_INTERNAL_ASSERT(false, "reduction type not supported");
@@ -765,22 +761,13 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
  bool include_self,
  const Tensor& result) {
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
+  TORCH_CHECK_NOT_IMPLEMENTED(is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS),
+                              "index_reduce is currently only supported on MacOS 15 or newer");
 
   TORCH_CHECK(self.scalar_type() != c10::kLong, "index_reduce for MPS does not support torch.long dtype");
   TORCH_CHECK(self.scalar_type() != c10::kComplexFloat, "index_reduce for MPS does not support torch.cfloat dtype");
 
   auto reduction_type = index_reduce_type(reduce);
-
-  std::cout << "===========================================" << std::endl;
-  std::cout << "in index_reduce_mps_out" << std::endl;
-  std::cout << "self=" << self << std::endl;
-  std::cout << "dim=" << dim << std::endl;
-  std::cout << "index=" << index << std::endl;
-  std::cout << "source=" << source << std::endl;
-  std::cout << "reduce=" << reduce << std::endl;
-  std::cout << "include_self=" << include_self << std::endl;
-  std::cout << "result=" << result << std::endl;
-  std::cout << "-------------------------------------------" << std::endl;
 
   if (!result.is_same(self)) {
     result.copy_(self);
@@ -793,12 +780,9 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
                                "index_reduce_func_mps_exclude_input_init",
                                [&] {
                                  scalar_t init_val = index_reduce_init_value<scalar_t>(reduction_type);
-                                 std::cout << "init_val=" << init_val << std::endl;
                                  result.index_fill_(dim, index.to(at::ScalarType::Long), init_val);
                                });
   }
-
-  std::cout << "result=" << result << std::endl;
 
   IndexReduceParams params;
   params.index_stride = index.stride(0);
@@ -829,8 +813,6 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
     }
   });
 
-  std::cout << "result=" << result << std::endl;
-
   if (reduction_type == ReductionType::MEAN) {
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
     counts.index_add_(dim, index, at::ones_like(source));
@@ -840,11 +822,7 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
     } else {
       result.div_(counts, "floor");
     }
-    std::cout << "counts=" << counts << std::endl;
-    std::cout << "result=" << result << std::endl;
   }
-
-  std::cout << "===========================================" << std::endl;
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) {
@@ -1007,6 +985,9 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   auto indices =
       at::native::expandTensors(*std::get<1>(mask_self_expanded),
                                 c10::List<std::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
+
+  TORCH_CHECK(indices[0].numel() <= source.numel(), "Number of elements of source < number of ones in mask");
+
   // next broadcast all index tensors together
   try {
     indices = at::expand_outplace(indices);
@@ -1024,7 +1005,9 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
   for (const auto index : indices) {
     final_indices.push_back(index);
   }
-  return at::index_put_out(self, *std::get<1>(mask_self_expanded), final_indices, source.resize_(indices[0].numel()));
+
+  return at::index_put_out(
+      self, *std::get<1>(mask_self_expanded), final_indices, source.flatten().narrow(0, 0, indices[0].numel()));
 }
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
