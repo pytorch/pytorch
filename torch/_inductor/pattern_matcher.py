@@ -48,7 +48,7 @@ import re
 import textwrap
 import typing
 from abc import ABC, abstractmethod
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NoReturn, Protocol, TypeVar
@@ -2100,9 +2100,6 @@ class PatternMatcherPass:
                                 pattern_name = f"{pattern_class}_{target}"
 
                             pattern_key = f"{backend}_pattern_matcher_per_pattern"
-                            if pattern_key not in counters:
-                                counters[pattern_key] = Counter()
-
                             counters[pattern_key][pattern_name] += 1
         return count
 
