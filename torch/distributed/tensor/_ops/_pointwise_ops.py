@@ -487,7 +487,7 @@ binary_additive_ops = [
     aten.sub_.Tensor,
 ]
 
-# mul is bilinear: linear in both args. div is linear in numerator only.
+# mul: partials propagate through either arg. div: only through numerator.
 binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor]
 binary_div_ops = [aten.div.Tensor, aten.div_.Tensor]
 
