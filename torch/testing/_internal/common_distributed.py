@@ -738,7 +738,10 @@ def cleanup_temp_dir() -> None:
 
 
 # Most tests operate with this worldsize
-DEFAULT_WORLD_SIZE = 4
+if TEST_WITH_ROCM:
+    DEFAULT_WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
+else:
+    DEFAULT_WORLD_SIZE = 4
 
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
