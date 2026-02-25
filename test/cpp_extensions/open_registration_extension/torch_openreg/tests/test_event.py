@@ -135,31 +135,6 @@ class TestEvent(TestCase):
         self.assertTrue(event.query())
 
     @skipIfTorchDynamo()
-    def test_device_synchronization(self):
-        """Test device synchronization operations"""
-        original_device = torch.accelerator.current_device_index()
-        try:
-            torch.accelerator.set_device_index(1)
-
-            # Perform operations
-            x = torch.randn(100, 100, device="openreg")
-            y = torch.randn(100, 100, device="openreg")
-            z = torch.matmul(x, y)
-
-            # Synchronize device
-            torch.accelerator.synchronize()
-
-            # Verify device index is still correct after operations
-            self.assertEqual(torch.accelerator.current_device_index(), 1)
-
-            # Verify operations completed and result is on correct device
-            result = torch.sum(z)
-            self.assertEqual(result.device.type, "openreg")
-            self.assertEqual(result.device.index, 1)
-        finally:
-            torch.accelerator.set_device_index(original_device)
-
-    @skipIfTorchDynamo()
     def test_blocking_vs_non_blocking_synchronization(self):
         """Test blocking vs non-blocking event synchronization"""
         stream = torch.Stream(device="openreg:0")

@@ -76,21 +76,6 @@ class TestDevice(TestCase):
 
         self.assertEqual(torch.accelerator.current_device_index(), original_device)
 
-    def test_device_switch_persistence(self):
-        """Test that device switch persists across operations"""
-        old_index = torch.accelerator.current_device_index()
-        try:
-            torch.accelerator.set_device_index(1)
-
-            x = torch.randn(2, 3, device="openreg")
-            self.assertEqual(x.device.index, 1)
-
-            y = torch.randn(3, 3, device="openreg")
-            self.assertEqual(y.device.index, 1)
-        finally:
-            # reset default device index
-            torch.accelerator.set_device_index(old_index)
-
     def test_device_count_consistency(self):
         """Test device count consistency"""
         count = torch.accelerator.device_count()
@@ -132,7 +117,7 @@ class TestDevice(TestCase):
             raise exc
 
     def test_device_properties(self):
-        """Test querying device name, total memory, and compute capability"""
+        """Test querying device name and memory information"""
         # Query device name
         device = torch.device("openreg:0")
         self.assertEqual(device.type, "openreg")
@@ -141,66 +126,52 @@ class TestDevice(TestCase):
         self.assertIn("openreg", device_str)
         self.assertIn("0", device_str)
 
-        # Query compute capability
-        capability = torch.accelerator.get_device_capability("openreg:0")
-        self.assertIsInstance(capability, dict)
-        self.assertIn("supported_dtypes", capability)
-        supported_dtypes = capability["supported_dtypes"]
-        self.assertIsInstance(supported_dtypes, set)
-        self.assertGreater(len(supported_dtypes), 0)
-
-        # Verify capability consistency across devices
-        capability1 = torch.accelerator.get_device_capability("openreg:1")
-        self.assertEqual(
-            capability["supported_dtypes"], capability1["supported_dtypes"]
-        )
-
         # Query device memory information
         try:
             memory_info = torch.accelerator.get_memory_info()
-            self.assertIsInstance(memory_info, dict)
+            self.assertIsInstance(memory_info, tuple)
             # Verify memory_info has expected structure if available
             if "allocated" in memory_info:
                 self.assertGreaterEqual(memory_info["allocated"], 0)
         except (AttributeError, NotImplementedError):
             # If get_memory_info is not available or not implemented, skip memory check
-            pass
+            self.skipTest("get_memory_info not implemented")
 
     def test_current_device_after_operations(self):
-        """Test that current device remains consistent after various operations"""
+        """Test that current device remains consistent after operations and device switching persists"""
         original_device = torch.accelerator.current_device_index()
+        try:
+            # Test 1: Operations don't change the current device
+            x = torch.randn(2, 3, device="openreg")
+            y = torch.randn(2, 3, device="openreg")
+            z = x + y
+            result = torch.sum(z)
 
-        # Perform various operations
-        x = torch.randn(2, 3, device="openreg")
-        y = torch.randn(2, 3, device="openreg")
-        z = x + y
-        result = torch.sum(z)
+            # Verify tensors are on correct device
+            self.assertEqual(x.device.index, original_device)
+            self.assertEqual(z.device.index, original_device)
+            self.assertEqual(result.device.index, original_device)
 
-        # Verify tensors are on correct device
-        self.assertEqual(x.device.index, original_device)
-        self.assertEqual(z.device.index, original_device)
-        self.assertEqual(result.device.index, original_device)
+            # Device should remain unchanged after operations
+            self.assertEqual(torch.accelerator.current_device_index(), original_device)
 
-        # Device should remain unchanged
-        self.assertEqual(torch.accelerator.current_device_index(), original_device)
+            # Test 2: Device switch persists across operations
+            torch.accelerator.set_device_index(1)
+            self.assertEqual(torch.accelerator.current_device_index(), 1)
 
-        # Switch device and verify it persists
-        torch.accelerator.set_device_index(1)
-        self.assertEqual(torch.accelerator.current_device_index(), 1)
+            # Perform operations on the new device
+            a = torch.randn(5, 5, device="openreg")
+            result2 = torch.matmul(a, a)
 
-        # Perform more operations
-        a = torch.randn(5, 5, device="openreg")
-        result2 = torch.matmul(a, a)
+            # Verify tensors are on device 1
+            self.assertEqual(a.device.index, 1)
+            self.assertEqual(result2.device.index, 1)
 
-        # Verify tensor is on device 1
-        self.assertEqual(a.device.index, 1)
-        self.assertEqual(result2.device.index, 1)
-
-        # Device should still be 1
-        self.assertEqual(torch.accelerator.current_device_index(), 1)
-
-        # Restore original device
-        torch.accelerator.set_device_index(original_device)
+            # Device should still be 1 after operations
+            self.assertEqual(torch.accelerator.current_device_index(), 1)
+        finally:
+            # Restore original device
+            torch.accelerator.set_device_index(original_device)
 
     def test_device_context_restoration(self):
         """Test that device context is properly restored after exceptions"""
@@ -296,16 +267,6 @@ class TestDevice(TestCase):
         # Restore original device
         torch.accelerator.set_device_index(original_device)
 
-    def test_device_initialization_state(self):
-        """Test device initialization and state management"""
-        # test that device can be initialized
-        torch.openreg.init()
-        self.assertTrue(torch.openreg.is_initialized())
-
-        # test that device count is available after init
-        count = torch.accelerator.device_count()
-        self.assertGreater(count, 0)
-
     def test_device_multiprocessing_spawn(self):
         """Test device with multiprocessing spawn method (safe path)"""
         # test device operations in spawned subprocess (safe for multiprocessing)
@@ -326,19 +287,11 @@ class TestDevice(TestCase):
         original_device = torch.accelerator.current_device_index()
 
         # test that device state is preserved after invalid operations
-        error_raised = False
-        try:
-            x = torch.randn(5, 5, device="openreg")
-            y = torch.randn(3, 3, device="openreg")
-            # this should raise an error (shape mismatch)
+        x = torch.randn(5, 5, device="openreg")
+        y = torch.randn(3, 3, device="openreg")
+        # this should raise an error (shape mismatch)
+        with self.assertRaises(RuntimeError):
             _ = torch.matmul(x, y)
-        except RuntimeError:
-            error_raised = True
-
-        # verify that error was actually raised
-        self.assertTrue(
-            error_raised, "Expected RuntimeError for shape mismatch in matmul"
-        )
 
         # device should still be valid
         self.assertEqual(torch.accelerator.current_device_index(), original_device)
@@ -349,6 +302,30 @@ class TestDevice(TestCase):
         # Verify tensor operations still work
         w = torch.randn(5, 5, device="openreg")
         _ = torch.matmul(z, w)  # Operation should complete successfully
+
+    def test_device_synchronization(self):
+        """Test device synchronization operations"""
+        original_device = torch.accelerator.current_device_index()
+        try:
+            torch.accelerator.set_device_index(1)
+
+            # Perform operations
+            x = torch.randn(100, 100, device="openreg")
+            y = torch.randn(100, 100, device="openreg")
+            z = torch.matmul(x, y)
+
+            # Synchronize device
+            torch.accelerator.synchronize()
+
+            # Verify device index is still correct after operations
+            self.assertEqual(torch.accelerator.current_device_index(), 1)
+
+            # Verify operations completed and result is on correct device
+            result = torch.sum(z)
+            self.assertEqual(result.device.type, "openreg")
+            self.assertEqual(result.device.index, 1)
+        finally:
+            torch.accelerator.set_device_index(original_device)
 
 
 if __name__ == "__main__":

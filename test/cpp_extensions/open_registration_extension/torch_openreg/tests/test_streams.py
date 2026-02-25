@@ -156,9 +156,8 @@ class TestStream(TestCase):
         self.assertTrue(event.query())
 
     @skipIfTorchDynamo()
-    def test_multi_stream_sync_patterns(self):
-        """Test additional multi-stream synchronization patterns"""
-        # pattern 1: fan-out (one stream to multiple streams)
+    def test_stream_fan_out(self):
+        """Test fan-out pattern: one stream to multiple streams"""
         stream_producer = torch.Stream(device="openreg:0")
         stream_consumer1 = torch.Stream(device="openreg:0")
         stream_consumer2 = torch.Stream(device="openreg:0")
@@ -188,7 +187,9 @@ class TestStream(TestCase):
         self.assertTrue(event_producer.query())
         self.assertEqual(result1, result2)  # Same computation should yield same result
 
-        # pattern 2: fan-in (multiple streams to one stream)
+    @skipIfTorchDynamo()
+    def test_stream_fan_in(self):
+        """Test fan-in pattern: multiple streams to one stream"""
         stream1 = torch.Stream(device="openreg:0")
         stream2 = torch.Stream(device="openreg:0")
         stream_aggregator = torch.Stream(device="openreg:0")
@@ -210,16 +211,17 @@ class TestStream(TestCase):
 
         # aggregator combines results
         with stream_aggregator:
-            combined = prod1 + prod2
+            _ = prod1 + prod2
 
         torch.accelerator.synchronize()
 
         # Verify events completed and result correctness
         self.assertTrue(event1.query())
         self.assertTrue(event2.query())
-        self.assertIsNotNone(combined)
 
-        # pattern 3: pipeline (sequential streams)
+    @skipIfTorchDynamo()
+    def test_stream_pipeline(self):
+        """Test pipeline pattern: sequential streams"""
         stage1 = torch.Stream(device="openreg:0")
         stage2 = torch.Stream(device="openreg:0")
         stage3 = torch.Stream(device="openreg:0")
@@ -240,7 +242,7 @@ class TestStream(TestCase):
         # stage 3 waits for stage 2
         stage3.wait_event(event_stage2)
         with stage3:
-            final = torch.matmul(intermediate2, data)
+            _ = torch.matmul(intermediate2, data)
 
         torch.accelerator.synchronize()
 
