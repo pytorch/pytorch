@@ -20,7 +20,8 @@ vllm_basic_models_test:
     - pytest -v -s models/test_registry.py
     - pytest -v -s models/test_utils.py
     - pytest -v -s models/test_vision.py
-    - pytest -v -s models/test_initialization.py
+    - pytest -v -s models/test_initialization.py -k 'not voxtral'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/test_initialization.py -k voxtral
 
 vllm_entrypoints_test:
   title: Entrypoints Test
@@ -60,7 +61,7 @@ vllm_distributed_test_28_failure_test:
     VLLM_WORKER_MULTIPROC_METHOD: spawn
   num_gpus: 4
   steps:
-    - pytest -v -s distributed/test_sequence_parallel.py
+    - pytest -v -s compile/correctness_e2e/test_sequence_parallel.py
 
 vllm_lora_28_failure_test:
   title: LoRA pytorch 2.8 failure test
@@ -85,29 +86,28 @@ vllm_multi_model_test_28_failure_test:
   package_install:
     - git+https://github.com/TIGER-AI-Lab/Mantis.git
   steps:
-    - pytest -v -s models/multimodal/generation/test_voxtral.py -k 'not 5-128-half'
-    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/generation/test_voxtral.py -k 5-128-half
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/generation/test_voxtral.py
     - pytest -v -s models/multimodal/pooling
 
 vllm_pytorch_compilation_unit_tests:
   title: PyTorch Compilation Unit Tests
   id: vllm_pytorch_compilation_unit_tests
   steps:
-    - pytest -v -s compile/test_pass_manager.py
-    - pytest -v -s compile/test_fusion.py
-    - pytest -v -s compile/test_fusion_attn.py
-    - pytest -v -s compile/test_silu_mul_quant_fusion.py
-    - pytest -v -s compile/distributed/test_sequence_parallelism.py
-    - pytest -v -s compile/distributed/test_async_tp.py
-    - pytest -v -s compile/distributed/test_fusion_all_reduce.py
+    - pytest -v -s compile/passes/test_pass_manager.py
+    - pytest -v -s compile/passes/test_fusion.py
+    - pytest -v -s compile/passes/test_fusion_attn.py
+    - pytest -v -s compile/passes/test_silu_mul_quant_fusion.py
+    - pytest -v -s compile/passes/distributed/test_sequence_parallelism.py
+    - pytest -v -s compile/passes/distributed/test_async_tp.py
+    - pytest -v -s compile/passes/distributed/test_fusion_all_reduce.py
     - pytest -v -s compile/test_decorator.py
 
 vllm_language_model_test_extended_generation_28_failure_test:
   title: Language Models Test (Extended Generation) 2.8 release failure
-  id: vllm_languagde_model_test_extended_generation_28_failure_test
+  id: vllm_language_model_test_extended_generation_28_failure_test
   package_install:
     - --no-build-isolation
-    - git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8
+    - git+https://github.com/Dao-AILab/causal-conv1d@v1.6.0
   steps:
     - pytest -v -s models/language/generation/test_mistral.py
 
@@ -118,7 +118,7 @@ vllm_distributed_test_2_gpu_28_failure_test:
     VLLM_WORKER_MULTIPROC_METHOD: spawn
   num_gpus: 4
   steps:
-    - pytest -v -s distributed/test_sequence_parallel.py
+    - pytest -v -s compile/correctness_e2e/test_sequence_parallel.py
 
 vllm_lora_test:
   title: LoRA Test %N
