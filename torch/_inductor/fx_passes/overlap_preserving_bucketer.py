@@ -1,5 +1,6 @@
 import itertools
 import logging
+import operator
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
@@ -1000,13 +1001,13 @@ class OverlapPreservingBucketer:
                 self.graph,
                 bucket,
                 insert_before=next_node,
-                mode="custom_ops",
+                mode=self.bucket_mode,
             )
         elif is_all_reduce_tensor(bucket[0]):
             new_nodes, replacements = merge_all_reduce_bucket(
                 self.graph,
                 bucket,
-                mode="custom_ops",
+                mode=self.bucket_mode,
                 insert_before=next_node,
             )
         else:
@@ -1015,23 +1016,41 @@ class OverlapPreservingBucketer:
                 self.graph,
                 bucket,
                 insert_before=next_node,
-                mode="custom_ops",
+                mode=self.bucket_mode,
             )
 
         # Get new nodes
         new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
-        assert len(new_waits) == 1
-
-        new_wait = new_waits[0]
-        new_start = new_wait.args[0]
-        assert isinstance(new_start, fx.Node)
 
         # Create mapping of all erased nodes to their replacements
         erased_to_new: dict[fx.Node, fx.Node | None] = {}
-        for old_start in old_starts:
-            erased_to_new[old_start] = new_start
-        for old_wait in old_waits:
-            erased_to_new[old_wait] = new_wait
+        new_start: fx.Node | None = None
+        if len(new_waits) == 1:
+            # Standard bucketing: single start + single wait
+            new_wait = new_waits[0]
+            new_start = new_wait.args[0]  # pyrefly: ignore [bad-assignment]
+            assert isinstance(new_start, fx.Node)
+            for old_start in old_starts:
+                erased_to_new[old_start] = new_start
+            for old_wait in old_waits:
+                erased_to_new[old_wait] = new_wait
+        else:
+            # Coalesced bucketing: single start + N waits (one per original tensor)
+            assert len(new_waits) == len(old_waits)
+            # Find the coalesced collective start (look through getitem)
+            coll_start = new_waits[0].args[0]
+            assert isinstance(coll_start, fx.Node)
+            if (
+                coll_start.op == "call_function"
+                and coll_start.target is operator.getitem
+            ):
+                coll_start = coll_start.args[0]
+            assert isinstance(coll_start, fx.Node)
+            new_start = coll_start
+            for old_start in old_starts:
+                erased_to_new[old_start] = coll_start
+            for old_wait, new_wait in zip(old_waits, new_waits):
+                erased_to_new[old_wait] = new_wait
 
         # Handle convert_element_type nodes that were fused and erased
         # The bucketed operation may have a _pre_bucket op that handles dtype conversion

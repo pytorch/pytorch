@@ -1574,6 +1574,7 @@ def schedule_overlap_bucketing(
     bucket_only_internode_comms=False,
     prioritize_bucketing_during_scheduling: bool = True,
     max_off_bucket_gb: float | None = 0.5,
+    bucket_mode: BucketMode | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1597,6 +1598,8 @@ def schedule_overlap_bucketing(
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
+        bucket_mode: Bucket mode for collective bucketing. "default" uses plain torch.cat
+            (visible to Inductor), "custom_ops"/"custom_ops_multidtype" use opaque custom ops.
     """
     if not any(is_wait_tensor(n) for n in gm.graph.nodes):
         return gm
@@ -1609,8 +1612,7 @@ def schedule_overlap_bucketing(
         },
         payload_fn=lambda: gm.print_readable(False),
     )
-    ret = OverlapScheduler(
-        gm,
+    overlap_kwargs: dict[str, object] = dict(
         compute_overlap_multipler=compute_overlap_multipler,
         max_in_flight_gb=max_in_flight_gb,
         max_coll_distance=max_coll_distance,
@@ -1627,7 +1629,10 @@ def schedule_overlap_bucketing(
         bucket_only_internode_comms=bucket_only_internode_comms,
         prioritize_bucketing_during_scheduling=prioritize_bucketing_during_scheduling,
         max_off_bucket_gb=max_off_bucket_gb,
-    ).run()
+    )
+    if bucket_mode is not None:
+        overlap_kwargs["bucket_mode"] = bucket_mode
+    ret = OverlapScheduler(gm, **overlap_kwargs).run()  # type: ignore[arg-type]
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
@@ -1672,6 +1677,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "bucket_only_internode_comms",
         "enable_fusion_regions",
         "prioritize_bucketing_during_scheduling",
+        "bucket_mode",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:

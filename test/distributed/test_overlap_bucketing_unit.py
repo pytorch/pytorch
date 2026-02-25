@@ -539,6 +539,60 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         )
         self.assertEqual(len(rs_nodes), 1)
 
+    def test_reduce_scatter_coalesced_mode(self):
+        """
+        Test that 'coalesced' bucket mode uses reduce_scatter_tensor_coalesced
+        instead of cat + single reduce_scatter.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 2
+
+            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                a, "sum", group_size, group_name
+            )
+            rs2 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                b, "sum", group_size, group_name
+            )
+
+            rs1_out = torch.ops._c10d_functional.wait_tensor(rs1)
+            rs2_out = torch.ops._c10d_functional.wait_tensor(rs2)
+
+            return rs1_out.sum() + rs2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+            traced = make_fx(func)(a, b)
+
+        rs1, rs2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+
+        hiding_annotations = {}
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            scheduled,
+            bucket_mode="coalesced",
+        )
+        bucketer.bucket_collectives()
+
+        graph_str = str(traced.graph)
+        # Coalesced mode should use reduce_scatter_tensor_coalesced, not cat
+        self.assertIn("reduce_scatter_tensor_coalesced", graph_str)
+        # No cat.default should appear (the whole point of coalesced)
+        self.assertNotIn("cat.default", graph_str)
+
     def test_can_bucket_multidtype_collectives(self):
         """
         Test that all_gathers with different dtypes CAN bucket together.

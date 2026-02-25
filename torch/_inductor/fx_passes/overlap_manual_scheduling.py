@@ -9,6 +9,7 @@ import torch.fx as fx
 from torch._dynamo.graph_deduplication import _stable_topological_sort
 from torch._inductor.fx_passes.bucketing import (
     _schedulable_wait_node,
+    BucketMode,
     is_all_gather_into_tensor as is_all_gather,
     is_fsdp_all_gather,
     is_fsdp_reduce_scatter,
@@ -72,7 +73,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 coll_nodes,
                 wait_insertion_point=first_wait,
                 insert_before=next_node,
-                mode="custom_ops",
+                mode=self.bucket_mode,
             )
         elif is_reduce_scatter(first):
             new_nodes, replacements = merge_reduce_scatter_bucket(
@@ -80,7 +81,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 coll_nodes,
                 wait_insertion_point=first_wait,
                 insert_before=next_node,
-                mode="custom_ops",
+                mode=self.bucket_mode,
             )
         else:
             raise ValueError(
@@ -143,6 +144,7 @@ class ManualOverlapScheduler(OverlapScheduler):
         module_bucket_plans: list[list[str] | str],
         insert_overlap_deps: bool,
         module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
+        bucket_mode: BucketMode | None = None,
     ):
         super().__init__(
             gm,
@@ -156,14 +158,19 @@ class ManualOverlapScheduler(OverlapScheduler):
             collective_estimator="analytical",
             max_memory_increase_gb=None,
             max_memory_increase_ratio=None,
+            bucket_mode=bucket_mode or "custom_ops_multidtype",
         )
         self.module_bucket_plans = module_bucket_plans
         self.nodes_in_subgraph: list[list[fx.Node]] = []
 
+        bucketer_kwargs: dict[str, object] = {}
+        if bucket_mode is not None:
+            bucketer_kwargs["bucket_mode"] = bucket_mode
         self.bucketer = ManualOverlapPreservingBucketer(
             graph=self.graph,
             collective_info=self.collective_info,
             scheduled=OrderedSet(self.graph.nodes),
+            **bucketer_kwargs,
         )
         self.insert_overlap_deps = insert_overlap_deps
 
@@ -352,6 +359,7 @@ def manual_overlap_bucketing(
     module_bucket_plans: list[list[str] | str],
     insert_overlap_deps: bool = False,
     module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
+    bucket_mode: BucketMode | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes based on user specifications in module_bucket_plans
     The manual overlapping consists of two steps:
@@ -370,10 +378,15 @@ def manual_overlap_bucketing(
 
             See the `module_stack_fn` parameter in `make_graph_view` (graph_view.py) for
             detailed documentation on signature, return format, and usage examples.
+        bucket_mode: Bucket mode for collective bucketing. None uses default.
     """
     # decode abbreviated FQNs to actual FQNs
     overlapped_gm = ManualOverlapScheduler(
-        gm, module_bucket_plans, insert_overlap_deps, module_stack_fn
+        gm,
+        module_bucket_plans,
+        insert_overlap_deps,
+        module_stack_fn,
+        bucket_mode=bucket_mode,
     ).run()
     overlapped_gm.recompile()
     return overlapped_gm
