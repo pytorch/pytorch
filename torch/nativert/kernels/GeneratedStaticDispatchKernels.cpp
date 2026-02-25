@@ -1574,6 +1574,22 @@ REGISTER_CPU_KERNEL(
       at::cpu::bitwise_and_out(out, self, other);
     })
 
+// __and__ is the Python dunder alias for bitwise_and
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.__and__.Tensor",
+    aten___and___Tensor,
+    {
+      const auto& self = KernelInput(0).toTensor();
+      const auto& other = KernelInput(1).toTensor();
+      if (KernelOutput(0).isNone()) {
+        KernelOutput(0) = at::cpu::bitwise_and(self, other);
+        return;
+      }
+      auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
+      at::cpu::bitwise_and_out(out, self, other);
+    })
+
 REGISTER_CPU_KERNEL(
     "torch.ops.aten.bitwise_or.Tensor",
     aten_bitwise_or_Tensor,
@@ -1587,6 +1603,35 @@ REGISTER_CPU_KERNEL(
       auto& out = KernelOutput(0).toTensor();
       fastResizeToZero(out);
       at::cpu::bitwise_or_out(out, self, other);
+    })
+
+// __or__ is the Python dunder alias for bitwise_or
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.__or__.Tensor",
+    aten___or___Tensor,
+    {
+      const auto& self = KernelInput(0).toTensor();
+      const auto& other = KernelInput(1).toTensor();
+      if (KernelOutput(0).isNone()) {
+        KernelOutput(0) = at::cpu::bitwise_or(self, other);
+        return;
+      }
+      auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
+      at::cpu::bitwise_or_out(out, self, other);
+    })
+
+REGISTER_NATIVE_CPU_KERNEL(
+    "torch.ops.aten.scalar_tensor.default",
+    aten_scalar_tensor_default,
+    {
+      const auto s = KernelInput(0).toScalar();
+      const auto dtype = KernelInput(1).toOptional<at::ScalarType>();
+      const auto layout = KernelInput(2).toOptional<at::Layout>();
+      const auto device = KernelInput(3).toOptional<at::Device>();
+      const auto pin_memory = KernelInput(4).toOptional<bool>();
+      KernelOutput(0) = at::native::scalar_tensor(
+          s, dtype, layout, device, pin_memory);
     })
 
 REGISTER_CPU_KERNEL(
