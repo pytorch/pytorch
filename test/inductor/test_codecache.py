@@ -72,7 +72,6 @@ from torch.testing._internal.inductor_utils import (
     patch_inductor_backend,
     requires_gpu,
     requires_triton,
-    RUN_CPU,
 )
 from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
@@ -654,7 +653,7 @@ class TestFxGraphCache(TestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if RUN_CPU and dtype == torch.float32:
+        if device == "cpu" and dtype == torch.float32:
             raise unittest.SkipTest("skip float32 on CPU")
         if (
             device == "cuda"
@@ -667,8 +666,8 @@ class TestFxGraphCache(TestCase):
         def fn(x, y):
             return x.cos() @ y
 
-        a = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
-        b = torch.rand(100, 100, dtype=dtype, device=device, requires_grad=True)
+        a = torch.rand(100, 100, device=device)
+        b = torch.rand(100, 100, device=device)
 
         # Record artifacts
         with fresh_cache():
@@ -697,16 +696,17 @@ class TestFxGraphCache(TestCase):
 
         # We did not load anything so dont hit yet
         with fresh_cache():
-            eager_result = fn(a, b)
             # With caching precompile, we have to re torch.compile the function
             # to trigger cache lookup
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
             with torch.amp.autocast(device_type=device, dtype=dtype):
-                compiled_fn = torch.compile(fn, dynamic=dynamic)
+                eager_result = fn(a, b)
                 compiled_result = compiled_fn(a, b)
             self.assertEqual(eager_result, compiled_result)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 0)
         # Hot load and hit
+        self.reset()
         with fresh_cache(), torch.compiler.set_stance("fail_on_recompile"):
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
             self.assertEqual(len(cache_info.precompile_artifacts), 1)
@@ -722,6 +722,8 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
             self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
         self.reset()
+        shutil.rmtree(cache_dir(), ignore_errors=True)
+        torch._C._dynamo.eval_frame._reset_precompile_entries(fn.__code__)
 
     @requires_triton()
     @config.patch(
