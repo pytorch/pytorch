@@ -3579,5 +3579,204 @@ class TestCompilationEventLogging(TestCase):
         )
 
 
+class TestAutotuneCacheExtraOptions(TestCase):
+    """
+    Unit tests for extra_options preservation in _load_cached_autotuning().
+
+    The extra_options field allows third-party backends to store custom tuned
+    options alongside the standard Triton config. These tests verify that
+    extra_options is correctly preserved when saving and loading from cache.
+    """
+
+    @requires_triton()
+    def test_load_cached_autotuning_preserves_extra_options_with_coordesc(self):
+        """
+        Test that extra_options is preserved when loading a config that was
+        found via coordinate descent tuning.
+        """
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        # Simulate a cached config with extra_options and found_by_coordesc=True
+        best_config = {
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "num_warps": 4,
+            "num_stages": 2,
+            "configs_hash": "test_hash",
+            "found_by_coordesc": True,
+            "extra_options": {"custom_option": "value", "another_option": 42},
+        }
+
+        # Empty configs list since coordesc path creates a new config
+        configs = []
+        inductor_meta = {"coordinate_descent_tuning": True}
+
+        result = _load_cached_autotuning(
+            best_config.copy(), "test_hash", configs, inductor_meta
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            result.extra_options, {"custom_option": "value", "another_option": 42}
+        )
+        self.assertTrue(result.found_by_coordesc)
+
+    @requires_triton()
+    def test_load_cached_autotuning_preserves_extra_options_with_matched_config(self):
+        """
+        Test that extra_options is preserved when loading by matching an
+        existing config from the configs list.
+        """
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        # Create a config that matches what's in the cache
+        original_config = Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64},
+            num_warps=4,
+            num_stages=2,
+        )
+        configs = [original_config]
+
+        # Simulate a cached config with extra_options
+        best_config = {
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "num_warps": 4,
+            "num_stages": 2,
+            "configs_hash": "test_hash",
+            "extra_options": {"backend_specific": "option"},
+        }
+
+        inductor_meta = {"coordinate_descent_tuning": False}
+
+        result = _load_cached_autotuning(
+            best_config.copy(), "test_hash", configs, inductor_meta
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.extra_options, {"backend_specific": "option"})
+        # The returned config should be the matched one
+        self.assertIs(result, original_config)
+
+    @requires_triton()
+    def test_load_cached_autotuning_handles_none_extra_options(self):
+        """
+        Test that _load_cached_autotuning handles missing extra_options gracefully
+        (returns None for the attribute).
+        """
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import _load_cached_autotuning
+
+        # Create a config that matches what's in the cache
+        original_config = Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64},
+            num_warps=4,
+            num_stages=2,
+        )
+        configs = [original_config]
+
+        # Simulate a cached config WITHOUT extra_options
+        best_config = {
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "num_warps": 4,
+            "num_stages": 2,
+            "configs_hash": "test_hash",
+        }
+
+        inductor_meta = {"coordinate_descent_tuning": False}
+
+        result = _load_cached_autotuning(
+            best_config.copy(), "test_hash", configs, inductor_meta
+        )
+
+        self.assertIsNotNone(result)
+        # extra_options should be None when not in cache
+        self.assertIsNone(result.extra_options)
+
+    @requires_triton()
+    def test_autotune_cache_save_includes_extra_options(self):
+        """
+        Test that AutotuneCache.save() includes extra_options in the saved data.
+        """
+        from unittest.mock import MagicMock
+
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        # Create a config with extra_options
+        config_with_extra = Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64},
+            num_warps=4,
+            num_stages=2,
+        )
+        config_with_extra.extra_options = {"custom_key": "custom_value"}
+
+        # Create an AutotuneCache instance with mocked caches
+        cache = AutotuneCache.__new__(AutotuneCache)
+        cache.configs_hash = "test_hash"
+
+        # Mock the local cache to capture what's being saved
+        mock_local_backend = MagicMock()
+        cache.local_cache = (mock_local_backend, "test_key")
+        cache.remote_cache = None
+
+        # Mock AutotuneCacheBundler and CacheArtifactManager
+        with (
+            mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"),
+            mock.patch("torch._inductor.runtime.autotune_cache.CacheArtifactManager"),
+        ):
+            cache.save(config_with_extra, time_taken_ns=1000000)
+
+        # Verify extra_options was included in the saved data
+        mock_local_backend.put.assert_called_once()
+        saved_data = mock_local_backend.put.call_args[0][1]
+        self.assertIn("extra_options", saved_data)
+        self.assertEqual(saved_data["extra_options"], {"custom_key": "custom_value"})
+
+    @requires_triton()
+    def test_autotune_cache_save_omits_extra_options_when_none(self):
+        """
+        Test that AutotuneCache.save() does not include extra_options when it's None.
+        """
+        from unittest.mock import MagicMock
+
+        from triton import Config
+
+        from torch._inductor.runtime.autotune_cache import AutotuneCache
+
+        # Create a config without extra_options
+        config_without_extra = Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64},
+            num_warps=4,
+            num_stages=2,
+        )
+
+        # Create an AutotuneCache instance with mocked caches
+        cache = AutotuneCache.__new__(AutotuneCache)
+        cache.configs_hash = "test_hash"
+
+        # Mock the local cache to capture what's being saved
+        mock_local_backend = MagicMock()
+        cache.local_cache = (mock_local_backend, "test_key")
+        cache.remote_cache = None
+
+        # Mock AutotuneCacheBundler and CacheArtifactManager
+        with (
+            mock.patch("torch._inductor.runtime.autotune_cache.AutotuneCacheBundler"),
+            mock.patch("torch._inductor.runtime.autotune_cache.CacheArtifactManager"),
+        ):
+            cache.save(config_without_extra, time_taken_ns=1000000)
+
+        # Verify extra_options was NOT included in the saved data
+        mock_local_backend.put.assert_called_once()
+        saved_data = mock_local_backend.put.call_args[0][1]
+        self.assertNotIn("extra_options", saved_data)
+
+
 if __name__ == "__main__":
     run_tests()
