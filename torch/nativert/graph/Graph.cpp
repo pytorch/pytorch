@@ -194,6 +194,9 @@ std::ostream& operator<<(std::ostream& out, const Type& ty) {
             case Type::Kind::TensorList:
               out << "TensorList";
               break;
+            case Type::Kind::NestedTensorList:
+              out << "NestedTensorList";
+              break;
             case Type::Kind::OptionalTensorList:
               out << "OptionalTensorList";
               break;
@@ -417,6 +420,10 @@ Node* Graph::createListPack(std::vector<Value*> inputs, const Type& inputType) {
     node->addOutput(name, Type::Kind::TensorList);
   } else if (inputType == Type::Kind::SymInt) {
     node->addOutput(name, Type::Kind::SymIntList);
+  } else if (inputType == Type::Kind::TensorList) {
+    // For nested tensor lists (List[List[Tensor]]), the inner lists are
+    // TensorList type. We output a NestedTensorList type.
+    node->addOutput(name, Type::Kind::NestedTensorList);
   }
 
   return node;
