@@ -28,6 +28,10 @@ from .profiler import (
     tensorboard_trace_handler,
 )
 
+# Auto-instrumentation and trace analysis tools
+from .auto_instrumenter import auto_profile_module, ANNOTATION_MARKER
+from .trace_analyzer import TraceGraph
+
 
 __all__ = [
     "profile",
@@ -40,6 +44,9 @@ __all__ = [
     "DeviceType",
     "record_function",
     "ExecutionTraceObserver",
+    "auto_profile_module",
+    "ANNOTATION_MARKER",
+    "TraceGraph",
 ]
 
 from . import itt
