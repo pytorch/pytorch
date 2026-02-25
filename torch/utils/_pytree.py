@@ -3,7 +3,7 @@
 """
 Contains utility functions for working with nested python data structures.
 
-A *pytree* is Python nested data structure. It is a tree in the sense that
+A *pytree* is a Python nested data structure. It is a tree in the sense that
 nodes are Python collections (e.g., list, tuple, dict) and the leaves are
 Python values. Furthermore, a pytree should not contain reference cycles.
 
@@ -58,6 +58,8 @@ __all__ = [
     "FlattenFunc",
     "UnflattenFunc",
     "DumpableContext",
+    "ToDumpableContextFn",  # deprecated
+    "FromDumpableContextFn",  # deprecated
     "ToDumpableContextFunc",
     "FromDumpableContextFunc",
     "PyTreeSpec",
@@ -136,8 +138,8 @@ UnflattenFunc: TypeAlias = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext: TypeAlias = Any  # Any json dumpable text
 ToDumpableContextFunc: TypeAlias = Callable[[Context], DumpableContext]
 FromDumpableContextFunc: TypeAlias = Callable[[DumpableContext], Context]
-ToDumpableContextFn: TypeAlias = ToDumpableContextFunc
-FromDumpableContextFn: TypeAlias = FromDumpableContextFunc
+ToDumpableContextFn: TypeAlias = ToDumpableContextFunc  # deprecated
+FromDumpableContextFn: TypeAlias = FromDumpableContextFunc  # deprecated
 ToStrFunc: TypeAlias = Callable[["TreeSpec", list[str]], str]
 MaybeFromStrFunc: TypeAlias = Callable[[str], tuple[Any, Context, str] | None]
 KeyPath: TypeAlias = tuple[KeyEntry, ...]
