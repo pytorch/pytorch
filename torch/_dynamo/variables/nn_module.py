@@ -225,7 +225,7 @@ class NNModuleVariable(VariableTracker):
         result: list[VariableTracker] = []
         if isinstance(base, torch.nn.ModuleDict):
             for name, submod in base.items():
-                name_var = variables.ConstantVariable.create(name)
+                name_var = VariableTracker.build(tx, name)
                 tx.output.register_attr_or_module(
                     submod,
                     self.module_key,
@@ -259,7 +259,7 @@ class NNModuleVariable(VariableTracker):
                 GuardBuilder.HASATTR
             )
         )
-        return variables.ConstantVariable.create(result)
+        return VariableTracker.build(tx, result)
 
     def is_training(self, tx: "InstructionTranslator") -> bool:
         mod = tx.output.get_submodule(self.module_key)
@@ -345,7 +345,7 @@ class NNModuleVariable(VariableTracker):
         options = {"source": AttrSource(obj_source, "__getattr__")}
 
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
-            tx, [variables.ConstantVariable.create(name)], {}
+            tx, [VariableTracker.build(tx, name)], {}
         )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -406,7 +406,7 @@ class NNModuleVariable(VariableTracker):
             guard_to_detect_forward_monkeypatching(self.source, base)
 
         if name == "__class__" and not object_member:
-            return variables.UserDefinedClassVariable(base.__class__, source=source)
+            return VariableTracker.build(tx, base.__class__, source=source)
 
         if object_member:
             out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]
@@ -579,7 +579,8 @@ class NNModuleVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
         constant: bool = False,
     ) -> VariableTracker:
-        from . import ConstantVariable, ListIteratorVariable, TupleVariable
+        from . import ListIteratorVariable, TupleVariable
+        from .constant import CONSTANT_VARIABLE_TRUE
 
         key = self.module_key
         module = tx.output.get_submodule(key)
@@ -626,7 +627,7 @@ class NNModuleVariable(VariableTracker):
         if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)  # type: ignore[union-attr]
         ):
-            return ConstantVariable.create(True)
+            return CONSTANT_VARIABLE_TRUE
 
         if name == "_get_item_by_idx":
             if not args[1].is_python_constant():
@@ -699,7 +700,7 @@ class NNModuleVariable(VariableTracker):
         def named_embed(name: str, obj: Any) -> "variables.TupleVariable":
             return TupleVariable(
                 [
-                    ConstantVariable.create(name),
+                    VariableTracker.build(tx, name),
                     tx.output.register_attr_or_module(
                         obj,
                         key,
@@ -791,7 +792,7 @@ class NNModuleVariable(VariableTracker):
             result = []
             # pyrefly: ignore[not-iterable]
             for tmp in module:
-                result.append(ConstantVariable.create(tmp))
+                result.append(VariableTracker.build(tx, tmp))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "values":
             if args or kwargs:
@@ -822,7 +823,7 @@ class NNModuleVariable(VariableTracker):
                     "0 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return ConstantVariable.create(len(module))  # type: ignore[arg-type]
+            return VariableTracker.build(tx, len(module))  # type: ignore[arg-type]
         elif name == "__iter__":
             return ListIteratorVariable(
                 self.unpack_var_sequence(tx), mutation_type=ValueMutationNew()
@@ -833,8 +834,8 @@ class NNModuleVariable(VariableTracker):
             and args
             and args[0].is_python_constant()
         ):
-            return ConstantVariable.create(
-                args[0].as_python_constant() in module._modules
+            return VariableTracker.build(
+                tx, args[0].as_python_constant() in module._modules
             )
         elif name == "__getitem__":
             if kwargs or len(args) != 1:
@@ -1298,7 +1299,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 i: int, k: Any, v: Any
             ) -> tuple[VariableTracker, VariableTracker]:
                 # Make key sourceless to avoid any guard on it
-                key = variables.ConstantVariable.create(k)
+                key = VariableTracker.build(tx, k)
 
                 # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
                 # value. This removes the reliance on the actual key value.
