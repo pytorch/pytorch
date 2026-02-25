@@ -585,6 +585,57 @@ def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
     return output_tensor, work_so
 
 
+def _local_reduce_scatter_(
+    output_tensors: list[torch.Tensor],
+    input_tensors: list[list[torch.Tensor]],
+    process_group_so: ScriptObject,
+    reduce_op_so: ScriptObject,
+    async_op: bool = True,
+    timeout: int = -1,
+) -> tuple[list[torch.Tensor], ScriptObject]:
+    # "reduce_scatter_(Tensor[] output_tensors, Tensor[][] input_tensors,
+    # __torch__.torch.classes.c10d.ProcessGroup process_group,
+    # __torch__.torch.classes.c10d.ReduceOp reduce_op,
+    # bool async_op=True, int timeout=-1)
+    # -> (Tensor[], __torch__.torch.classes.c10d.Work)"
+
+    from . import LocalTensor
+
+    assert len(output_tensors) == 1
+    assert len(input_tensors) == 1
+
+    output_tensor = output_tensors[0]
+    input_list = input_tensors[0]
+
+    reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
+    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+
+    assert isinstance(output_tensor, LocalTensor), "Output tensor must be a LocalTensor"
+    assert len(input_list) == len(ranks), (
+        f"Number of input chunks ({len(input_list)}) must match number of ranks ({len(ranks)})"
+    )
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
+
+        # For each rank position i, reduce input_list[i] across all ranks in the group
+        for i, rank_i in enumerate(group_ranks):
+            chunk = input_list[i]
+            assert isinstance(chunk, LocalTensor), "Input chunk must be a LocalTensor"
+            if not all(rank in chunk._local_tensors for rank in group_ranks):
+                continue
+
+            group_tensors = [chunk._local_tensors[rank] for rank in group_ranks]
+            reduced = _local_reduce(reduce_op, group_tensors)
+            output_tensor._local_tensors[rank_i].copy_(reduced)
+
+    work = FakeWork()
+    work_so = Work.boxed(work)
+    return (output_tensors, work_so)
+
+
 def _local_all_gather_(
     output_tensors: list[list[torch.Tensor]],
     input_tensors: list[torch.Tensor],
