@@ -2947,6 +2947,15 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    def test_comparison_scalar_type_promotion_bf16(self):
+        def fn(x):
+            return x == 3.14
+
+        x = torch.randn([3, 1, 64, 128], dtype=torch.bfloat16, device=self.device)
+        expected = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(actual, expected)
+
     @skip_if_gpu_halide
     @xfail_if_triton_cpu
     def test_dist(self):

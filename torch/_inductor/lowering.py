@@ -602,13 +602,26 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
         return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView, ir.Constant)))
+    tensor_dtype = ex.get_dtype()
+
+    # Round scalar to tensor's dtype for comparison ops to match eager
+    if override_return_dtype == torch.bool and tensor_dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        _round_scalar = lambda v: torch.tensor(v, dtype=tensor_dtype).item()  # noqa: E731
+    else:
+        _round_scalar = lambda v: v  # noqa: E731
+
     out = []
     for x in inputs:
         if isinstance(x, (int, float)):
             out.append(
                 ExpandView.create(
                     ir.Constant(
-                        value=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
+                        value=_round_scalar(x),
+                        dtype=tensor_dtype,
+                        device=ex.get_device_or_error(),
                     ),
                     list(ex.get_size()),
                 )
@@ -617,7 +630,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
             out.append(
                 ExpandView.create(
                     IndexingConstant(
-                        index=x, dtype=ex.get_dtype(), device=ex.get_device_or_error()
+                        index=x, dtype=tensor_dtype, device=ex.get_device_or_error()
                     ),
                     list(ex.get_size()),
                 )
