@@ -31,6 +31,7 @@ import shutil
 import sys
 import os
 import warnings
+import time
 
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
@@ -834,6 +835,7 @@ def preprocessor(
 
     rel_filepath = _to_unix_path(os.path.relpath(filepath, output_directory))
 
+    expected_size = os.path.getsize(fin_path)
     with open(fin_path, encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
             hipify_result.hipified_path = None
@@ -842,6 +844,15 @@ def preprocessor(
             return hipify_result
         fin.seek(0)
         output_source = fin.read()
+        # for some reason sometimes we don't manage to read file and get empty `output_source`
+        # so in those cases lets try more
+        attempts = 0
+        while fin.tell() < expected_size and attempts < 3:
+            time.sleep(0.1)
+            output_source += fin.read()
+            attempts += 1
+        if fin.tell() < expected_size:
+            raise InputError(f"something went wrong while reading {fin_path}")
 
     orig_output_source = output_source
 
