@@ -1035,7 +1035,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
     def test_swap_tensors_subclass_not_blocked_by_metaconverter_refcycle(self):
-        """Checks that MetaConverter doesn't creat refcycles of itself that blocks swap_tensor on subclass tensors"""
+        """Checks that MetaConverter doesn't create refcycles of itself that blocks swap_tensor on subclass tensors"""
         was_gc_enabled = gc.isenabled()
         gc.disable()
         try:
