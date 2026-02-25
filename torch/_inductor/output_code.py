@@ -467,6 +467,10 @@ class CompiledFxGraph(OutputCode):
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
     _wrap_compiled_regions: bool = False
+    # Metadata-stripped copy of the FX graph for fake tensor propagation.
+    # Running this graph under FakeTensorMode re-derives output shapes
+    # (including aliasing) from the input shapes.
+    _original_gm: Optional[torch.fx.GraphModule] = None
 
     def __init__(
         self,
@@ -617,32 +621,15 @@ class CompiledFxGraph(OutputCode):
         self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
 
         if self._wrap_compiled_regions:
-            from torch._higher_order_ops.wrap import OutputTensorMeta
+            # Store a metadata-stripped copy of the FX graph. Running this
+            # under FakeTensorMode re-derives output shapes and aliasing
+            # from the input fake tensors.
+            import copy
 
-            fake_vals = [
-                x.meta["val"] if x is not None else None
-                for x in gm.graph.find_nodes(op="output")[0].args[0]
-            ]
-            for t in fake_vals:
-                if isinstance(t, torch.Tensor) and any(
-                    isinstance(s, torch.SymInt) for s in t.shape
-                ):
-                    raise RuntimeError(
-                        "wrap_compiled_regions does not support dynamic shapes yet"
-                    )
-            # FakeTensors are not picklable; store metadata for FX graph cache
-            self.fake_outputs = tuple(
-                OutputTensorMeta(
-                    tuple(t.shape),
-                    tuple(t.stride()),
-                    t.dtype,
-                    str(t.device),
-                    t.requires_grad,
-                )
-                if isinstance(t, torch.Tensor)
-                else t
-                for t in fake_vals
-            )
+            gm_copy = copy.deepcopy(gm)
+            for node in gm_copy.graph.nodes:
+                node.meta.clear()
+            self._original_gm = gm_copy
 
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
@@ -783,9 +770,8 @@ class CompiledFxGraph(OutputCode):
 
             original_callable = self.current_callable
 
-            # Create a wrapper that holds both the compiled callable and FX graph
             inductor_callable = InductorCompiledCallable(
-                original_callable, self.fake_outputs
+                original_callable, self._original_gm
             )
 
             def wrapped_callable(inputs):
@@ -807,6 +793,7 @@ class CompiledFxGraph(OutputCode):
         self.current_callable = None
         self.recursively_apply_fns = None
         self.compiled_fn_runner = None
+        # Note: _original_gm is already picklable (metadata stripped at creation)
         # Note: _serialized_fx_graph is already in serializable form (SerializedGraphModule)
         # so it doesn't need to be cleared
 
