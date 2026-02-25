@@ -3790,6 +3790,7 @@ class Layout(OutputSpec):
         stride: Optional[Sequence[Expr]] = None,
         offset: Expr = Integer(0),
         is_pinned: bool = False,
+        allocator: AllocatorType = None,  # type: ignore[assignment]
     ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
@@ -3802,6 +3803,9 @@ class Layout(OutputSpec):
         self._stride = stride
         self._offset = offset
         self.is_pinned = is_pinned
+        if allocator is None:
+            allocator = DEFAULT_ALLOCATOR
+        self.allocator = allocator
         # is_pinned implies cpu
         assert (not self.is_pinned) or (self.device.type == "cpu"), (
             "Only CPU tensors can be pinned"
@@ -4032,6 +4036,7 @@ class Layout(OutputSpec):
             self.stride,
             self.offset,
             self.is_pinned,
+            self.allocator,
         )
 
     def make_indexer(self) -> Callable[[Sequence[Expr]], Expr]:
@@ -4049,6 +4054,7 @@ class Layout(OutputSpec):
             and self.stride == other.stride
             and self.offset == other.offset
             and self.is_pinned == other.is_pinned
+            and self.allocator == other.allocator
         )
 
     def storage_size(self) -> Expr:
@@ -4335,6 +4341,30 @@ class CommBufferType(Enum):
     SYMM_MEM = "symm_mem"
 
 
+@dataclasses.dataclass(frozen=True)
+class AllocatorType:
+    """
+    Allocator type for buffer allocation.
+
+    This is the allocator dimension of Layout, following the direction
+    proposed in https://github.com/pytorch/pytorch/issues/138280 which
+    separates Layout into orthogonal stride and allocator dimensions.
+
+    kind="default": CUDA caching allocator (empty_strided_cuda)
+    kind="symm_mem": P2P symmetric memory (empty_strided_p2p)
+    """
+
+    kind: str = "default"
+    group_name: Optional[str] = None
+
+    @property
+    def is_symm_mem(self) -> bool:
+        return self.kind == "symm_mem"
+
+
+DEFAULT_ALLOCATOR = AllocatorType()
+
+
 class CommBufferLayout(FixedLayout):
     """
     A layout that signifies the buffer is a comm buffer.
@@ -4342,6 +4372,11 @@ class CommBufferLayout(FixedLayout):
 
     Buffers with this layout do not participate in in-place reuse - it can be
     neither the source nor the target for in-place reuse.
+
+    The allocator field is set to the corresponding AllocatorType so that new
+    code can check layout.allocator instead of isinstance(layout, CommBufferLayout).
+    See https://github.com/pytorch/pytorch/issues/138280 for the long-term
+    Layout refactor direction.
 
     For detailed motivation and usage of this layout, see
     NOTE [lowering-time collective optimization].
@@ -4367,6 +4402,8 @@ class CommBufferLayout(FixedLayout):
         )
         self.comm_buffer_type = comm_buffer_type
         self.group_name = group_name
+        if comm_buffer_type == CommBufferType.SYMM_MEM:
+            self.allocator = AllocatorType(kind="symm_mem", group_name=group_name)
 
 
 @ir_dataclass
