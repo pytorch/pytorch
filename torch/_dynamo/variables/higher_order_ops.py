@@ -5183,42 +5183,49 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         return body_name
 
     @staticmethod
-    def _flatten_args_and_kwargs(fn_args_vt, kwargs):
-        """Flatten fn_args_vt and kwargs into proxyable proxies and arg sources.
+    def _flatten_args(tx, fn_args_vt, kwargs):
+        """Flatten fn_args_vt and kwargs into leaf info via VariableTracker.visit.
 
-        Walks through all positional and keyword arguments using
-        VariableTracker.visit to collect leaf tensors/symnodes for proxy
-        matching, and sources for building the replacement dict on cache hit.
-
-        Returns (proxy_node_to_idx, flat_proxies, arg_sources):
+        Returns (flat_vts, proxy_node_to_idx, flat_proxies, arg_sources):
+          - flat_vts: list of (tag, vt) pairs.
+            Tags: "tensor", "symnode", "constant", "module", "unknown".
           - proxy_node_to_idx: dict mapping fx.Node → index for O(1) lookup.
             Deduplicates nodes (only first occurrence is kept).
-          - flat_proxies: list of Proxy objects in index order, for reuse on
-            cache hit without constructing new Proxy wrappers.
-          - arg_sources: list of Source objects from all VTs with a source
-            (includes non-tensor VTs like modules)
-
-        TODO: support pytree registered objects — VariableTracker.visit may
-        not be sufficient for those.
+          - flat_proxies: list of Proxy objects in index order.
+          - arg_sources: list of Source objects from leaf VTs with a source.
         """
-        # Maps fx.Node → index for O(1) freevar matching and natural dedup.
+        flat_vts: list[tuple[str, VariableTracker]] = []
         proxy_node_to_idx: dict[torch.fx.Node, int] = {}
         flat_proxies: list[Proxy] = []
         arg_sources: list[Source] = []
 
         def _collect(vt: VariableTracker) -> None:
-            if vt.is_tensor() or isinstance(vt, SymNodeVariable):
+            if isinstance(vt, TensorVariable):
+                flat_vts.append(("tensor", vt))
+            elif isinstance(vt, SymNodeVariable):
+                flat_vts.append(("symnode", vt))
+            elif isinstance(vt, ConstantVariable):
+                flat_vts.append(("constant", vt))
+            elif isinstance(vt, UnspecializedNNModuleVariable):
+                flat_vts.append(("module", vt))
+            else:
+                # Non-leaf container VTs (TupleVariable, etc.) are visited
+                # recursively by VariableTracker.visit — skip tagging them.
+                return
+
+            if isinstance(vt, (TensorVariable, SymNodeVariable)):
                 proxy = vt.as_proxy()
                 if proxy.node not in proxy_node_to_idx:
                     proxy_node_to_idx[proxy.node] = len(flat_proxies)
                     flat_proxies.append(proxy)
+
             source = getattr(vt, "source", None)
             if source is not None:
                 arg_sources.append(source)
 
         all_vts: list[VariableTracker] = list(fn_args_vt) + list(kwargs.values())
         VariableTracker.visit(_collect, all_vts)
-        return proxy_node_to_idx, flat_proxies, arg_sources
+        return flat_vts, proxy_node_to_idx, flat_proxies, arg_sources
 
     @staticmethod
     def _get_fn_id(fn_var):
@@ -5227,6 +5234,479 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         elif isinstance(fn_var, UnspecializedNNModuleVariable):
             return id(fn_var.value.forward.__func__)  # type: ignore[attr-defined]
         return None
+
+    @staticmethod
+    def _build_source_replacement(old_sources, new_sources):
+        return {old: new for old, new in zip(old_sources, new_sources) if old != new}
+
+    @staticmethod
+    def _is_auto_cacheable(body_r, flat_vts):
+        """Check if a traced subgraph result can be auto-cached."""
+        # Check output types: single tensor, or tuple/list of all tensors
+        if isinstance(body_r, TensorVariable):
+            pass
+        elif isinstance(body_r, (TupleVariable, ListVariable)):
+            non_tensor = [
+                type(item).__name__
+                for item in body_r.items
+                if not isinstance(item, TensorVariable)
+            ]
+            if non_tensor:
+                hc_log.debug(
+                    "auto_guard_cache: not cacheable — output contains non-tensor types: %s",
+                    non_tensor,
+                )
+                return False
+        else:
+            hc_log.debug(
+                "auto_guard_cache: not cacheable — output type %s is not tensor or tuple/list",
+                type(body_r).__name__,
+            )
+            return False
+
+        # Check input types: no unknowns
+        unknown_vts = [vt for tag, vt in flat_vts if tag == "unknown"]
+        if unknown_vts:
+            hc_log.debug(
+                "auto_guard_cache: not cacheable — unsupported input VT types: %s",
+                [type(vt).__name__ for vt in unknown_vts],
+            )
+            return False
+
+        return True
+
+    @staticmethod
+    def _extract_tensor_metadata(t):
+        return (t.shape, t.stride(), t.dtype, t.device, t.requires_grad)
+
+    def _build_auto_cache_condition(self, tx, flat_vts, arg_sources, fn_args_vt, kwargs, guards_before):
+        from torch._guards import AutoCacheCondition
+
+        # Build flat input checks
+        flat_input_checks: list[tuple[str, Any]] = []
+        for tag, vt in flat_vts:
+            if tag == "tensor":
+                example = vt.proxy.node.meta.get("example_value", None)
+                if example is None:
+                    hc_log.debug(
+                        "auto_guard_cache: cannot build condition — tensor input has no example_value"
+                    )
+                    return None
+                flat_input_checks.append(
+                    ("tensor", self._extract_tensor_metadata(example))
+                )
+            elif tag == "symnode":
+                flat_input_checks.append(("symnode", vt.python_type()))
+            elif tag == "constant":
+                flat_input_checks.append(("constant", vt.value))
+            elif tag == "module":
+                flat_input_checks.append(("module", None))
+            else:
+                hc_log.debug(
+                    "auto_guard_cache: cannot build condition — unexpected input tag '%s' for %s",
+                    tag,
+                    type(vt).__name__,
+                )
+                return None
+
+        # Compute guard delta
+        guards_after = tx.output.guards.inner.copy()
+        new_guards = guards_after - guards_before
+
+        # Guard types to skip — structural guards are already enforced by
+        # the outer graph. DICT_CONTAINS is introduced by pytree.tree_flatten
+        # checking SUPPORTED_NODES and is invariant.
+        structural_guards = {
+            "DUPLICATE_INPUT",
+            "BUILTIN_MATCH",
+            "MODULE_MATCH",
+            # "BUILTIN_MATCH",
+            # "NN_MODULE",
+            # "HASATTR",
+            # "FUNCTION_MATCH",
+            # "CLOSURE_MATCH",
+            # "ID_MATCH",
+            # "DICT_CONTAINS",
+        }
+
+        from torch._guards import ChainedSource
+
+        # Collect root sources from function args. Guards not rooted at one
+        # of these are about the outer environment and already enforced.
+        arg_root_sources = set()
+        for s in arg_sources:
+            arg_root_sources.add(s.get_base() if isinstance(s, ChainedSource) else s)
+
+        guard_tuples: list[tuple[Any, Any, str, Any]] = []
+        for guard in new_guards:
+            source = guard.originating_source
+
+            # Only process guards rooted at one of the function arg sources.
+            root = source.get_base() if isinstance(source, ChainedSource) else source
+            if root not in arg_root_sources:
+                # hc_log.debug(
+                #     "auto_guard_cache: skipping non-arg guard '%s' on source '%s'",
+                #     guard.create_fn_name(),
+                #     source.name,
+                # )
+                continue
+
+            type_str = guard.create_fn_name()
+            if type_str in structural_guards:
+                # hc_log.debug(
+                #     "auto_guard_cache: skipping structural guard '%s' on source '%s'",
+                #     type_str,
+                #     source.name,
+                # )
+                continue
+            if type_str == "HASATTR":
+                from ..source import AttrSource as _AttrSource
+
+                if isinstance(source, _AttrSource):
+                    try:
+                        base_value = tx.output.resolve_source_value(source.base)
+                    except Exception:
+                        hc_log.debug(
+                            "auto_guard_cache: cannot build condition — failed to resolve base source '%s' for HASATTR guard",
+                            source.base.name,
+                        )
+                        return None
+                    expected = hasattr(base_value, source.member)
+                    guard_tuples.append((source, guard.create_fn, type_str, expected))
+                    continue
+                else:
+                    hc_log.debug(
+                        "auto_guard_cache: cannot build condition — HASATTR source '%s' is not AttrSource",
+                        source.name,
+                    )
+                    return None
+
+            try:
+                value = tx.output.resolve_source_value(source)
+            except Exception:
+                hc_log.debug(
+                    "auto_guard_cache: cannot build condition — failed to resolve source '%s' for %s guard",
+                    source.name,
+                    type_str,
+                )
+                return None
+
+            if type_str == "TENSOR_MATCH":
+                if not isinstance(value, torch.Tensor):
+                    hc_log.debug(
+                        "auto_guard_cache: cannot build condition — TENSOR_MATCH source '%s' resolved to %s, not a tensor",
+                        source.name,
+                        type(value).__name__,
+                    )
+                    return None
+                expected = self._extract_tensor_metadata(value)
+            elif type_str == "TYPE_MATCH":
+                expected = type(value)
+            elif type_str == "EQUALS_MATCH":
+                expected = value
+            elif type_str == "EMPTY_NN_MODULE_HOOKS_DICT":
+                expected = len(value) == 0
+            elif type_str == "NOT_PRESENT_IN_GENERIC_DICT":
+                attr = guard.create_fn.keywords["attr"]
+                expected = attr not in value.__dict__
+            elif type_str == "CONSTANT_MATCH":
+                if isinstance(value, str):
+                    # TODO - THis is wrong, but ignoring because vLLM hardcodes
+                    # a string name in custom op. Using opaque strings will
+                    # remove the guard.
+                    continue
+                expected = value
+            elif type_str == "CLASS_MATCH":
+                expected = value
+            elif type_str == "CLOSURE_MATCH":
+                if type(value) is types.FunctionType and hasattr(value, "__code__"):
+                    expected = value.__code__
+                else:
+                    expected = id(value)
+            elif type_str == "DICT_CONTAINS":
+                key = guard.create_fn.keywords["key"]
+                invert = guard.create_fn.keywords["invert"]
+                expected = (key not in value) if invert else (key in value)
+            elif type_str == "SEQUENCE_LENGTH":
+                expected = len(value)
+            else:
+                hc_log.debug(
+                    "auto_guard_cache: cannot build condition — unsupported guard type '%s' on source '%s'",
+                    type_str,
+                    source.name,
+                )
+                expected = None
+                return None
+
+            guard_tuples.append((source, guard.create_fn, type_str, expected))
+
+        return AutoCacheCondition(
+            flat_input_checks=flat_input_checks,
+            guards=guard_tuples,
+        )
+
+    def _is_reusable(self, tx, condition, flat_vts, new_arg_sources, cached_entry):
+        """Check if a cache entry's conditions match the current call."""
+        # Check flat input checks
+        if len(condition.flat_input_checks) != len(flat_vts):
+            hc_log.debug(
+                "auto_guard_cache: reuse failed — input count mismatch: cached %d vs current %d",
+                len(condition.flat_input_checks),
+                len(flat_vts),
+            )
+            return False
+
+        for i, ((cached_tag, cached_val), (cur_tag, cur_vt)) in enumerate(
+            zip(condition.flat_input_checks, flat_vts)
+        ):
+            if cached_tag != cur_tag:
+                hc_log.debug(
+                    "auto_guard_cache: reuse failed — input %d tag mismatch: cached '%s' vs current '%s'",
+                    i, cached_tag, cur_tag,
+                )
+                return False
+            if cached_tag == "tensor":
+                example = cur_vt.proxy.node.meta.get("example_value", None)
+                if example is None:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — input %d tensor has no example_value",
+                        i,
+                    )
+                    return False
+                cur_meta = self._extract_tensor_metadata(example)
+                if cur_meta != cached_val:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — input %d tensor metadata mismatch: cached %s vs current %s",
+                        i, cached_val, cur_meta,
+                    )
+                    return False
+            elif cached_tag == "symnode":
+                if cur_vt.python_type() != cached_val:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — input %d symnode type mismatch: cached %s vs current %s",
+                        i, cached_val, cur_vt.python_type(),
+                    )
+                    return False
+            elif cached_tag == "constant":
+                if cur_vt.value != cached_val:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — input %d constant mismatch: cached %s vs current %s",
+                        i, cached_val, cur_vt.value,
+                    )
+                    return False
+            # "module" → always passes
+
+        # Check guards with reparameterized sources
+        source_replacement = self._build_source_replacement(
+            cached_entry.arg_sources, new_arg_sources
+        )
+
+        def replacement_fn(s):
+            return source_replacement.get(s, s)
+
+        for source, create_fn, type_str, expected in condition.guards:
+            if source_replacement:
+                new_source = source.clone(replacement_fn)
+            else:
+                new_source = source
+
+            if type_str == "HASATTR":
+                from ..source import AttrSource as _AttrSource
+
+                if isinstance(new_source, _AttrSource):
+                    try:
+                        base_value = tx.output.resolve_source_value(new_source.base)
+                    except Exception:
+                        hc_log.debug(
+                            "auto_guard_cache: reuse failed — cannot resolve base source '%s' for HASATTR guard",
+                            new_source.base.name,
+                        )
+                        return False
+                    if hasattr(base_value, new_source.member) != expected:
+                        hc_log.debug(
+                            "auto_guard_cache: reuse failed — HASATTR guard on '%s': expected %s, got %s",
+                            new_source.name, expected, hasattr(base_value, new_source.member),
+                        )
+                        return False
+                    continue
+                else:
+                    return False
+
+            try:
+                value = tx.output.resolve_source_value(new_source)
+            except Exception:
+                hc_log.debug(
+                    "auto_guard_cache: reuse failed — cannot resolve source '%s' for %s guard",
+                    new_source.name, type_str,
+                )
+                return False
+
+            if type_str == "TENSOR_MATCH":
+                if not isinstance(value, torch.Tensor):
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — TENSOR_MATCH source '%s' resolved to %s, not a tensor",
+                        new_source.name, type(value).__name__,
+                    )
+                    return False
+                cur_meta = self._extract_tensor_metadata(value)
+                if cur_meta != expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — TENSOR_MATCH guard on '%s': cached %s vs current %s",
+                        new_source.name, expected, cur_meta,
+                    )
+                    return False
+            elif type_str == "TYPE_MATCH":
+                if type(value) is not expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — TYPE_MATCH guard on '%s': expected %s, got %s",
+                        new_source.name, expected, type(value),
+                    )
+                    return False
+            elif type_str == "EQUALS_MATCH":
+                if value != expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — EQUALS_MATCH guard on '%s': expected %s, got %s",
+                        new_source.name, expected, value,
+                    )
+                    return False
+            elif type_str == "EMPTY_NN_MODULE_HOOKS_DICT":
+                if (len(value) == 0) != expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — EMPTY_NN_MODULE_HOOKS_DICT guard on '%s': expected empty=%s, got empty=%s",
+                        new_source.name, expected, len(value) == 0,
+                    )
+                    return False
+            elif type_str == "NOT_PRESENT_IN_GENERIC_DICT":
+                attr = create_fn.keywords["attr"]
+                if (attr not in value.__dict__) != expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — NOT_PRESENT_IN_GENERIC_DICT guard on '%s': expected (%s not in __dict__)=%s, got %s",
+                        new_source.name, attr, expected, attr not in value.__dict__,
+                    )
+                    return False
+            elif type_str == "CONSTANT_MATCH":
+                if value != expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — CONSTANT_MATCH guard on '%s': expected %s, got %s",
+                        new_source.name, expected, value,
+                    )
+                    return False
+            elif type_str == "CLASS_MATCH":
+                if value is not expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — CLASS_MATCH guard on '%s': expected %s, got %s",
+                        new_source.name, expected, value,
+                    )
+                    return False
+            elif type_str == "CLOSURE_MATCH":
+                if type(value) is types.FunctionType and hasattr(value, "__code__"):
+                    if value.__code__ is not expected:
+                        hc_log.debug(
+                            "auto_guard_cache: reuse failed — CLOSURE_MATCH guard on '%s': __code__ mismatch",
+                            new_source.name,
+                        )
+                        return False
+                else:
+                    if id(value) != expected:
+                        hc_log.debug(
+                            "auto_guard_cache: reuse failed — CLOSURE_MATCH guard on '%s': id mismatch",
+                            new_source.name,
+                        )
+                        return False
+            elif type_str == "DICT_CONTAINS":
+                key = create_fn.keywords["key"]
+                invert = create_fn.keywords["invert"]
+                cur = (key not in value) if invert else (key in value)
+                if cur != expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — DICT_CONTAINS guard on '%s': key=%s invert=%s, expected %s got %s",
+                        new_source.name, key, invert, expected, cur,
+                    )
+                    return False
+            elif type_str == "SEQUENCE_LENGTH":
+                if len(value) != expected:
+                    hc_log.debug(
+                        "auto_guard_cache: reuse failed — SEQUENCE_LENGTH guard on '%s': expected %s, got %s",
+                        new_source.name, expected, len(value),
+                    )
+                    return False
+            else:
+                hc_log.debug(
+                    "auto_guard_cache: reuse failed — unknown guard type '%s' on '%s'",
+                    type_str, new_source.name,
+                )
+                return False
+
+        # Re-install guards whose source changed
+        # if source_replacement:
+        #     from torch._dynamo.guards import GuardBuilder, install_guard
+        #     from torch._guards import Guard
+
+        #     for source, create_fn, _, _ in condition.guards:
+        #         new_source = source.clone(replacement_fn)
+        #         if new_source != source:
+        #             install_guard(Guard(new_source, create_fn))
+
+        return True
+
+    def _find_auto_cache_match(self, tx, fn_var, flat_vts, new_arg_sources):
+        from torch._guards import InvokeSubgraphCache
+
+        invoke_subgraph_cache = (
+            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+                torch._higher_order_ops.invoke_subgraph
+            )
+        )
+        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+            return None
+        fn_id = self._get_fn_id(fn_var)
+        if fn_id is None:
+            return None
+
+        return invoke_subgraph_cache.find_auto_cache_entry(
+            fn_id,
+            lambda cond, entry: self._is_reusable(
+                tx, cond, flat_vts, new_arg_sources, entry
+            ),
+        )
+
+    def _save_auto_cache(
+        self, tx, fn_var, proxy_node_to_idx, arg_sources, body_name, body_gmod,
+        config, p_args, body_r, example_value, condition,
+    ):
+        from torch._guards import InvokeSubgraphCache, PureSubgraphCacheEntry
+
+        invoke_subgraph_cache = (
+            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+                torch._higher_order_ops.invoke_subgraph
+            )
+        )
+        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
+            return
+
+        fn_id = self._get_fn_id(fn_var)
+        if fn_id is None:
+            return
+
+        freevar_mapping = self._build_freevar_mapping(p_args, proxy_node_to_idx)
+
+        single_tensor_output = isinstance(body_r, TensorVariable)
+
+        output_metadata = [
+            (t.shape, t.stride(), t.dtype, t.device, t.requires_grad)
+            for t in example_value
+        ]
+
+        entry = PureSubgraphCacheEntry(
+            body_name=body_name,
+            body_gmod=body_gmod,
+            config=config,
+            freevar_mapping=freevar_mapping,
+            single_tensor_output=single_tensor_output,
+            output_metadata=output_metadata,
+            arg_sources=arg_sources,
+        )
+        invoke_subgraph_cache.add_auto_cache_entry(fn_id, condition, entry)
 
     @staticmethod
     def _build_freevar_mapping(p_args, proxy_node_to_idx):
@@ -5251,87 +5731,18 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 grapharg = outer_proxy.node.meta.get("grapharg", None)
                 source = grapharg.source if grapharg is not None else None
                 assert source is not None, (
-                    f"is_pure freevar has no source: node.op={outer_proxy.node.op} "
+                    f"Freevar has no source: node.op={outer_proxy.node.op} "
                     f"node.name={outer_proxy.node.name} — this likely means a "
                     f"function argument was not included in the proxy matching"
                 )
                 freevar_mapping.append((-1, source))
         return freevar_mapping
 
-    def _get_pure_cache(self, tx, fn_var):
-        from torch._guards import InvokeSubgraphCache
-
-        invoke_subgraph_cache = (
-            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
-                torch._higher_order_ops.invoke_subgraph
-            )
-        )
-        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
-            return None
-        fn_id = self._get_fn_id(fn_var)
-        if fn_id is None:
-            return None
-        return invoke_subgraph_cache.get_pure_cache_entry(fn_id)
-
-    def _save_pure_cache(
-        self, tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r, example_value
-    ):
-        from torch._guards import InvokeSubgraphCache, PureSubgraphCacheEntry
-
-        invoke_subgraph_cache = (
-            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
-                torch._higher_order_ops.invoke_subgraph
-            )
-        )
-        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
-            return
-
-        fn_id = self._get_fn_id(fn_var)
-        if fn_id is None:
-            return
-
-        proxy_node_to_idx, _, arg_sources = self._flatten_args_and_kwargs(
-            fn_args_vt, kwargs
-        )
-        freevar_mapping = self._build_freevar_mapping(p_args, proxy_node_to_idx)
-
-        single_tensor_output = isinstance(body_r, TensorVariable)
-
-        # Validate output types: single tensor, or tuple/list of tensors.
-        if single_tensor_output:
-            assert isinstance(body_r, TensorVariable)
-        else:
-            assert isinstance(body_r, (TupleVariable, ListVariable)), (
-                f"is_pure: expected single tensor or tuple/list output, got {type(body_r)}"
-            )
-            for item in body_r.items:
-                assert isinstance(item, TensorVariable), (
-                    f"is_pure: sequence output contains non-tensor: {type(item)}"
-                )
-
-        # allow_side_effects is disabled for is_pure in _call_function, so
-        # example_value contains only user outputs (no extra intermediates).
-        output_metadata = [
-            (t.shape, t.stride(), t.dtype, t.device, t.requires_grad)
-            for t in example_value
-        ]
-
-        entry = PureSubgraphCacheEntry(
-            body_name=body_name,
-            body_gmod=body_gmod,
-            config=config,
-            freevar_mapping=freevar_mapping,
-            single_tensor_output=single_tensor_output,
-            output_metadata=output_metadata,
-            arg_sources=arg_sources,
-        )
-        invoke_subgraph_cache.add_pure_cache_entry(fn_id, entry)
-
     def _stamp_out_cached_subgraph(self, tx, fn_args_vt, kwargs, cached):
         from .builder import VariableBuilder
 
-        _, flat_proxies, new_arg_sources = self._flatten_args_and_kwargs(
-            fn_args_vt, kwargs
+        _, _, flat_proxies, new_arg_sources = self._flatten_args(
+            tx, fn_args_vt, kwargs
         )
 
         # Build a replacement dict: old arg source → new arg source.
@@ -5341,11 +5752,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # instance, the root source changes (e.g. L['self'] on call 1 vs
         # L['self'].layers[1] on call 2). We map old roots to new roots so
         # Source.clone() can rewrite the entire tree.
-        # pyrefly: ignore[implicit-any]
-        source_replacement = {}
-        for old_source, new_source in zip(cached.arg_sources, new_arg_sources):
-            if old_source != new_source:
-                source_replacement[old_source] = new_source
+        source_replacement = self._build_source_replacement(
+            cached.arg_sources, new_arg_sources
+        )
 
         # Lookup existing placeholders by source so we can reuse them below
         # instead of creating duplicates via VariableBuilder.
@@ -5408,17 +5817,16 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._dynamo.utils import dynamo_timed
+
         fn_var = args[0]
         fn_args_vt = args[1:]
 
-        # Extract config and is_pure from the marked function.
         config = None
-        is_pure = False
         if hasattr(fn_var, "get_function"):
             try:
                 fn = fn_var.get_function()
                 config = getattr(fn, "__marked_compile_region_config__", None)
-                is_pure = getattr(fn, "__marked_compile_region_is_pure__", False)
             except Exception:
                 log.warning(
                     "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
@@ -5426,31 +5834,56 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 )
                 raise
 
-        if is_pure:
-            cached = self._get_pure_cache(tx, fn_var)
-            if cached is not None:
-                return self._stamp_out_cached_subgraph(tx, fn_args_vt, kwargs, cached)
+        auto_cache = torch._dynamo.config.invoke_subgraph_auto_guard_cache
 
-        # Normal path: trace the subgraph.
-        # Pure functions have no side effects, so disable allow_side_effects
-        # to prevent collect_intermediate_outputs from adding extra SymInt
-        # outputs that complicate caching.
+        # Auto-cache lookup
+        if auto_cache:
+            with dynamo_timed("invoke_subgraph_cache_lookup"):
+                flat_vts, _, _, new_arg_sources = self._flatten_args(
+                    tx, fn_args_vt, kwargs
+                )
+                match = self._find_auto_cache_match(
+                    tx, fn_var, flat_vts, new_arg_sources
+                )
+            if match is not None:
+                hc_log.debug(
+                    "auto_guard_cache: cache hit for '%s', reusing subgraph '%s'",
+                    fn_var,
+                    match.body_name,
+                )
+                with dynamo_timed("invoke_subgraph_stamp_out"):
+                    return self._stamp_out_cached_subgraph(
+                        tx, fn_args_vt, kwargs, match
+                    )
+
+        # Snapshot guards before tracing for auto-cache delta computation
+        guards_before = None
+        if auto_cache:
+            guards_before = tx.output.guards.inner.copy()
+
+        # Trace the subgraph.
+        # Auto-cached functions have no side effects, so disable
+        # allow_side_effects to prevent collect_intermediate_outputs from
+        # adding extra SymInt outputs that complicate caching.
         assert self._HOP_NAME is not None
         old_allow_side_effects = self.allow_side_effects
-        if is_pure:
+        if auto_cache:
             self.allow_side_effects = False
-        try:
-            (
-                p_args,
-                p_kwargs,
-                example_value,
-                body_r,
-                body_gmod,
-                body_name,
-                body_graph_output_vts,
-            ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
-        finally:
-            self.allow_side_effects = old_allow_side_effects
+        with dynamo_timed("invoke_subgraph_trace"):
+            try:
+                (
+                    p_args,
+                    p_kwargs,
+                    example_value,
+                    body_r,
+                    body_gmod,
+                    body_name,
+                    body_graph_output_vts,
+                ) = self.create_wrapped_node(
+                    tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME
+                )
+            finally:
+                self.allow_side_effects = old_allow_side_effects
 
         if len(p_kwargs) > 0:
             unimplemented(
@@ -5472,10 +5905,21 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             *p_args[1:],
         )
 
-        if is_pure:
-            self._save_pure_cache(
-                tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r, example_value
+        # Auto-cache save
+        if auto_cache:
+            flat_vts, proxy_node_to_idx, _, arg_sources = self._flatten_args(
+                tx, fn_args_vt, kwargs
             )
+            if self._is_auto_cacheable(body_r, flat_vts):
+                condition = self._build_auto_cache_condition(
+                    tx, flat_vts, arg_sources, fn_args_vt, kwargs, guards_before
+                )
+                if condition is not None:
+                    self._save_auto_cache(
+                        tx, fn_var, proxy_node_to_idx, arg_sources,
+                        body_name, body_gmod,
+                        config, p_args, body_r, example_value, condition,
+                    )
 
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
             tx,
