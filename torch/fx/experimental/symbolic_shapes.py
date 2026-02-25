@@ -127,24 +127,23 @@ from torch.fx.experimental.size_hinting import (
 
 def guarding_hint_or_throw(
     a: Union[torch.SymInt, torch.SymBool, int, bool, SymNode],
-) -> int:
+) -> Union[int, bool]:
     """
-    Return a concrete integer hint for a symbolic value, for use in guarding decisions.
+    Return a concrete hint for a symbolic value, for use in guarding decisions.
 
-    Always returns a Python int.  For boolean inputs (SymBool, bool), this
-    returns 0 or 1 — **not** sympy.true/sympy.false.  Callers that need
-    sympy boolean types should wrap the result accordingly.
+    Returns Python bool (True/False) for boolean inputs (SymBool, bool),
+    and Python int for integer inputs (SymInt, int).
     """
     if isinstance(a, SymNode):
         if a._hint is not None:
-            return int(a._hint)
+            return a._hint
         hint = a.shape_env.guarding_hint_or_throw(a.expr)
         a._hint = hint
-        return int(hint)
+        return hint
     if isinstance(a, (torch.SymInt, torch.SymBool)):
         return guarding_hint_or_throw(a.node)
     if isinstance(a, bool):
-        return int(a)
+        return a
     if type(a) is not int:
         raise AssertionError(f"Expected int, got {type(a)}")
     return a
@@ -6828,12 +6827,12 @@ class ShapeEnv:
         return expr
 
     @lru_cache(256)
-    def guarding_hint_or_throw(self, expr: Union[sympy.Expr, int]) -> int:
+    def guarding_hint_or_throw(self, expr: Union[sympy.Expr, int]) -> Union[int, bool]:
         """
-        Return a concrete integer hint for an expression.
+        Return a concrete hint for an expression.
 
-        Always returns a Python int.  For boolean expressions (e.g. Eq, Ne),
-        this returns 0 or 1 — **not** sympy.true/sympy.false.
+        Returns Python bool (True/False) for boolean expressions (e.g. Eq, Ne),
+        and Python int for integer expressions.
         """
         return _guarding_hint_or_throw_base(self, expr, {})
 
@@ -7730,13 +7729,14 @@ class ShapeEnv:
         def compute_concrete_val() -> sympy.Basic:
             if hint is None:
                 # This is only ever called for expressions WITHOUT unbacked
-                # symbols.  These are always boolean guard expressions, so
-                # return sympy.true/sympy.false (not int) to match what
-                # downstream `is sympy.true` identity checks expect.
+                # symbols.  guarding_hint_or_throw returns Python bool for
+                # boolean expressions and int for integer expressions;
+                # sympify converts them to the proper sympy types
+                # (True -> sympy.true, 5 -> Integer(5)).
                 r = self.guarding_hint_or_throw(orig_expr)
                 if r is None:
                     raise AssertionError("r must not be None")
-                return sympy.true if r else sympy.false
+                return sympy.sympify(r)
             else:
                 return sympy.sympify(hint)
 
