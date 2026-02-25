@@ -31,7 +31,6 @@ class FileBaton:
             True if the file could be created, else False.
         """
         try:
-            # pyrefly: ignore [bad-assignment]
             self.fd = os.open(self.lock_file_path, os.O_CREAT | os.O_EXCL)
             return True
         except FileExistsError:
