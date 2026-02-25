@@ -1169,16 +1169,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
-            # RuntimeError: Failed to create function state object for: cross_float2
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
         ),
     ),
     OpInfo(
@@ -2831,13 +2821,6 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
-            # Exception: index ????? is out of bounds for dimension 0 with size 6
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
             # Exception: Tensor-likes are not close!
             DecorateInfo(
                 unittest.expectedFailure,
@@ -2847,11 +2830,6 @@ op_db: list[OpInfo] = [
             ),
         ],
         skips=(
-            DecorateInfo(
-                unittest.skip("Unsupported on MPS for now"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
             # Exception: linalg.lu_factor(): MPS only supports floats.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -2885,14 +2863,14 @@ python_ref_db: list[OpInfo] = [
                 "TestCommon",
                 "test_python_ref",
                 device_type="mps",
-                dtypes=(torch.bfloat16, torch.complex64, torch.float16),
+                dtypes=(torch.bfloat16, torch.float16),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref_torch_fallback",
                 device_type="mps",
-                dtypes=(torch.bfloat16, torch.complex64, torch.float16),
+                dtypes=(torch.bfloat16, torch.float16),
             ),
         ),
     ),

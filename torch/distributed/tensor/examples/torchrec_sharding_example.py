@@ -91,10 +91,10 @@ class LocalShardsWrapper(torch.Tensor):
         if func in supported_ops:
             res_shards_list = [
                 func(shard, *args[1:], **kwargs)
-                # pyrefly: ignore [bad-index, index-error]
+                # pyrefly: ignore [bad-index]
                 for shard in args[0].shards
             ]
-            # pyrefly: ignore [bad-index, index-error]
+            # pyrefly: ignore [bad-index]
             return LocalShardsWrapper(res_shards_list, args[0].shard_offsets)
         else:
             raise NotImplementedError(
