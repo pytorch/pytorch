@@ -525,7 +525,9 @@ def register_symm_mem_lowerings():
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
             return inp
         else:
-            return _copy_input_to_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
+            return _copy_input_to_comm_buffer(
+                inp, ir.CommBufferType.SYMM_MEM, group_name
+            )  # type: ignore[arg-type]
 
     def _create_out_variant_node(
         out_op: torch._ops.OpOverload,
