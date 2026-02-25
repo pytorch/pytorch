@@ -89,17 +89,29 @@ CUDAPeerAllocInfo::CUDAPeerAllocInfo(
       local_device_idx_(local_device_idx),
       rank_(rank),
       world_size_(world_size) {
+  // Use cudaMalloc instead of CUDACachingAllocator::raw_alloc for these
+  // small, long-lived device pointer arrays.  The caching allocator respects
+  // the active memory-pool context (e.g. the private pool used by CUDAGraph
+  // tree warmup), so an allocation made inside that context lands in the
+  // private pool and is flagged as an untracked leak by check_memory_pool.
+  // cudaMalloc always allocates from the default CUDA pool, which is the
+  // correct behavior for infrastructure metadata that outlives any single
+  // graph capture.
   const size_t arr_size = sizeof(void*) * world_size_;
-  buffers_dev_ = reinterpret_cast<void**>(
-      c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-  signal_pads_dev_ = reinterpret_cast<void**>(
-      c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-
   c10::cuda::CUDAGuard guard(local_device_idx);
+  AT_CUDA_CHECK(cudaMalloc(&buffers_dev_, arr_size));
+  AT_CUDA_CHECK(cudaMalloc(&signal_pads_dev_, arr_size));
   AT_CUDA_CHECK(cudaMemcpy(
       buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
   AT_CUDA_CHECK(cudaMemcpy(
       signal_pads_dev_, signal_pads_.data(), arr_size, cudaMemcpyHostToDevice));
+}
+
+CUDAPeerAllocInfo::~CUDAPeerAllocInfo() {
+  // Best-effort free -- ignore errors during process teardown.
+  c10::cuda::CUDAGuard guard(local_device_idx_);
+  (void)cudaFree(buffers_dev_);
+  (void)cudaFree(signal_pads_dev_);
 }
 
 /* Start of CUDASymmetricMemory */
