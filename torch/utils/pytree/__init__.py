@@ -62,9 +62,18 @@ __all__ = [
 
 # NB: Once this variable is read from the environment, the underlying pytree
 #     implementation is frozen. It cannot be swapped to another at runtime.
-PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {
-    "0",
+PYTORCH_USE_CXX_PYTREE: bool = _os.getenv(
+    "PYTORCH_USE_CXX_PYTREE", "false"
+).lower() not in {
     "",
+    "0",
+    "false",
+    "f",
+    "no",
+    "n",
+    "off",
+    "disable",
+    "disabled",
 }
 
 
