@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import operator
 from collections import Counter, defaultdict
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -90,12 +91,27 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
 
         logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
 
-        # Identify the new wait and start
+        # Identify the new wait(s) and start
         new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
-        assert len(new_waits) == 1, f"Expected exactly one new wait, got {new_waits}"
-        new_wait = new_waits[0]
-        new_start = new_wait.args[0]
-        assert isinstance(new_start, fx.Node)
+        assert len(new_waits) >= 1, f"Expected at least one new wait, got {new_waits}"
+
+        if len(new_waits) == 1:
+            new_wait = new_waits[0]
+            new_start: fx.Node = new_wait.args[0]  # pyrefly: ignore[bad-assignment]
+            assert isinstance(new_start, fx.Node)
+        else:
+            # Coalesced bucketing: N waits, find the collective start through getitem
+            coll_start = new_waits[0].args[0]
+            assert isinstance(coll_start, fx.Node)
+            if (
+                coll_start.op == "call_function"
+                and coll_start.target is operator.getitem
+            ):
+                coll_start = coll_start.args[0]  # pyrefly: ignore[bad-assignment]
+            assert isinstance(coll_start, fx.Node)
+            new_start = coll_start
+            # Use last wait as the canonical wait for scheduling
+            new_wait = new_waits[-1]
 
         # Set manual bucketing-specific metadata
         # Note: Generic metadata (nn_module_stack, fwd_nn_module_stack, custom, stack_trace)
@@ -103,12 +119,13 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         node_type = (
             "bucketed_all_gather" if is_all_gather(first) else "bucketed_reduce_scatter"
         )
+        wait_set = OrderedSet(new_waits)
         for n in new_nodes:
-            if n == new_wait:
-                node_type = node_type + "_wait"
-            n.meta["manual_bucket_node_type"] = node_type
-            if "wait" in node_type:
+            if n in wait_set:
+                n.meta["manual_bucket_node_type"] = node_type + "_wait"
                 self.node_to_wait_map[n] = new_wait
+            elif n is new_start:
+                n.meta["manual_bucket_node_type"] = node_type
 
     def manual_bucket_collectives(self, nodes: list[fx.Node]) -> None:
         """
