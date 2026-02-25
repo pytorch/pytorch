@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import functools
 from collections.abc import Callable, Sequence
-from typing import cast
+from typing import cast, Optional
 
 import torch
 from torch._ops import OpOverload
@@ -15,6 +16,7 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
     register_single_dim_strategy,
@@ -292,6 +294,21 @@ _monotone_binary_base_rules: list[list[Placement]] = [
     [Partial("min"), Replicate(), Partial("min")],
 ]
 
+# .out variants stay on old path until PR2 adds out-variant infrastructure
+partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
+    aten.maximum.out: "max",
+    aten.minimum.out: "min",
+}
+
+# Reconstruct the original linear_pointwise_ops dict for the existing registration path.
+linear_pointwise_ops: dict[OpOverload, int] = {
+    **dict.fromkeys(unary_linear_ops, 0),
+    **dict.fromkeys(binary_additive_ops, 1),
+    **dict.fromkeys(binary_mul_ops, 2),
+    **dict.fromkeys(binary_div_ops, 2),
+    **dict.fromkeys(scalar_linear_ops, 0),
+    **dict.fromkeys(neg_ops, 0),
+}
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.__ilshift__.Scalar,
@@ -685,6 +702,7 @@ def _register(
 
 def pointwise_strategy(
     op_schema: OpSchema,
+    linearity: int = -1,
     preserve_partial: str | None = None,
 ) -> OpStrategy:
     """Strategy for pointwise ops on the old registration path."""
@@ -720,8 +738,41 @@ def pointwise_strategy(
         op_schema.args_schema,
         followed_strategy,
         followed_strategy_index,
+        linearity,
         preserve_partial=preserve_partial,
     )
+
+
+def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Linear pointwise operators can propagate pending reductions.
+    For example, c = add(a, b); if a is pending sum, then c will be
+    pending sum as well without any communication overhead.
+
+    Note that:
+    1. Only unary and binary operations are supported, out variant
+      ops are not supported.
+    2. There're multiple types of linearity, refer to the doc of
+      common_pointwise_strategy for more details.
+    """
+    linearity_type = linear_pointwise_ops.get(op_schema.op, -1)
+    return pointwise_strategy(op_schema, linearity=linearity_type)
+
+
+def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
+    """Strategy for pointwise ops that preserve specific Partial types."""
+    preserve_partial = partial_preserving_ops.get(op_schema.op)
+    return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
+
+
+def copy_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for copy_ that preserves any Partial placement.
+
+    copy_ simply copies data and should preserve whatever Partial placement
+    the destination has, regardless of the reduce_op type (sum, avg, max, min, etc.).
+    """
+    return pointwise_strategy(op_schema, preserve_partial="all")
 
 
 def common_pointwise_strategy(
@@ -778,9 +829,21 @@ def common_pointwise_strategy(
                     out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
                 is_scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
-                propagate_partial = not (
-                    op in p_sum_scalar_redistribute_ops and is_scalar_arg
-                )
+                propagate_partial = False
+
+                # ordering matters here since NormPartial is a subclass of Partial
+                if isinstance(placement, _NormPartial):
+                    # explanation for args_schema[1] >= 0 can be found in summary
+                    # https://github.com/pytorch/pytorch/pull/170035
+                    propagate_partial = (
+                        op in norm_partial_avoidable_redistribute_ops
+                        and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
+                    )
+
+                elif isinstance(placement, Partial):
+                    propagate_partial = not (
+                        op in p_sum_scalar_redistribute_ops and is_scalar_arg
+                    )
 
                 # Check if this partial type should be preserved
                 # preserve_partial="all" preserves any Partial type (used for copy_)
@@ -900,6 +963,41 @@ p_sum_scalar_redistribute_ops = {
     aten.sub.Tensor,
     aten.sub_.Tensor,
 }
+
+norm_partial_avoidable_redistribute_ops = {
+    aten.div.Scalar,
+    aten.div_.Scalar,
+    aten.mul.Scalar,
+    aten.mul_.Scalar,
+}
+
+for op in linear_pointwise_ops:
+    if op in norm_partial_avoidable_redistribute_ops:
+        register_op_strategy(
+            op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
+        )(linear_pointwise_strategy)
+    else:
+        register_op_strategy(
+            op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+        )(linear_pointwise_strategy)
+
+for op in partial_preserving_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        partial_preserving_pointwise_strategy
+    )
+
+# Register copy_ with its custom strategy that preserves all Partial types
+register_op_strategy(
+    aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(copy_strategy)
+register_op_strategy(
+    prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(copy_strategy)
+
+for op in pointwise_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        pointwise_strategy
+    )
 
 # Register single-dim strategies for all categorized ops.
 
