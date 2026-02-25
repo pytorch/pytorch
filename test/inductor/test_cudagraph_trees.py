@@ -3353,6 +3353,53 @@ if HAS_CUDA_AND_TRITON:
             # g2 and g3 use cudagraphs (2 graphs recorded)
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        def test_cudagraph_min_partition_size_skip_small(self):
+            """Partitions with fewer kernels than the threshold are skipped."""
+
+            # Simple function with few kernels
+            def fn(x):
+                return x * 2
+
+            inp = torch.randn(4, 4, device="cuda")
+
+            # Set threshold high enough to skip this simple function
+            with torch._inductor.config.patch(
+                {"triton.cudagraph_min_partition_size": 10}
+            ):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                for _ in range(3):
+                    out = fn_compiled(inp)
+
+            self.assertEqual(out, inp * 2)
+            # Partition was too small, so no cudagraph recorded
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_min_partition_size_allow_large(self):
+            """Partitions with enough kernels pass the threshold."""
+
+            # Function with multiple operations -> more kernels
+            def fn(x):
+                y = x * 2
+                y = y + 1
+                y = y.sin()
+                y = y.cos()
+                y = y * x
+                return y @ y
+
+            inp = torch.randn(4, 4, device="cuda")
+
+            # Set threshold low enough to allow this function
+            with torch._inductor.config.patch(
+                {"triton.cudagraph_min_partition_size": 2}
+            ):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                for _ in range(3):
+                    out = fn_compiled(inp)
+
+            # Partition was large enough, cudagraph should be recorded
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         def test_tensor_constant_mutation(self):
             class Foo(torch.nn.Module):
                 def __init__(self) -> None:
