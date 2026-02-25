@@ -67,7 +67,7 @@ pip install linkchecker
 - `#anchor` fragments (verifies the target ID exists on the page)
 - Links to auto-generated API documentation in `/generated/`
 
-External URLs are **not** checked by linkchecker (they're validated separately
+External URLs are **not** checked by this linkchecker configuration (they're validated separately
 by `scripts/lint_urls.sh`).
 
 ### CI Integration
