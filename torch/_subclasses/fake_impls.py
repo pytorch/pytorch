@@ -36,6 +36,7 @@ from torch._subclasses.fake_tensor import (
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
+from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils._stats import count_label
 
@@ -641,14 +642,14 @@ def _compute_stride(
 def _view_has_unbacked_input(
     a: torch.Tensor, shape: ShapeType | tuple[ShapeType]
 ) -> bool:
-    from torch.fx.experimental.symbolic_shapes import has_hint
+    from torch.fx.experimental.symbolic_shapes import has_guarding_hint
 
     shape = utils.extract_shape_from_varargs(shape, validate=False)
 
     return (
-        any(not has_hint(s) for s in a.size())
-        or any(not has_hint(s) for s in a.stride())
-        or any(not has_hint(s) for s in shape)
+        any(not has_guarding_hint(s) for s in a.size())
+        or any(not has_guarding_hint(s) for s in a.stride())
+        or any(not has_guarding_hint(s) for s in shape)
     )
 
 
@@ -1319,11 +1320,10 @@ def conv(
         k = new_kwargs["weight"].ndim
 
         # Avoid importing sympy at a module level
-        from torch.fx.experimental.symbolic_shapes import has_hint
 
-        all_hinted = all(has_hint(s) for s in new_kwargs["input"].shape) and all(
-            has_hint(s) for s in new_kwargs["weight"].shape
-        )
+        all_hinted = all(
+            has_guarding_hint(s) for s in new_kwargs["input"].shape
+        ) and all(has_guarding_hint(s) for s in new_kwargs["weight"].shape)
 
         if not all_hinted:
             # TODO: We can make this a little more faithful with best effort

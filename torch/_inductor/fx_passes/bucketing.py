@@ -71,13 +71,13 @@ def _compute_foreach_groups(
     Returns a flat list with -1 as group delimiter, or None if only one group exists.
     For example, groups [[0, 2], [1]] would be encoded as [0, 2, -1, 1].
     """
-    from torch.fx.experimental.symbolic_shapes import size_hint
+    from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 
     groups: defaultdict[tuple[torch.dtype, torch.dtype, tuple[int, ...]], list[int]] = (
         defaultdict(list)
     )
     for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes)):
-        shape = tuple(size_hint(s) for s in ag_in.shape)
+        shape = tuple(guarding_hint_or_throw(s) for s in ag_in.shape)
         key = (ag_in.dtype, out_dtype, shape)
         groups[key].append(i)
 

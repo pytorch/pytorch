@@ -44,7 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
     find_symbol_binding_fx_nodes,
     free_symbols,
     is_symbol_binding_fx_node,
-    size_hint,
+    optimization_hint,
     statically_known_false,
     statically_known_true,
 )
@@ -1370,7 +1370,7 @@ def _size_of(node: fx.Node) -> int:
     def object_nbytes(x: object) -> int:
         if not isinstance(x, torch.Tensor):
             return 0
-        return _tensor_nbytes(size_hint(x.numel(), fallback=4096), x.dtype)
+        return _tensor_nbytes(optimization_hint(x.numel(), fallback=4096), x.dtype)
 
     if "val" in node.meta:
         val = node.meta["val"]
@@ -2913,7 +2913,7 @@ def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Te
     shape = list(x.shape)
 
     def realize_symbol(d: torch.SymInt | int) -> int:
-        return size_hint(d, fallback=fallback)
+        return optimization_hint(d, fallback=fallback)
 
     shape = [realize_symbol(s) for s in shape]
     stride = [realize_symbol(s) for s in x.stride()]
@@ -2927,7 +2927,7 @@ def estimate_runtime(node: fx.Node) -> float:
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
             return _remove_symbols_without_guarding(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
-            return size_hint(x.meta["val"], fallback=4096)
+            return optimization_hint(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
