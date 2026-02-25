@@ -827,8 +827,12 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         self._overloadname = (
             "default" if schema.overload_name == "" else schema.overload_name
         )
-        if tags:
-            self._nondeterministic_seeded = torch.Tag.nondeterministic_seeded in tags
+        self._nondeterministic_seeded = (
+            bool(tags) and torch.Tag.nondeterministic_seeded in tags
+        )
+        self._data_dependent_output = (
+            bool(tags) and torch.Tag.data_dependent_output in tags
+        )
         self._name = self._schema.name
         if schema.overload_name:
             self._name += "." + schema.overload_name
@@ -853,6 +857,12 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                 # aliased inputs as NOT a view
                 is_write = a.alias_info.is_write or is_write
         self.is_view = is_write is not None and not is_write
+        self._has_multiple_returns = len(schema.returns) > 1
+        # Pre-compute static bypass eligibility for proxy_call fast path.
+        # Only dynamic arg-level checks (sym scalars, symbolic sizes) remain per-call.
+        self._can_bypass_proxy_dispatch = (
+            not self._has_multiple_returns and not self._data_dependent_output
+        )
 
     @cached_property
     def _namespace(self) -> str:

@@ -71,7 +71,7 @@ from torch.utils._python_dispatch import (
     autograd_would_have_decomposed,
     TorchDispatchMode,
 )
-from torch.utils._stats import count
+from torch.utils._stats import count, count_label
 from torch.utils._thunk import Thunk
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
 
@@ -1040,20 +1040,30 @@ def _maybe_record_pointwise_barrier(
 
 def _fetch_proxies_and_all_constant_flag(
     flat_args_kwargs: Union[list[object], tuple[object, ...]], tracer: _ProxyTracer
-) -> tuple[list[object], tuple[object, ...], bool]:
+) -> tuple[list[object], tuple[object, ...], bool, bool, bool]:
     """
     Given flat arguments, fetch the proxies and whether they are all constants.
     This is later used in proxy_call or when someone is trying to stitch together
     graph node in tf or td modes.
+
+    Returns (f_flat_args_kwargs, proxy_flat_args_kwargs, all_constant,
+    has_sym_scalars, has_symbolic_sizes).
+    All three flags are computed in a single pass to avoid redundant iteration.
     """
-    f_flat_args_kwargs = [
-        (
-            fetch_object_proxy(tracer, x)
-            if isinstance(x, (Tensor, _AnyScriptObject)) or is_opaque_value(x)
-            else x
-        )
-        for x in flat_args_kwargs
-    ]
+    f_flat_args_kwargs: list[object] = []
+    has_sym_scalars = False
+    has_symbolic_sizes = False
+
+    for x in flat_args_kwargs:
+        if isinstance(x, py_sym_types):
+            has_sym_scalars = True
+            f_flat_args_kwargs.append(x)
+        elif isinstance(x, (Tensor, _AnyScriptObject)) or is_opaque_value(x):
+            if isinstance(x, Tensor) and x._has_symbolic_sizes_strides:
+                has_symbolic_sizes = True
+            f_flat_args_kwargs.append(fetch_object_proxy(tracer, x))
+        else:
+            f_flat_args_kwargs.append(x)
 
     # If there are SymInts, we also should not consider this constant.
     # However, fake tensor handling of SymInts is sufficiently broken that
@@ -1066,7 +1076,7 @@ def _fetch_proxies_and_all_constant_flag(
         )
         # TODO: maybe constant SymInts should also be allowed?  Not sure if
         # this can happen
-        and not any(isinstance(x, py_sym_types) for x in flat_args_kwargs)
+        and not has_sym_scalars
     )
 
     proxy_flat_args_kwargs = [
@@ -1078,7 +1088,13 @@ def _fetch_proxies_and_all_constant_flag(
         for e in proxy_flat_args_kwargs
     ]
 
-    return f_flat_args_kwargs, tuple(proxy_flat_args_kwargs), all_constant
+    return (
+        f_flat_args_kwargs,
+        tuple(proxy_flat_args_kwargs),
+        all_constant,
+        has_sym_scalars,
+        has_symbolic_sizes,
+    )
 
 
 def proxy_call(
@@ -1087,6 +1103,7 @@ def proxy_call(
     pre_dispatch: bool,
     args: tuple[object, ...],
     kwargs: dict[str, object],
+    types: tuple[type, ...] | None = None,
 ) -> object:
     unrecognized_types: list[type] = []
     flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
@@ -1138,9 +1155,13 @@ def proxy_call(
             return (args[0] != 0).item()  # type: ignore[attr-defined]
 
     tracer = proxy_mode.tracer
-    f_flat_args_kwargs, proxy_flat_args_kwargs, all_constant = (
-        _fetch_proxies_and_all_constant_flag(flat_args_kwargs, tracer)
-    )
+    (
+        f_flat_args_kwargs,
+        proxy_flat_args_kwargs,
+        all_constant,
+        has_sym_scalars,
+        has_symbolic_sizes,
+    ) = _fetch_proxies_and_all_constant_flag(flat_args_kwargs, tracer)
 
     if torch.Tag.data_dependent_output in func.tags:
         # Check if all of the Tensor inputs are constants
@@ -1213,8 +1234,40 @@ def proxy_call(
         name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
 
-    with _enable_thunkify(proxy_mode.tracer):
-        out = func(*args, **kwargs)
+    # Try to bypass proxy mode and call fake tensor dispatch directly for eligible ops.
+    # This avoids re-entering the proxy mode dispatch for simple operations.
+    # Static op-level eligibility is cached on OpOverload (_can_bypass_proxy_dispatch).
+    # Dynamic checks (has_sym_scalars, has_symbolic_sizes) are both computed in
+    # _fetch_proxies_and_all_constant_flag in a single pass over flat args.
+    out = None
+    bypass_succeeded = False
+
+    if (
+        func._can_bypass_proxy_dispatch
+        and not has_sym_scalars
+        and not has_symbolic_sizes
+    ):
+        fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+        if fake_mode is not None:
+            try:
+                # Temporarily unset fake mode to avoid re-entry guard, then call
+                # dispatch() directly (skips the assertion in __torch_dispatch__)
+                with unset_fake_temporarily():
+                    dispatch_types = types if types is not None else ()
+                    with _enable_thunkify(proxy_mode.tracer):
+                        out = fake_mode.dispatch(
+                            func, dispatch_types, args, kwargs or {}
+                        )
+                    bypass_succeeded = True
+                    count_label("proxy_call.bypass_succeeded")
+            except Exception:
+                bypass_succeeded = False
+                count_label("proxy_call.bypass_failed")
+
+    if not bypass_succeeded:
+        count_label("proxy_call.normal_dispatch")
+        with _enable_thunkify(proxy_mode.tracer):
+            out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -1253,6 +1306,7 @@ def proxy_call(
     # we can query it if we're asked to item() it at some later point
     if (
         func is torch.ops.aten.lift_fresh_copy.default
+        and out is not None
         and out.numel() <= CONSTANT_NUMEL_LIMIT
     ):
         with unset_fake_temporarily():
@@ -1717,7 +1771,9 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             torch._functorch.predispatch._vmap_decrement_nesting,
             torch._functorch.vmap.lazy_load_decompositions,
         ]:
-            _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
+            _, proxies, _, _, _ = _fetch_proxies_and_all_constant_flag(
+                args, self.tracer
+            )
             out_proxy = self.tracer.create_proxy(
                 "call_function",
                 func,
@@ -1787,7 +1843,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             if func == prim.device.default:
                 return func(*args, **kwargs)
 
-            return proxy_call(self, func, self.pre_dispatch, args, kwargs)
+            return proxy_call(self, func, self.pre_dispatch, args, kwargs, types)
 
     def __enter__(self) -> Self:
         # Stash and store the previous proxy mode (there may or may not be one)
