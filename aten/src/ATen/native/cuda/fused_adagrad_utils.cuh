@@ -51,9 +51,10 @@ template <typename scalar_t>
 struct FusedAdagradMathFunctor {
   using opmath_t = at::opmath_type<scalar_t>;
 
+  template <bool IS_VOLTA_OR_HIGHER>
   C10_DEVICE __forceinline__ void operator()(
       int64_t chunk_size,
-      FusedOptimizerTensorListMetadata<3>& tl,
+      FusedOptimizerTensorListMetadata<3, IS_VOLTA_OR_HIGHER>& tl,
       const float* lr_ptr,
       const double& lr,
       const double& lr_decay,

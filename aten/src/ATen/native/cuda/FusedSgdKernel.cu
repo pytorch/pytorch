@@ -65,9 +65,10 @@ struct FusedSgdMathFunctor {
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
   using opmath_t = at::opmath_type<scalar_t>;
 
+  template <bool IS_VOLTA_OR_HIGHER>
   C10_DEVICE __forceinline__ void operator()(
       const int64_t chunk_size,
-      TensorListMetadata<depth>& tl,
+      TensorListMetadata<depth, IS_VOLTA_OR_HIGHER>& tl,
       const double weight_decay,
       const double momentum,
       const float* lr_ptr,
