@@ -304,7 +304,6 @@ class StreamVariable(StreamContextVariable):
 
         self.proxy = proxy
         self.value = value
-        # pyrefly: ignore [read-only]
         self.device = value.device
 
         self.user_object_index = user_object_index
@@ -356,13 +355,14 @@ class StreamVariable(StreamContextVariable):
             # constant values
             other = args[0]
             if not isinstance(other, StreamVariable):
-                return ConstantVariable.create(NotImplemented)
+                return VariableTracker.build(tx, NotImplemented)
 
             if other.source:
                 assert self.source is not None
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-            return ConstantVariable.create(
-                cmp_name_to_op_mapping[name](self.value, other.value)  # type: ignore[arg-type]
+            return VariableTracker.build(
+                tx,
+                cmp_name_to_op_mapping[name](self.value, other.value),  # type: ignore[arg-type]
             )
 
         return super().call_method(tx, name, args, kwargs)

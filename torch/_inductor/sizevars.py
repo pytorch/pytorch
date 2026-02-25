@@ -13,8 +13,10 @@ from sympy import Expr
 from torch import SymInt
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
+    free_unbacked_symbols,
     GuardOnDataDependentSymNode,
     has_free_unbacked_symbols,
+    IterateExprs,
     ShapeEnv,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -821,6 +823,17 @@ class SizeVarAllocator:
             fallback = config.unbacked_symint_fallback
         return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
 
+    def all_unbacked_explicitly_hinted(self, exprs: IterateExprs) -> bool:
+        """
+        Return True if every unbacked symbol in *exprs* has an explicit
+        user-provided hint in var_to_hint_override.  If there are no
+        unbacked symbols at all, returns True (vacuously).
+        *exprs* can be a single expression or any iterable accepted by
+        free_unbacked_symbols (list, tuple, etc.).
+        """
+        unbacked = free_unbacked_symbols(exprs)
+        return unbacked.issubset(self.var_to_hint_override.keys())
+
     def optimization_hint_with_override(
         self,
         expr: Union[Expr, int],
@@ -1130,11 +1143,12 @@ class SizeVarAllocator:
         while sub_cnt < sub_cnt_limit:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
-                return new_expr
+                break
             expr = sympy.factor(new_expr)
             sub_cnt += 1
+        else:
+            log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
 
-        log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
         return expr
