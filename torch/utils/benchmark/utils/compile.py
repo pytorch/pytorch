@@ -89,14 +89,11 @@ if HAS_TABULATE:
             try:
                 torch._dynamo.reset()
                 compile_counter_with_backend = CompileCounterWithBackend(backend)
-                # pyrefly: ignore [no-matching-overload]
                 opt_model = torch.compile(model, backend=compile_counter_with_backend, mode=mode)
 
                 # Compilation only happens after the first inference
-                # pyrefly: ignore [bad-argument-type]
                 compilation_time = bench_loop(opt_model, sample_input, 1, optimizer, loss_fn)
 
-                # pyrefly: ignore [bad-argument-type]
                 running_time = bench_loop(opt_model, sample_input, num_iters, optimizer, loss_fn)
 
                 if compile_counter_with_backend.frame_count == 0:
@@ -112,7 +109,6 @@ if HAS_TABULATE:
         else:
             opt_model = model
             compilation_time = None
-            # pyrefly: ignore [bad-argument-type]
             running_time = bench_loop(opt_model, sample_input, num_iters, optimizer, loss_fn)
 
         compilation_time = round(compilation_time, 2) if compilation_time else None
