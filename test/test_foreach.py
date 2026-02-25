@@ -1587,6 +1587,69 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
+    def test_foreach_copy_with_mixed_dtypes_across_tensors(self, device, dtype, op):
+        foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+
+        for sample in op.sample_inputs(
+            device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
+        ):
+            if len(sample.input) < 2:
+                continue
+
+            dtypes = [torch.float32, torch.int64, torch.bfloat16, torch.float16]
+            src_tensors = [
+                t.detach().clone().to(src_dtype)
+                for t, src_dtype in zip(sample.args[0], itertools.cycle(dtypes))
+            ]
+            dst_tensors = [torch.empty_like(t) for t in src_tensors]
+
+            out = foreach_copy_(
+                (dst_tensors, src_tensors), is_cuda=True, expect_fastpath=True
+            )
+            out_ref = [
+                torch.empty_like(dst_tensor).copy_(src_tensor)
+                for dst_tensor, src_tensor in zip(dst_tensors, src_tensors)
+            ]
+            for t, ref_t in zip(out, out_ref):
+                self.assertTrue(torch.equal(t, ref_t))
+
+    @onlyCUDA
+    def test_foreach_copy_mixed_dtypes_same_pair_fastpath_unaligned_int8(self):
+        foreach_copy_ = ForeachFuncWrapper(torch._foreach_copy_)
+        numel = 4096
+
+        for src_offset, dst_offset in ((1, 1), (1, 2)):
+            with self.subTest(src_offset=src_offset, dst_offset=dst_offset):
+                src_storage = torch.randint(
+                    -128,
+                    128,
+                    (numel + src_offset,),
+                    device="cuda",
+                    dtype=torch.int8,
+                )
+                dst_storage = torch.empty(
+                    numel + dst_offset, device="cuda", dtype=torch.int8
+                )
+
+                src_tensors = [
+                    src_storage[src_offset:],
+                    torch.randn(numel, device="cuda", dtype=torch.float32),
+                ]
+                dst_tensors = [
+                    dst_storage[dst_offset:],
+                    torch.empty(numel, device="cuda", dtype=torch.float32),
+                ]
+
+                out = foreach_copy_(
+                    (dst_tensors, src_tensors), is_cuda=True, expect_fastpath=True
+                )
+                ref_out = [
+                    torch.empty_like(t).copy_(s) for t, s in zip(out, src_tensors)
+                ]
+                self.assertEqual(out, ref_out)
+
+    @onlyCUDA
+    @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_mixed_dtypes_within_tensor(self, device, dtype, op):
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
 
