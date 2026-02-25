@@ -388,7 +388,7 @@ binary_additive_ops = [
 ]
 
 # Maps op -> whether R, P(x) -> P(x) is valid (linear in second arg).
-# True for mul (bilinear), False for div (only linear in numerator).
+# True for mul (linear in each argument), False for div (only linear in numerator).
 binary_multiplicative_ops: dict[OpOverload, bool] = {
     aten.div.Tensor: False,
     aten.div.out: False,
@@ -429,11 +429,11 @@ scalar_linear_ops = [
     aten._foreach_sub_.ScalarList,
 ]
 
-# Monotonic increasing unary ops: P(max)->P(max), P(min)->P(min)
-# Only ops that are monotonic on their ENTIRE domain belong here.
+# Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
+# Only ops that are non-decreasing on their ENTIRE domain belong here.
 # Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
 # because P(max) offsets can push inputs outside the valid domain.
-monotonic_increasing_unary_ops = [
+non_decreasing_unary_ops = [
     aten.asinh.default,
     aten.asinh.out,
     aten.asinh_.default,
@@ -487,9 +487,9 @@ monotonic_increasing_unary_ops = [
     aten.trunc_.default,
 ]
 
-# Monotonic decreasing unary ops: P(max)->P(min), P(min)->P(max)
+# Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
 # Note: acos excluded due to domain constraints [-1,1] causing validation failures
-monotonic_decreasing_unary_ops: list[OpOverload] = [
+non_increasing_unary_ops: list[OpOverload] = [
     aten.erfc.default,
     aten.erfc.out,
     aten.erfc_.default,
@@ -681,10 +681,10 @@ for op, linear_in_second_arg in binary_multiplicative_ops.items():
 for op in scalar_linear_ops:
     _register(op, _UNARY_LINEAR_RULES, static_argnum=1)
 
-for op in monotonic_increasing_unary_ops:
+for op in non_decreasing_unary_ops:
     _register(op, _MONOTONIC_INCREASING_RULES)
 
-for op in monotonic_decreasing_unary_ops:
+for op in non_increasing_unary_ops:
     _register(op, _MONOTONIC_DECREASING_RULES)
 
 for op in all_partial_preserving_unary_ops:
