@@ -340,6 +340,26 @@ class _AnnotateCall(_DebugCall):
         ]
 
 
+class _ExternalCall(_DebugCall):
+    """Non-dispatch function call recorded by external call sites."""
+
+    def __init__(
+        self, func_name: str, args_str: str, call_depth: int, stack: bool = False
+    ) -> None:
+        super().__init__(call_depth, stack=stack)
+        self.func_name = func_name
+        self.args_str = args_str
+
+    def stringify_args(self, attributes, tensor_memo=None):
+        pass
+
+    def render(self, attributes: list[str]) -> str:
+        base_str = f"[external] {self.func_name}({self.args_str})"
+        if self.output_str:
+            base_str += self.output_str
+        return base_str
+
+
 def _get_call_name(call: _DebugCall) -> str:
     """String identifying _DebugCall (e.g. func, kernel, module name)"""
     if isinstance(call, _OpCall):
@@ -348,6 +368,8 @@ def _get_call_name(call: _DebugCall) -> str:
         return call.kernel_name
     elif isinstance(call, _AnnotateCall):
         return f"[{call.header}] {call.tag}"
+    elif isinstance(call, _ExternalCall):
+        return call.func_name
     elif isinstance(call, _RedistributeCall):
         return REDISTRIBUTE_FUNC
     else:
