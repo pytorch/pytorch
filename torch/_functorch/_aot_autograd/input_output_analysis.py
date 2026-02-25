@@ -225,8 +225,8 @@ def create_synthetic_base_metadata(
                 if not is_concrete_int(s)
             },
             base_idx=synthetic_base_info[outer_idx][0],  # type: ignore[index]
-            requires_grad=outer_args[outer_idx].requires_grad,
-            requires_grad_for_backward=outer_args[outer_idx].requires_grad,
+            requires_grad=(requires_grad := outer_args[outer_idx].requires_grad),
+            requires_grad_for_backward=requires_grad,
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
