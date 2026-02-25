@@ -1331,7 +1331,7 @@ class PythonWrapperCodegen(CodeGen):
                     from torch.distributed.distributed_c10d import _resolve_process_group
                     _pg = _resolve_process_group(group_name)
                     _backend = _pg._get_backend(device)
-                    if _backend.supports_tensor_alloc(device):
+                    if _backend.supports_tensor_alloc(device) and _backend.is_initialized():
                         return _backend.allocate_tensor(numel, dtype=dtype, device=device)
                     return torch.empty(numel, dtype=dtype, device=device)
                 """,
