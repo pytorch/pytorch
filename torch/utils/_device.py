@@ -54,21 +54,12 @@ def _device_constructors():
         torch.tensor,
         torch.as_tensor,
         torch.scalar_tensor,
-        # *_like may contain device kwarg, but the user implicitly
-        # expects a specific device even when kwarg unused.
-        # torch.zeros_like,
-        # torch.randint_like,
-        # torch.randn_like,
-        # torch.ones_like,
-        # torch.full_like,
-        # torch.empty_like,
     }
 
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
     def __init__(self, device) -> None:
-        # pyrefly: ignore [read-only]
         self.device = torch.device(device)
         self.prev_mode: Optional[DeviceContext] = None
 

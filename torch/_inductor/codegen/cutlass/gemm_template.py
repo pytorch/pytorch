@@ -23,7 +23,7 @@ from ...config import cutlass as inductor_cutlass_config
 from ...ir import (
     Buffer,
     ChoiceCaller,
-    CUDATemplateBuffer,
+    CUTLASSTemplateBuffer,
     FixedLayout,
     IRNode,
     Layout,
@@ -33,7 +33,7 @@ from ...utils import is_dynamic, Placeholder
 from ...virtualized import V
 from ..common import IndentedBuffer
 from . import utils as cutlass_utils
-from .cuda_kernel import CUDATemplateKernel
+from .kernel import CUTLASSTemplateKernel
 from .python_evt import CutlassEVTCodegen, scaled_mm_evt
 from .template import CUTLASSTemplate
 from .utils import (
@@ -1093,9 +1093,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     def render(  # type: ignore[override]
         self,
-        kernel: CUDATemplateKernel,
+        kernel: CUTLASSTemplateKernel,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
-        template_buffer_node: Optional[CUDATemplateBuffer] = None,
+        template_buffer_node: Optional[CUTLASSTemplateBuffer] = None,
         epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
         **kwargs,
     ) -> str:
@@ -1105,14 +1105,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         including potentially fused epilogues.
 
         Args:
-            kernel (CUDATemplateKernel): The kernel to be rendered.
+            kernel (CUTLASSTemplateKernel): The kernel to be rendered.
             op (cutlass_gemm_op.GemmOperation, optional): A GEMM operation that is required to be compatible with the
                 input and output definitions as well as a possible epilogue. Defaults to None.
             **kwargs: Additional keyword arguments. Currently unused.
 
         Returns:
             str: Cutlass based CUDA C++ code fragment as a string, to be used by the current
-            CUDATemplateKernel or autotuning code.
+            CUTLASSTemplateKernel or autotuning code.
 
         Note:
             All inputs and their corresponding buffer addresses and names take precedence over previously
@@ -1448,8 +1448,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             return False
         if len(B_layout.size) < 1:
             return False
-        A_size = list(V.graph.sizevars.size_hints(A_layout.size))
-        B_size = list(V.graph.sizevars.size_hints(B_layout.size))
+        A_size = list(V.graph.sizevars.guarding_hints_or_throw(A_layout.size))
+        B_size = list(V.graph.sizevars.guarding_hints_or_throw(B_layout.size))
         if len(A_size) < 2:
             A_size.insert(0, 1)
         if len(B_size) < 2:
@@ -1472,7 +1472,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
                 return False
         if len(layouts) == 3:
             C_layout = layouts[2]
-            C_size = [V.graph.sizevars.size_hint(i) for i in C_layout.size]
+            C_size = list(V.graph.sizevars.guarding_hints_or_throw(C_layout.size))
             while len(C_size) < len(A_size):
                 C_size.insert(0, 1)
             # check batch dims
@@ -1512,10 +1512,18 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         acc_dtype = torch_dtype_to_cutlass_type(accumulator_dtype)
         output_dtype = torch_dtype_to_cutlass_type(output_dtype)
 
+        # TODO: size_hint_fn is passed to both create_example_tensors (just for
+        # tracing examples) and trace -> _render_argument_type -> _get_arg_from_node
+        # where stride values are baked as C++ literals into the generated CUTLASS
+        # argument struct. For the latter, accessing hint is wrong: even for
+        # backed symbols we access the hint without installing a guard, so the
+        # generated strides could be incorrect for different dynamic shape inputs.
+        # guarding_hint_or_throw would be wrong here — it does not install
+        # guards either. This should use guard_int to properly guard on the values.
         examples = create_example_tensors(
             var_name_to_buffer_name,
             name_to_buffer,  # type: ignore[arg-type]
-            V.graph.sizevars.size_hint,
+            V.graph.sizevars.optimization_hint,
         )
         evt_name, evt_args, evt_code, arg_renames = trace(
             evt_py_code,
@@ -1525,7 +1533,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             op.tile_description,  # type: ignore[attr-defined]
             op.epilogue_schedule,  # type: ignore[attr-defined]
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
-            V.graph.sizevars.size_hint,
+            V.graph.sizevars.guarding_hint_or_throw,
         )
 
         return (
@@ -1653,7 +1661,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         Y: IRNode,
         alpha: float,
         beta: float,
-        kernel: CUDATemplateKernel,
+        kernel: CUTLASSTemplateKernel,
         epilogue_args,
     ) -> str:
         """
@@ -1670,7 +1678,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             Y (IRNode): The output tensor.
             alpha (float): Scaling factor for the product of the inputs.
             beta (float): Scaling factor for the output tensor.
-            kernel (CUDATemplateKernel): CUDA Template kernel for the operation.
+            kernel (CUTLASSTemplateKernel): CUDA Template kernel for the operation.
             epilogue_args (any): Additional arguments for the epilogue state.
 
         Returns:
@@ -1944,7 +1952,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         Y: IRNode,
         alpha: float,
         beta: float,
-        kernel: CUDATemplateKernel,
+        kernel: CUTLASSTemplateKernel,
         epilogue_args,
     ) -> str:
         """
@@ -1963,7 +1971,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
             Y (IRNode): The output tensor.
             alpha (float): Scaling factor for the product of the inputs.
             beta (float): Scaling factor for the output tensor.
-            kernel (CUDATemplateKernel): CUDA Template kernel for the operation.
+            kernel (CUTLASSTemplateKernel): CUDA Template kernel for the operation.
             epilogue_args (any): Additional arguments for the epilogue state.
 
         Returns:
