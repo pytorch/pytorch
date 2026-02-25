@@ -1,4 +1,3 @@
-import hashlib
 import itertools
 import math
 from collections import defaultdict
@@ -410,26 +409,24 @@ class DTensorSpec:
             # but I actually can't reproduce it, maybe it is also a bug!
             assert isinstance(value, TensorMeta | TensorMetadata), value
 
-    def _hash_key(self) -> tuple[Any, ...]:
-        """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
-        if self.tensor_meta is not None:
-            return (
-                self.mesh,
-                self.placements,
-                self.shard_order,
-                self.tensor_meta.shape,
-                self.tensor_meta.stride,
-                self.tensor_meta.dtype,
-            )
-        return (self.mesh, self.placements, self.shard_order)
-
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
         # propagation results. We only need to consider the mesh, placements, shape
         # dtype and stride.
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
         # fields to them.
-        return hash(self._hash_key())
+        if self.tensor_meta is not None:
+            return hash(
+                (
+                    self.mesh,
+                    self.placements,
+                    self.shard_order,
+                    self.tensor_meta.shape,
+                    self.tensor_meta.stride,
+                    self.tensor_meta.dtype,
+                )
+            )
+        return hash((self.mesh, self.placements, self.shard_order))
 
     def __hash__(self) -> int:
         # We lazily cache the spec to avoid recomputing the hash upon each
@@ -439,17 +436,6 @@ class DTensorSpec:
         if self._hash is None:
             self._hash = self._hash_impl()
         return self._hash
-
-    def _stable_hash(self) -> str:
-        """
-        Return a stable hash for AOT autograd caching.
-        [See note: Tensor subclass stable hashing for AOT autograd cache]
-        """
-        # Get hash key, but replace mesh with its stable hash
-        key = self._hash_key()
-        # First element is mesh, replace with its stable hash
-        stable_key = (self.mesh._stable_hash(),) + key[1:]
-        return hashlib.blake2b(repr(stable_key).encode(), digest_size=16).hexdigest()
 
     def _check_equals(self, other: object, skip_shapes: bool = False) -> bool:
         if not (
