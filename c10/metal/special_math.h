@@ -583,7 +583,7 @@ inline float polygamma(const int64_t order, const T0 input) {
   return sgn * gamma(n + 1) * zeta(n + 1, x);
 }
 
-template<typename T>
+template <typename T>
 inline float trigamma(T x) {
   float sign = 1.0f;
   float result = 0.0f;
