@@ -281,7 +281,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
     def __init__(
-        self, name, *, cacheable=False, supports_training_input_mutation=False, no_overloaded_args=False
+        self,
+        name,
+        *,
+        cacheable=False,
+        supports_training_input_mutation=False,
+        no_overloaded_args=False,
     ):
         super().__init__()
         if type(self) is HigherOrderOperator:
