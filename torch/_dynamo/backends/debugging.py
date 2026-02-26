@@ -28,7 +28,7 @@ import functools
 import logging
 from collections.abc import Callable, Iterable
 from importlib import import_module
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -312,7 +312,7 @@ def boxed_nop_with_mode(
 def fake_crossref_boxed_nop(
     fx_g: torch.fx.GraphModule,
     example_inputs: list[torch.Tensor],
-    ignore_op_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None,
+    ignore_op_fn: Callable[[torch._ops.OpOverload], bool] | None = None,
 ) -> Callable[..., Any]:
     from torch.fx.graph import _BoxedCodeGen
 
@@ -352,8 +352,8 @@ def get_nop_func() -> Callable[
 def aot_eager(
     gm: torch.fx.GraphModule,
     fake_tensor_inputs: list[torch.Tensor],
-    fw_compiler: Optional[Callable[..., Any]] = None,
-    bw_compiler: Optional[Callable[..., Any]] = None,
+    fw_compiler: Callable[..., Any] | None = None,
+    bw_compiler: Callable[..., Any] | None = None,
     **kwargs: Any,
 ) -> Callable[..., Any]:
     return aot_autograd(
@@ -545,9 +545,9 @@ class ExplainOutput:
     graph_break_count: int
     break_reasons: list[GraphCompileReason]
     op_count: int
-    ops_per_graph: Optional[list[list["Target"]]] = None
-    out_guards: Optional[list[_guards.Guard]] = None
-    compile_times: Optional[str] = None
+    ops_per_graph: list[list["Target"]] | None = None
+    out_guards: list[_guards.Guard] | None = None
+    compile_times: str | None = None
 
     def __str__(self) -> str:
         output = f"Graph Count: {self.graph_count}\n"
@@ -645,7 +645,7 @@ class ExplainWithBackend:
         print(eb.output())
     """
 
-    def __init__(self, backend: Union[CompilerFn, str]) -> None:
+    def __init__(self, backend: CompilerFn | str) -> None:
         from .registry import lookup_backend
 
         self.backend = lookup_backend(backend)
