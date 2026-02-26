@@ -24,6 +24,10 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
 from torch.distributed.tensor._ops._pointwise_ops import (
+    _BINARY_ADDITIVE_RULES,
+    _common_pointwise_single_dim_strategy,
+    _MUL_RULES,
+    _UNARY_LINEAR_RULES,
     single_mesh_dim_linear_pointwise_strategy,
 )
 from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
@@ -1193,6 +1197,99 @@ def dummy_check(x: torch.Tensor) -> None:
 @dummy_check.register_fake
 def _dummy_check_fake(x):
     return None
+
+
+class TestCommonPointwiseSingleDimStrategy(TestCase):
+    """Unit tests for _common_pointwise_single_dim_strategy raw rule generation."""
+
+    def _meta(self, *dims: int) -> TensorMeta:
+        shape = torch.Size(dims)
+        stride = torch.empty(shape).stride()
+        return TensorMeta(shape=shape, stride=stride, dtype=torch.float32)
+
+    @staticmethod
+    def _normalize(rules):
+        """Convert rules to a comparable form (replace _ShardingPlaceholder with Shard)."""
+        out = []
+        for rule in rules:
+            out.append(
+                tuple(
+                    Shard(p.dim) if isinstance(p, _ShardingPlaceholder) else p
+                    for p in rule
+                )
+            )
+        return out
+
+    def test_unary_2d_shard_rules(self):
+        """Unary op with a 2D tensor should produce two Shard rules."""
+        fn = _common_pointwise_single_dim_strategy()
+        rules = self._normalize(
+            fn(torch.ops.aten.abs.default, (self._meta(4, 8),), {})
+        )
+        self.assertEqual(
+            rules,
+            [(Shard(0), Shard(0)), (Shard(1), Shard(1))],
+        )
+
+    def test_unary_with_partial_extra_rules(self):
+        """Unary op with _UNARY_LINEAR_RULES should append partial rules."""
+        fn = _common_pointwise_single_dim_strategy(partial_extra_rules=_UNARY_LINEAR_RULES)
+        rules = self._normalize(
+            fn(torch.ops.aten.neg.default, (self._meta(4, 8),), {})
+        )
+        expected = [
+            (Shard(0), Shard(0)),
+            (Shard(1), Shard(1)),
+            (Partial("sum"), Partial("sum")),
+            (Partial("avg"), Partial("avg")),
+        ]
+        self.assertEqual(rules, expected)
+
+    def test_binary_broadcast_replicate(self):
+        """When one input is broadcast, the broadcast dim gets Replicate."""
+        fn = _common_pointwise_single_dim_strategy()
+        # (4, 8) + (8,) — dim 0 is broadcast for the second arg
+        rules = self._normalize(
+            fn(torch.ops.aten.add.Tensor, (self._meta(4, 8), self._meta(8)), {})
+        )
+        self.assertEqual(
+            rules,
+            [(Shard(0), Shard(0), Replicate()), (Shard(1), Shard(1), Shard(0))],
+        )
+
+    def test_partial_extra_rules_filtered_by_arity(self):
+        """Binary extra rules are filtered out when only one tensor arg is present."""
+        fn = _common_pointwise_single_dim_strategy(partial_extra_rules=_MUL_RULES + _UNARY_LINEAR_RULES)
+        # Scalar promotion: mul.Tensor with one tensor arg
+        rules = self._normalize(
+            fn(torch.ops.aten.mul.Tensor, (self._meta(4, 8), 2.0), {})
+        )
+        # Length-3 _MUL_RULES should be filtered out, only length-2 _UNARY_LINEAR_RULES kept
+        expected = [
+            (Shard(0), Shard(0)),
+            (Shard(1), Shard(1)),
+            (Partial("sum"), Partial("sum")),
+            (Partial("avg"), Partial("avg")),
+        ]
+        self.assertEqual(rules, expected)
+
+    def test_binary_with_additive_rules(self):
+        """Binary op with _BINARY_ADDITIVE_RULES appends the right partial rules."""
+        fn = _common_pointwise_single_dim_strategy(partial_extra_rules=_BINARY_ADDITIVE_RULES)
+        rules = self._normalize(
+            fn(torch.ops.aten.add.Tensor, (self._meta(4, 8), self._meta(4, 8)), {})
+        )
+        expected = [
+            (Shard(0), Shard(0), Shard(0)),
+            (Shard(1), Shard(1), Shard(1)),
+            (Partial("sum"), Partial("sum"), Partial("sum")),
+            (Partial("avg"), Partial("avg"), Partial("avg")),
+            (Partial("avg"), Partial("avg"), Replicate()),
+            (Partial("max"), Partial("max"), Replicate()),
+            (Partial("min"), Partial("min"), Replicate()),
+            (Partial("avg"), Replicate(), Partial("avg")),
+        ]
+        self.assertEqual(rules, expected)
 
 
 class TestSingleDimStrategyRegistration(TestCase):

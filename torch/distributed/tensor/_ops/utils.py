@@ -473,9 +473,14 @@ def expand_to_full_mesh_op_strategy(
             )
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
-        if inplace_op and self_spec.placements != input_specs[0].placements:
-            # if it's inplace op, we would only allow the OpSpec to be added when the
-            # input_spec matches the first argument's runtime sharding, otherwise we skip
+        redistribute_input = self_spec.placements != input_specs[0].placements
+        mismatching_input_output = (
+            spec_list[0] is not None and spec_list[0].placements != self_spec.placements
+        )
+        if inplace_op and (redistribute_input or mismatching_input_output):
+            # For inplace ops, both the proposed input[0] and the output must
+            # match self's runtime placement: input[0] because self can't be
+            # redistributed, output because the result IS self.
             if blocking_inplace_input_placements is None:
                 blocking_inplace_input_placements = self_spec.placements
             continue
@@ -504,11 +509,15 @@ def expand_to_full_mesh_op_strategy(
             else:
                 raise RuntimeError("output spec is None")
 
-        # check all inputs are shardable
+        # check all inputs are shardable. The placement equality fallback
+        # is required: is_tensor_shardable rejects shapes smaller than the mesh
+        # (e.g. dim=2 on 4 ranks), but if the input is already at that placement
+        # no redistribution occurs, so the check is irrelevant.
         if not all(
             is_tensor_shardable(
                 inp.shape, s, allow_unbacked_sharding=allow_unbacked_sharding
             )
+            or inp.strategies[0].output_spec.placements == s.placements
             for inp, s in zip(input_args_strategy, input_specs)
         ):
             continue
