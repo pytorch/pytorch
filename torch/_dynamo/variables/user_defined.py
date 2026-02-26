@@ -1170,15 +1170,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
-        # Could this be in a Mixin instead?
         if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
-            # Should this be done lazily?
-            for name, value in self.value.__dict__.items():
-                vt = VariableTracker.build(
+            dict_proxy = {
+                name: VariableTracker.build(
                     tx, value, source=self.source and AttrSource(self.source, name)
                 )
-                self.dict_vt.setitem(name, vt)
+                for name, value in self.value.__dict__.items()
+            }
+            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
         return self.dict_vt
 
     def is_underlying_vt_modified(self, side_effects: "SideEffects") -> bool:
