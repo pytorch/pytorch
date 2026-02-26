@@ -54,7 +54,7 @@ class f(torch.nn.Module):
         _opaque_obj0 = self._opaque_obj0
         _opaque_obj1 = self._opaque_obj1
         _tree_spec_constant0 = self._tree_spec_constant0
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, x_1, y_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = x_1 = y_1 = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', x_1, y_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = x_1 = y_1 = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
 """,  # noqa: B950
@@ -90,7 +90,7 @@ class f(torch.nn.Module):
         _opaque_obj0 = self._opaque_obj0
         _opaque_obj1 = self._opaque_obj1
         _tree_spec_constant0 = self._tree_spec_constant0
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, x_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = x_1 = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', x_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = x_1 = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
 """,  # noqa: B950
@@ -150,7 +150,7 @@ class f(torch.nn.Module):
         _opaque_obj0 = self._opaque_obj0
         _opaque_obj1 = self._opaque_obj1
         _tree_spec_constant0 = self._tree_spec_constant0
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, x_1, y_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = x_1 = y_1 = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', x_1, y_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = x_1 = y_1 = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
 """,  # noqa: B950
@@ -219,7 +219,7 @@ class f(torch.nn.Module):
         def f(x, y):
             _, input_spec = pytree.tree_flatten(((x, y), {}))
             return invoke_leaf_function(
-                real_fn_callable, fake_fn_callable, input_spec, x, y
+                real_fn_callable, fake_fn_callable, input_spec, "", x, y
             )
 
         x = torch.randn(3, 3)
@@ -235,7 +235,7 @@ class f(torch.nn.Module):
         _opaque_obj0 = self._opaque_obj0
         _opaque_obj1 = self._opaque_obj1
         _tree_spec_constant0 = self._tree_spec_constant0
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, x_1, y_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = x_1 = y_1 = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', x_1, y_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = x_1 = y_1 = None
         getitem: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem,)
 """,  # noqa: B950
@@ -244,6 +244,35 @@ class f(torch.nn.Module):
         x2 = torch.randn(3, 3)
         y2 = torch.randn(3, 3)
         self.assertEqual(gm(x2, y2), f(x2, y2))
+
+    def test_make_fx_input_mutation(self):
+        @leaf_function(mutates_args={"buf"})
+        def mutate_fn(x, buf):
+            buf.add_(1)
+            return (x + buf,)
+
+        @mutate_fn.register_fake
+        def mutate_fn_fake(x, buf):
+            buf.add_(1)
+            return (x + buf,)
+
+        def f(x, buf):
+            return mutate_fn(x, buf)
+
+        x = torch.randn(3, 3)
+        buf = torch.randn(3, 3)
+
+        buf_eager = buf.clone()
+        eager_out = f(x, buf_eager)
+
+        buf_fx = buf.clone()
+        gm = make_fx(f)(x, buf_fx)
+        self.assertTrue(self._has_invoke_leaf_function_node(gm))
+
+        buf_gm = buf.clone()
+        gm_out = gm(x, buf_gm)
+        self.assertEqual(gm_out, eager_out)
+        self.assertEqual(buf_gm, buf_eager)
 
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
@@ -291,7 +320,7 @@ class GraphModule(torch.nn.Module):
         _opaque_obj0 = self._opaque_obj0
         _opaque_obj1 = self._opaque_obj1
         _tree_spec_constant0 = self._tree_spec_constant0
-        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _opaque_obj0, _opaque_obj1, _tree_spec_constant0, primals_2, primals_3, requires_grad_indices = (0, 1));  primals_1 = _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = primals_2 = primals_3 = None
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.invoke_leaf_function, _opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', primals_2, primals_3, requires_grad_indices = (0, 1));  primals_1 = _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = primals_2 = primals_3 = None
 
         getitem: "f32[0]" = with_effects[0]
         getitem_1: "f32[3, 3]" = with_effects[1];  with_effects = None
@@ -306,7 +335,7 @@ class GraphModule(torch.nn.Module):
         _opaque_obj2 = self._opaque_obj2
         _opaque_obj3 = self._opaque_obj3
         _tree_spec_constant1 = self._tree_spec_constant1
-        with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops.higher_order.invoke_leaf_function, _opaque_obj2, _opaque_obj3, _tree_spec_constant1, tangents_1, requires_grad_indices = ());  tangents_token = _opaque_obj2 = _opaque_obj3 = _tree_spec_constant1 = tangents_1 = None
+        with_effects_1 = torch.ops.higher_order.with_effects(tangents_token, torch.ops.higher_order.invoke_leaf_function, _opaque_obj2, _opaque_obj3, _tree_spec_constant1, '', tangents_1, requires_grad_indices = ());  tangents_token = _opaque_obj2 = _opaque_obj3 = _tree_spec_constant1 = tangents_1 = None
         getitem_2: "f32[0]" = with_effects_1[0]
         getitem_3: "f32[3, 3]" = with_effects_1[1]
         getitem_4: "f32[3, 3]" = with_effects_1[2];  with_effects_1 = None
@@ -425,6 +454,32 @@ class GraphModule(torch.nn.Module):
         out_compiled.backward()
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
+
+    def test_aot_function_input_mutation(self):
+        @leaf_function(mutates_args={"buf"})
+        def mutate_fn(x, buf):
+            buf.add_(1)
+            return (x + buf,)
+
+        @mutate_fn.register_fake
+        def mutate_fn_fake(x, buf):
+            buf.add_(1)
+            return (x + buf,)
+
+        def f(x, buf):
+            return mutate_fn(x, buf)[0]
+
+        x = torch.randn(3, 3)
+        buf = torch.randn(3, 3)
+
+        buf_eager = buf.clone()
+        eager_out = f(x, buf_eager)
+
+        compiled_f = aot_function(f, nop)
+        buf_compiled = buf.clone()
+        compiled_out = compiled_f(x, buf_compiled)
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(buf_compiled, buf_eager)
 
 
 @skipIfTorchDynamo("leaf_function tests manage their own compilation")
@@ -647,7 +702,7 @@ class outer(torch.nn.Module):
             _opaque_obj0 = self._opaque_obj0
             _opaque_obj1 = self._opaque_obj1
             _tree_spec_constant0 = self._tree_spec_constant0
-            with_effects = torch.ops.higher_order.with_effects(None, torch.ops.higher_order.invoke_leaf_function, _opaque_obj0, _opaque_obj1, _tree_spec_constant0, arg1_1, arg2_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = arg1_1 = arg2_1 = None
+            with_effects = torch.ops.higher_order.with_effects(None, torch.ops.higher_order.invoke_leaf_function, _opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', arg1_1, arg2_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = arg1_1 = arg2_1 = None
             getitem: "f32[0]" = with_effects[0]
             getitem_1: "f32[3, 3]" = with_effects[1];  with_effects = None
             return (getitem, getitem_1)
@@ -697,7 +752,7 @@ class outer(torch.nn.Module):
         _opaque_obj0 = self._opaque_obj0
         _opaque_obj1 = self._opaque_obj1
         _tree_spec_constant0 = self._tree_spec_constant0
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, getitem, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = getitem = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', getitem, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = getitem = None
         getitem_1: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem_1,)
 
@@ -751,7 +806,7 @@ class outer(torch.nn.Module):
         _opaque_obj0 = self._opaque_obj0
         _opaque_obj1 = self._opaque_obj1
         _tree_spec_constant0 = self._tree_spec_constant0
-        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, getitem_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = getitem_1 = None
+        invoke_leaf_function = torch.ops.higher_order.invoke_leaf_function(_opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', getitem_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = getitem_1 = None
         getitem_2: "f32[3, 3]" = invoke_leaf_function[0];  invoke_leaf_function = None
         return (getitem_2,)
 
@@ -760,7 +815,7 @@ class outer(torch.nn.Module):
             _opaque_obj0 = self._opaque_obj0
             _opaque_obj1 = self._opaque_obj1
             _tree_spec_constant0 = self._tree_spec_constant0
-            with_effects = torch.ops.higher_order.with_effects(None, torch.ops.higher_order.invoke_leaf_function, _opaque_obj0, _opaque_obj1, _tree_spec_constant0, arg1_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = arg1_1 = None
+            with_effects = torch.ops.higher_order.with_effects(None, torch.ops.higher_order.invoke_leaf_function, _opaque_obj0, _opaque_obj1, _tree_spec_constant0, '', arg1_1, requires_grad_indices = ());  _opaque_obj0 = _opaque_obj1 = _tree_spec_constant0 = arg1_1 = None
             getitem: "f32[0]" = with_effects[0]
             getitem_1: "f32[3, 3]" = with_effects[1];  with_effects = None
             return (getitem, getitem_1)

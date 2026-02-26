@@ -21,6 +21,10 @@ class OpKernel_prim_listpack : public OpKernel {
       case Type::Kind::TensorList:
         type_ = c10::TensorType::get();
         break;
+      case Type::Kind::NestedTensorList:
+        // For List[List[Tensor]], each element is a List[Tensor]
+        type_ = c10::ListType::create(c10::TensorType::get());
+        break;
       case Type::Kind::SymIntList:
         type_ = c10::IntType::get();
         break;
