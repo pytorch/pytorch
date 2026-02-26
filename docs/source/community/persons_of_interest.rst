@@ -32,7 +32,7 @@ Core Maintainers
 -  Joe Spisak (`jspisak <https://github.com/jspisak>`__)
 -  (emeritus) Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
 
-Module-level maintainers
+Core Module maintainers
 ------------------------
 
 NN APIs (torch.nn)
@@ -70,72 +70,68 @@ TorchDynamo
 -  Animesh Jain (`anijain2305 <https://github.com/anijain2305>`__)
 -  Jason Ansel (`jansel <https://github.com/jansel>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
+-  William Wen (`williamwen <https://github.com/williamwen>`__)
 
 TorchInductor
 ~~~~~~~~~~~~~
 
 -  Elias Ellison (`eellison <https://github.com/eellison>`__)
--  Horace He (`Chillee <https://github.com/Chillee>`__)
 -  Shunting Zhang (`shunting314 <https://github.com/shunting314>`__)
 -  Jason Ansel (`jansel <https://github.com/jansel>`__)
--  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
+-  Eikan Wang (`eikanwang <https://github.com/eikanwang>`__)
+-  (emeritus) Horace He (`Chillee <https://github.com/Chillee>`__)
+-  (emeritus) Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
 
 Cudagraph Tree
 ~~~~~~~~~~~~~~
 
 -  Elias Ellison (`eellison <https://github.com/eellison>`__)
+-  Boyuan Feng (`boyuanfeng <https://github.com/boyuanfeng>`__)
 
 PT2 Dispatcher
 ~~~~~~~~~~~~~~
 
--  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
--  Richard Zou (`zou3519 <https://github.com/zou3519>`__)
--  Horace He (`Chillee <https://github.com/Chillee>`__)
+-  Aaron Orenstein (`aorenste <https://github.com/aorenste>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
+-  Richard Zou (`zou3519 <https://github.com/zou3519>`__)
+-  (emeritus) Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
+-  (emeritus) Horace He (`Chillee <https://github.com/Chillee>`__)
 
 PT2 Export (torch.export)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Avik Chaudhuri (`avikchaudhuri <https://github.com/avikchaudhuri>`__)
--  Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
+-  Angela Yi (`angelayi <https://github.com/angelayi>`__)
+-  Milad Mohammadi (`miladm <https://github.com/miladm>`__)
+-  (emeritus) Avik Chaudhuri (`avikchaudhuri <https://github.com/avikchaudhuri>`__)
+-  (emeritus) Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
 
 AOT Inductor (AOTI) & AOTI Runtime
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Bin Bao (`desertfire <https://github.com/desertfire>`__)
--  Angela Yi (`angelayi <https://github.com/angelayi>`__)
--  Yang Chen (`chenyang78 <https://github.com/chenyang78>`__)
-
-Compilers (JIT / TorchScript / Package / Deploy)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
--  (emeritus) Elias Ellison (`eellison <https://github.com/eellison>`__)
--  (emeritus) Michael Suo (`suo <https://github.com/suo>`__)
--  (emeritus) Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
--  (emeritus) James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
--  (emeritus) Jason Ansel (`jansel <https://github.com/jansel>`__)
--  (emeritus) Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
--  (emeritus) Zach Devito (`zdevito <https://github.com/zdevito>`__)
-
+-  Shangdi Yu (`shangdiy <https://github.com/shangdiy>`__)
+-  (emeritus) Angela Yi (`angelayi <https://github.com/angelayi>`__)
+-  (emeritus) Yang Chen (`chenyang78 <https://github.com/chenyang78>`__)
 
 Distributions & RNG
 ~~~~~~~~~~~~~~~~~~~
 
 -  Fritz Obermeyer (`fritzo <https://github.com/fritzo>`__)
--  Neeraj Pradhan (`neerajprad <https://github.com/neerajprad>`__)
--  Alican Bozkurt (`alicanb <https://github.com/alicanb>`__)
+-  (emeritus) Neeraj Pradhan (`neerajprad <https://github.com/neerajprad>`__)
+-  (emeritus) Alican Bozkurt (`alicanb <https://github.com/alicanb>`__)
 -  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
 Distributed
 ~~~~~~~~~~~
 -  Will Constable (`wconstab <https://github.com/wconstab>`__)
 -  Howard Huang (`H-Huang <https://github.com/H-Huang>`__)
--  Wanchao Liang (`wanchaol <https://github.com/wanchaol>`__)
--  Ke Wen (`kwen2501 <https://github.com/kwen2501>`__)
+-  (emeritus) Wanchao Liang (`wanchaol <https://github.com/wanchaol>`__)
+-  (emeritus) Ke Wen (`kwen2501 <https://github.com/kwen2501>`__)
 -  Chien-Chin Huang (`fegin <https://github.com/fegin>`__)
 -  Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
 -  Junjie Wang (`fduwjj <https://github.com/fduwjj>`__)
 -  Wei Feng (`weifengpy <https://github.com/weifengpy>`__)
+-  Pei Zhang (`zpcore <https://github.com/zpcore>`__)
 -  (emeritus) Shen Li (`mrshenli <https://github.com/mrshenli>`__)
 -  (emeritus) Pritam Damania (`pritamdamania87 <https://github.com/pritamdamania87>`__)
 -  (emeritus) Yanli Zhao (`zhaojuanmao <https://github.com/zhaojuanmao>`__)
@@ -150,6 +146,7 @@ Distributed
 Multiprocessing
 ~~~~~~~~~~~~~~~
 
+-  Alban Desmaison (`albanD <https://github.com/albanD>`__)
 -  (emeritus) Simon Wang (`SsnL <https://github.com/SsnL>`__)
 -  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
 -  (emeritus) Adam Paszke (`apaszke <https://github.com/apaszke>`__)
@@ -175,17 +172,17 @@ Sparse (torch.sparse)
 NestedTensor (torch.nested)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
--  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
--  Driss Guessous (`drisspg <https://github.com/drisspg>`__)
--  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
--  Alban Desmaison (`albanD <https://github.com/albanD>`__)
+-  (emeritus) Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
+-  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  (emeritus) Driss Guessous (`drisspg <https://github.com/drisspg>`__)
+-  (emeritus) Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
+-  (emeritus) Alban Desmaison (`albanD <https://github.com/albanD>`__)
 -  (emeritus) Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 
 MaskedTensor (torch.masked)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  (emeritus) Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
 -  (emeritus) George Qi (`george-qi <https://github.com/george-qi>`__)
 
 Fast Fourier Transform (torch.fft)
@@ -193,6 +190,15 @@ Fast Fourier Transform (torch.fft)
 
 -  (emeritus) Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  (emeritus) Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
+
+Quantization (torch/ao)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Vasiliy Kuznetsov (`vkuzo <https://github.com/vkuzo>`__)
+-  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
+-  (emeritus) Mark Saroufim (`msaroufim <https://github.com/msaroufim>`__)
+-  (emeritus) Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
+-  (emeritus) Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
 
 MKLDNN
 ~~~~~~
@@ -219,7 +225,6 @@ CUDA
 -  (emeritus) Andrew Tulloch (`ajtulloch <https://github.com/ajtulloch>`__)
 -  (emeritus) Xiaoqiang Zheng (`zheng-xq <https://github.com/zheng-xq>`__)
 
-
 AMD/ROCm/HIP
 ~~~~~~~~~~~~
 
@@ -232,78 +237,6 @@ XPU/Intel GPU
 
 - Eikan Wang (`EikanWang <https://github.com/EikanWang>`__)
 - Guangye Yu (`guangyey <https://github.com/guangyey>`__)
-
-Build + CI
-~~~~~~~~~~
-
--  Nikita Shulga (`malfet <https://github.com/malfet>`__)
--  Eli Uriegas (`seemethere <https://github.com/seemethere>`__)
--  Alban Desmaison (`alband <https://github.com/alband>`__)
--  Andrey Talman (`atalman <https://github.com/atalman>`__)
--  Zain Rizvi (`ZainRizvi <https://github.com/ZainRizvi>`__)
--  (emeritus) Mikey Dagitses (`dagitses <https://github.com/dagitses>`__)
--  (emeritus) Omkar Salpekar (`osalpekar <https://github.com/osalpekar>`__)
--  (emeritus) Nirav Mehta (`mehtanirav <https://github.com/mehtanirav>`__)
--  (emeritus) Zhuojie Zhou (`zhouzhuojie <https://github.com/zhouzhuojie>`__)
--  (emeritus) Edward Yang (`ezyang <https://github.com/ezyang>`__)
--  (emeritus) Karl Ostmo (`kostmo <https://github.com/kostmo>`__)
-
-Performance Tools
-~~~~~~~~~~~~~~~~~
-
--  Taylor Robie (`robieta <https://github.com/robieta>`__)
--  Xu Zhao (`xuzhao9 <https://github.com/xuzhao9>`__)
--  (emeritus) Victor Bittorf (`bitfort <https://github.com/bitfort>`__)
--  (emeritus) Gisle Dankel (`gdankel <https://github.com/gdankel>`__)
--  (emeritus) Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
--  (emeritus) Mingzhe Li (`mingzhe09088 <https://github.com/mingzhe09088>`__)
-
-C++ API
-~~~~~~~
-
--  (emeritus) Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
--  (emeritus) Will Feng (`yf225 <https://github.com/yf225>`__)
-
-C10 utils and operator dispatch
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
--  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
--  Edward Yang (`ezyang <https://github.com/ezyang>`__)
--  (emeritus) Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
--  (emeritus) Sebastian Messmer (`smessmer <https://github.com/smessmer>`__)
-
-ONNX exporter
-~~~~~~~~~~~~~
--  Shubham Bhokare (`shubhambhokare1 <https://github.com/shubhambhokare1>`__)
--  Justin Chu (`justinchuby <https://github.com/justinchuby>`__)
--  Xavier Dupré (`xadupre <https://github.com/xadupre>`__)
--  Titai Wang (`titaiwangms <https://github.com/titaiwangms>`__)
--  (emeritus) Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
--  (emeritus) Thiago Crepaldi (`thiagocrepaldi <https://github.com/thiagocrepaldi>`__)
--  (emeritus) Aaron Bockover (`abock <https://github.com/abock>`__)
--  (emeritus) Gary Miguel (`garymm <https://github.com/garymm>`__)
--  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
--  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
--  (emeritus) Negin Raoof (`neginraoof <https://github.com/neginraoof>`__)
--  (emeritus) Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
-
-LiteInterpreter
-~~~~~~~~~~~~~~~
--  (emeritus) David Reiss (`dreiss <https://github.com/dreiss>`__)
--  (emeritus) Raziel Guevara (`raziel <https://github.com/raziel>`__)
--  (emeritus) Linbin Yu (`linbinyu <https://github.com/linbinyu>`__)
--  (emeritus) Ivan Kobzarev (`IvanKobzarev <https://github.com/IvanKobzarev>`__)
--  (emeritus) Tao Xu (`xta0 <https://github.com/xta0>`__)
-
-Quantization (torch/ao)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
--  Mark Saroufim (`msaroufim <https://github.com/msaroufim>`__)
--  Vasiliy Kuznetsov (`vkuzo <https://github.com/vkuzo>`__)
--  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
--  (emeritus) Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
--  (emeritus) Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
-
 
 Windows
 ~~~~~~~
@@ -341,40 +274,88 @@ Out-of-tree Backend Integration (PrivateUse1)
 
 -  Jiawei Li (`fffrog <https://github.com/fffrog>`__)
 
+Build + CI
+~~~~~~~~~~
+
+-  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  Eli Uriegas (`seemethere <https://github.com/seemethere>`__)
+-  Alban Desmaison (`alband <https://github.com/alband>`__)
+-  Andrey Talman (`atalman <https://github.com/atalman>`__)
+-  Zain Rizvi (`ZainRizvi <https://github.com/ZainRizvi>`__)
+-  (emeritus) Mikey Dagitses (`dagitses <https://github.com/dagitses>`__)
+-  (emeritus) Omkar Salpekar (`osalpekar <https://github.com/osalpekar>`__)
+-  (emeritus) Nirav Mehta (`mehtanirav <https://github.com/mehtanirav>`__)
+-  (emeritus) Zhuojie Zhou (`zhouzhuojie <https://github.com/zhouzhuojie>`__)
+-  (emeritus) Edward Yang (`ezyang <https://github.com/ezyang>`__)
+-  (emeritus) Karl Ostmo (`kostmo <https://github.com/kostmo>`__)
+
+Profiling and Monitoring Tools
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Scott Schneider (`scotts <https://github.com/scotts>`__)
+-  Divyansh Khanna (`divyanshk <https://github.com/divyanshk>`__)
+-  (emeritus) Taylor Robie (`robieta <https://github.com/robieta>`__)
+-  (emeritus) Xu Zhao (`xuzhao9 <https://github.com/xuzhao9>`__)
+-  (emeritus) Victor Bittorf (`bitfort <https://github.com/bitfort>`__)
+-  (emeritus) Gisle Dankel (`gdankel <https://github.com/gdankel>`__)
+-  (emeritus) Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
+-  (emeritus) Mingzhe Li (`mingzhe09088 <https://github.com/mingzhe09088>`__)
+
+C++ API (libtorch + StableABI)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Jane Xu (`janeyx99 <https://github.com/janeyx99>`__)
+-  Mikayla Gawarecki (`mikaylagawarecki <https://github.com/mikaylagawarecki>`__)
+-  (emeritus) Joel Schlosser (`jbschlosser <https://github.com/jbschlosser>`__)
+-  (emeritus) Will Feng (`yf225 <https://github.com/yf225>`__)
+
+C10 utils and operator dispatch
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
+-  Edward Yang (`ezyang <https://github.com/ezyang>`__)
+-  (emeritus) Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
+-  (emeritus) Sebastian Messmer (`smessmer <https://github.com/smessmer>`__)
+
+ONNX exporter
+~~~~~~~~~~~~~
+-  Shubham Bhokare (`shubhambhokare1 <https://github.com/shubhambhokare1>`__)
+-  Justin Chu (`justinchuby <https://github.com/justinchuby>`__)
+-  Xavier Dupré (`xadupre <https://github.com/xadupre>`__)
+-  Titai Wang (`titaiwangms <https://github.com/titaiwangms>`__)
+-  (emeritus) Bowen Bao (`BowenBao <https://github.com/BowenBao>`__)
+-  (emeritus) Thiago Crepaldi (`thiagocrepaldi <https://github.com/thiagocrepaldi>`__)
+-  (emeritus) Aaron Bockover (`abock <https://github.com/abock>`__)
+-  (emeritus) Gary Miguel (`garymm <https://github.com/garymm>`__)
+-  (emeritus) Lara Haidar (`lara-hdr <https://github.com/lara-hdr>`__)
+-  (emeritus) Lu Fang (`houseroad <https://github.com/houseroad>`__)
+-  (emeritus) Negin Raoof (`neginraoof <https://github.com/neginraoof>`__)
+-  (emeritus) Spandan Tiwari (`spandantiwari <https://github.com/spandantiwari>`__)
+
 Docs / Tutorials
 ~~~~~~~~~~~~~~~~
 
 - Svetlana Karslioglu (`svekars <https://github.com/svekars>`__)
 - Ivan Sekyonda (`sekyondaMeta <https://github.com/sekyondaMeta>`__)
 
-Library-level maintainers
--------------------------
+Core Governed External Module maintainers
+------------------------------------------
 
-XLA
-~~~
+ExecuTorch (Edge, Mobile)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  Jack Cao (`JackCaoG <https://github.com/JackCaoG>`__)
--  Han Qi (`qihqi <https://github.com/qihqi>`__)
--  Yifei Teng (`tengyifei <https://github.com/tengyifei>`__)
--  Siyuan Liu (`lsy323 <https://github.com/lsy323>`__)
--  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
--  (emeritus) Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
--  (emeritus) Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
--  (emeritus) Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
--  (emeritus) Alex Suhan (`asuhan <https://github.com/asuhan>`__)
--  (emeritus) Daniel Sohn (`jysohn23 <https://github.com/jysohn23>`__)
--  (emeritus) Zach Cain (`zcain117 <https://github.com/zcain117>`__)
+-  Mergen Nachin (`mergennachin <https://github.com/mergennachin>`__)
+-  Jacob Szwejbka (`JacobSzwejbka <https://github.com/JacobSzwejbka>`__)
+-  (emeritus) Kimish Patel (`kimishpatel <https://github.com/kimishpatel>`__)
+-  (emeritus) Dave Bort (`dbort <https://github.com/dbort>`__)
+-  (emeritus) Martin Yuan (`iseeyuan <https://github.com/iseeyuan>`__)
 
-TorchServe
-~~~~~~~~~~
+TorchCodec
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  (emeritus) Li Ning (`lxning <https://github.com/lxning>`__)
--  (emeritus) Ankith Gunapal (`agunapal <https://github.com/agunapal>`__)
--  (emeritus) Hamid Shojanazeri (`HamidShojanazeri <https://github.com/HamidShojanazeri>`__)
--  (emeritus) Mark Saroufim (`msaroufIm <https://github.com/msaroufIm>`__)
--  (emeritus) Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
--  (emeritus) Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
--  (emeritus) Dhanasekar Karuppasamy (`dhanainme <https://github.com/dhanainme>`__)
+-  Nicolas Hug (`NicolasHug <https://github.com/NicolasHug>`__)
+-  Scott Schneider (`scotts <https://github.com/scotts>`__)
+-  (emeritus) Ahmad Sharif (`ahmadsharif1 <https://github.com/ahmadsharif1>`__)
 
 TorchVision
 ~~~~~~~~~~~
@@ -399,7 +380,7 @@ TorchText
 TorchAudio
 ~~~~~~~~~~
 
--  Moto Hira (`mthrok <https://github.com/mthrok>`__)
+-  (emeritus) Moto Hira (`mthrok <https://github.com/mthrok>`__)
 -  (emeritus) Jeff Hwang (`hwangjeff <https://github.com/hwangjeff>`__)
 -  (emeritus) Caroline Chen (`carolineechen <https://github.com/carolineechen>`__)
 -  (emeritus) Xiaohui Zhang (`xiaohui-zhang <https://github.com/xiaohui-zhang>`__)
@@ -414,34 +395,8 @@ TorchRec
 -  Paul Zhang (`PaulZhang12 <https://github.com/PaulZhang12>`__)
 -  (emeritus) Dmytro Ivchenko (`divchenko <https://github.com/divchenko>`__)
 
-TorchX
-~~~~~~
-
--  (emeritus) Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
--  (emeritus) Kiuk Chung (`kiukchung <https://github.com/kiukchung>`__)
-
-TorchData
-~~~~~~~~~~~~~~~~~~~~~~
-
--  Divyansh Khanna (`divyanshk <https://github.com/divyanshk>`__)
--  Ramanish Singh (`ramanishsingh <https://github.com/ramanishsingh>`__)
--  Lavender (`aelavender <https://github.com/aelavender>`__)
--  Scott Schneider (`scotts <https://github.com/scotts>`__)
--  (emeritus) Andrew Ho (`andrewkho <https://github.com/andrewkho>`__)
-
-TorchArrow
-~~~~~~~~~~~~~~~~~~~~~~
-
--  (emeritus) Wenlei Xie (`wenleix <https://github.com/wenleix>`__)
--  (emeritus) Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
-
-ExecuTorch (Edge, Mobile)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
--  Mergen Nachin (`mergennachin <https://github.com/mergennachin>`__)
--  Kimish Patel (`kimishpatel <https://github.com/kimishpatel>`__)
--  Dave Bort (`dbort <https://github.com/dbort>`__)
--  Martin Yuan (`iseeyuan <https://github.com/iseeyuan>`__)
+Sunsetted Modules
+-----------------
 
 TorchTune
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -457,9 +412,68 @@ TorchChat
 -  Jesse White (`byjlw <https://github.com/byjlw>`__)
 -  (emeritus) Michael Gschwind (`mikekgfb <https://github.com/mikekgfb>`__)
 
-TorchCodec
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+XLA
+~~~
 
--  Nicolas Hug (`NicolasHug <https://github.com/NicolasHug>`__)
+-  Jack Cao (`JackCaoG <https://github.com/JackCaoG>`__)
+-  Han Qi (`qihqi <https://github.com/qihqi>`__)
+-  Yifei Teng (`tengyifei <https://github.com/tengyifei>`__)
+-  Siyuan Liu (`lsy323 <https://github.com/lsy323>`__)
+-  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
+-  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
+-  Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
+-  Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
+-  Alex Suhan (`asuhan <https://github.com/asuhan>`__)
+-  Daniel Sohn (`jysohn23 <https://github.com/jysohn23>`__)
+-  Zach Cain (`zcain117 <https://github.com/zcain117>`__)
+
+TorchServe
+~~~~~~~~~~
+
+-  Li Ning (`lxning <https://github.com/lxning>`__)
+-  Ankith Gunapal (`agunapal <https://github.com/agunapal>`__)
+-  Hamid Shojanazeri (`HamidShojanazeri <https://github.com/HamidShojanazeri>`__)
+-  Mark Saroufim (`msaroufIm <https://github.com/msaroufIm>`__)
+-  Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
+-  Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
+-  Dhanasekar Karuppasamy (`dhanainme <https://github.com/dhanainme>`__)
+
+Other Compilers (JIT / TorchScript / Package / Deploy)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Elias Ellison (`eellison <https://github.com/eellison>`__)
+-  Michael Suo (`suo <https://github.com/suo>`__)
+-  Yanan Cao (`gmagogsfm <https://github.com/gmagogsfm>`__)
+-  James Reed (`jamesr66a <https://github.com/jamesr66a>`__)
+-  Jason Ansel (`jansel <https://github.com/jansel>`__)
+-  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
+-  Zach Devito (`zdevito <https://github.com/zdevito>`__)
+
+LiteInterpreter
+~~~~~~~~~~~~~~~
+-  David Reiss (`dreiss <https://github.com/dreiss>`__)
+-  Raziel Guevara (`raziel <https://github.com/raziel>`__)
+-  Linbin Yu (`linbinyu <https://github.com/linbinyu>`__)
+-  Ivan Kobzarev (`IvanKobzarev <https://github.com/IvanKobzarev>`__)
+-  Tao Xu (`xta0 <https://github.com/xta0>`__)
+
+TorchX
+~~~~~~
+
+-  Tristan Rice (`d4l3k <https://github.com/d4l3k>`__)
+-  Kiuk Chung (`kiukchung <https://github.com/kiukchung>`__)
+
+TorchData
+~~~~~~~~~~~~~~~~~~~~~~
+
+-  Divyansh Khanna (`divyanshk <https://github.com/divyanshk>`__)
+-  Ramanish Singh (`ramanishsingh <https://github.com/ramanishsingh>`__)
+-  Lavender (`aelavender <https://github.com/aelavender>`__)
 -  Scott Schneider (`scotts <https://github.com/scotts>`__)
--  (emeritus) Ahmad Sharif (`ahmadsharif1 <https://github.com/ahmadsharif1>`__)
+-  Andrew Ho (`andrewkho <https://github.com/andrewkho>`__)
+
+TorchArrow
+~~~~~~~~~~~~~~~~~~~~~~
+
+-  Wenlei Xie (`wenleix <https://github.com/wenleix>`__)
+-  Vitaly Fedyunin (`VitalyFedyunin <https://github.com/VitalyFedyunin>`__)
