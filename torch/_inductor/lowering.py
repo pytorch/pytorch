@@ -7900,6 +7900,65 @@ def cvt_e8m0_rceil_lowering(inp):
     return to_dtype(result, torch.uint8)
 
 
+# -----------------------------------------------------------------------------
+# inline_asm_elementwise HOP lowering
+# -----------------------------------------------------------------------------
+
+
+def _constraint_expects_fp32(constraint: str) -> bool:
+    return constraint.lstrip("=") == "f"
+
+
+def _should_upcast_to_fp32(dtype: torch.dtype) -> bool:
+    return dtype in (torch.float16, torch.bfloat16)
+
+
+@register_lowering(
+    torch._higher_order_ops.inline_asm_elementwise, type_promotion_kind=None
+)
+def lower_inline_asm_elementwise(
+    *inputs, asm_str, constraints, dtype, is_pure=True, pack=1
+):
+    inputs = broadcast_tensors(*inputs)
+
+    constraint_parts = [p.strip() for p in constraints.split(",")]
+    input_constraints = [p for p in constraint_parts if not p.startswith("=")]
+
+    loaders = []
+    for inp, constraint in zip(inputs, input_constraints):
+        loader = inp.make_loader()
+        if _constraint_expects_fp32(constraint) and _should_upcast_to_fp32(
+            inp.get_dtype()
+        ):
+            original_loader = loader
+
+            def upcasting_loader(idx, orig=original_loader):
+                val = orig(idx)
+                return ops.to_dtype(val, torch.float32)
+
+            loaders.append(upcasting_loader)
+        else:
+            loaders.append(loader)
+
+    def inner_fn(idx):
+        vals = tuple(loader(idx) for loader in loaders)
+        return ops.inline_asm_elementwise(
+            *vals,
+            asm=asm_str,
+            constraints=constraints,
+            dtype=dtype,
+            is_pure=is_pure,
+            pack=pack,
+        )
+
+    return ir.Pointwise.create(
+        device=inputs[0].get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(inputs[0].get_size()),
+    )
+
+
 # populate lowerings defined in kernel/*
 from . import kernel
 
