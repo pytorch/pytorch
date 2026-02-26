@@ -116,7 +116,6 @@ from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
     ReenterWith,
-    TORCH_DYNAMO_RESUME_IN_PREFIX,
 )
 from .source import (
     AttrSource,
@@ -4661,23 +4660,10 @@ class InstructionTranslatorBase(
         function for the post-comprehension code.
         """
         assert sys.version_info >= (3, 12)
-
-        analysis = self._analyze_comprehension()
-
-        # Validate: can't handle captured vars in resume functions due to nested sources
-        if self.f_code.co_name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
-            if analysis.captured_vars:
-                unimplemented(
-                    gb_type="Comprehension graph break in resume function with captured variables",
-                    context=str(analysis.captured_vars),
-                    explanation="Cannot use comprehension optimization inside a resume "
-                    "function when there are captured variables. This can cause issues "
-                    "with deeply nested source chains.",
-                    hints=[],
-                )
-
         assert self.instruction_pointer is not None
+
         start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
+        analysis = self._analyze_comprehension()
         stack_pops = 1 + len(analysis.iterator_vars)
         reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
         log.debug("comprehension triggered compile")
