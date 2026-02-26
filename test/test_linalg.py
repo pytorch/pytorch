@@ -120,6 +120,8 @@ class TestLinalg(TestCase):
     def setUp(self):
         super().setUp()
         torch.backends.cuda.matmul.allow_tf32 = False
+        if TEST_WITH_ROCM:
+            torch.backends.cuda.preferred_linalg_library('cusolver')
 
     def tearDown(self):
         torch.backends.cuda.matmul.allow_tf32 = True
