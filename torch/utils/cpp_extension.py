@@ -213,20 +213,25 @@ def _join_sycl_home(*paths) -> str:
 
 
 
-def _wrap_compiler(compiler: str | list[str]) -> str | list[str]:
+def _wrap_compiler(compiler: str | list[str]) -> list[str]:
     """Prepend a compiler wrapper (ccache/sccache) if available.
 
-    Accepts a compiler as a string or list. Returns the same type with the
-    wrapper prepended, or the original value unchanged if no wrapper is found.
+    Accepts a compiler as a string or list. Always returns a list with the
+    wrapper prepended, or the original value as a list if no wrapper is found.
     Disabled when TORCH_NO_COMPILER_WRAPPER is set.
     """
-    if os.environ.get('TORCH_NO_COMPILER_WRAPPER') or IS_WINDOWS:
+    if isinstance(compiler, str):
+        compiler = [compiler]
+    # hipcc with ccache/sccache is currently broken
+    # I.e. compilation fails with
+    #  sccache: caused by: Compiler not supported: "sh: 1: /usr/local/cuda/bin/nvcc: not found\n
+    # sh: 1: nvcc: not found\nDevice not supported - Defaulting to AMD\n
+    # failed to execute:/opt/rocm/lib/llvm/bin/clang++  -O3  -E -x c /tmp/sccachei1cosZ/testfile.c\n"
+    if os.environ.get('TORCH_NO_COMPILER_WRAPPER') or IS_WINDOWS or torch.version.hip is not None:
         return compiler
     for wrapper in ('ccache', 'sccache'):
         if shutil.which(wrapper):
-            if isinstance(compiler, list):
-                return [wrapper] + compiler
-            return f'{wrapper} {compiler}'
+            return [wrapper] + compiler
     return compiler
 
 
@@ -1901,7 +1906,7 @@ def _check_and_build_extension_h_precompiler_headers(
     if b_is_gcc is False:
         return
 
-    compiler = _wrap_compiler(compiler)
+    compiler = shlex.join(_wrap_compiler(compiler))
 
     head_file = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h')
     head_file_pch = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.gch')
@@ -3052,7 +3057,7 @@ e.
 
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
-    config.append(f'cxx = {_wrap_compiler(compiler)}')
+    config.append(f'cxx = {shlex.join(_wrap_compiler(compiler))}')
     if with_cuda or cuda_dlink_post_cflags:
         if "PYTORCH_NVCC" in os.environ:
             nvcc = os.getenv("PYTORCH_NVCC")    # user can set nvcc compiler with ccache using the environment variable here
@@ -3061,7 +3066,7 @@ e.
                 nvcc = _get_hipcc_path()
             else:
                 nvcc = _join_cuda_home('bin', 'nvcc')
-            nvcc = _wrap_compiler(nvcc)
+            nvcc = shlex.join(_wrap_compiler(nvcc))
         config.append(f'nvcc = {nvcc}')
     if with_sycl or sycl_dlink_post_cflags:
         sycl = 'icx' if IS_WINDOWS else 'icpx'
