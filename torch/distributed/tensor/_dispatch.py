@@ -7,13 +7,10 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
-import torch.distributed.config as dist_config
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._logging import LazyString
-from torch._prims.rng_prims import run_dtensor_rng_op
-from torch.distributed import _local_tensor
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -299,20 +296,9 @@ class OpDispatcher:
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
-                    # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
-                    # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.
-                    run_state_sync = not _are_we_tracing()
-                    if not run_state_sync:
-                        logger.info(
-                            "DTensor RNG tracker is being lazily initialized during tracing. "
-                            "RNG states may not be synchronized across ranks, which can lead "
-                            "to silent incorrectness. Please call `torch.manual_seed()` with "
-                            "the same seed on all ranks before compiling DTensor random ops.",
-                            stacklevel=2,
-                        )
-                    random._rng_tracker = random.OffsetBasedRNGTracker(
-                        mesh, run_state_sync
-                    )
+                    # Default to `OffsetBasedRNGTracker` if the parallelism API
+                    # did not already construct one
+                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
 
                 first_arg, first_local_arg = (
                     cast(dtensor.DTensor, args[0]),
@@ -326,45 +312,17 @@ class OpDispatcher:
                 assert maybe_user_generator is None or isinstance(
                     maybe_user_generator, torch.Generator
                 )
-
-                if (
-                    random._rng_tracker
-                    and not first_local_arg.is_meta
-                    and random._rng_tracker.distribute_region_enabled
-                ):
-                    if (
-                        maybe_user_generator is not None
-                        or first_local_arg.device.type != "cuda"
-                        or _local_tensor.enabled_local_tensor_mode()
-                    ):
-                        # User provided a generator or non-CUDA device, use context manager
-                        with random._rng_tracker._distribute_region(
-                            first_arg._spec, generator=maybe_user_generator
-                        ):
-                            local_results = op_call(
-                                *local_tensor_args, **op_info.local_kwargs
-                            )
-                    else:
-                        # CUDA device without user generator, use HOP for traceability
-                        if dist_config.compile_on_one_rank:
-                            raise NotImplementedError(
-                                "run_dtensor_rng_op is not yet compatible with compile_on_one_rank"
-                            )
-                        assert isinstance(
-                            random._rng_tracker, random.OffsetBasedRNGTracker
-                        )
-                        start_offset_incr, end_offset_incr = (
-                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
-                        )
-                        local_results = run_dtensor_rng_op(
-                            start_offset_incr,
-                            end_offset_incr,
-                            op_call,
-                            *local_tensor_args,
-                            **op_info.local_kwargs,
-                        )
-                else:
-                    # No rng_tracker, meta tensor, or distribute_region disabled
+                # maybe_user_generator = None
+                rng_context = (
+                    random._rng_tracker._distribute_region(
+                        first_arg._spec, generator=maybe_user_generator
+                    )
+                    if random._rng_tracker and not first_local_arg.is_meta
+                    else contextlib.nullcontext()
+                )
+                # For DTensor random operator, run it within a RNGTracker context to
+                # ensure the random number generator is properly distributed.
+                with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation

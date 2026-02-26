@@ -104,10 +104,10 @@ vllm_pytorch_compilation_unit_tests:
 
 vllm_language_model_test_extended_generation_28_failure_test:
   title: Language Models Test (Extended Generation) 2.8 release failure
-  id: vllm_languagde_model_test_extended_generation_28_failure_test
+  id: vllm_language_model_test_extended_generation_28_failure_test
   package_install:
     - --no-build-isolation
-    - git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8
+    - git+https://github.com/Dao-AILab/causal-conv1d@v1.6.0
   steps:
     - pytest -v -s models/language/generation/test_mistral.py
 

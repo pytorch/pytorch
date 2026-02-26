@@ -47,6 +47,7 @@ from torch._library.opaque_object import is_opaque_type
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
+    is_contiguous_for_memory_format_or_false,
     is_float_dtype,
     make_channels_last_strides_for,
     StrideType,
@@ -56,6 +57,8 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
+    GuardOnDataDependentSymNode,
+    has_free_unbacked_symbols,
     IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
@@ -468,11 +471,8 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
-        if not V.graph.sizevars.statically_known_equals(
-            s1, s2
-        ) and V.graph.sizevars.symbolic_hint(s1) != V.graph.sizevars.symbolic_hint(s2):
+        if not V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2)):
             return False
-
     return True
 
 
@@ -1319,8 +1319,13 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
-        numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
+        # TODO Laith support unbacked!
+        reduction_numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
+            reduction_numel
+        )
+        numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
+            sympy_product(ranges)
+        )
 
         should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
@@ -1373,8 +1378,10 @@ class Reduction(Loops):
                         new_reduction_ranges,
                     ) = extract_input_node_reduction_ranges(input_node)
                 if new_ranges is not None and new_reduction_ranges is not None:
-                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
-                        sympy_product(new_ranges + new_reduction_ranges)
+                    extracted_numel_hint = (
+                        V.graph.sizevars.replace_backed_symbols_with_hints(
+                            sympy_product(new_ranges + new_reduction_ranges)
+                        )
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         log.debug(
@@ -2220,7 +2227,7 @@ class WelfordReduction(MultiOutputReduction):
         # TODO: Unrolled reduction
         # if (
         #     isinstance(reduction_numel, Integer)
-        #     and V.graph.sizevars.size_hint(reduction_numel)
+        #     and int(reduction_numel)
         #     < config.unroll_reductions_threshold
         #     and sympy_product(ranges) != 1
         # ):
@@ -2363,7 +2370,9 @@ class WelfordReduction(MultiOutputReduction):
         ) -> OpsValue:
             return loader([*index, *reduction_index])
 
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
+        # numel_hint is only used to choose between ReductionHint.OUTER vs
+        # OUTER_TINY, which is a performance heuristic, not a correctness decision.
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(ranges))
         reduction_hint = cls._multilayer_second_step_hint(
             split, numel_hint, reduction_hint
         )
@@ -2970,7 +2979,9 @@ class ExpandView(BaseView):
                 old_size[i]
             ):
                 pass
-            else:
+            elif not has_free_unbacked_symbols(
+                old_size
+            ) and not has_free_unbacked_symbols(new_size):
                 # Sanity check: Expect broadcast compatibility
                 #
                 # NB: new_size[i] == old_size[i] is expected to already be
@@ -3249,20 +3260,22 @@ class View(GenericView):
         ) -> IRNode:
             """
             Handle the case where view is not possible with current strides.
-            For unbacked symbols, make contiguous; otherwise use dynamic_reshape_indexer.
+            Try dynamic_reshape_indexer first; if it fails with unbacked
+            symbols (guard_or_false can't resolve comparisons), fall back
+            to making the tensor contiguous.
             """
-            nonlocal old_size, new_size, unbacked_symbols_in_sizes
-            if unbacked_symbols_in_sizes:
-                # For unbacked symbols, we must require contiguous
+            nonlocal old_size, new_size
+            try:
+                reindex = cls.dynamic_reshape_indexer(old_size, new_size)
+                return cls(data=x, size=list(new_size), reindex=reindex)
+            except GuardOnDataDependentSymNode:
                 # dynamic_reshape_indexer cannot handle unbacked SymInts
+                # because guard_or_false can't resolve size comparisons.
                 # https://github.com/pytorch/pytorch/issues/145561
                 x = ExternKernel.require_contiguous(x)
                 return create_reinterpret_view(
                     x, new_size, FlexibleLayout.contiguous_strides(new_size)
                 )
-            # For backed symbols, fall back to dynamic_reshape_indexer
-            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-            return cls(data=x, size=list(new_size), reindex=reindex)
 
         if 0 in new_size:
 
@@ -3349,7 +3362,7 @@ class View(GenericView):
     ) -> Callable[[Sequence[_T]], Sequence[_V]]:
         try:
             reindex = cls._dynamic_reshape_indexer(old_size, new_size, dense_dim)
-        except (AssertionError, IndexError):
+        except (AssertionError, GuardOnDataDependentSymNode, IndexError):
             # optimistic algorithm failed, lets do a fallback
             flat = [sympy_product(old_size)]
             reindex1 = cls._dynamic_reshape_indexer(old_size, flat)
@@ -3366,7 +3379,42 @@ class View(GenericView):
         """
         Perform a reshape entirely by modifying indexing math
         """
-        size_hint = V.graph.sizevars.size_hint
+        guard_or_false = V.graph.sizevars.guard_or_false
+
+        def compare_sizes(a: Expr, b: Expr) -> int:
+            """
+            Compare two symbolic sizes, returning -1 if a < b, 0 if a == b, 1 if a > b.
+
+            For unbacked symbols, guard_or_false returns False, so we fall back
+            to divisibility checks.
+            """
+            if guard_or_false(sympy.Eq(a, b)):
+                return 0
+            if guard_or_false(sympy.Lt(a, b)):
+                return -1
+            if guard_or_false(sympy.Gt(a, b)):
+                return 1
+
+            # Divisibility fallback for unbacked symbols:
+            # e.g. comparing u0 vs u0*u1, statically_known_multiple_of(u0*u1, u0)
+            # returns True so we take the merge path (return -1).
+            # The merge reindex for old=[u0, u1] -> new=[u0*u1] is:
+            #   for k in range(u0 * u1):
+            #     i = k // u1
+            #     j = k % u1
+            #     z[k] = x[i, j] + 1
+            # Two cases where this could seem wrong but is still safe:
+            #   u1=1: the merge reindex is correct since the extra dim is
+            #         size 1 (a no-op). e.g. k // 1 = k, k % 1 = 0.
+            #   u0=0: loop is range(0), no kernel runs, result doesn't matter.
+
+            if V.graph.sizevars.statically_known_multiple_of(b, a):
+                return -1
+            if V.graph.sizevars.statically_known_multiple_of(a, b):
+                return 1
+
+            raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
+
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -3396,22 +3444,21 @@ class View(GenericView):
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
-            elif size_hint(size_new) == size_hint(size_old):
+            elif compare_sizes(size_new, size_old) == 0:
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
-            elif size_hint(size_new) < size_hint(size_old):
-                while size_hint(size_new) < size_hint(size_old):
+            elif compare_sizes(size_new, size_old) < 0:
+                while compare_sizes(size_new, size_old) < 0:
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
                 V.graph.sizevars.check_equals(size_new, size_old)
-            elif size_hint(size_new) > size_hint(size_old):
+            elif compare_sizes(size_new, size_old) > 0:
                 divisor = sympy.S.One
                 modulus = size_old
                 view_expr.append(ModularIndexing(var, divisor, modulus))
                 divisor = divisor * modulus
-                while size_hint(size_new) > size_hint(size_old):
+                while compare_sizes(size_new, size_old) > 0:
                     modulus = stack_old.pop()
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
@@ -6309,11 +6356,13 @@ class ExternKernel(InputsKernel):
             and isinstance(x_unwrap_view, (ReinterpretView, Buffer, MutableBox))
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
-                x_unwrap_view_fx_node.meta["val"].is_contiguous(
-                    memory_format=torch.channels_last
+                is_contiguous_for_memory_format_or_false(
+                    x_unwrap_view_fx_node.meta["val"],
+                    memory_format=torch.channels_last,
                 )
-                or x_unwrap_view_fx_node.meta["val"].is_contiguous(
-                    memory_format=torch.channels_last_3d
+                or is_contiguous_for_memory_format_or_false(
+                    x_unwrap_view_fx_node.meta["val"],
+                    memory_format=torch.channels_last_3d,
                 )
             )
         ):
@@ -6819,7 +6868,9 @@ class ExternKernel(InputsKernel):
         sizevars = V.graph.sizevars
         sizes = self.get_size()
         strides = self.get_stride()
-        strides = [sizevars.size_hint(x) for x in strides]
+        # Stride hints are only used as sort keys to determine dimension
+        # ordering for canonicalization, not for correctness.
+        strides = [sizevars.optimization_hint(x) for x in strides]
         # TODO: I can't tell if the symbols here are temporary
         index_vars = [sympy_index_symbol(f"d{i}") for i in range(len(sizes))]
         # reorder index vars according to stride
@@ -9100,8 +9151,16 @@ class Conditional(ExternKernel):
         fx_operands: Argument = V.graph.current_node.args[-1]
 
         assert isinstance(fx_operands, Sequence), type(fx_operands)
-        assert all(isinstance(n, Node) for n in fx_operands)
-        fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
+        # Build fake_operands from FX nodes' metadata
+        # For FX Nodes, get the fake tensor from meta["val"]
+        # For non-Nodes (e.g., symbolic integers from sym_size lowering), pass directly
+        fake_operands: list[Any] = []
+        for fx_op in fx_operands:
+            if isinstance(fx_op, Node):
+                fake_operands.append(fx_op.meta["val"])
+            else:
+                # Symbolic integer or constant - pass directly
+                fake_operands.append(fx_op)
         fake_outputs = V.graph.current_node.meta["val"]
 
         def _require_exact_strides(
