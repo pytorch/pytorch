@@ -27,6 +27,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
+    skipIfRocm,
     slowTest,
     TestCase,
 )
@@ -1073,6 +1074,7 @@ class TestSortAndSelect(TestCase):
             )
             self._test_unique_scalar_empty(dtype, device, f)
 
+    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     @dtypes(torch.double)
     def test_kthvalue(self, device, dtype):
         SIZE = 50

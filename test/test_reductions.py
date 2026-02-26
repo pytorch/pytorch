@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize,
     skipIfTorchDynamo,
+    skipIfRocm,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
@@ -2525,6 +2526,7 @@ class TestReductions(TestCase):
     @dtypes(torch.int, torch.long, torch.float, torch.double)
     @dtypesIfCUDA(torch.int, torch.long, torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.int, torch.long, torch.half, torch.float, torch.double)
+    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     def test_median_real_values(self, device, dtype):
         # Generate random 0-3D sizes
         sizes = [random.sample(range(1, 32), i) for i in range(4) for _ in range(2)]
@@ -2555,6 +2557,7 @@ class TestReductions(TestCase):
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
+    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     def test_median_nan_values(self, device, dtype):
         # Generate random 0-3D sizes
         sizes = [random.sample(range(1, 32), i) for i in range(4) for _ in range(2)]
@@ -2593,6 +2596,7 @@ class TestReductions(TestCase):
                     ref = numpy_op(t_numpy, dim, keepdims=True)[mask.cpu().numpy()]
                     self.assertEqual(res, torch.from_numpy(ref))
 
+    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     def test_median_corner_cases(self, device):
         def check(op, a, args, key):
             t = torch.tensor(a, device=device)
