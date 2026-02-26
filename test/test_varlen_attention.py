@@ -1,5 +1,4 @@
 # Owner(s): ["module: sdpa"]
-import importlib
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager
@@ -9,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention import (
     activate_flash_attention_impl,
+    list_flash_attention_impls,
     restore_flash_attention_impl,
 )
 from torch.nn.attention.varlen import varlen_attn
@@ -19,24 +19,10 @@ from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-def _fa3_available() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
-    if major != 9:
-        return False
-    try:
-        importlib.import_module("flash_attn_interface")
-    except ModuleNotFoundError:
-        return False
-    return True
-
-
 @contextmanager
-def flash_attention_impl(impl: str):
-    """Activate a flash attention implementation for the duration of the block."""
-    activate_flash_attention_impl(impl)
+def use_fa3():
     try:
+        activate_flash_attention_impl("FA3")
         yield
     finally:
         restore_flash_attention_impl()
@@ -758,7 +744,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipUnless(_fa3_available(), "FA3 backend unavailable")
+    @unittest.skipIf("FA3" not in list_flash_attention_impls(), "FA3 not available")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128])
     @parametrize(
@@ -772,7 +758,6 @@ class TestVarlenAttention(NNTestCase):
         ],
     )
     def test_page_table_kv_cache(self, device, dtype, page_size, actual_kv_lens):
-        """Test paged KV cache via page_table + seqused_k with FA3."""
         torch.manual_seed(42)
 
         batch_size = 4
@@ -782,7 +767,6 @@ class TestVarlenAttention(NNTestCase):
         max_pages_per_seq = (max_kv + page_size - 1) // page_size
         cache_size = max_pages_per_seq * page_size
 
-        # Build real KV sequences for the reference path
         q_seqs = [
             torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
             for _ in range(batch_size)
@@ -798,8 +782,6 @@ class TestVarlenAttention(NNTestCase):
             for kv_len in actual_kv_lens
         ]
 
-        # Build a paged KV cache.
-        # Total number of physical pages across all sequences.
         total_pages = batch_size * max_pages_per_seq
         k_pages = torch.randn(
             total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
@@ -808,7 +790,6 @@ class TestVarlenAttention(NNTestCase):
             total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
         )
 
-        # page_table maps (batch, logical_page) -> physical page index.
         page_table = torch.zeros(
             batch_size, max_pages_per_seq, device=device, dtype=torch.int32
         )
@@ -816,7 +797,7 @@ class TestVarlenAttention(NNTestCase):
             for p in range(max_pages_per_seq):
                 phys = i * max_pages_per_seq + p
                 page_table[i, p] = phys
-                # Fill physical page with real data where applicable
+
                 token_start = p * page_size
                 token_end = min(token_start + page_size, actual_kv_lens[i])
                 if token_start < actual_kv_lens[i]:
@@ -826,7 +807,7 @@ class TestVarlenAttention(NNTestCase):
 
         seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
 
-        with flash_attention_impl("FA3"), torch.no_grad():
+        with use_fa3(), torch.no_grad():
             output_paged = varlen_attn(
                 q_packed,
                 k_pages,
@@ -843,7 +824,7 @@ class TestVarlenAttention(NNTestCase):
         k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
         v_real_packed = torch.cat(v_seqs, dim=0)
 
-        with flash_attention_impl("FA3"), torch.no_grad():
+        with use_fa3(), torch.no_grad():
             output_reference = varlen_attn(
                 q_packed,
                 k_real_packed,
