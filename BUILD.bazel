@@ -773,7 +773,7 @@ cc_library(
         "@cpp-httplib",
         "@nlohmann",
     ] + if_cuda([
-        "@cuda//:nvToolsExt",
+        "@cuda//:cuda_headers",
         "@cutlass",
         ":torch_cuda",
     ]),
