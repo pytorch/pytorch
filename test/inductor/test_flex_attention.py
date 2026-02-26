@@ -1534,7 +1534,6 @@ class TestFlexAttention(InductorTestCase):
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
-    @skip_on_rocm  # TODO: NaNs on ROCM
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
         inputs = (
             score_mod,
@@ -2507,7 +2506,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_rocm  # TODO: Investigate
     def test_multiple_mask_calls(self, device):
         make_tensor = functools.partial(
             torch.randn,
@@ -3639,11 +3637,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
-
-        if torch.version.hip and mode == "paged_attention":
-            raise self.skipTest(
-                "TODO: figure out why mode_paged_attention_permute_order3_shape0 on MI200 caused mem fault"
-            )
 
         dtype = torch.float32
         # Setup
@@ -5503,6 +5496,88 @@ class GraphModule(torch.nn.Module):
         out = flex_compiled(query, key, value, block_mask=block_mask)
 
         self.assertEqual(out.shape, (B, H, S, D))
+
+    @supported_platform
+    def test_callable_class_mask_mod(self, device):
+        # Test that callable class instances work as mask_mod with flex_attention
+
+        B, H, S, D = 1, 8, 64, 64
+
+        class CausalOrWindowMask:
+            __name__ = "causal_or_window"
+
+            def __init__(self, window_size):
+                self.window_size = window_size
+
+            def __call__(self, b, h, q_idx, kv_idx):
+                causal = q_idx >= kv_idx
+                in_window = (kv_idx - q_idx) < self.window_size
+                return causal | in_window
+
+            def __eq__(self, other):
+                if not isinstance(other, CausalOrWindowMask):
+                    return NotImplemented
+                return self.window_size == other.window_size
+
+            def __hash__(self):
+                return hash(self.window_size)
+
+        mask_mod = CausalOrWindowMask(window_size=64)
+
+        query = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        key = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        value = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+
+        @torch.compile(fullgraph=True)
+        def f(q, k, v):
+            block_mask = create_block_mask(mask_mod, B, H, S, S, device=q.device)
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        _ = f(query, key, value)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_flex_attention_always_freezes_layout(self, device):
+        """Test that flex attention always freezes FlexibleLayout inputs.
+
+        When always_freeze_layout=True on flex attention templates,
+        get_stride_and_maybe_freeze_layout should freeze FlexibleLayout
+        immediately rather than using layout constraints.
+        """
+        from torch._inductor import ir
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        B, H, S, D = 2, 4, 128, 64
+        dtype = torch.float16
+
+        query = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        key = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        value = torch.randn(B, H, S, D, device=device, dtype=dtype)
+
+        flexible_layout_called = False
+        orig_stride_call = TritonTemplateKernel.get_stride_and_maybe_freeze_layout
+
+        def tracking_get_stride(self, node):
+            nonlocal flexible_layout_called
+            flexible_layout = isinstance(node.data.layout, ir.FlexibleLayout)
+            result = orig_stride_call(self, node)
+            if flexible_layout:
+                flexible_layout_called = True
+                assert isinstance(node.data.layout, ir.FixedLayout)
+            return result
+
+        with patch.object(
+            TritonTemplateKernel,
+            "get_stride_and_maybe_freeze_layout",
+            tracking_get_stride,
+        ):
+            compiled_flex = torch.compile(flex_attention, fullgraph=True)
+            compiled_flex(query, key, value)
+
+        self.assertTrue(
+            flexible_layout_called,
+            "get_stride_and_maybe_freeze_layout should be called with FlexibleLayout nodes",
+        )
 
 
 class TestBlockMask(InductorTestCase):
