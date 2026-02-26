@@ -470,7 +470,7 @@ class CompiledFxGraph(OutputCode):
     # Metadata-stripped copy of the FX graph for fake tensor propagation.
     # Running this graph under FakeTensorMode re-derives output shapes
     # (including aliasing) from the input shapes.
-    _original_gm: Optional[torch.fx.GraphModule] = None
+    _original_gm: torch.fx.GraphModule | None = None
 
     def __init__(
         self,
