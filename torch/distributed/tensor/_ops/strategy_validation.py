@@ -124,6 +124,8 @@ class ComparisonStats:
     total_samples: int = 0
     total_combinations: int = 0
     skip_reasons: dict[str, int] = field(default_factory=dict)
+    # Per aten op variant breakdown (e.g. "aten.min.dim" -> 5)
+    true_positives_by_op: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -1212,9 +1214,13 @@ def _compare_rules(
     _assert_keys_normalized(ground_truth_valid, input_shapes, output_shape)
     _assert_keys_normalized(dtensor_rules, input_shapes, output_shape)
 
+    op_str = str(aten_op) if aten_op else "(unknown)"
     for combo_key in ground_truth_valid:
         if combo_key in dtensor_rules:
             stats.true_positives += 1
+            stats.true_positives_by_op[op_str] = (
+                stats.true_positives_by_op.get(op_str, 0) + 1
+            )
         else:
             stats.false_negatives.append(
                 Discrepancy(
@@ -1318,6 +1324,26 @@ def _print_comparison_summary(
     show_repro: int = 0,
 ) -> None:
     """Print discrepancy details for an operator."""
+    # Per aten op variant breakdown
+    fp_by_op: dict[str, set[ComboKey]] = defaultdict(set)
+    for d in stats.false_positives:
+        op_str = str(d.aten_op) if d.aten_op else "(unknown)"
+        fp_by_op[op_str].add((d.input_placements, d.output_placement))
+    fn_by_op: dict[str, set[ComboKey]] = defaultdict(set)
+    for d in stats.false_negatives:
+        op_str = str(d.aten_op) if d.aten_op else "(unknown)"
+        fn_by_op[op_str].add((d.input_placements, d.output_placement))
+
+    all_ops = sorted(
+        set(stats.true_positives_by_op) | set(fp_by_op) | set(fn_by_op)
+    )
+    if len(all_ops) > 1:
+        for op_str in all_ops:
+            tp = stats.true_positives_by_op.get(op_str, 0)
+            fp = len(fp_by_op.get(op_str, set()))
+            fn = len(fn_by_op.get(op_str, set()))
+            print(f"  {op_str}: {tp} correct, {fp} incorrect, {fn} missing")
+
     _print_discrepancy_section(
         "Incorrect (has rule but ground truth invalid)",
         stats.false_positives,
