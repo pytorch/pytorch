@@ -21,9 +21,8 @@ struct HashValue {
   size_t operator()(Value* v) const {
     auto t = valsToParamsMap_.find(v)->second.second.toTensor();
 
-    // Use first element of the tensor data as part of the hash to reduce hash
-    // collision, since most tensors differ from one another from the very first
-    // element.
+    // Use first element of the tensor as hash key to reduce hash collision,
+    // since most tensors differ from one another from the very first element.
     double first_elem_double = 0.0;
     int64_t first_elem_int64 = 0;
     uint64_t first_elem_uint64 = 0;
@@ -77,7 +76,6 @@ static void DeduplicateInitializers(
     return comp(t1, t2);
   };
 
-  // std::vector<Value*> uniqueVals;
   std::unordered_set<Value*, HashValue, CompareValue> uniqueVals(
       0, HashValue(valsToParamsMap), CompareValue(is_same_tensor_as));
   std::vector<size_t> inputsIndicesToRemove;
