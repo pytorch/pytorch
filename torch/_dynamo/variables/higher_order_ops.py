@@ -34,7 +34,7 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables.constant import ConstantVariable
+from torch._dynamo.variables.constant import CONSTANT_VARIABLE_NONE, ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.nn_module import UnspecializedNNModuleVariable
@@ -70,7 +70,7 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from . import AutogradFunctionContextVariable
 
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Generator, Iterable
 from typing import ParamSpec, TypeVar
 
 
@@ -232,22 +232,7 @@ def only_consist_of(
 # A more read-able syntax sugar for creating a UserFunctionVariable for f
 # and run call_function on it. Make it return a function to preserve the calling
 # convention of the original f.
-def _make_inlined(
-    tx: "InstructionTranslator", f: Callable[..., Any]
-) -> Callable[..., VariableTracker]:
-    assert callable(f), "Expect f to be a python callable."
-
-    def inline_call(
-        *args: VariableTracker, **kwargs: VariableTracker
-    ) -> VariableTracker:
-        from torch._dynamo.trace_rules import _force_inline
-
-        with _force_inline():
-            # We cannot use SourcelessBuilder here because it ignores _force_inline.
-            # since the rules are static.
-            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
-
-    return inline_call
+from torch._dynamo.utils import _make_inlined
 
 
 def add_call_function(
@@ -256,7 +241,7 @@ def add_call_function(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     flat_example_value: Any,
-    config: Optional[NestedCompileRegionOptions] = None,
+    config: NestedCompileRegionOptions | None = None,
 ) -> VariableTracker:
     from .builder import wrap_fx_proxy
 
@@ -1469,8 +1454,8 @@ def speculate_subgraph_with_auto_output_flattening(
     *,
     # source_target is the .value of HigherOrderOpVariable and is the
     # target of the proxy that we created for the higherOrderOperator.
-    source_target: Optional[HigherOrderOperator] = None,
-    enable_grad: Optional[bool] = None,
+    source_target: HigherOrderOperator | None = None,
+    enable_grad: bool | None = None,
     # automatic: relies on Dynamo to find the used tensors and lift them as
     # inputs.
     #
@@ -1690,7 +1675,6 @@ def speculate_subgraph_with_auto_output_flattening(
             # be actual FX graph outputs.
             # Collect only tensor and symint VTs that should be graph outputs.
             # We walk the output structure and extract proxyable VTs.
-            # pyrefly: ignore [implicit-any]
             graph_output_vt_list = []
 
             def visit(vt: VariableTracker) -> None:
@@ -2084,7 +2068,7 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
     # Subclasses should set _HOP_NAME to enable automatic HOP context in error messages
-    _HOP_NAME: Optional[str] = None
+    _HOP_NAME: str | None = None
     # Set to False for HOPs that hard error on graph break (e.g., cond, map, scan); otherwise
     # HOPs will fall back to eager.
     _ALLOW_FALLBACK_TO_EAGER: bool = True
@@ -2201,6 +2185,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from . import ListVariable
+
+        self.supports_input_mutation = not torch.is_grad_enabled()
+        self.supports_aliasing = not torch.is_grad_enabled()
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -4528,7 +4515,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         """
         Traces the backward method of the autograd.Function object.
         """
-        from . import UserDefinedClassVariable, UserMethodVariable
+        from . import UserMethodVariable
 
         # Note that for the forward, we do not restore side effects, because we
         # want the later tracing to see the side-effects. But for backward, we
@@ -4554,7 +4541,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if i.is_tensor():
                     bwd_args.append(i)
                 else:
-                    bwd_args.append(ConstantVariable.create(None))
+                    bwd_args.append(CONSTANT_VARIABLE_NONE)
 
         bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
 
@@ -4610,7 +4597,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
                         autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        UserDefinedClassVariable(self.bwd_fn.__class__),
+                        VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
                     unimplemented(
@@ -5000,7 +4987,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         method_name: str,
         args: Sequence[VariableTracker],
     ) -> tuple[VariableTracker, Sequence[VariableTracker]]:
-        from . import UserDefinedClassVariable, UserMethodVariable
+        from . import UserMethodVariable
 
         source = None
         if self.parent_source:
@@ -5016,7 +5003,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fn_vt = VariableTracker.build(tx, fn, source=source)
             fn_args = [ctx, *args]
         elif isinstance(fn, types.MethodType):
-            cls_vt = UserDefinedClassVariable(fn.__class__)
+            cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
                 fn.__func__,
                 cls_vt,

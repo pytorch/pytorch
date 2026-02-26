@@ -22,7 +22,7 @@ import pickle
 import re
 import zlib
 from collections import defaultdict
-from typing import Optional, TYPE_CHECKING, TypeVar, Union
+from typing import TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
 import torch._dynamo.config
@@ -171,8 +171,8 @@ class CodeState:
     )
 
 
-_INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
-_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
+_INIT_CODE_STATE: defaultdict[CodeId, CodeState] | None = None
+_CODE_STATE: defaultdict[CodeId, CodeState] | None = None
 _LOGGED_DYNAMIC_ALLOWLIST: bool = False
 _KNOWN_DYNAMIC_SOURCES: set[str] = set()
 
@@ -227,20 +227,20 @@ auto_dynamic = AutoDynamic.token
 
 @dataclasses.dataclass
 class FrameStateSizeEntry:
-    scalar: Union[int, AutoDynamic, AutoUnset] = dataclasses.field(default=auto_unset)
+    scalar: int | AutoDynamic | AutoUnset = dataclasses.field(default=auto_unset)
     # NB: We don't have cases where we have a known dimensionality but
     # we know NOTHING about the individual sizes
-    size: Union[AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic], ...]] = (
+    size: AutoDynamic | AutoUnset | tuple[int | AutoDynamic, ...] = dataclasses.field(
+        default=auto_unset
+    )
+    stride: AutoDynamic | AutoUnset | tuple[int | AutoDynamic | InferStride, ...] = (
         dataclasses.field(default=auto_unset)
     )
-    stride: Union[
-        AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
-    ] = dataclasses.field(default=auto_unset)
     excluded_sizes: tuple[int | None, ...] | None = None
 
     def render(self) -> str:
         # Special cases
-        def render_single(s: Union[int, AutoDynamic, AutoUnset, InferStride]) -> str:
+        def render_single(s: int | AutoDynamic | AutoUnset | InferStride) -> str:
             if s is auto_dynamic:
                 return "?"
             elif s is auto_unset:
@@ -251,7 +251,7 @@ class FrameStateSizeEntry:
             else:
                 return str(s)
 
-        def render_tuple(ss: tuple[Union[int, AutoDynamic, InferStride], ...]) -> str:
+        def render_tuple(ss: tuple[int | AutoDynamic | InferStride, ...]) -> str:
             return "[" + ", ".join(render_single(s) for s in ss) + "]"
 
         # Common cases
@@ -310,7 +310,7 @@ class FrameStateSizeEntry:
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
-    def _munge_symint(xs: tuple[int, ...]) -> tuple[Union[AutoDynamic, int], ...]:
+    def _munge_symint(xs: tuple[int, ...]) -> tuple[AutoDynamic | int, ...]:
         return tuple(auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs)
 
     @classmethod
@@ -336,7 +336,7 @@ class FrameStateSizeEntry:
         )
 
     @staticmethod
-    def _merge_atom(x: _T, y: _T) -> Union[AutoDynamic, _T]:
+    def _merge_atom(x: _T, y: _T) -> AutoDynamic | _T:
         if x is auto_unset:
             return y
         if y is auto_unset:
@@ -348,9 +348,9 @@ class FrameStateSizeEntry:
     @classmethod
     def _merge_atom_tup(
         cls,
-        xs: Union[AutoDynamic, AutoUnset, tuple[_T, ...]],
-        ys: Union[AutoDynamic, AutoUnset, tuple[_T, ...]],
-    ) -> Union[AutoDynamic, AutoUnset, tuple[Union[AutoDynamic, _T], ...]]:
+        xs: AutoDynamic | AutoUnset | tuple[_T, ...],
+        ys: AutoDynamic | AutoUnset | tuple[_T, ...],
+    ) -> AutoDynamic | AutoUnset | tuple[AutoDynamic | _T, ...]:
         if xs is auto_unset:
             return ys
         if ys is auto_unset:
@@ -432,7 +432,7 @@ def update_automatic_dynamic(
                 )
 
         def log_tup(
-            tup_name: str, short_reason: str, long_reason: str, i: Optional[int] = None
+            tup_name: str, short_reason: str, long_reason: str, i: int | None = None
         ) -> None:
             entry_tup = (
                 getattr(entry, tup_name) if i is None else getattr(entry, tup_name)[i]
@@ -554,7 +554,7 @@ def format_cache_key(key: str) -> str:
     return f"{key}:{rank}:{tag}"
 
 
-def get_cache_key() -> Optional[str]:
+def get_cache_key() -> str | None:
     # TODO: info versions of these logs that log only once
     if torch.compiler.config.force_disable_caches:
         warn_once(
@@ -580,7 +580,7 @@ def get_cache_key() -> Optional[str]:
     return None
 
 
-def get_extra_cache_key(sticky_key: str) -> Optional[str]:
+def get_extra_cache_key(sticky_key: str) -> str | None:
     if torch.compiler.config.force_disable_caches:
         warn_once(
             "dynamo_pgo force disabled by torch.compiler.config.force_disable_caches"
@@ -591,7 +591,7 @@ def get_extra_cache_key(sticky_key: str) -> Optional[str]:
 
 
 # This solely controls local PGO
-def code_state_path(cache_key: str) -> Optional[str]:
+def code_state_path(cache_key: str) -> str | None:
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
         log.debug("automatic_dynamic_local_pgo not enabled")
         return None
@@ -625,7 +625,7 @@ def should_use_remote_dynamo_pgo_cache() -> bool:
     )
 
 
-def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+def get_remote_cache() -> RemoteCache[JsonDataTy] | None:
     from torch._inductor.remote_cache import create_cache
 
     if not should_use_remote_dynamo_pgo_cache():
@@ -760,7 +760,7 @@ def hit(key: str, ty: str) -> defaultdict[CodeId, CodeState]:
     return _CODE_STATE
 
 
-def get_local_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+def get_local_code_state(cache_key: str) -> defaultdict[CodeId, CodeState] | None:
     global _CODE_STATE
     path = code_state_path(cache_key)
     if path is not None and os.path.exists(path):
@@ -790,8 +790,8 @@ def get_local_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeSta
 def lookup_remote_cache_entry(
     remote_cache: RemoteCache[JsonDataTy],
     cache_key: str,
-    event_name: Optional[str] = None,
-) -> Optional[defaultdict[CodeId, CodeState]]:
+    event_name: str | None = None,
+) -> defaultdict[CodeId, CodeState] | None:
     code_state = None
     try:
         cache_data = remote_cache.get(cache_key)
@@ -824,7 +824,7 @@ def lookup_remote_cache_entry(
     return code_state
 
 
-def get_remote_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+def get_remote_code_state(cache_key: str) -> defaultdict[CodeId, CodeState] | None:
     global _CODE_STATE
     remote_cache = get_remote_cache()
     if remote_cache is not None:
@@ -929,7 +929,7 @@ def put_code_state() -> None:
             put_remote_code_state(extra_write_key)
 
 
-def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str, int]]:
+def write_local_impl(cache_key: str, pickled_code: bytes) -> tuple[str, int] | None:
     path = code_state_path(cache_key)
 
     if path is None:

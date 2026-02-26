@@ -7,7 +7,7 @@ from __future__ import annotations
 import itertools
 import operator
 from collections.abc import Callable
-from typing import Optional, overload, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import overload, TYPE_CHECKING, TypeAlias, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -25,9 +25,10 @@ __all__ = [
     "dropwhile",
     "filterfalse",
     "islice",
+    "pairwise",
+    "takewhile",
     "tee",
     "zip_longest",
-    "pairwise",
 ]
 
 
@@ -49,9 +50,9 @@ def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
 @substitute_in_graph(itertools.accumulate, is_embedded_type=True)  # type: ignore[arg-type]
 def accumulate(
     iterable: Iterable[_T],
-    func: Optional[Callable[[_T, _T], _T]] = None,
+    func: Callable[[_T, _T], _T] | None = None,
     *,
-    initial: Optional[_T] = None,
+    initial: _T | None = None,
 ) -> Iterator[_T]:
     # call iter outside of the generator to match cypthon behavior
     iterator = iter(iterable)
@@ -115,6 +116,8 @@ def cycle(iterable: Iterable[_T]) -> Iterator[_T]:
 @substitute_in_graph(itertools.dropwhile, is_embedded_type=True)  # type: ignore[arg-type]
 def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
     # dropwhile(lambda x: x < 5, [1, 4, 6, 3, 8]) -> 6 3 8
+    if not callable(predicate):
+        raise TypeError(f"'{type(predicate).__name__}' object is not callable")
 
     iterator = iter(iterable)
     for x in iterator:
@@ -123,6 +126,19 @@ def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[
             break
 
     yield from iterator
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.takewhile
+@substitute_in_graph(itertools.takewhile, is_embedded_type=True)  # type: ignore[arg-type]
+def takewhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
+    # takewhile(lambda x: x<5, [1,4,6,3,8]) → 1 4
+    if not callable(predicate):
+        raise TypeError(f"'{type(predicate).__name__}' object is not callable")
+
+    for x in iterable:
+        if not predicate(x):
+            break
+        yield x
 
 
 @substitute_in_graph(itertools.filterfalse, is_embedded_type=True)  # type: ignore[arg-type]
