@@ -757,8 +757,8 @@ def single_mesh_dim_common_pointwise_strategy(
     return placements_list
 
 
-def _make_partial_strategy(
-    extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+def _common_pointwise_single_dim_strategy(
+    partial_extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
 ) -> Callable[
     [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
 ]:
@@ -793,10 +793,10 @@ def _make_partial_strategy(
                 else:
                     shard_placements.append(Replicate())
             placements.append(shard_placements)
-        if extra_rules:
+        if partial_extra_rules:
             n_tensors = len(tensor_arg_metas)
             expected_len = 1 + n_tensors
-            for rule in extra_rules:
+            for rule in partial_extra_rules:
                 # Filter rather than assert: some ops (e.g. mul.Tensor) mix
                 # unary rules (len 2, for scalar promotion) and binary rules
                 # (len 3, for tensor-tensor), so mismatched lengths are expected.
