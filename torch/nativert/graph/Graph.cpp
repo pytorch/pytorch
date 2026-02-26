@@ -605,7 +605,23 @@ void Graph::finalize() {
       userOutputs_.emplace_back(getValue(*outputName));
     } else {
       if (constantIndex < constantOutputs_.size()) {
-        userOutputs_.emplace_back(std::move(constantOutputs_[constantIndex]));
+        // Copy the constant rather than moving it, because finalize() may be
+        // called multiple times (e.g. after constant folding). Moving would
+        // leave constantOutputs_ entries in a moved-from state, causing
+        // subsequent calls to produce empty strings/vectors.
+        // Constant is non-copyable due to unique_ptr<Graph>, so we use
+        // std::visit to copy each alternative individually.
+        userOutputs_.emplace_back(std::visit(
+            [](const auto& val) -> Constant {
+              using T = std::decay_t<decltype(val)>;
+              if constexpr (is_same_v<T, std::unique_ptr<Graph>>) {
+                TORCH_CHECK(false, "Graph constant outputs cannot be copied");
+                return Constant(None{});
+              } else {
+                return Constant(val);
+              }
+            },
+            constantOutputs_[constantIndex]));
         constantIndex++;
       } else {
         TORCH_CHECK(false, "No more constant outputs available");
