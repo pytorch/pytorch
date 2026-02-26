@@ -7367,7 +7367,7 @@ Example::
 add_docstr(
     torch.amin,
     r"""
-amin(input, dim, keepdim=False, *, out=None) -> Tensor
+amin(input, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the minimum value of each slice of the :attr:`input` tensor in the given
 dimension(s) :attr:`dim`.
