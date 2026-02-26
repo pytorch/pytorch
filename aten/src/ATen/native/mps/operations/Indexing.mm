@@ -907,7 +907,6 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
     return self;
   }
 
-  // Handle 0-dim self by filling directly
   if (self.dim() == 0) {
     return self.fill_(source);
   }
@@ -917,28 +916,127 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
   auto stream = getCurrentMPSStream();
   const bool is_dense = self.is_contiguous() && index.is_contiguous();
   const auto long_or_int = (index.scalar_type() == ScalarType::Long) ? "long" : "int";
-  const auto dense_or_strided = is_dense ? "dense" : "strided";
-  auto indexFillPSO = lib.getPipelineStateForFunc(
-      fmt::format("index_fill_{}_{}_{}", dense_or_strided, scalarToMetalTypeString(self), long_or_int));
+  const auto type_str = scalarToMetalTypeString(self);
+  const int64_t dim_size = self.size(dim);
+  const int64_t indices_numel = index.numel();
 
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    @autoreleasepool {
-      auto computeEncoder = stream->commandEncoder();
-      auto mpsScalar = getMPSScalar(source, self.scalar_type());
-      uint32_t dim_arg = static_cast<uint32_t>(dim);
-      uint32_t ndim = static_cast<uint32_t>(self.dim());
-      uint32_t indices_numel = static_cast<uint32_t>(index.numel());
-      [computeEncoder setComputePipelineState:indexFillPSO];
-      mtl_setArgs(computeEncoder, self, index);
-      mtl_setBytes(computeEncoder, mpsScalar, 2);
-      mtl_setArgs<3>(computeEncoder, dim_arg, self.sizes(), ndim, indices_numel);
-      if (!is_dense) {
-        long indices_stride = index.dim() > 0 ? index.stride(0) : 1;
-        mtl_setArgs<7>(computeEncoder, self.strides(), indices_stride);
+  // For large index counts, use a two-pass mask approach: mark which dim-positions
+  // to fill, then iterate over all elements checking the mask. This avoids write
+  // conflicts from duplicate indices and produces cache-friendly sequential writes.
+  // Threshold: ≥6% fill rate (indices_numel × 16 ≥ dim_size).  Empirically this
+  // is where the mask's O(numel) sequential scan beats scatter's growing write-
+  // conflict overhead.
+  const bool use_mask = (indices_numel * 16 >= dim_size);
+
+  if (use_mask) {
+    // Use at::empty (not at::zeros) to avoid a blit encoder fill that would
+    // force a blit→compute encoder switch, adding latency per call.
+    // The mask is zeroed via a compute kernel inside the dispatch block instead.
+    // TODO: Remove me after https://github.com/pytorch/pytorch/issues/175859 is fixed
+    auto mask = at::empty({dim_size}, at::TensorOptions().dtype(at::kBool).device(self.device()));
+    auto zeroMaskPSO = lib.getPipelineStateForFunc("index_fill_zero_mask");
+    auto setMaskPSO = lib.getPipelineStateForFunc(fmt::format("index_fill_set_mask_{}", long_or_int));
+    auto fillMaskPSO = lib.getPipelineStateForFunc(
+        fmt::format("index_fill_{}_from_mask_{}", is_dense ? "dense" : "strided", type_str));
+
+    c10::SmallVector<int64_t> all_sizes, all_strides;
+    if (!is_dense) {
+      for (int64_t d = 0; d < self.dim(); d++) {
+        all_sizes.push_back(self.size(d));
+        all_strides.push_back(self.stride(d));
       }
-      mtl_dispatch1DJob(computeEncoder, indexFillPSO, self.numel());
     }
-  });
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        auto mpsScalar = getMPSScalar(source, self.scalar_type());
+        long indices_stride = index.dim() > 0 ? index.stride(0) : 1;
+
+        // Pass 0: zero the mask entirely within the compute encoder.
+        [computeEncoder setComputePipelineState:zeroMaskPSO];
+        mtl_setArgs(computeEncoder, mask);
+        mtl_dispatch1DJob(computeEncoder, zeroMaskPSO, dim_size);
+
+        [computeEncoder setComputePipelineState:setMaskPSO];
+        mtl_setArgs(computeEncoder, mask, index);
+        mtl_setArgs<2>(computeEncoder, dim_size, indices_stride);
+        mtl_dispatch1DJob(computeEncoder, setMaskPSO, indices_numel);
+
+        [computeEncoder setComputePipelineState:fillMaskPSO];
+        mtl_setArgs(computeEncoder, self, mask);
+        mtl_setBytes(computeEncoder, mpsScalar, 2);
+        if (is_dense) {
+          // 3D dispatch: (inner, dim, outer) avoids integer division in the kernel.
+          // Compute inner_size from size products, not stride(dim): for size-1 dims,
+          // is_contiguous() returns true regardless of stride, so stride(dim) can
+          // exceed the actual inner element count, causing outer_size=0 (no threads).
+          uint32_t dim_size_u = static_cast<uint32_t>(dim_size);
+          uint32_t inner_size = 1;
+          for (int64_t d = dim + 1; d < self.dim(); d++) {
+            inner_size *= static_cast<uint32_t>(self.size(d));
+          }
+          uint32_t outer_size = static_cast<uint32_t>(self.numel() / ((int64_t)dim_size * inner_size));
+          mtl_setArgs<3>(computeEncoder, dim_size_u, inner_size);
+          NSUInteger maxTG = [fillMaskPSO maxTotalThreadsPerThreadgroup];
+          // Fill threadgroup across dimensions to ensure adequate occupancy.
+          // When inner_size is small (e.g. 1 for dim=last), use y-dim threads.
+          NSUInteger tgX = std::min((NSUInteger)inner_size, maxTG);
+          NSUInteger tgY = std::min((NSUInteger)dim_size_u, maxTG / tgX);
+          NSUInteger tgZ = std::min((NSUInteger)outer_size, maxTG / (tgX * tgY));
+          [computeEncoder dispatchThreads:MTLSizeMake(inner_size, dim_size_u, outer_size)
+                    threadsPerThreadgroup:MTLSizeMake(tgX, tgY, tgZ)];
+        } else {
+          uint32_t dim_u = static_cast<uint32_t>(dim);
+          uint32_t ndim_u = static_cast<uint32_t>(self.dim());
+          mtl_setArgs<3>(computeEncoder, all_sizes, all_strides, dim_u, ndim_u);
+          mtl_dispatch1DJob(computeEncoder, fillMaskPSO, self.numel());
+        }
+      }
+    });
+  } else {
+    // Scatter: one thread per (index, slice-element) pair.
+    const int64_t slice_numel = self.numel() / dim_size;
+    auto indexFillPSO = lib.getPipelineStateForFunc(
+        fmt::format("index_fill_{}_{}_{}", is_dense ? "dense" : "strided", type_str, long_or_int));
+
+    c10::SmallVector<int64_t> slice_sizes, slice_out_strides;
+    if (!is_dense) {
+      for (int64_t d = 0; d < self.dim(); d++) {
+        if (d != dim) {
+          slice_sizes.push_back(self.size(d));
+          slice_out_strides.push_back(self.stride(d));
+        }
+      }
+    }
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        auto mpsScalar = getMPSScalar(source, self.scalar_type());
+        [computeEncoder setComputePipelineState:indexFillPSO];
+        mtl_setArgs(computeEncoder, self, index);
+        mtl_setBytes(computeEncoder, mpsScalar, 2);
+        if (is_dense) {
+          long dim_stride = self.stride(dim);
+          mtl_setArgs<3>(computeEncoder, dim_size, dim_stride, slice_numel);
+        } else {
+          long dim_out_stride = self.stride(dim);
+          long indices_stride = index.dim() > 0 ? index.stride(0) : 1;
+          uint32_t slice_ndim = static_cast<uint32_t>(self.dim() - 1);
+          mtl_setArgs<3>(computeEncoder,
+                         dim_size,
+                         dim_out_stride,
+                         slice_sizes,
+                         slice_out_strides,
+                         slice_ndim,
+                         slice_numel,
+                         indices_stride);
+        }
+        mtl_dispatch1DJob(computeEncoder, indexFillPSO, indices_numel * slice_numel);
+      }
+    });
+  }
 
   return self;
 }
