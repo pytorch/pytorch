@@ -919,25 +919,6 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
         return decompositions
     result = fast_random_decomps()
-    # Skip decomposition of addcmul/addcdiv so the inductor FMA lowering is
-    # used instead, which matches eager CUDA's rounding behavior.
-    _fma_ops_to_skip = OrderedSet(
-        [
-            aten.addcmul,
-            aten.addcmul_,
-            aten._foreach_addcmul.Scalar,
-            aten._foreach_addcdiv.Scalar,
-        ]
-    )
-
-    def should_skip(op: Any) -> bool:
-        if op in _fma_ops_to_skip:
-            return True
-        if hasattr(op, "overloadpacket"):
-            return op.overloadpacket in _fma_ops_to_skip
-        return False
-
-    result = {k: v for k, v in result.items() if not should_skip(k)}
     return result
 
 
