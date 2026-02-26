@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
@@ -32,7 +32,7 @@ def should_unwrap_unspec_arg(name: str):
     return False
 
 
-def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
+def signature_of(arg: KernelArgType, *, size_dtype: str | None) -> str:
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/triton-lang/triton/pull/2279/
@@ -125,9 +125,9 @@ def non_constexpr_signature(signature):
 def signature_to_meta(
     signature: list[KernelArgType],
     *,
-    size_dtype: Optional[str],
+    size_dtype: str | None,
     argdefs: list[ArgName],
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
     is_template: bool = False,
 ) -> dict[str, str]:
     if indices is None:
@@ -203,7 +203,7 @@ def _arg_equals_1(arg: KernelArgType) -> bool:
 def equal_1_arg_indices(
     args: list[KernelArgType],
     *,
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
 ) -> tuple[int, ...]:
     if indices is None:
         indices = list(range(len(args)))
@@ -216,7 +216,7 @@ def equal_1_arg_indices(
 def config_of(
     args: list[KernelArgType],
     *,
-    indices: Optional[list[int]] = None,
+    indices: list[int] | None = None,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))

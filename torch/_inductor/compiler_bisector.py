@@ -8,7 +8,6 @@ import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
@@ -83,7 +82,7 @@ def reset_counters() -> None:
 
 
 @functools.cache
-def get_env_val(env_str: str) -> Optional[str]:
+def get_env_val(env_str: str) -> str | None:
     return os.environ.get(env_str, None)
 
 
@@ -97,9 +96,9 @@ class BisectionResult:
     """
 
     backend: str
-    subsystem: Optional[str] = None
-    bisect_number: Optional[int] = None
-    debug_info: Optional[str] = None
+    subsystem: str | None = None
+    bisect_number: int | None = None
+    debug_info: str | None = None
 
 
 class CompilerBisector:
@@ -131,7 +130,7 @@ class CompilerBisector:
 
     bisection_enabled: bool = False
 
-    in_process_cache: Optional[str] = None
+    in_process_cache: str | None = None
 
     @classmethod
     def get_dir(cls) -> str:
@@ -194,7 +193,7 @@ class CompilerBisector:
         cls.write_lines_to_file(file_path, lines)
 
     @classmethod
-    def get_backend(cls) -> Optional[str]:
+    def get_backend(cls) -> str | None:
         """
         Returns the active backend, if any
         """
@@ -209,7 +208,7 @@ class CompilerBisector:
         return None
 
     @classmethod
-    def get_subsystem(cls) -> Optional[str]:
+    def get_subsystem(cls) -> str | None:
         """
         Returns the active subsystem, if any
         """
@@ -230,7 +229,7 @@ class CompilerBisector:
         return next(obj for obj in BACKENDS[backend_name] if obj.name == subsystem_name)
 
     @classmethod
-    def get_run_state(cls, backend_name: str, subsystem_name: str) -> Optional[str]:
+    def get_run_state(cls, backend_name: str, subsystem_name: str) -> str | None:
         """
         Returns the current stage of bisecting, if Any
         """
@@ -283,7 +282,7 @@ class CompilerBisector:
         cls.write_lines_to_file(file_path, lines)
 
     @classmethod
-    def get_config_change(cls, config_name: str) -> Optional[dict[str, object]]:
+    def get_config_change(cls, config_name: str) -> dict[str, object] | None:
         backend = cls.get_backend()
         subsystem = cls.get_subsystem()
 
@@ -326,7 +325,7 @@ class CompilerBisector:
         cls,
         backend: str,
         subsystem: str,
-        debug_info: Optional[Callable[[], str]] = None,
+        debug_info: Callable[[], str] | None = None,
     ) -> bool:
         if not cls.bisection_enabled:
             return False
@@ -375,7 +374,7 @@ class CompilerBisector:
     @classmethod
     def advance_subsystem(
         cls, curr_backend: str, curr_subsystem: Subsystem
-    ) -> Optional[Subsystem]:
+    ) -> Subsystem | None:
         """
         Tries to move to the next subsystem within the current system.
         """
@@ -403,7 +402,7 @@ class CompilerBisector:
             return None
 
     @classmethod
-    def advance_backend(cls, curr_backend: str) -> Optional[str]:
+    def advance_backend(cls, curr_backend: str) -> str | None:
         """
         Tries Move to the next backend.
         """
@@ -498,7 +497,7 @@ class CompilerBisector:
     @classmethod
     def do_bisect(
         cls, fn: Callable[[], bool], cli_interface: bool = False
-    ) -> Optional[BisectionResult]:
+    ) -> BisectionResult | None:
         """
         Run fn repeatedly attempting to bisect torch.compile. fn should return True on success and False on failure.
         """

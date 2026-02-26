@@ -3,14 +3,14 @@
 Utility functions for NVIDIA Universal GEMM.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from torch.nn.functional import ScalingType, SwizzleType
 
 
 def to_cutlass_scale_mode(
     scale_type: Any, swizzle_type: Any
-) -> tuple[Optional[Any], Optional[Any]]:
+) -> tuple[Any | None, Any | None]:
     """
     Map PyTorch ScalingType/SwizzleType to cutlass_api ScaleMode/ScaleSwizzleMode.
 
