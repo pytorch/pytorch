@@ -608,13 +608,19 @@ def do_auto_functionalize(
 class FunctionalCallableWithEpilogue:
     def __init__(self, orig_callable: Callable):
         self.orig_callable = orig_callable
+        # Propagate so callers pass inputs as a list, enabling input deallocation.
+        self._boxed_call = getattr(orig_callable, "_boxed_call", False)
 
     def __call__(self, *args, **kwargs):
-        # We call torch.func.functionalize. This allows us to inline the epilogue graph.
-        # Inlining has the benefit of allowing easiser fusion inside subgraph.
-        # Though the epilogue graph contains copy_, it is OK because inductor can handle it
-        # and this is also how we have been supporting top-level graph input mutation.
-        return tuple(torch.func.functionalize(self.orig_callable)(*args, **kwargs))
+        # Functionalize to inline the epilogue graph (copy_ ops) for better fusion.
+        functionalized = torch.func.functionalize(self.orig_callable)
+        if self._boxed_call:
+            # Not all callers respect _boxed_call (e.g. reenter_make_fx
+            # always calls f(*args)). Detect which convention was used.
+            if len(args) == 1 and isinstance(args[0], list):
+                return tuple(functionalized(args[0]))
+            return tuple(functionalized(list(args)))
+        return tuple(functionalized(*args, **kwargs))
 
     def __hash__(self):
         return id(self.orig_callable)
@@ -640,12 +646,24 @@ def do_auto_functionalize_v2(
     if not isinstance(op, get_args(_MutableOpType)):
         raise AssertionError(f"Expected _MutableOpType, got {type(op)}")
 
-    def _functionalize_callable(arg: Any):
-        if callable(arg):
+    subgraph_arg_names = {
+        arg_info.name
+        for arg_info in schema.arguments
+        if isinstance(arg_info.type, torch._C.AnyType)
+    }
+
+    def _maybe_functionalize(name: str, arg: Any) -> Any:
+        if name in subgraph_arg_names and callable(arg):
             return FunctionalCallableWithEpilogue(arg)
         return arg
 
-    args, kwargs = pytree.tree_map(_functionalize_callable, (args, kwargs))
+    args = tuple(
+        _maybe_functionalize(schema.arguments[i].name, a)
+        if i < len(schema.arguments)
+        else a
+        for i, a in enumerate(args)
+    )
+    kwargs = {k: _maybe_functionalize(k, v) for k, v in kwargs.items()}
 
     for idx, arg in enumerate(schema.arguments):
         # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
@@ -1021,10 +1039,15 @@ def auto_functionalized_v2_proxy(
             HopInstance(_mutable_op, schema), tuple(), new_kwargs
         )
 
-        # Only replace the callabes in kwargs with the materialized subgraphs.
+        # Only replace the callables in kwargs with the materialized subgraphs.
         # The rest of the kwargs are kept unchanged.
+        subgraph_arg_names = {
+            arg_info.name
+            for arg_info in schema.arguments
+            if isinstance(arg_info.type, torch._C.AnyType)
+        }
         for k, v in kwargs.items():
-            if callable(v):
+            if k in subgraph_arg_names and callable(v):
                 if k not in materialized_kwargs or not isinstance(
                     materialized_kwargs[k], torch.fx.GraphModule
                 ):

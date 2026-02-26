@@ -119,6 +119,12 @@ class InductorChoices:
         conv_heuristics = self.get_config_heuristics(device_type)
         return conv_heuristics.get_conv_configs()
 
+    def get_depthwise_conv_configs(
+        self, device_type: Optional[str] = "cuda"
+    ) -> list[Any]:
+        heuristics = self.get_config_heuristics(device_type)
+        return heuristics.get_depthwise_conv_configs()
+
     # Flex attention configs
     # TODO(coconutruben): break out flexattention/decode configs into the new retrieval mechanism
     def get_flex_attention_fwd_configs(
