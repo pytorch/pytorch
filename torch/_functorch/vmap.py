@@ -182,7 +182,7 @@ def _maybe_remove_batch_dim(
     vmap_level: int,
     batch_size: int,
     out_dim: int | None,
-) -> torch.Tensor:
+) -> Any:
     if out_dim is None:
         if isinstance(batched_output, torch.Tensor) and is_batchedtensor(
             batched_output
@@ -193,15 +193,20 @@ def _maybe_remove_batch_dim(
             )
         return batched_output
 
-    # out_dim is non None
-    if not isinstance(batched_output, torch.Tensor):
-        raise ValueError(
-            f"vmap({name}, ...): `{name}` must only return "
-            f"Tensors, got type {type(batched_output)}. "
-            "Did you mean to set out_dims= to None for output?"
-        )
+    if isinstance(batched_output, torch.Tensor):
+        return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
 
-    return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
+    if batched_output is None:
+        return None
+
+    if isinstance(batched_output, (int, float, bool, complex)):
+        return torch.tensor(batched_output).expand(batch_size)
+
+    raise ValueError(
+        f"vmap({name}, ...): `{name}` must only return "
+        f"Tensors, got type {type(batched_output)}. "
+        "Did you mean to set out_dims= to None for output?"
+    )
 
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
@@ -240,13 +245,6 @@ def _unwrap_batched(
             incompatible_error()
         else:
             flat_out_dims = broadcast_result
-
-    # Non-tensor leaves were never batched, so override their out_dim to None
-    # to pass them through unchanged rather than raising an error.
-    flat_out_dims = [
-        None if not isinstance(o, torch.Tensor) and out_dim is not None else out_dim
-        for o, out_dim in zip(flat_batched_outputs, flat_out_dims, strict=True)
-    ]
 
     flat_outputs = [
         _maybe_remove_batch_dim(
@@ -396,7 +394,7 @@ def _concat_chunked_outputs(
     out_dims: out_dims_t,
     arg_spec: TreeSpec,
     flat_output_chunks: list[tuple[Any, ...] | None],
-) -> list[Tensor]:
+) -> list[Any]:
     # concat chunks on out_dim
     flat_out_dims = _broadcast_to_and_flatten(out_dims, arg_spec)
     if flat_out_dims is None:
@@ -405,12 +403,15 @@ def _concat_chunked_outputs(
         raise AssertionError(
             f"len(flat_out_dims)={len(flat_out_dims)} != len(flat_output_chunks)={len(flat_output_chunks)}"
         )
-    flat_output: list[Tensor] = []
+    flat_output: list[Any] = []
     for idx, out_dim in enumerate(flat_out_dims):
         chunk = flat_output_chunks[idx]
         if chunk is None:
             raise AssertionError(f"chunk at index {idx} must not be None")
-        flat_output.append(torch.cat(chunk, dim=out_dim))
+        if all(c is None for c in chunk):
+            flat_output.append(None)
+        else:
+            flat_output.append(torch.cat(chunk, dim=out_dim))
         # release tensors
         flat_output_chunks[idx] = None
 

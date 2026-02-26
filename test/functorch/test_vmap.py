@@ -107,27 +107,58 @@ class EnableVmapFallbackWarnings:
 
 @markDynamoStrictTest
 class TestVmapAPI(TestCase):
-    def test_non_tensor_output_passthrough(self):
-        # Non-tensor outputs pass through vmap unchanged
+    def test_non_tensor_output_numeric(self):
+        # Numeric non-tensor outputs are expanded across the batch
         result = vmap(lambda x: 3.14)(torch.ones(3))
-        self.assertEqual(result, 3.14)
+        self.assertEqual(result, torch.tensor(3.14).expand(3))
+
+        result = vmap(lambda x: 42)(torch.ones(4))
+        self.assertEqual(result, torch.tensor(42).expand(4))
+
+        result = vmap(lambda x: True)(torch.ones(2))
+        self.assertEqual(result, torch.tensor(True).expand(2))
 
         def multiple_outputs(x):
             return x, 3
 
         tensor_out, int_out = vmap(multiple_outputs)(torch.ones(3))
         self.assertEqual(tensor_out, torch.ones(3))
-        self.assertEqual(int_out, 3)
+        self.assertEqual(int_out, torch.tensor(3).expand(3))
+
+    def test_non_tensor_output_none(self):
+        # None outputs pass through unchanged
+        result = vmap(lambda x: (x.sin(), None))(torch.randn(4, 3))
+        self.assertEqual(result[0].shape, (4, 3))
+        self.assertIsNone(result[1])
+
+    def test_non_tensor_output_string_raises(self):
+        # String outputs raise an error
+        with self.assertRaisesRegex(ValueError, "must only return Tensors"):
+            vmap(lambda x: "hello")(torch.ones(3))
+
+        with self.assertRaisesRegex(ValueError, "must only return Tensors"):
+            vmap(lambda x: (x.sin(), "hello"))(torch.randn(4, 3))
 
     def test_non_tensor_output_pytree(self):
-        # Non-tensor leaves in pytree outputs pass through unchanged
         def f(x):
-            return {"tensor": x.sin(), "count": 42, "name": "hello"}
+            return {"tensor": x.sin(), "count": 42}
 
         result = vmap(f)(torch.randn(4, 3))
         self.assertEqual(result["tensor"].shape, (4, 3))
-        self.assertEqual(result["count"], 42)
-        self.assertEqual(result["name"], "hello")
+        self.assertEqual(result["count"], torch.tensor(42).expand(4))
+
+    def test_non_tensor_output_out_dims_none(self):
+        # out_dims=None passes non-tensors through unchanged
+        def f(x):
+            return x, "hello"
+
+        result = vmap(f, out_dims=(0, None))(torch.randn(3, 2))
+        self.assertEqual(result[0].shape, (3, 2))
+        self.assertEqual(result[1], "hello")
+
+        # Numeric with out_dims=None passes through as raw value
+        result = vmap(lambda x: (x, 42), out_dims=(0, None))(torch.randn(3, 2))
+        self.assertEqual(result[1], 42)
 
     def test_different_map_dim_size_raises(self):
         x = torch.randn(2)

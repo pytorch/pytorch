@@ -27,17 +27,26 @@ class EnableVmapFallbackWarnings:
 
 
 class TestVmapAPILegacy(TestCase):
-    def test_non_tensor_output_passthrough(self):
-        # Non-tensor outputs pass through vmap unchanged
+    def test_non_tensor_output_numeric(self):
+        # Numeric non-tensor outputs are expanded across the batch
         result = vmap(lambda x: 3.14)(torch.ones(3))
-        self.assertEqual(result, 3.14)
+        self.assertEqual(result, torch.tensor(3.14).expand(3))
 
         def multiple_outputs(x):
             return x, 3
 
         tensor_out, int_out = vmap(multiple_outputs)(torch.ones(3))
         self.assertEqual(tensor_out, torch.ones(3))
-        self.assertEqual(int_out, 3)
+        self.assertEqual(int_out, torch.tensor(3).expand(3))
+
+    def test_non_tensor_output_none(self):
+        result = vmap(lambda x: (x, None))(torch.ones(3))
+        self.assertEqual(result[0], torch.ones(3))
+        self.assertIsNone(result[1])
+
+    def test_non_tensor_output_string_raises(self):
+        with self.assertRaisesRegex(ValueError, "must only return Tensors"):
+            vmap(lambda x: "hello")(torch.ones(3))
 
     def test_different_map_dim_size_raises(self):
         x = torch.randn(2)
