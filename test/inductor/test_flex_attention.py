@@ -5594,7 +5594,10 @@ class GraphModule(torch.nn.Module):
             result = orig_stride_call(self, node)
             if flexible_layout:
                 flexible_layout_called = True
-                assert isinstance(node.data.layout, ir.FixedLayout)
+                if not isinstance(node.data.layout, ir.FixedLayout):
+                    raise AssertionError(
+                        f"Expected FixedLayout, got {type(node.data.layout)}"
+                    )
             return result
 
         with patch.object(
@@ -7735,10 +7738,8 @@ class TestLearnableBiases(InductorTestCase):
         loss = torch.nn.functional.mse_loss(attn_output, random_target)
         loss.backward()
 
-        if not bias.grad:
-            raise AssertionError("No gradient computed for bias")
-        if not torch.any(bias.grad != 0):
-            raise AssertionError("Gradient for bias is 0")
+        assert bias.grad, "No gradient computed for bias"  # noqa: S101
+        assert torch.any(bias.grad != 0), "Gradient for bias is 0"  # noqa: S101
 
     @skip_on_cpu
     def test_backprop_error_case(self, device):
