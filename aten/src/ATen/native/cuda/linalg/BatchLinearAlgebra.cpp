@@ -832,6 +832,7 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
         : c10::MaybeOwned<Tensor>::borrowed(A);
       // NOTE: we tolerate redispatch with at::triangular_solve_triangular
       // because it handles memory layout optimization and conj/neg flags.
+      // IMPORTANT NOTE: `self` and `A` are not processed for kernel calls yet!
       auto X = at::linalg_solve_triangular(*L, self, /*upper=*/false, /*left=*/true);
       at::linalg_solve_triangular_out(const_cast<Tensor&>(X), L->mH(), X, /*upper=*/true, /*left=*/true);
       return X;
