@@ -64,9 +64,9 @@ enum class CPUCapability {
   VSX = 1,
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
   ZVECTOR = 1,
-#elif defined(HAVE_SVE256_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
-  SVE128 = 1,
-  SVE256 = 2,
+#elif defined(HAVE_SVE_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
+  SVE256 = 1,
+  SVE128 = 2,
 #else
   AVX2 = 1,
   AVX512 = 2,
@@ -459,6 +459,10 @@ struct RegisterPRIVATEUSE1Dispatch {
 #else
 #define REGISTER_SVE256_DISPATCH(name, fn)
 #endif
+
+#define REGISTER_SVE_DISPATCH(name, fn)                                        \
+  REGISTER_SVE128_DISPATCH(name, fn)                                           \
+  REGISTER_SVE256_DISPATCH(name, fn)
 
 // Macro to register the same kernel for all CPU arch types. This is useful
 // if a kernel does not benefit from being recompiled across different arch types.
