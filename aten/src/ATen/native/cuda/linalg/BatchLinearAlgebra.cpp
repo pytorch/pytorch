@@ -808,25 +808,60 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
   return self_working_copy;
 }
 
-// Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
-//     Batched cholesky_solve is dispatched to magma.
+namespace {
+// At the moment of writing, the unconditional dispatch
+// to the native cholesky_solve method in cuSOLVER is slow
+// with bached inputs.
+template <bool use_dedicated_kernel_unconditionally = false>
+inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
+  const Tensor& self,
+  const Tensor& A,
+  bool upper) {
+  if constexpr (use_dedicated_kernel_unconditionally) {
+    return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+  } else {
+    // TODO: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
+    // TODO: potrs is too slow in the bached setting compared to two triangular solves.
+    if (batchCount(self) == 1) {
+      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+    } else {
+      // Dispatch to two triangular solves.
+      // NOTE: A is column-major, self is anything.
+      const auto L = upper
+        ? c10::MaybeOwned<Tensor>::owned(A.mH())
+        : c10::MaybeOwned<Tensor>::borrowed(A);
+      auto y = at::linalg_solve_triangular(*L, self, /*upper=*/false, /*left=*/true);
+      auto x = at::linalg_solve_triangular(*L, y.mH(), /*upper=*/false, /*left=*/false);
+      return x.mH();
+    }
+  }
+}
+
+inline Tensor _cholesky_solve_helper_cuda_cusolver_dispatcher(
+    const Tensor& self,
+    const Tensor& A,
+    bool upper) {
+  // For now, unconditional dispatch to the dedicated cholesky solve
+  // kernel in cuSOLVER is slow for batched inputs.
+  // TODO: switch once resolved.
+  return _cholesky_solve_helper_cuda_cusolver_algo_selector<
+    /*use_dedicated_kernel_unconditionally=*/false
+  >(self, A, upper);
+}
+
+} // namespace (anonymous)
+
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
-  const auto L = upper
-    ? c10::MaybeOwned<Tensor>::owned(A.mH())
-    : c10::MaybeOwned<Tensor>::borrowed(A);
-  auto y = at::linalg_solve_triangular(*L, self, /*upper=*/false, /*left=*/true);
-  auto x = at::linalg_solve_triangular(*L, y.mH(), /*upper=*/false, /*left=*/false);
-  return x.mH();
 #if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
-      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+      return _cholesky_solve_helper_cuda_cusolver_dispatcher(self, A, upper);
     case at::LinalgBackend::Magma:
       return _cholesky_solve_helper_cuda_magma(self, A, upper);
     default:
       if (batchCount(self) == 1 || !use_magma_) {
-        return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+        return _cholesky_solve_helper_cuda_cusolver_dispatcher(self, A, upper);
       } else {
         return _cholesky_solve_helper_cuda_magma(self, A, upper);
       }
