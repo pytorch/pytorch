@@ -5,7 +5,7 @@ from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate, Optional, Union
+from typing import Any, Concatenate
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -107,7 +107,7 @@ class Benchmarker:
         pass
 
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
-        inferred_device: Optional[torch.device] = None
+        inferred_device: torch.device | None = None
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             # Some callables take nested structures as arguments so use the
             # flattened form to find any tensors
@@ -134,9 +134,9 @@ class Benchmarker:
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: Optional[tuple[Any, ...]] = None,
-        fn_kwargs: Optional[dict[str, Any]] = None,
-        device: Optional[Union[str, torch.device]] = None,
+        fn_args: tuple[Any, ...] | None = None,
+        fn_kwargs: dict[str, Any] | None = None,
+        device: str | torch.device | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
@@ -167,7 +167,7 @@ class Benchmarker:
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        inferred_device: Optional[torch.device] = None
+        inferred_device: torch.device | None = None
         if device is not None:
             inferred_device = (
                 torch.device(device) if isinstance(device, str) else device
@@ -243,6 +243,30 @@ class Benchmarker:
     @time_and_count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
+
+    @time_and_count
+    def benchmark_gpu_with_cuda_graph(
+        self: Self,
+        _callable: Callable[[], Any],
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark a GPU callable using CUDA graph capture and replay.
+
+        This captures the callable into a CUDA graph and benchmarks the graph replay,
+        which eliminates kernel launch overhead for fair comparison between different
+        implementations.
+        """
+        # Warmup
+        _callable()
+        torch.cuda.synchronize()
+
+        # Capture into CUDA graph
+        cuda_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(cuda_graph, capture_error_mode="thread_local"):
+            _callable()
+        torch.cuda.synchronize()
+
+        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
 
 
 class TritonBenchmarker(Benchmarker):

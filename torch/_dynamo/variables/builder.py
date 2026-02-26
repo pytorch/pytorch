@@ -37,7 +37,7 @@ import types
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, Optional, overload, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
 
 import sympy
 
@@ -186,6 +186,7 @@ from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
+    CudagraphOverrideVariable,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
     NullContextVariable,
@@ -201,11 +202,7 @@ from .dicts import (
     OrderedSetVariable,
     SetVariable,
 )
-from .distributed import (
-    DeviceMeshVariable,
-    ProcessGroupVariable,
-    WorldMetaClassVariable,
-)
+from .distributed import WorldMetaClassVariable
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -678,7 +675,6 @@ class VariableBuilder:
         items = dict(build_key_value(k, v) for k, v in value.items())
 
         # Create a dict_vt to be used in the mapping proxy variable
-        # pyrefly: ignore[bad-argument-type]
         dict_vt = ConstDictVariable(items, source=None)
         result = MappingProxyVariable(dict_vt, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
@@ -721,6 +717,7 @@ class VariableBuilder:
         )
 
         from ..decorators import (
+            CudagraphOverrideContextManager,
             DynamoConfigPatchProxy,
             ErrorOnGraphBreakDecoratorContextManager,
         )
@@ -1145,6 +1142,8 @@ class VariableBuilder:
             return DynamoConfigPatchVariable(value.changes)
         elif isinstance(value, ErrorOnGraphBreakDecoratorContextManager):
             return ErrorOnGraphBreakVariable(value.error_on_graph_break)
+        elif isinstance(value, CudagraphOverrideContextManager):
+            return CudagraphOverrideVariable(value.fwd, value.bwd)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -1224,13 +1223,6 @@ class VariableBuilder:
             return DispatchKeySetVariable(value)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
-        elif ProcessGroupVariable.is_process_group(value):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return ProcessGroupVariable(value, source=self.source)
-        elif DeviceMeshVariable.is_device_mesh(value):
-            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.EQUALS_MATCH)
-            return DeviceMeshVariable(value, source=self.source)
         elif value is OrderedSet:
             self.install_guards(GuardBuilder.ID_MATCH)
             return OrderedSetClassVariable()
@@ -1647,7 +1639,6 @@ class VariableBuilder:
             )
 
             dict_vt = ConstDictVariable(
-                # pyrefly: ignore[bad-argument-type]
                 result,
                 user_cls=(
                     collections.OrderedDict
@@ -2224,14 +2215,14 @@ class VariableBuilder:
     @overload
     def _wrap_lazy_constant(
         self,
-        value: Union[int, float, bool, str],
+        value: int | float | bool | str,
         wrap_fn: None = None,
     ) -> VariableTracker: ...
 
     def _wrap_lazy_constant(
         self,
-        value: Union[int, float, bool, str],
-        wrap_fn: Optional[Callable[[Any], VariableTracker]] = None,
+        value: int | float | bool | str,
+        wrap_fn: Callable[[Any], VariableTracker] | None = None,
     ) -> VariableTracker:
         """Wrap a primitive constant, deferring guard installation if allowed."""
         if not self.allow_lazy_constant:
@@ -3151,7 +3142,7 @@ def _wrap_fx_preexisting_tensor(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
-            # pyrefly: ignore[missing-argument, bad-argument-type]
+            # pyrefly: ignore [missing-argument]
             tensor = wrap_to_fake_tensor_and_record(tensor, tx=tx, **kwargs)
 
         if tensor.device.type != "meta" and (
@@ -4127,7 +4118,7 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_value_type(type(value)):
+        elif is_opaque_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 tx.output.fake_mode, value
@@ -4184,8 +4175,6 @@ class SourcelessBuilder:
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
-        elif DeviceMeshVariable.is_device_mesh(value):
-            return DeviceMeshVariable(value)
         elif value is functools.wraps:
             return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):

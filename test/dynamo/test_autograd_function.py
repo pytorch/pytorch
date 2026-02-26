@@ -1050,7 +1050,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_output):
                 x, weight = ctx.saved_tensors
                 grad_x = grad_output.matmul(weight)
-                assert grad_x.is_contiguous()
+                assert grad_x.is_contiguous()  # noqa: S101
                 grad_weight = grad_output.transpose(0, 1).matmul(x)
 
                 return grad_x, grad_weight
@@ -1086,7 +1086,7 @@ class GraphModule(torch.nn.Module):
 
             @staticmethod
             def backward(ctx, grad_output):
-                assert grad_output.is_contiguous()
+                assert grad_output.is_contiguous()  # noqa: S101
                 x, weight = ctx.saved_tensors
                 grad_x = grad_output.matmul(weight)
                 grad_weight = grad_output.transpose(0, 1).matmul(x)
@@ -1419,7 +1419,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_out):
                 return grad_out
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def foo(x):
             return Foo.apply(x)
 

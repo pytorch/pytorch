@@ -202,6 +202,10 @@ ROCM_BLOCKLIST = [
 if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
     # Some autotune tests on gfx1100 are hanging, disable for now
     ROCM_BLOCKLIST.append("inductor/test_max_autotune")
+    # ROCm 7.2 gfx1100 started timing out due to these
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_dynamic_shapes")
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_opinfo")
+    ROCM_BLOCKLIST.append("inductor/test_ck_backend")
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
@@ -299,6 +303,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
     "test_privateuseone_python_backend",
+    "functorch/test_control_flow_cuda_initialization",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -1321,6 +1326,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
     "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
+    "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,

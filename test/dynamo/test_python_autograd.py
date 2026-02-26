@@ -184,7 +184,7 @@ def operator_sum(self: Variable, name: Optional[str]) -> "Variable":
 
 
 def operator_expand(self: Variable, sizes: list[int]) -> "Variable":
-    assert self.value.dim() == 0  # only works for scalars
+    assert self.value.dim() == 0  # noqa: S101 - only works for scalars
     r = Variable(self.value.expand(sizes))
     # print(f'{r.name} = {self.name}.expand({sizes})')
 

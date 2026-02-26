@@ -341,7 +341,7 @@ class TestPeephole(JitTestCase):
                 x1 = True
             else:
                 x1 = len(b) != 4
-            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            assert x1 == False  # noqa: E712, S101 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
@@ -355,7 +355,7 @@ class TestPeephole(JitTestCase):
                 x1 = False
             else:
                 x1 = len(b) != 4
-            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            assert x1 == False  # noqa: E712, S101 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
@@ -369,7 +369,7 @@ class TestPeephole(JitTestCase):
                 x1 = True
             else:
                 x1 = len(b) == 4
-            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            assert x1 == False  # noqa: E712, S101 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
@@ -383,7 +383,7 @@ class TestPeephole(JitTestCase):
                 x1 = True
             else:
                 x1 = len(b) != 4
-            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            assert x1 == False  # noqa: E712, S101 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
@@ -398,7 +398,7 @@ class TestPeephole(JitTestCase):
                 x1 = len(b) != 4
             else:
                 x1 = True
-            assert x1 == False  # noqa: E712 TODO: canonicalize x is False to aten::eq
+            assert x1 == False  # noqa: E712, S101 TODO: canonicalize x is False to aten::eq
             return len(x), len(b)
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
@@ -413,7 +413,7 @@ class TestPeephole(JitTestCase):
                 x1 = len(b) != 4
             else:
                 x1 = True
-            assert not x1
+            assert not x1  # noqa: S101
             return len(x), len(b)
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
@@ -425,7 +425,7 @@ class TestPeephole(JitTestCase):
 
         @torch.jit.script
         def foo(x: List[int]):
-            assert len(x) == 4
+            assert len(x) == 4  # noqa: S101
             x.append(3)
             return len(x)
 
@@ -435,7 +435,7 @@ class TestPeephole(JitTestCase):
 
         @torch.jit.script
         def foo(x: List[int], y: List[int]):
-            assert len(x) == 4 or len(y) == 5
+            assert len(x) == 4 or len(y) == 5  # noqa: S101
             return len(x) + len(y)
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
@@ -515,7 +515,7 @@ class TestPeephole(JitTestCase):
 
         @torch.jit.script
         def foo(x: int, y: int):
-            assert x == 4 or y == 5
+            assert x == 4 or y == 5  # noqa: S101
             return x + y
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)

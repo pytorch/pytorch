@@ -93,14 +93,14 @@ def init_fake_distributed(device="cpu"):
 
 def init_module_bw_hooks(allow_eager):
     def bw_pre_hook(mod, gO):
-        assert allow_eager or torch._dynamo.is_compiling()
-        assert mod.weight.size() == (10, 10)
+        assert allow_eager or torch._dynamo.is_compiling()  # noqa: S101
+        assert mod.weight.size() == (10, 10)  # noqa: S101
         mod.hook_count_pre.add_(1)
         return (torch.sin(gO[0] + 1.2),)
 
     def bw_post_hook(mod, gI, gO):
-        assert allow_eager or torch._dynamo.is_compiling()
-        assert mod.weight.size() == (10, 10)
+        assert allow_eager or torch._dynamo.is_compiling()  # noqa: S101
+        assert mod.weight.size() == (10, 10)  # noqa: S101
         mod.hook_count_post.add_(1)
         return (torch.sin(gI[0] + 3.4),)
 
@@ -214,7 +214,7 @@ class DistributedPatternTests(TestCase):
         @torch.compile(fullgraph=True)
         def fn(x, out):
             y = torch.sin(x)
-            assert out.untyped_storage().size() == 0
+            assert out.untyped_storage().size() == 0  # noqa: S101
             out.untyped_storage().resize_(x.untyped_storage().size())
             out.copy_(y.cos())
 

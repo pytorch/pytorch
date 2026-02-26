@@ -56,7 +56,8 @@ def as_strided_handler(
     kwargs: dict[str, object],
 ):
     args, kwargs = fill_defaults(op_call._schema, args, kwargs)
-    assert not kwargs
+    if kwargs:
+        raise AssertionError
     tensor, size, stride, storage_offset = args
     if (
         tensor.size() == tuple(size)
@@ -215,10 +216,11 @@ class OpDispatcher:
         # NOTE: schema should always be populated when calling this function,
         # as it's only called from C++ after unwrap_to_op_info (create_schema=True).
         # See dispatchDTensorOp in python_variable.cpp line 1453-1460.
-        assert op_info.schema is not None, (
-            "op_info.schema should not be None in sharding propagation. "
-            "This function should only be called after unwrap_to_op_info."
-        )
+        if op_info.schema is None:
+            raise AssertionError(
+                "op_info.schema should not be None in sharding propagation. "
+                "This function should only be called after unwrap_to_op_info."
+            )
         try:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
@@ -243,7 +245,8 @@ class OpDispatcher:
                 # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
                 # so we manually decompose them, here
                 out = op_call.decompose(*args, **kwargs)
-                assert out is not NotImplemented
+                if out is NotImplemented:
+                    raise AssertionError from None
                 return out
             else:
                 raise
@@ -259,8 +262,10 @@ class OpDispatcher:
         op_info: OpInfo,
     ) -> object:
         output_sharding = op_info.output_sharding
-        assert output_sharding is not None, "output sharding should not be None"
-        assert op_info is not None, "op_info should never be None"
+        if output_sharding is None:
+            raise AssertionError("output sharding should not be None")
+        if op_info is None:
+            raise AssertionError("op_info should never be None")
 
         # Record output placements for debugging
         debug_mode = get_active_debug_mode()
@@ -275,7 +280,8 @@ class OpDispatcher:
             if output_sharding.needs_redistribute:
                 # If sharding propagation decision needs redistribute, perform redistribute
                 # on args first, which could potentially modify args (i.e. allgather certain arg)
-                assert output_sharding.redistribute_schema is not None
+                if output_sharding.redistribute_schema is None:
+                    raise AssertionError
                 self.redistribute_local_args(
                     op_info,
                     output_sharding.redistribute_schema,
@@ -309,9 +315,11 @@ class OpDispatcher:
                 # so the op_call does not directly use it (we want op_call to fall back to the 'default' which is
                 # our RNG manager)
                 maybe_user_generator = op_info.local_kwargs.pop("generator", None)
-                assert maybe_user_generator is None or isinstance(
-                    maybe_user_generator, torch.Generator
-                )
+                if not (
+                    maybe_user_generator is None
+                    or isinstance(maybe_user_generator, torch.Generator)
+                ):
+                    raise AssertionError
                 # maybe_user_generator = None
                 rng_context = (
                     random._rng_tracker._distribute_region(
@@ -364,7 +372,8 @@ class OpDispatcher:
                     local_results = [
                         default_tensor(s) if s is not None else None for s in spec
                     ]
-                    assert isinstance(local_results, list)
+                    if not isinstance(local_results, list):
+                        raise AssertionError
                     if None in local_results:
                         ret_type = str(ret_list[0].type)
                         raise NotImplementedError(
@@ -398,7 +407,8 @@ class OpDispatcher:
                 # The output of the equal op is a bool, by converting it into a
                 # a single value tensor, we can use all-reduce with min reduce op
                 # to simulate logical and.
-                assert local_results is None or isinstance(local_results, bool)
+                if not (local_results is None or isinstance(local_results, bool)):
+                    raise AssertionError
                 r = torch.tensor(
                     int(local_results) if local_results is not None else 1,
                     device=compute_mesh.device_type,
@@ -410,8 +420,10 @@ class OpDispatcher:
             # inplace op should return self instead of re-wrapping
             if output_sharding.output_spec is not None:
                 output_spec = output_sharding.output_spec
-                assert isinstance(output_spec, DTensorSpec)
-                assert isinstance(args[0], dtensor.DTensor)
+                if not isinstance(output_spec, DTensorSpec):
+                    raise AssertionError
+                if not isinstance(args[0], dtensor.DTensor):
+                    raise AssertionError
 
                 # NOTE: aten.squeeze_.dim is an inplace op but it also may change
                 # the inplace argument's tensor meta. Here we choose to special case
@@ -456,10 +468,12 @@ class OpDispatcher:
                     out_dts.append(out_dt)
                     spec_idx += 1
 
-            assert len(out_dts) >= 1, "out variant should have at least one out arg"
+            if len(out_dts) < 1:
+                raise AssertionError("out variant should have at least one out arg")
             return tuple(out_dts) if len(out_dts) > 1 else out_dts[0]
         else:
-            assert op_call == aten.equal.default, op_call
+            if op_call != aten.equal.default:
+                raise AssertionError(op_call)
             ret = self.wrap(local_results, output_sharding.output_spec)  # type: ignore[possibly-undefined]
             if participating and op_call._schema._is_view_op():
                 return return_and_correct_aliasing(op_call, args, kwargs, ret)
@@ -618,9 +632,10 @@ class OpDispatcher:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
-        assert compute_mesh is not None, (
-            f"found no DeviceMesh from dtensor args for {op_call}!"
-        )
+        if compute_mesh is None:
+            raise AssertionError(
+                f"found no DeviceMesh from dtensor args for {op_call}!"
+            )
         op_info = OpInfo(
             compute_mesh,
             OpSchema(
@@ -647,19 +662,22 @@ class OpDispatcher:
     def wrap(res: object, spec: OutputSpecType) -> object:
         if isinstance(res, torch.Tensor):
             if spec is not None:
-                assert isinstance(spec, DTensorSpec), (
-                    f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-                )
+                if not isinstance(spec, DTensorSpec):
+                    raise AssertionError(
+                        f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                    )
                 # pyrefly: ignore [bad-argument-type, bad-argument-count, unexpected-keyword]
                 return dtensor.DTensor(res, spec, requires_grad=res.requires_grad)
             else:
                 # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
-                assert res.ndim == 0, "output tensor should be scalar!"
+                if res.ndim != 0:
+                    raise AssertionError("output tensor should be scalar!")
                 return res
         elif isinstance(res, (list, tuple)):
-            assert spec is not None and isinstance(spec, (list, tuple)), (
-                f"output spec does not match with output! Expected list/tuple, got {spec}."
-            )
+            if not (spec is not None and isinstance(spec, (list, tuple))):
+                raise AssertionError(
+                    f"output spec does not match with output! Expected list/tuple, got {spec}."
+                )
             res_list = []
             for e, s in zip(res, spec):
                 # pyrefly: ignore [bad-argument-type]

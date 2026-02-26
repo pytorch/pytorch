@@ -594,9 +594,8 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
 
             op_spec_costs: list[float] = []
             for op_spec in strategy.strategies:
-                assert op_spec.redistribute_cost is not None, (
-                    "must set redistribute cost each OpSpec!"
-                )
+                if op_spec.redistribute_cost is None:
+                    raise AssertionError("must set redistribute cost each OpSpec!")
                 costs_from__select_strategy.append(op_spec.redistribute_cost)
                 redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
                 op_spec_costs.append(redistribute_cost)
@@ -863,6 +862,130 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(len(kwargs_meta["tensors"]), 2)
         self.assertEqual(kwargs_meta["dim"], 0)
         self.assertEqual(kwargs_meta["alpha"], 1.0)
+
+    def test_layer_norm_forward_output_specs_are_tuple(self):
+        """layer_norm strategy returns (out, mean, rstd) with correct shapes."""
+        from torch.distributed.tensor._ops._math_ops import (
+            _common_norm_forward_strategy,
+        )
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        input_spec = DTensorSpec(mesh, (Shard(0),), input_meta)
+        weight_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+        weight_spec = DTensorSpec(mesh, (Replicate(),), weight_meta)
+        bias_spec = DTensorSpec(mesh, (Replicate(),), weight_meta)
+
+        op_schema = OpSchema(
+            torch.ops.aten.native_layer_norm.default,
+            (
+                OpStrategy([OpSpec(input_spec)]),
+                [8],
+                OpStrategy([OpSpec(weight_spec)]),
+                OpStrategy([OpSpec(bias_spec)]),
+                1e-5,
+            ),
+            {},
+        )
+
+        strategy = _common_norm_forward_strategy(op_schema, rms_norm=False)
+        for op_spec in strategy.strategies:
+            specs = op_spec.output_specs
+            self.assertIsInstance(specs, tuple)
+            self.assertEqual(len(specs), 3)
+            out_spec, mean_spec, rstd_spec = specs
+            self.assertEqual(out_spec.tensor_meta.shape, torch.Size([4, 8]))
+            self.assertEqual(out_spec.tensor_meta.stride, (8, 1))
+            self.assertEqual(mean_spec.tensor_meta.shape, torch.Size([4]))
+            self.assertEqual(rstd_spec.tensor_meta.shape, torch.Size([4]))
+
+    def test_norm_forward_noncontiguous_input_gets_contiguous_output(self):
+        """Non-contiguous input strides must not leak into output specs."""
+        from torch.distributed.tensor._ops._math_ops import (
+            _common_norm_forward_strategy,
+        )
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8]), stride=(1, 4), dtype=torch.float32
+        )
+        input_spec = DTensorSpec(mesh, (Shard(0),), input_meta)
+        weight_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+        weight_spec = DTensorSpec(mesh, (Replicate(),), weight_meta)
+        bias_spec = DTensorSpec(mesh, (Replicate(),), weight_meta)
+
+        op_schema = OpSchema(
+            torch.ops.aten.native_layer_norm.default,
+            (
+                OpStrategy([OpSpec(input_spec)]),
+                [8],
+                OpStrategy([OpSpec(weight_spec)]),
+                OpStrategy([OpSpec(bias_spec)]),
+                1e-5,
+            ),
+            {},
+        )
+
+        strategy = _common_norm_forward_strategy(op_schema, rms_norm=False)
+        for op_spec in strategy.strategies:
+            specs = op_spec.output_specs
+            out_spec = specs if isinstance(specs, DTensorSpec) else specs[0]
+            self.assertEqual(out_spec.tensor_meta.stride, (8, 1))
+
+    def test_layer_norm_backward_output_specs_are_tuple(self):
+        """layer_norm backward returns (d_input, d_weight, d_bias) tuple."""
+        from torch.distributed.tensor._ops._math_ops import (
+            _common_norm_backward_strategy,
+        )
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        # input: [4, 8], normalized_shape: [8] => axis=1
+        input_meta = TensorMeta(
+            shape=torch.Size([4, 8]), stride=(8, 1), dtype=torch.float32
+        )
+        input_spec = DTensorSpec(mesh, (Shard(0),), input_meta)
+
+        stat_meta = TensorMeta(shape=torch.Size([4]), stride=(1,), dtype=torch.float32)
+        stat_spec = DTensorSpec(mesh, (Shard(0),), stat_meta)
+
+        weight_meta = TensorMeta(
+            shape=torch.Size([8]), stride=(1,), dtype=torch.float32
+        )
+        weight_spec = DTensorSpec(mesh, (Replicate(),), weight_meta)
+        bias_spec = DTensorSpec(mesh, (Replicate(),), weight_meta)
+
+        op_schema = OpSchema(
+            torch.ops.aten.native_layer_norm_backward.default,
+            (
+                OpStrategy([OpSpec(input_spec)]),  # grad_out
+                OpStrategy([OpSpec(input_spec)]),  # input
+                [8],  # normalized_shape
+                OpStrategy([OpSpec(stat_spec)]),  # mean
+                OpStrategy([OpSpec(stat_spec)]),  # rstd
+                OpStrategy([OpSpec(weight_spec)]),  # weight
+                OpStrategy([OpSpec(bias_spec)]),  # bias
+                [True, True, True],  # output_mask
+            ),
+            {},
+        )
+
+        strategy = _common_norm_backward_strategy(op_schema, rms_norm=False)
+        for op_spec in strategy.strategies:
+            specs = op_spec.output_specs
+            self.assertIsInstance(specs, tuple)
+            self.assertEqual(len(specs), 3)
+            d_input, d_weight, d_bias = specs
+            # d_input has input shape
+            self.assertIsNotNone(d_input)
+            # d_weight and d_bias have weight shape
+            self.assertIsNotNone(d_weight)
+            self.assertIsNotNone(d_bias)
 
 
 class TestExpandToFullMeshOpStrategy(TestCase):

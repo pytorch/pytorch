@@ -81,7 +81,8 @@ def _should_skip_xfail_test_sample(
     for decorator_meta in ops_test_data.SKIP_XFAIL_SUBTESTS:
         # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
         if decorator_meta.op_name == op_name:
-            assert decorator_meta.matcher is not None, "Matcher must be defined"
+            if decorator_meta.matcher is None:
+                raise AssertionError("Matcher must be defined")
             if not decorator_meta.enabled_if:
                 # Do not skip the test if the decorator meta is not enabled
                 continue
@@ -231,8 +232,13 @@ def run_test_output_match(
                 flattened_torch_outputs, _ = pytree.tree_flatten(torch_output)
                 flattened_function_outputs, _ = pytree.tree_flatten(function_output)
 
-                assert flattened_torch_outputs
-                assert len(flattened_torch_outputs) == len(flattened_function_outputs)
+                if not flattened_torch_outputs:
+                    raise AssertionError("flattened_torch_outputs is empty")
+                if len(flattened_torch_outputs) != len(flattened_function_outputs):
+                    raise AssertionError(
+                        f"Expected {len(flattened_torch_outputs)} outputs, "
+                        f"got {len(flattened_function_outputs)}"
+                    )
 
                 for j, (torch_output, function_output) in enumerate(
                     zip(flattened_torch_outputs, flattened_function_outputs)

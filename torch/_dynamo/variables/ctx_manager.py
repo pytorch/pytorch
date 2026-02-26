@@ -23,7 +23,7 @@ import logging
 import warnings
 from collections.abc import Callable, Sequence, Sized
 from contextlib import AbstractContextManager, ExitStack
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch._C
 from torch._dynamo import config
@@ -67,7 +67,7 @@ class ContextWrappingVariable(VariableTracker):
     }
 
     def __init__(
-        self, target_values: Any, initial_values: Optional[Any] = None, **kwargs: Any
+        self, target_values: Any, initial_values: Any | None = None, **kwargs: Any
     ) -> None:
         super().__init__(**kwargs)
         self.target_values = target_values
@@ -80,7 +80,7 @@ class ContextWrappingVariable(VariableTracker):
         return variables.CONSTANT_VARIABLE_NONE
 
     def set_cleanup_hook(
-        self, tx: "InstructionTranslator", fn: Optional[Callable[..., Any]] = None
+        self, tx: "InstructionTranslator", fn: Callable[..., Any] | None = None
     ) -> None:
         if fn is None:
 
@@ -88,7 +88,7 @@ class ContextWrappingVariable(VariableTracker):
                 if hasattr(self, "_call_func"):
                     self._call_func(tx, self.initial_values)
 
-        self.cleanup_fn: Optional[Callable[..., Any]] = fn
+        self.cleanup_fn: Callable[..., Any] | None = fn
         tx.output.add_cleanup_hook(self.cleanup)
 
     def exit(
@@ -359,7 +359,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
             (),
             {},
         )
-        return variables.ConstantVariable.create(jvp_level)
+        return variables.VariableTracker.build(tx, jvp_level)
 
     def exit(
         self, tx: "InstructionTranslator", *args: VariableTracker
@@ -438,7 +438,7 @@ class DualLevelContextManager(ContextWrappingVariable):
             (),
             {},
         )
-        return variables.ConstantVariable.create(self.new_level)
+        return variables.VariableTracker.build(tx, self.new_level)
 
     def exit(
         self, tx: "InstructionTranslator", *args: VariableTracker
@@ -484,7 +484,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
             (),
             {},
         )
-        return variables.ConstantVariable.create(grad_level)
+        return variables.VariableTracker.build(tx, grad_level)
 
     def exit(
         self, tx: "InstructionTranslator", *args: VariableTracker
@@ -512,8 +512,8 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
     def __init__(
         self,
         catch_warnings_args: dict[str, VariableTracker],
-        target_values: Optional[Any] = None,
-        initial_values: Optional[Any] = None,
+        target_values: Any | None = None,
+        initial_values: Any | None = None,
         **kwargs: Any,
     ) -> None:
         assert isinstance(catch_warnings_args, dict), catch_warnings_args
@@ -528,7 +528,7 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         }
         ctx_val = warnings.catch_warnings(**kwargs)
         self.set_cleanup_hook(tx, lambda: ctx_val.__exit__(None, None, None))
-        return variables.ConstantVariable.create(ctx_val.__enter__())
+        return variables.VariableTracker.build(tx, ctx_val.__enter__())
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -580,7 +580,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
             (batch_size.as_proxy(), randomness),
             {},
         )
-        return variables.ConstantVariable.create(vmap_level)
+        return variables.VariableTracker.build(tx, vmap_level)
 
     def exit(
         self, tx: "InstructionTranslator", *args: VariableTracker
@@ -619,7 +619,7 @@ class GradModeVariable(ContextWrappingVariable):
     def __init__(
         self,
         target_values: Any,
-        initial_values: Optional[Sequence[bool]] = None,
+        initial_values: Sequence[bool] | None = None,
         initialized: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -677,7 +677,7 @@ class InferenceModeVariable(ContextWrappingVariable):
     def __init__(
         self,
         target_values: Any,
-        initial_values: Optional[bool] = None,
+        initial_values: bool | None = None,
         **kwargs: Any,
     ) -> None:
         if initial_values is None:
@@ -753,7 +753,7 @@ class CUDADeviceVariable(ContextWrappingVariable):
     def __init__(
         self,
         target_values: Any,
-        initial_values: Optional[Any] = None,
+        initial_values: Any | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -770,7 +770,7 @@ class CUDADeviceVariable(ContextWrappingVariable):
             (self.proxy,),
             {},
         )
-        return variables.ConstantVariable.create(False)
+        return variables.CONSTANT_VARIABLE_FALSE
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         prev_idx = torch.cuda._exchange_device(*self.target_values)
@@ -811,7 +811,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         self,
         tx: "InstructionTranslator",
         target_values: Sized,
-        initial_values: Optional[Sized] = None,
+        initial_values: Sized | None = None,
         only_subclass: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -869,7 +869,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator", target_value: Optional[str], **kwargs: Any
+        tx: "InstructionTranslator", target_value: str | None, **kwargs: Any
     ) -> "DisabledSavedTensorsHooksVariable":
         var = DisabledSavedTensorsHooksVariable(
             target_values=[target_value],
@@ -884,8 +884,8 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
 
     def __init__(
         self,
-        target_values: Sequence[Optional[str]],
-        initial_values: Optional[Sequence[Optional[str]]] = None,
+        target_values: Sequence[str | None],
+        initial_values: Sequence[str | None] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -896,7 +896,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         return variables.CONSTANT_VARIABLE_NONE
 
     def _call_func(
-        self, tx: "InstructionTranslator", values: Sequence[Optional[str]]
+        self, tx: "InstructionTranslator", values: Sequence[str | None]
     ) -> None:
         assert len(values) == 1
         value = values[0]
@@ -966,7 +966,7 @@ class AutocastModeVariable(ContextWrappingVariable):
     def __init__(
         self,
         target_values: Sequence[Any],
-        initial_values: Optional[Any] = None,
+        initial_values: Any | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -1002,7 +1002,7 @@ class NullContextVariable(ContextWrappingVariable):
     This class represents Python contextlib.nullcontext.
     """
 
-    def __init__(self, target_values: Optional[Any] = None, **kwargs: Any) -> None:
+    def __init__(self, target_values: Any | None = None, **kwargs: Any) -> None:
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -1089,7 +1089,7 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
                 record_args[0].as_python_constant()
                 if record_args
                 else kwargs.get(
-                    "name", variables.ConstantVariable("unknown")
+                    "name", variables.ConstantVariable.create("unknown")
                 ).as_python_constant()
             )
             record_args_const = None
@@ -1109,7 +1109,7 @@ class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
     def __init__(
         self,
         target_values: Any = None,
-        initial_values: Optional[Any] = None,
+        initial_values: Any | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -1268,7 +1268,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         self,
         param_group_var: Any,
         target_values: Sequence[Any],
-        initial_values: Optional[Sequence[Any]] = None,
+        initial_values: Sequence[Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -1305,8 +1305,8 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
                 tx,
                 "__setattr__",
                 (
-                    variables.ConstantVariable.create("_training_state"),
-                    variables.EnumVariable(value),
+                    variables.VariableTracker.build(tx, "_training_state"),
+                    variables.VariableTracker.build(tx, value),
                 ),
                 {},
             )
@@ -1513,10 +1513,63 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
         return "error_on_graph_break"
 
 
+class CudagraphOverrideVariable(ContextWrappingVariable):
+    """represents torch._dynamo.override_cudagraphs"""
+
+    def __init__(self, fwd: bool | None, bwd: bool | None, **kwargs: Any) -> None:
+        super().__init__(
+            target_values=(fwd, bwd),
+            initial_values=None,  # Captured in enter()
+            **kwargs,
+        )
+
+    def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
+        # Capture current annotation before overwriting
+        prev = tx.output.cudagraph_annotation
+        if prev is not None:
+            self.initial_values = (prev.fwd, prev.bwd)
+        else:
+            self.initial_values = (None,)
+        return super().enter(tx)
+
+    def _call_func(self, tx: "InstructionTranslator", values: tuple[Any, ...]) -> None:
+        from torch._inductor import _CudagraphAnnotation
+
+        if len(values) == 1 and values[0] is None:
+            # Restoring to no annotation
+            tx.output.cudagraph_annotation = None
+            tx.output.tracing_context.cudagraph_annotation = None
+        else:
+            assert len(values) == 2
+            fwd, bwd = values
+            annotation = _CudagraphAnnotation(fwd=fwd, bwd=bwd)
+            tx.output.cudagraph_annotation = annotation
+            tx.output.tracing_context.cudagraph_annotation = annotation
+
+    def module_name(self) -> str:
+        return "torch._dynamo"
+
+    def fn_name(self) -> str:
+        return "override_cudagraphs"
+
+    def exit_on_graph_break(self) -> bool:
+        # Annotation persists until graph is compiled; each resume function
+        # will reconstruct the context manager and call enter() again
+        return False
+
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> "VariableTracker":
+        # Override to NOT call cleanup here. The cleanup will happen in
+        # call_cleanup_hooks() during compile_subgraph, which is AFTER
+        # the annotation is copied to gm.meta.
+        return variables.ConstantVariable.create(None)
+
+
 class WithEnterFunctionVariable(VariableTracker):
     def __init__(
         self,
-        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        ctx: ContextWrappingVariable | GenericContextWrappingVariable,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1562,7 +1615,7 @@ class WithExitFunctionVariable(VariableTracker):
 
     def __init__(
         self,
-        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        ctx: ContextWrappingVariable | GenericContextWrappingVariable,
         target: Any,
         **kwargs: Any,
     ) -> None:

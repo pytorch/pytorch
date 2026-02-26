@@ -148,7 +148,7 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMesh:
+    class DeviceMesh(torch._opaque_base.OpaqueBase):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
@@ -244,15 +244,19 @@ else:
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
 
-            assert _layout.check_non_overlap(), (
-                "Please use a non-overlapping layout when creating a DeviceMesh."
-            )
-            assert _rank_map.ndim == 1, "The rank map must be 1-dimensional"
-            assert _rank_map.is_contiguous(), "The rank map must be contiguous"
-            assert _rank_map.numel() >= _layout.cosize(), (
-                f"The rank map contains {_rank_map.numel()} element, "
-                f"which isn't large enough for layout {_layout}"
-            )
+            if not _layout.check_non_overlap():
+                raise AssertionError(
+                    "Please use a non-overlapping layout when creating a DeviceMesh."
+                )
+            if _rank_map.ndim != 1:
+                raise AssertionError("The rank map must be 1-dimensional")
+            if not _rank_map.is_contiguous():
+                raise AssertionError("The rank map must be contiguous")
+            if _rank_map.numel() < _layout.cosize():
+                raise AssertionError(
+                    f"The rank map contains {_rank_map.numel()} element, "
+                    f"which isn't large enough for layout {_layout}"
+                )
 
             self._device_type = device_type
             self._layout = _layout
@@ -319,7 +323,6 @@ else:
                             target_registry[name] = pg
 
                 if is_initialized() and get_backend() == "threaded":
-                    # pyrefly: ignore [bad-assignment]
                     self._thread_id = threading.get_ident()
 
                 # Now that the process group is initialized, we can get the rank
@@ -329,6 +332,8 @@ else:
                     self._rank = _rank
 
                 self._coordinate_on_dim = self._compute_coordinate_on_dim()
+
+            self._hash: Optional[int] = None
 
         @staticmethod
         def _compute_coordinates_from_mesh(
@@ -607,9 +612,10 @@ else:
                 )
             # Filter out None values. If any are None then they should all be None.
             dim_non_none_group_names = [n for n in dim_group_names if n is not None]
-            assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
+            if dim_non_none_group_names and len(dim_non_none_group_names) != len(
                 dim_group_names
-            )
+            ):
+                raise AssertionError
             return dim_non_none_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
@@ -799,12 +805,11 @@ else:
             root_mesh = self._get_root_mesh()
             slice_dim_group_name = []
             if len(self._dim_group_names) > 0:
-                assert len(self._dim_group_names) == len(
-                    not_none(self._mesh_dim_names)
-                ), (
-                    "The number of dim_group_names and mesh_dim_names "
-                    "should have the same length if the rank is in the mesh."
-                )
+                if len(self._dim_group_names) != len(not_none(self._mesh_dim_names)):
+                    raise AssertionError(
+                        "The number of dim_group_names and mesh_dim_names "
+                        "should have the same length if the rank is in the mesh."
+                    )
                 for name in submesh_dim_names:
                     if name in not_none(self._mesh_dim_names):
                         slice_dim_group_name.append(
@@ -835,17 +840,14 @@ else:
 
         def _create_flatten_mesh(
             self,
-            mesh_dim_name: str | None = None,
+            mesh_dim_name: str,
             backend_override: BackendConfig = (None, None),
-        ) -> "DeviceMesh":
+        ) -> None:
+            """
+            Creates a flattened mesh and stores it in the root mesh's _flatten_mapping.
+            This is a helper method for _flatten() that performs the actual mesh creation.
+            """
             root_mesh = self._get_root_mesh()
-
-            if not mesh_dim_name:
-                mesh_dim_name = "_".join(not_none(self._mesh_dim_names))
-
-            # Flatten a 1D device mesh into its original mesh_dim_name will return itself.
-            if self.ndim == 1 and mesh_dim_name in not_none(self._mesh_dim_names):
-                return self
 
             # Check whether the mesh_dim_name for flattened mesh is valid.
             invalid_dim_names = not_none(root_mesh._mesh_dim_names)
@@ -859,13 +861,15 @@ else:
             flattened_mesh_layout = self._layout.coalesce()
             if len(flattened_mesh_layout) > 1:
                 flattened_mesh_layout = flattened_mesh_layout.nest()
-            # Quick return if the flatten mesh has been created before.
+
+            # Check if the flatten mesh has been created before.
             if mesh_dim_name in root_mesh._flatten_mapping:
                 if (
                     flattened_mesh_layout
                     == root_mesh._flatten_mapping[mesh_dim_name]._layout
                 ):
-                    return root_mesh._flatten_mapping[mesh_dim_name]
+                    # Already exists with same layout, nothing to do
+                    return
                 else:
                     raise ValueError(
                         f"Flatten mesh with mesh_dim_name {mesh_dim_name} has been created before, "
@@ -881,8 +885,6 @@ else:
                 backend_override=(backend_override,),
             )
             root_mesh._flatten_mapping[mesh_dim_name] = res_flattened_mesh
-
-            return res_flattened_mesh
 
         def _get_root_mesh_dim(self) -> int | None:
             """
@@ -1216,7 +1218,8 @@ else:
 
             if not detect_fake_mode() or not config.compile_on_one_rank:
                 # This is only valid when the current rank is part of the mesh.
-                assert self._coordinate_on_dim is not None
+                if self._coordinate_on_dim is None:
+                    raise AssertionError
                 return self._coordinate_on_dim[index]
 
             # This will cause the ops to be registered - so don't let RUFF
@@ -1259,6 +1262,14 @@ else:
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
 
+            # Compute mesh_dim_name first if not provided
+            if not mesh_dim_name:
+                mesh_dim_name = "_".join(not_none(self._mesh_dim_names))
+
+            # Flatten a 1D device mesh into its original mesh_dim_name will return itself.
+            if self.ndim == 1 and mesh_dim_name in not_none(self._mesh_dim_names):
+                return self
+
             if backend_override is not None:
                 (backend_override_tuple,) = _normalize_backend_override(
                     {0: backend_override}, 1
@@ -1266,7 +1277,9 @@ else:
             else:
                 backend_override_tuple = (None, None)
 
-            return self._create_flatten_mesh(mesh_dim_name, backend_override_tuple)
+            self._create_flatten_mesh(mesh_dim_name, backend_override_tuple)
+
+            return self._get_root_mesh()._flatten_mapping[mesh_dim_name]
 
         def _create_unflatten_mesh(
             self,
@@ -1551,3 +1564,71 @@ else:
         )
 
         return device_mesh
+
+
+def _register_distributed_opaque_types():
+    """
+    Register DeviceMesh as an opaque type for torch.compile.
+    This must happen before any custom ops that use DeviceMesh in their schema.
+    Called lazily to avoid circular import issues.
+    """
+    from torch._library.opaque_object import MemberType, register_opaque_type
+
+    register_opaque_type(
+        ProcessGroup,
+        typ="reference",
+        members={
+            "size": MemberType.USE_REAL,
+            "rank": MemberType.USE_REAL,
+            "_get_backend_name": MemberType.USE_REAL,
+            "group_name": MemberType.USE_REAL,
+            "__eq__": MemberType.USE_REAL,
+        },
+    )
+
+    register_opaque_type(
+        DeviceMesh,
+        typ="reference",
+        guard_fn=lambda obj: [
+            obj._flatten_rank_map,
+            obj._layout,
+            obj._device_type,
+            obj._mesh_dim_names,
+            obj._thread_id,
+        ],
+        members={
+            # USE_REAL: Evaluate these with the real object at compile time
+            # and bake the result as a constant
+            "_flatten_rank_map": MemberType.USE_REAL,
+            "_layout": MemberType.USE_REAL,
+            "_device_type": MemberType.USE_REAL,
+            "_mesh_dim_names": MemberType.USE_REAL,
+            "_thread_id": MemberType.USE_REAL,
+            "get_rank": MemberType.USE_REAL,
+            "size": MemberType.USE_REAL,
+            "get_coordinate": MemberType.USE_REAL,
+            "get_local_rank": MemberType.USE_REAL,
+            "__eq__": MemberType.USE_REAL,
+            "ndim": MemberType.USE_REAL,
+            "shape": MemberType.USE_REAL,
+            "mesh_dim_names": MemberType.USE_REAL,
+            "get_group": MemberType.INLINED,
+            "_pg_registry": MemberType.INLINED,
+            "_hash": MemberType.USE_REAL,
+            "_create_flatten_mesh": MemberType.USE_REAL,
+            "_coordinate_on_dim": MemberType.USE_REAL,
+            "_dim_group_names": MemberType.USE_REAL,
+            "_flatten_mapping": MemberType.USE_REAL,
+            "_rank_map": MemberType.USE_REAL,
+            "_root_mesh": MemberType.USE_REAL,
+            "device_type": MemberType.USE_REAL,
+            "mesh": MemberType.USE_REAL,
+            "_flatten": MemberType.INLINED,
+            "_unflatten": MemberType.USE_REAL,
+            "_is_current_rank_part_of_mesh": MemberType.USE_REAL,
+            "_sym_get_coordinate": MemberType.USE_REAL,
+            "_get_mesh_dim_by_name": MemberType.USE_REAL,
+            "_get_root_mesh": MemberType.INLINED,
+            "__getitem__": MemberType.INLINED,
+        },
+    )

@@ -339,7 +339,8 @@ class DistMathOpsTest(DTensorTestBase):
             from torch.distributed.tensor._dtensor_spec import TensorMeta
 
             dtensor_meta = y_dist._spec.tensor_meta
-            assert isinstance(dtensor_meta, TensorMeta)
+            if not isinstance(dtensor_meta, TensorMeta):
+                raise AssertionError(f"Expected TensorMeta, got {type(dtensor_meta)}")
             # make sure the right shape in sharding prop
             self.assertEqual(y_local.shape, dtensor_meta.shape)
             self.assertEqual(y_local, y_dist.full_tensor())
@@ -560,9 +561,15 @@ class DistMathOpsTest(DTensorTestBase):
                     for n, p in target_model.named_parameters():
                         if not req_grad_map.get(n.rpartition(".")[0], False):
                             p.requires_grad_(False)
-                            assert not p.requires_grad
+                            if p.requires_grad:
+                                raise AssertionError(
+                                    f"Expected requires_grad to be False for {n}"
+                                )
                         else:
-                            assert p.requires_grad
+                            if not p.requires_grad:
+                                raise AssertionError(
+                                    f"Expected requires_grad to be True for {n}"
+                                )
 
                 # forward step for both local and distributed models
                 x = torch.randint(vocab_size, (batch, seq_len), device=self.device_type)
@@ -617,9 +624,10 @@ class DistMathOpsTest(DTensorTestBase):
             except Exception as e:
                 subtest_fails[subtest_cfg] = e
         # if any subtest fails, provide the failed subtests and report the overall failure
-        assert not subtest_fails, (
-            f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
-        )
+        if subtest_fails:
+            raise AssertionError(
+                f"{len(subtest_fails)}/{len(subtest_cfgs)} subtests failed: {pformat(subtest_fails)}"
+            )
 
     @with_comms
     def test_topk(self):
