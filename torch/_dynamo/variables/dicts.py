@@ -1961,12 +1961,16 @@ class DunderDictVariable(ConstDictVariable):
 
     @classmethod
     def create(
-        cls, tx: "InstructionTranslator", vt: VariableTracker
+        cls,
+        tx: "InstructionTranslator",
+        vt: VariableTracker,
+        dict_proxy: dict[str, VariableTracker],
     ) -> "DunderDictVariable":
         mutation = ValueMutationExisting() if vt.source else ValueMutationNew()
         source = vt.source and AttrSource(vt.source, "__dict__")
         return cls(
             vt,
+            dict_proxy=dict_proxy,
             side_effects=tx.output.side_effects,
             mutation_type=mutation,
             source=source,
@@ -1975,29 +1979,61 @@ class DunderDictVariable(ConstDictVariable):
     def __init__(
         self,
         vt: VariableTracker,
+        dict_proxy: dict[str, VariableTracker],  # object __dict__
         side_effects: "SideEffects",
         **kwargs: Any,
     ) -> None:
         super().__init__({}, **kwargs)
         self.items = SideEffectsProxyDict(vt, side_effects)
+        # Saves a "proxy" dict to the original __dict__ of the object
+        # This allows track mutations on __dict__ (using side effects) without
+        # modifying the original __dict__
+        self.dict_proxy = dict_proxy
 
     def setitem(self, name: str, value: VariableTracker) -> None:
         self.items[name] = value
 
     def getitem(self, name: str) -> VariableTracker:
-        return self.items[name]
+        if name in self.items:
+            return self.items[name]
+        else:
+            return self.dict_proxy[name]
 
     def contains(self, name: str) -> bool:
-        return name in self.items
+        return name in self.items or name in self.dict_proxy
 
     def getitem_or_default(
         self,
         name: str,
         default: Callable[[], VariableTracker],
     ) -> VariableTracker:
-        if name in self.items:
-            return self.items[name]
+        if self.contains(name):
+            return self.getitem(name)
         else:
             value = default()
             self.items[name] = value
             return value
+
+    # We need to overload the three functions below:
+    # - __contains__
+    # - getitem_const
+    # - maybe_getitem_const
+    # because the default implementation in ConstDictVariable will directly look
+    # up the name in self.items, which might add undesired guards.
+    def __contains__(self, vt: VariableTracker) -> bool:
+        name = vt.as_python_constant()
+        return self.contains(name)
+
+    def getitem_const(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker:
+        name = arg.as_python_constant()
+        if self.contains(name):
+            return self.getitem(name)
+        return super().getitem_const(tx, arg)
+
+    def maybe_getitem_const(self, arg: VariableTracker) -> Optional[VariableTracker]:
+        name = arg.as_python_constant()
+        if self.contains(name):
+            return self.getitem(name)
+        return None
