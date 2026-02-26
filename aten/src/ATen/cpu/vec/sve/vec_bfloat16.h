@@ -2,7 +2,6 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
-#include <ATen/cpu/vec/sve/vec_common_sve.h>
 #include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/bit_cast.h>
@@ -586,7 +585,7 @@ Vectorized<BFloat16> inline fmadd(
   return a * b + c;
 }
 
-#endif // defined(CPU_CAPABILITY_SVE) && defined(__ARM_FEATURE_BF16)
+#endif // defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
 
 } // namespace CPU_CAPABILITY
 } // namespace vec

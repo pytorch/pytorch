@@ -103,47 +103,6 @@ struct VecReduceAllSIMD<float, Op> {
        // !defined(C10_MOBILE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
-    !defined(CPU_CAPABILITY_SVE)
-template <typename Op>
-struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(
-      const Op& vec_fun,
-      const Vectorized<float>& acc_vec) {
-    using Vec = Vectorized<float>;
-    Vec v = acc_vec;
-
-    // 64-bit shuffle: [a1+a5, a2+a6, a3+a7, a4+a8, -, -, -, -] -> [a3+a7,
-    // a4+a8, a1+a5, a2+a6, -, -, -, -]
-    float32x4_t v1_1 = vextq_f32(v, v, 2);
-    Vec v1 = v1_1;
-    // [a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, -, -, -, -]
-    v = vec_fun(v, v1);
-
-    // 32-bit shuffle: [a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, -,
-    // -, -, -] -> [a2+a4+a6+a8, a1+a3+a5+a7, a2+a4+a6+a8, a1+a3+a5+a7, -, -, -,
-    // -]
-    v1_1 = vrev64q_f32(v);
-    v1 = v1_1;
-    // [a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8,
-    // a1+a2+a3+a4+a5+a6+a7+a8, a1+a2+a3+a4+a5+a6+a7+a8, -, -, -, -]
-    v = vec_fun(v, v1);
-
-    return v[0];
-  }
-};
-
-template <>
-struct VecReduceAllSIMD<float, std::plus<Vectorized<float>>> {
-  static inline float apply(
-      const std::plus<Vectorized<float>>& vec_fun,
-      const Vectorized<float>& acc_vec) {
-    return vaddvq_f32(acc_vec);
-  }
-};
-#endif // defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
-       // && !defined(CPU_CAPABILITY_SVE)
-
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
     defined(CPU_CAPABILITY_SVE256)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
@@ -169,6 +128,41 @@ struct VecReduceAllSIMD<float, Op> {
 };
 #endif // defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
        // && defined(CPU_CAPABILITY_SVE256)
+
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
+    !defined(CPU_CAPABILITY_SVE256)
+template <typename Op>
+struct VecReduceAllSIMD<float, Op> {
+  static inline float apply(
+      const Op& vec_fun,
+      const Vectorized<float>& acc_vec) {
+    using Vec = Vectorized<float>;
+    Vec v = acc_vec;
+
+    // 64-bit shuffle
+    float32x4_t v1_1 = vextq_f32(v, v, 2);
+    Vec v1 = v1_1;
+    v = vec_fun(v, v1);
+
+    // 32-bit shuffle
+    v1_1 = vrev64q_f32(v);
+    v1 = v1_1;
+    v = vec_fun(v, v1);
+
+    return v[0];
+  }
+};
+
+template <>
+struct VecReduceAllSIMD<float, std::plus<Vectorized<float>>> {
+  static inline float apply(
+      const std::plus<Vectorized<float>>& vec_fun,
+      const Vectorized<float>& acc_vec) {
+    return vaddvq_f32(acc_vec);
+  }
+};
+#endif // defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+       // && !defined(CPU_CAPABILITY_SVE256)
 
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(
