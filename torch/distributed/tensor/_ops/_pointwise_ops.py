@@ -758,7 +758,7 @@ def single_mesh_dim_common_pointwise_strategy(
 
 
 def _make_partial_strategy(
-    extra_rules: list[list[Placement]] | None = None,
+    extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
 ) -> Callable[
     [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
 ]:
@@ -784,6 +784,8 @@ def _make_partial_strategy(
                 common_dim_to_arg_dim = infer_broadcast_dims_map(
                     common_shape, arg.shape
                 )
+                # If the output shard dim maps to an input dim, shard that
+                # input dim; otherwise it was broadcast, so replicate.
                 if common_dim_to_arg_dim[i] >= 0:
                     shard_placements.append(
                         _ShardingPlaceholder(common_dim_to_arg_dim[i])
@@ -795,8 +797,10 @@ def _make_partial_strategy(
             n_tensors = len(tensor_arg_metas)
             expected_len = 1 + n_tensors
             for rule in extra_rules:
+                # Filter rather than assert: some ops (e.g. mul.Tensor) mix
+                # unary rules (len 2, for scalar promotion) and binary rules
+                # (len 3, for tensor-tensor), so mismatched lengths are expected.
                 if len(rule) == expected_len:
-                    # pyrefly: ignore [bad-argument-type]
                     placements.append(rule)
         return placements
 
