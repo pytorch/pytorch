@@ -4,7 +4,7 @@ import itertools
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 from unittest.mock import patch
 
 from ...autotune_process import TensorMeta
@@ -37,7 +37,7 @@ class ROCmTemplate(KernelTemplate):
         name: str,
         input_nodes: list[Buffer],
         layout: Layout,
-        input_reorder: list[int] | None = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
 
@@ -121,7 +121,7 @@ class ROCmTemplate(KernelTemplate):
 
         def make_kernel_render(
             template_node: ROCmTemplateBuffer,
-            epilogue_nodes: Sequence[IRNode] | None = None,
+            epilogue_nodes: Optional[Sequence[IRNode]] = None,
         ):
             kernel = ROCmTemplateKernel(
                 kernel_name="KERNEL_NAME",

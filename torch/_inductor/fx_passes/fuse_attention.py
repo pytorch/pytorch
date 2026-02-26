@@ -4,6 +4,7 @@ import inspect
 import logging
 import math
 import warnings
+from typing import Optional
 
 import torch
 
@@ -916,7 +917,7 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns(input_device: torch.device | None = None):
+def _get_sfdp_patterns(input_device: Optional[torch.device] = None):
     from .joint_graph import patterns
 
     if input_device:
@@ -1316,6 +1317,6 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
 
 
 @functools.cache
-def _sfdp_init(input_device: torch.device | None = None):
+def _sfdp_init(input_device: Optional[torch.device] = None):
     for key, register_replacement_kwargs in _get_sfdp_patterns(input_device):
         gen_register_replacement(key, **register_replacement_kwargs)

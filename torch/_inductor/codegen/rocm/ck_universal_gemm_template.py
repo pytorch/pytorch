@@ -4,6 +4,7 @@ import logging
 import math
 import random
 from collections import namedtuple
+from typing import Optional
 
 import sympy
 
@@ -316,7 +317,7 @@ class CKGemmTemplate(CKTemplate):
         layout: Layout,
         alpha: float,
         beta: float,
-        input_reorder: list[int] | None = None,
+        input_reorder: Optional[list[int]] = None,
     ) -> None:
         is_batched = len(layout.size) == 3
         name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"

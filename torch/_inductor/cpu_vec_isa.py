@@ -8,7 +8,7 @@ import subprocess
 import sys
 import warnings
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Union
 
 import torch
 from torch._inductor import config
@@ -466,7 +466,7 @@ supported_vec_isa_list = [
 
 
 def get_isa_from_cpu_capability(
-    capability: str | None,
+    capability: Union[str, None],
     vec_isa_list: list[VecISA],
     invalid_vec_isa: InvalidVecISA,
 ):
