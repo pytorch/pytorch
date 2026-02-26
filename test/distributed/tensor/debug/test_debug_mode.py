@@ -304,10 +304,12 @@ class TestDTensorDebugMode(TestCase):
       redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
         _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
+        _c10d_functional::wait_tensor(t: f32[16, 16])
         aten::chunk(t: f32[16, 16], 2)
         aten::cat(['t: f32[8, 16]', 't: f32[8, 16]'], 1)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 32], 4, 1)
         _c10d_functional::_wrap_tensor_autograd(t: f32[32, 32])
+        _c10d_functional::wait_tensor(t: f32[32, 32])
         aten::chunk(t: f32[32, 32], 4)
         aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
     aten::mm(t: f32[16, 8], t: f32[8, 128])
@@ -369,6 +371,7 @@ class TestDTensorDebugMode(TestCase):
       redistribute_input(t: f32[8, 2], trace: S(1)->R)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
         _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
+        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
     aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
@@ -377,7 +380,10 @@ class TestDTensorDebugMode(TestCase):
     def test_debug_mode_einsum(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
-        # Create test tensors
+        # Create test tensors with mixed Partial placements: P(sum)R and RP(sum).
+        # Per-input linearity allows bmm to operate directly on Partial inputs
+        # without redistribution, producing P(sum)P(sum) output.
+        # Numerics are verified in test_matrix_ops.py::test_mm_partial_inputs.
         a = torch.randn(16, 6, 8)
         b = torch.randn(8, 4, 4)
 
@@ -413,25 +419,7 @@ class TestDTensorDebugMode(TestCase):
     aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
     aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
-      redistribute_input [implicit] (0, P(sum)R -> S(2)[0]S(2)[1])
-        redistribute_input(t: f32[1, 96, 8], trace: P(sum)R->S(2)R->S(2)[0]S(2)[1])
-          aten::chunk(t: f32[1, 96, 8], 4, 2)
-          aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
-          _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 1)
-          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 96, 2])
-          _c10d_functional::wait_tensor(t: f32[1, 96, 2])
-          aten::chunk(t: f32[1, 96, 2], 2, 2)
-          aten::clone(t: f32[1, 96, 1])
-      redistribute_input [implicit] (1, RP(sum) -> S(1)[0]S(1)[1])
-        redistribute_input(t: f32[1, 8, 16], trace: RP(sum)->S(1)P(sum)->S(1)[0]S(1)[1])
-          aten::chunk(t: f32[1, 8, 16], 4, 1)
-          aten::clone(t: f32[1, 2, 16])
-          aten::chunk(t: f32[1, 2, 16], 2, 1)
-          aten::cat(['t: f32[1, 1, 16]', 't: f32[1, 1, 16]'])
-          _c10d_functional::reduce_scatter_tensor(t: f32[2, 1, 16], sum, 2, 3)
-          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 1, 16])
-          _c10d_functional::wait_tensor(t: f32[1, 1, 16])
-      aten::bmm(t: f32[1, 96, 1], t: f32[1, 1, 16])
+      aten::bmm(t: f32[1, 96, 8], t: f32[1, 8, 16])
     aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
     aten::permute(dt: f32[16, 6, 1, 4, 4]| P(sum)P(sum), [0, 1, 3, 4, 2])
