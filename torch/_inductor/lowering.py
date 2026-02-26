@@ -626,6 +626,31 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
     return out
 
 
+def _add_with_alpha_fma(a, b, alpha):
+    """Compute a + alpha * b using FMA for CUDA floating-point precision."""
+    dtype = get_promoted_dtype(
+        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+    a_loader = a.make_loader()
+    b_loader = b.make_loader()
+
+    def inner_fn(idx):
+        a_val = a_loader(idx)
+        b_val = b_loader(idx)
+        if isinstance(alpha, sympy.Basic):
+            alpha_expr = ops.index_expr(alpha, dtype)
+        else:
+            alpha_expr = ops.constant(alpha, dtype)
+        return ops.fma(b_val, alpha_expr, a_val)
+
+    return Pointwise.create(
+        device=a.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=a.get_size(),
+    )
+
+
 def make_pointwise(
     fn,
     override_return_dtype=None,
@@ -644,6 +669,23 @@ def make_pointwise(
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
+                # Use FMA for add-with-alpha on CUDA floating-point.
+                # Eager CUDA computes a + alpha * b as fma(b, alpha, a).
+                device = None
+                for i in inputs:
+                    if isinstance(i, IRNode) and is_gpu(i.get_device().type):
+                        device = i.get_device()
+                        break
+                inp_dtype = inputs[0].get_dtype() if isinstance(inputs[0], IRNode) else None
+                if (
+                    inp_dtype is not None
+                    and inp_dtype.is_floating_point
+                    and not torch.version.hip
+                    and device is not None
+                    and device.type == "cuda"
+                ):
+                    return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
+
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
                 # pyrefly: ignore [unsupported-operation]
@@ -6993,13 +7035,7 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     to force rounding of the product before the FMA. This prevents Triton's
     compiler from fusing the multiplication with the FMA, matching eager's
     rounding behavior.
-
-    When emulate_precision_casts is False, we return NotImplemented to use the
-    decomposition instead.
     """
-    if not config.emulate_precision_casts:
-        return NotImplemented
-
     dtype = get_promoted_dtype(
         self,
         tensor1,
@@ -7011,8 +7047,14 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA is only available for floating-point types on non-AMD GPUs
-    use_fma = dtype.is_floating_point and not torch.version.hip
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    device = self.get_device()
+    use_fma = (
+        dtype.is_floating_point
+        and not torch.version.hip
+        and device is not None
+        and device.type == "cuda"
+    )
 
     def inner_fn(idx):
         self_val = self_loader(idx)
@@ -7052,17 +7094,85 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     )
 
 
+@register_lowering(aten.addcdiv, broadcast=True)
+def addcdiv(self, tensor1, tensor2, *, value=1):
+    """
+    Computes self + value * (tensor1 / tensor2) using FMA for better precision.
+
+    Matches eager CUDA kernel order: self + value * (tensor1 / tensor2)
+    This is computed as: fma(value, tensor1 / tensor2, self)
+
+    For value=1: self + tensor1 / tensor2 (no FMA needed, just add the division)
+    For value!=1: fma(value, div_rn(tensor1, tensor2), self)
+
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
+    we fall back to regular arithmetic since FMA doesn't support integers.
+
+    We use div_rn (round-to-nearest division) to force proper rounding, preventing
+    Triton from fusing operations in ways that change the rounding behavior.
+    """
+    dtype = get_promoted_dtype(
+        self,
+        tensor1,
+        tensor2,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+
+    self_loader = self.make_loader()
+    t1_loader = tensor1.make_loader()
+    t2_loader = tensor2.make_loader()
+
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    device = self.get_device()
+    use_fma = (
+        dtype.is_floating_point
+        and not torch.version.hip
+        and device is not None
+        and device.type == "cuda"
+    )
+
+    def inner_fn(idx):
+        self_val = self_loader(idx)
+        t1_val = t1_loader(idx)
+        t2_val = t2_loader(idx)
+
+        # Compute tensor1 / tensor2 first
+        # Use div_rn for round-to-nearest division on CUDA to match eager behavior
+        if use_fma:
+            t1_div_t2 = ops.div_rn(t1_val, t2_val)
+        else:
+            t1_div_t2 = ops.truediv(t1_val, t2_val)
+
+        if value == 1:
+            # For value=1, just add the division result (no FMA needed)
+            return ops.add(self_val, t1_div_t2)
+
+        # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
+        if isinstance(value, sympy.Basic):
+            value_expr = ops.index_expr(value, dtype)
+        else:
+            value_expr = ops.constant(value, dtype)
+
+        if use_fma:
+            # Use FMA for floating-point types for better precision
+            return ops.fma(value_expr, t1_div_t2, self_val)
+        else:
+            # Fall back to regular arithmetic for integer types
+            return ops.add(self_val, ops.mul(value_expr, t1_div_t2))
+
+    return Pointwise.create(
+        device=self.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=self.get_size(),
+    )
+
+
 def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
     """
     Foreach version of addcmul with scalar value parameter.
     Uses foreach_group_loop for consistent grouping behavior.
-
-    When emulate_precision_casts is False, we return NotImplemented to use the
-    decomposition instead.
     """
-    if not config.emulate_precision_casts:
-        return NotImplemented
-
     realize_outputs = (
         len(V.graph.current_node.users) == 0
         or V.graph.current_node.target in inplace_foreach_ops
