@@ -650,7 +650,10 @@ class GraphLowering(torch.fx.Interpreter):
         if (dep, count_bytes) not in self.dep_size_hint_cache:
             res = 0
             try:
-                if not dep.has_unbacked_symbols():
+                if (
+                    not dep.has_unbacked_symbols()
+                    or self.sizevars.all_unbacked_explicitly_hinted(dep.get_numel())
+                ):
                     if count_bytes:
                         res = dep.numbytes_hint()
                     else:
