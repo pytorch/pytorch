@@ -563,6 +563,9 @@ class MpsInterface(DeviceInterface):
 
 
 class TpuInterface(DeviceInterface):
+    Event = torch.tpu.Event  # type: ignore[assignment]
+    Stream = torch.tpu.Stream  # type: ignore[assignment]
+
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return True
@@ -583,9 +586,11 @@ class TpuInterface(DeviceInterface):
     def is_available() -> bool:
         return has_torch_tpu()
 
-    @staticmethod
-    def current_device() -> int:
-        return 0
+    current_device = staticmethod(torch.tpu.current_device)
+    device_count = staticmethod(torch.tpu.device_count)
+    stream = staticmethod(torch.tpu.stream)  # type: ignore[assignment]
+    current_stream = staticmethod(torch.tpu.current_stream)
+    set_stream = staticmethod(torch.tpu.set_stream)  # type: ignore[assignment]
 
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> str:
@@ -655,5 +660,7 @@ def init_device_reg() -> None:
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
     register_interface_for_device("tpu", TpuInterface)
+    for i in range(torch.tpu.device_count()):
+        register_interface_for_device(f"tpu:{i}", TpuInterface)
 
     _device_initialized = True
