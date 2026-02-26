@@ -8,7 +8,7 @@ import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -62,7 +62,7 @@ FuncType = Callable[..., Any]
 F = TypeVar("F", bound=FuncType)
 
 
-def run(fn: Optional[Callable[_P, _R]] = None) -> Any:
+def run(fn: Callable[_P, _R] | None = None) -> Any:
     """Don't do any dynamic compiles, just use prior optimizations"""
     if fn is not None:
         fn = innermost_fn(fn)
@@ -114,7 +114,7 @@ _nonrecursive_disable_wrapper_code = disable(lambda: None, recursive=False).__co
 skip_code(_nonrecursive_disable_wrapper_code)
 
 
-def skip(fn: Optional[Callable[_P, _R]] = None) -> Callable[..., Any]:
+def skip(fn: Callable[_P, _R] | None = None) -> Callable[..., Any]:
     """
     Skip frames associated with the function code, but still process recursively
     invoked frames
@@ -142,7 +142,7 @@ class set_stance(_DecoratorContextManager):
         stance: str = "default",
         *,
         skip_guard_eval_unsafe: bool = False,
-        force_backend: Union[str, Callable[..., Any], None] = None,
+        force_backend: str | Callable[..., Any] | None = None,
     ) -> None:
         if force_backend is not None and stance != "default":
             raise RuntimeError("non-default stance cannot have force_backend set")
@@ -320,8 +320,8 @@ def _invoke_leaf_function_python(
     This enables @leaf_function to work with make_fx
     without relying on Dynamo to intercept the call.
     """
-    from torch._higher_order_ops.flat_apply import func_to_graphable
     from torch._higher_order_ops.invoke_leaf_function import (
+        _LeafCallable,
         convert_modules_to_states,
         invoke_leaf_function,
         make_leaf_function_wrappers,
@@ -352,8 +352,8 @@ def _invoke_leaf_function_python(
         real_impl, fake_impl, captured_out_spec
     )
 
-    _, real_fn_spec = func_to_graphable(wrapped_real)
-    _, fake_fn_spec = func_to_graphable(wrapped_fake)
+    real_fn_callable = _LeafCallable(wrapped_real)
+    fake_fn_callable = _LeafCallable(wrapped_fake)
 
     mutated_flat_indices = ""
     if mutates_args:
@@ -366,7 +366,7 @@ def _invoke_leaf_function_python(
         )
 
     flat_out = invoke_leaf_function(
-        real_fn_spec, fake_fn_spec, input_spec, mutated_flat_indices, *flat_args
+        real_fn_callable, fake_fn_callable, input_spec, mutated_flat_indices, *flat_args
     )
 
     assert captured_out_spec[0] is not None
@@ -384,7 +384,7 @@ def leaf_function(
 
 
 def leaf_function(
-    fn: Optional[Callable[_P, _R]] = None, *, mutates_args: Optional[set[str]] = None
+    fn: Callable[_P, _R] | None = None, *, mutates_args: set[str] | None = None
 ) -> Callable[_P, _R] | Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Decorator to mark a function as a leaf function for :func:`torch.compile`.
@@ -1052,11 +1052,11 @@ class _DimRange:
 @forbid_in_graph
 def mark_unbacked(
     t: Any,
-    index: Union[int, list[Any], tuple[Any]],
-    hint_override: Optional[int] = None,
+    index: int | list[Any] | tuple[Any],
+    hint_override: int | None = None,
     strict: bool = False,
-    specialize_on: Optional[list[Any]] = None,
-    shape_id: Optional[str] = None,
+    specialize_on: list[Any] | None = None,
+    shape_id: str | None = None,
 ) -> None:
     """
     Mark a tensor as having an unbacked dimension. This changes the semantics of operations:
@@ -1137,12 +1137,12 @@ def mark_unbacked(
 @forbid_in_graph
 def mark_dynamic(
     t: Any,
-    index: Union[int, list[Any], tuple[Any]],
+    index: int | list[Any] | tuple[Any],
     *,
-    hint_override: Optional[int] = None,
-    min: Optional[int] = None,
-    max: Optional[int] = None,
-    specialize_on: Optional[list[Any]] = None,
+    hint_override: int | None = None,
+    min: int | None = None,
+    max: int | None = None,
+    specialize_on: list[Any] | None = None,
 ) -> None:
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
@@ -1229,7 +1229,7 @@ def mark_dynamic(
 
 
 @forbid_in_graph
-def maybe_mark_dynamic(t: Any, index: Union[int, list[Any], tuple[Any]]) -> None:
+def maybe_mark_dynamic(t: Any, index: int | list[Any] | tuple[Any]) -> None:
     """
     Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
     dimension ends up getting specialized, don't error).
@@ -1252,9 +1252,7 @@ def maybe_mark_dynamic(t: Any, index: Union[int, list[Any], tuple[Any]]) -> None
         maybe_mark_dynamic(t, i)
 
 
-def mark_static(
-    t: Any, index: Optional[Union[int, list[Any], tuple[Any]]] = None
-) -> None:
+def mark_static(t: Any, index: int | list[Any] | tuple[Any] | None = None) -> None:
     """
     Mark a tensor as having a static dim or mark a nn module class as static.
 
@@ -1397,9 +1395,9 @@ class DynamoConfigPatchProxy:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         return self.config_patch.__exit__(exc_type, exc_val, exc_tb)
 
@@ -1450,7 +1448,7 @@ def _patch_dynamo_config_check(changes: dict[str, Any]) -> None:
 # Unlike config.patch, we also need to accept tuple as input in order to
 # deal with context manager reconstruction.
 def patch_dynamo_config(
-    arg1: Optional[Union[str, dict[str, Any], tuple[tuple[str, Any], ...]]] = None,
+    arg1: str | dict[str, Any] | tuple[tuple[str, Any], ...] | None = None,
     arg2: Any = None,
     **kwargs: Any,
 ) -> DynamoConfigPatchProxy:
@@ -1485,7 +1483,7 @@ def dont_skip_tracing(fn: None = None) -> DynamoConfigPatchProxy: ...
 def dont_skip_tracing(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
 
 
-def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
+def dont_skip_tracing(fn: Any | None = None) -> Any:
     """
     Context manager/decorator to trace into functions intentionally marked by developers to be skipped
     when tracing.
@@ -1506,7 +1504,7 @@ def disable_nested_graph_breaks(fn: None = None) -> DynamoConfigPatchProxy: ...
 def disable_nested_graph_breaks(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
 
 
-def disable_nested_graph_breaks(fn: Optional[Any] = None) -> Any:
+def disable_nested_graph_breaks(fn: Any | None = None) -> Any:
     """
     Context manager/decorator to disable nested graph breaks when tracing
     this function and any nested functions. Used when nested graph breaks
@@ -1530,9 +1528,9 @@ class ErrorOnGraphBreakDecoratorContextManager:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         _set_error_on_graph_break(self.prev_error_on_graph_break)
 
@@ -1557,7 +1555,49 @@ def error_on_graph_break(
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
 
 
-def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
+class CudagraphOverrideContextManager:
+    """Context manager that overrides cudagraph recording during tracing."""
+
+    def __init__(self, fwd: bool | None = None, bwd: bool | None = None) -> None:
+        self.fwd = fwd
+        self.bwd = bwd
+
+    __call__ = wrap_dunder_call_ctx_manager
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        pass
+
+
+def override_cudagraphs(
+    fwd: bool | None = None, bwd: bool | None = None
+) -> CudagraphOverrideContextManager:
+    """
+    Context manager/decorator to override cudagraph recording for compiled graphs.
+
+    When used as a context manager, overrides cudagraphs for all graph segments
+    within the block (including across graph breaks).
+
+    When used as a decorator, marks a function so that any compiled graph
+    inlining it will have cudagraphs overridden.
+
+    Args:
+        fwd: If False, disable cudagraphs for forward. If True, force enable.
+             If None, don't override.
+        bwd: If False, disable cudagraphs for backward. If True, force enable.
+             If None, don't override.
+    """
+    return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
+
+
+def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> bool | None:
     """
     Check if a method is marked as `dynamo_disable` recursively. It returns:
     - True if disable(recursive=True)
