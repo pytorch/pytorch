@@ -874,13 +874,13 @@ class PallasKernel(SIMDKernel):
         self.outputs_need_read: OrderedSet[str] = OrderedSet()
         # Track if any load in this kernel used transpose
         # Used to avoid double transpose (load + store)
-        self.has_transposed_load = False
+        self.permuted_input_buffers: dict[str, tuple[int, ...]] = {}
         # Track which iteration variables are actually used in the kernel
         self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
         # Track if any load/store uses flatten-based indexing (buf[...].flatten()[idx])
         self.has_flatten_indexing = False
         # Track input buffers that are accessed with transposed last-2 dims
-        self.transposed_input_buffers: OrderedSet[str] = OrderedSet()
+
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -1590,7 +1590,7 @@ class PallasKernel(SIMDKernel):
                 perm = self._get_load_permutation(name, index)
                 if perm is not None:
                     load_expr = f"jnp.permute_dims({load_expr}, {perm})"
-                    self.has_transposed_load = True
+                    self.permuted_input_buffers[name] = perm
 
             return load_expr
 
@@ -1796,7 +1796,7 @@ class PallasKernel(SIMDKernel):
         - But input(s) have row-major stride
         - And we haven't already transposed on load
         """
-        if self.has_transposed_load:
+        if self.permuted_input_buffers:
             return False
 
         info = self._get_buffer_info(name)
@@ -2624,7 +2624,7 @@ class PallasKernel(SIMDKernel):
                 ):
                     has_col_major_out = True
                     break
-        self.tile_has_transpose = self.has_transposed_load or has_col_major_out
+        self.tile_has_transpose = bool(self.permuted_input_buffers) or has_col_major_out
 
         # Count trailing reduction dimensions in the output shape that must
         # not be tiled (the kernel body needs the full reduction range).
@@ -2681,22 +2681,16 @@ class PallasKernel(SIMDKernel):
                     mismatch = True
                     break
 
-                if mismatch and ref_nd >= 2 and self.tile_has_transpose:
-                    # Check if last-2 dims are swapped (transpose pattern).
-                    # Only allow when the kernel actually transposes
-                    # (has_transposed_load or column-major output).
-                    if (
-                        int_size[-2] == ref_shape[-1]
-                        and int_size[-1] == ref_shape[-2]
-                        and all(
-                            int_size[i] == ref_shape[i]
-                            or int_size[i] == 1
-                            or ref_shape[i] == 1
-                            for i in range(ref_nd - 2)
-                        )
+                if mismatch and buf_name in self.permuted_input_buffers:
+                    # Permuted input: verify shape matches under permutation
+                    perm = self.permuted_input_buffers[buf_name]
+                    if len(perm) == ref_nd and all(
+                        int_size[perm[i]] == ref_shape[i]
+                        or int_size[perm[i]] == 1
+                        or ref_shape[i] == 1
+                        for i in range(ref_nd)
                     ):
-                        if buf_name in self.args.input_buffers:
-                            self.transposed_input_buffers.add(buf_name)
+                        pass  # shape is compatible under permutation
                     else:
                         return False
                 elif mismatch:
@@ -2747,7 +2741,6 @@ class PallasKernel(SIMDKernel):
 
             _, grid, _ = pallas_compute_tiling(
                 tuple(ref_shape),
-                transpose=self.tile_has_transpose,
                 skip_last_n=self.tile_skip_last_n,
                 exact_only=True,
             )
@@ -3365,12 +3358,10 @@ from torch._inductor.runtime.runtime_utils import (
         reference output shape per numpy broadcast rules.
         """
         code = ctx.code
-        transpose_literal = "True" if self.tile_has_transpose else "False"
-
         skip_n = self.tile_skip_last_n
         code.writeline(
             f"_tile, _grid, _ax2g = pallas_compute_tiling("
-            f"out_shapes[0], transpose={transpose_literal}, "
+            f"out_shapes[0], "
             f"skip_last_n={skip_n}, exact_only=True)"
         )
         code.writeline("_ng = len(_grid)")
@@ -3383,8 +3374,8 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline("    for s in out_shapes")
         code.writeline(")")
 
-        # Build per-input swap_last_two flags for transposed buffers
-        swap_flags = []
+        # Build per-input permutation flags
+        perm_flags = []
         for param in ctx.kernel_input_params:
             # Map kernel param back to graph buffer name
             buf_name = None
@@ -3392,17 +3383,17 @@ from torch._inductor.runtime.runtime_utils import (
                 if inner_name == param:
                     buf_name = graph_name
                     break
-            is_swap = buf_name is not None and buf_name in self.transposed_input_buffers
-            swap_flags.append(is_swap)
+            perm = self.permuted_input_buffers.get(buf_name) if buf_name else None
+            perm_flags.append(perm)
 
-        if any(swap_flags):
-            swap_list = ", ".join(str(f) for f in swap_flags)
-            code.writeline(f"_swap_flags = [{swap_list}]")
+        if any(p is not None for p in perm_flags):
+            perm_list = ", ".join(repr(p) for p in perm_flags)
+            code.writeline(f"_perm_flags = [{perm_list}]")
             input_list = ", ".join(ctx.kernel_input_params)
             code.writeline("in_specs_pallas = tuple(")
             code.writeline(
-                f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng, swap_last_two=s)"
-                f" for i, s in zip([{input_list}], _swap_flags)"
+                f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng, permutation=p)"
+                f" for i, p in zip([{input_list}], _perm_flags)"
             )
             code.writeline(")")
         else:

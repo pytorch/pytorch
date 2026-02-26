@@ -383,10 +383,6 @@ def pallas_compute_tiling(
     second-to-last multiple of 8) so that the same generated kernel works
     on both CPU-interpret and real TPU.
 
-    When *transpose* is True and nd >= 2, both last-2 dims use the same
-    square tile size based on the smaller alignment so that transposed
-    buffers can use the same tile for both dims.
-
     *skip_last_n* prevents tiling the last N dimensions (used when those
     dims correspond to internal reduction ranges that must remain full).
 
@@ -427,40 +423,23 @@ def pallas_compute_tiling(
             return False
         return True
 
-    if transpose and tileable_nd >= 2:
-        # Square tile for both last-2 tileable dims
-        ax_last = tileable_nd - 1
-        ax_second = tileable_nd - 2
-        min_dim = min(ref_shape[ax_last], ref_shape[ax_second])
-        t = _pallas_tile_size(min_dim, max(_align(ax_last), _align(ax_second)))
+    # Second-to-last tileable dim (added first so it becomes grid dim 0)
+    if tileable_nd >= 2:
+        ax = tileable_nd - 2
+        t = _pallas_tile_size(ref_shape[ax], _align(ax))
+        if _can_tile_ax(ref_shape[ax], t):
+            tile[ax] = t
+            axis_to_grid[ax] = len(grid_parts)
+            grid_parts.append((ref_shape[ax] + t - 1) // t)
 
-        if _can_tile_ax(ref_shape[ax_second], t) and t % _align(ax_second) == 0:
-            tile[ax_second] = t
-            axis_to_grid[ax_second] = len(grid_parts)
-            grid_parts.append(ref_shape[ax_second] // t)
-
-        if _can_tile_ax(ref_shape[ax_last], t) and t % _align(ax_last) == 0:
-            tile[ax_last] = t
-            axis_to_grid[ax_last] = len(grid_parts)
-            grid_parts.append(ref_shape[ax_last] // t)
-    else:
-        # Second-to-last tileable dim (added first so it becomes grid dim 0)
-        if tileable_nd >= 2:
-            ax = tileable_nd - 2
-            t = _pallas_tile_size(ref_shape[ax], _align(ax))
-            if _can_tile_ax(ref_shape[ax], t):
-                tile[ax] = t
-                axis_to_grid[ax] = len(grid_parts)
-                grid_parts.append((ref_shape[ax] + t - 1) // t)
-
-        # Last tileable dim
-        if tileable_nd >= 1:
-            ax = tileable_nd - 1
-            t = _pallas_tile_size(ref_shape[ax], _align(ax))
-            if _can_tile_ax(ref_shape[ax], t):
-                tile[ax] = t
-                axis_to_grid[ax] = len(grid_parts)
-                grid_parts.append((ref_shape[ax] + t - 1) // t)
+    # Last tileable dim
+    if tileable_nd >= 1:
+        ax = tileable_nd - 1
+        t = _pallas_tile_size(ref_shape[ax], _align(ax))
+        if _can_tile_ax(ref_shape[ax], t):
+            tile[ax] = t
+            axis_to_grid[ax] = len(grid_parts)
+            grid_parts.append((ref_shape[ax] + t - 1) // t)
 
     grid = tuple(grid_parts) if grid_parts else (1,)
     return tuple(tile), grid, axis_to_grid
@@ -472,7 +451,7 @@ def pallas_make_block_spec(
     tile_shape: tuple[int, ...],
     axis_to_grid: dict[int, int],
     n_grid: int,
-    swap_last_two: bool = False,
+    permutation: "Optional[tuple[int, ...]]" = None,
     is_output: bool = False,
 ) -> Any:
     """Build a ``pl.BlockSpec`` for *buf_shape* given tiling of *ref_shape*.
@@ -485,8 +464,9 @@ def pallas_make_block_spec(
     so the ref dims map into the buffer.  Extra dims are kept at full size
     with index 0 in the index_map.
 
-    When *swap_last_two* is True, the last two buffer dims are swapped
-    relative to the reference: ref axis -2 maps to buf axis -1 and vice versa.
+    When *permutation* is given (a tuple mapping ref axis -> buf axis),
+    the buffer dimensions are accessed in permuted order relative to the
+    reference shape.  For example, permutation=(1, 0) swaps the last two.
 
     When *is_output* is True and *buf_nd < ref_nd*, left-alignment is used
     as a fallback (for reduction outputs whose trailing dims were reduced).
@@ -526,17 +506,10 @@ def pallas_make_block_spec(
                 bs[buf_ax] = tile_shape[ref_ax]
                 tiled_pairs.append((buf_ax, grid_dim))
 
-    elif swap_last_two and buf_nd >= 2 and ref_nd >= 2:
-        # Transposed buffer: last-2 dims of buf are swapped vs ref.
+    elif permutation is not None and buf_nd == ref_nd:
+        # Permuted buffer: map ref axes through the permutation.
         for ref_ax, grid_dim in axis_to_grid.items():
-            # Map ref axis to buf axis with swap on the last two
-            if ref_ax == ref_nd - 2:
-                buf_ax = buf_nd - 1
-            elif ref_ax == ref_nd - 1:
-                buf_ax = buf_nd - 2
-            else:
-                buf_ax = ref_ax - (ref_nd - buf_nd)
-
+            buf_ax = permutation[ref_ax]
             if 0 <= buf_ax < buf_nd and buf_shape[buf_ax] == ref_shape[ref_ax]:
                 bs[buf_ax] = tile_shape[ref_ax]
                 tiled_pairs.append((buf_ax, grid_dim))
@@ -562,7 +535,7 @@ def pallas_make_block_spec(
 
     return pl.BlockSpec(
         tuple(bs),
-        _make_index_map(tiled_pairs, buf_nd, n_grid, swap_last_two=swap_last_two),
+        _make_index_map(tiled_pairs, buf_nd, n_grid),
     )
 
 
@@ -570,15 +543,11 @@ def _make_index_map(
     tiled_pairs: list[tuple[int, int]],
     buf_nd: int,
     n_grid: int,
-    swap_last_two: bool = False,
 ) -> Any:
     """Return an index_map callable for ``pl.BlockSpec``.
 
     *tiled_pairs* is a list of ``(buf_axis, grid_dim)`` indicating which
     buffer axes receive a grid index.  All other axes return 0 (full block).
-
-    When *swap_last_two* is True the grid args for the last two buffer dims
-    are swapped so that the tile iteration follows the transposed layout.
 
     All returned values are explicitly ``jnp.int32`` so that TPU Mosaic
     lowering (which rejects 64-bit types) works when ``jax_enable_x64`` is
