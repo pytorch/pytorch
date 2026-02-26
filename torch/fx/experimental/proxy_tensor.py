@@ -2122,7 +2122,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 
     def __init__(self, scope_root: GraphModule) -> None:
         super().__init__()
-        self.record_stack_traces = True
+        self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
         self.enable_attr_proxy = False
@@ -2496,8 +2496,10 @@ class _MakefxTracer:
                 self.fx_tracer = _ModuleStackTracer(scope_root)
             else:
                 self.fx_tracer = PythonKeyTracer()
-                self.fx_tracer.record_stack_traces = self.record_stack_traces
-                if self.record_stack_traces:
+                self.fx_tracer.record_stack_traces = (
+                    self.record_stack_traces and not fx.config.do_not_emit_stack_traces
+                )
+                if self.fx_tracer.record_stack_traces:
                     self.fx_tracer._record_forward_stack_traces_only = True
 
             if self.tracing_mode == "fake":
