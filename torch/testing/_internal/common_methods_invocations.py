@@ -13197,8 +13197,6 @@ op_db: list[OpInfo] = [
                                     'TestNNCOpInfo',
                                     'test_nnc_correctness',
                                     dtypes=tuple(t for t in integral_types() if t != torch.uint8)),
-                       # NotImplementedError: "ceil_vml_cpu" not implemented for 'Bool'
-                       DecorateInfo(unittest.expectedFailure, 'TestConsistency', device_type='mps', dtypes=(torch.bool,)),
                    ),
                    supports_sparse=True,
                    supports_sparse_csr=True,
@@ -14082,8 +14080,6 @@ op_db: list[OpInfo] = [
                                     'TestNNCOpInfo',
                                     'test_nnc_correctness',
                                     dtypes=tuple(t for t in integral_types() if t != torch.uint8)),
-                       # NotImplementedError: "floor_vml_cpu" not implemented for 'Bool'
-                       DecorateInfo(unittest.expectedFailure, 'TestConsistency', device_type='mps', dtypes=(torch.bool,)),
                    ),
                    supports_sparse=True,
                    supports_sparse_csr=True,
@@ -14248,8 +14244,6 @@ op_db: list[OpInfo] = [
                                      dtypes=(torch.float16,)),
                         DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
                                      'TestBinaryUfuncs', 'test_reference_numerics'),
-                        # NotImplementedError: "div_floor_cpu" not implemented for 'Bool'
-                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', device_type='mps', dtypes=(torch.bool,)),
                     )),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
@@ -18738,8 +18732,6 @@ op_db: list[OpInfo] = [
                         # TODO: FIXME tolerance is too high
                         DecorateInfo(unittest.skip('Skipped!'), 'TestFwdGradients'),
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBwdGradients'),
-                        # Exception: "pow" not implemented for 'Bool'
-                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', device_type='mps', dtypes=(torch.bool,)),
                     ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::pow'],),
@@ -20632,7 +20624,7 @@ op_db: list[OpInfo] = [
                # NotImplementedError: "bernoulli_tensor_cpu_p_" not implemented for *
                DecorateInfo(
                    unittest.expectedFailure, 'TestConsistency', device_type='mps',
-                   dtypes=(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+                   dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
                ),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'))),
     OpInfo('scatter_add',
