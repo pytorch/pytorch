@@ -30,6 +30,7 @@ from ..kernel.mm_plus_mm import mm_plus_mm_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
 from ..utils import (
     get_backend_num_stages,
+    get_default_kpack,
     get_num_sms,
     get_tma_workspace_arg,
     TMA_DESCRIPTOR_SIZE,
@@ -176,7 +177,7 @@ class ROCmGemmConfig(GemmConfig):
 
     matrix_instr_nonkdim: int = 16
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 @dataclasses.dataclass
@@ -187,7 +188,7 @@ class ROCmConvConfig(ConvConfig):
 
     matrix_instr_nonkdim: int = 16
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 @dataclasses.dataclass
@@ -198,7 +199,7 @@ class ROCmFlexConfig(FlexConfig):
 
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 @dataclasses.dataclass
@@ -209,7 +210,7 @@ class ROCmFlexBwDConfig(FlexBwDConfig):
 
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 @dataclasses.dataclass
@@ -220,7 +221,7 @@ class ROCmFlexDecodeConfig(FlexDecodeConfig):
 
     matrix_instr_nonkdim: int = 0
     waves_per_eu: int = 0
-    kpack: int = 2
+    kpack: int = 1
 
 
 class BaseHeuristicSingleton(type):
@@ -1547,23 +1548,26 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for group_m in [4, 8, 16]
             for matrix_instr_nonkdim in [0, 16]
             for waves_per_eu in [0, 2]
-            for kpack in [2]
+            for kpack in [1, 2]
         ]
 
+        # Architecture-aware default kpack for flex configs
+        default_kpack = get_default_kpack()
+
         self.default_flex_config = {
-            (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4),
-            (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4),
-            (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4),
-            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 1, 8),
-            (torch.float16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 128): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 256): ROCmFlexConfig(32, 64, 1, 4),
+            (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
+            (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
+            (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4, kpack=default_kpack),
+            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 1, 8, kpack=default_kpack),
+            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 8, kpack=default_kpack),
+            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 1, 8, kpack=default_kpack),
+            (torch.float16, 64): ROCmFlexConfig(128, 64, 1, 8, kpack=default_kpack),
+            (torch.float16, 128): ROCmFlexConfig(128, 64, 1, 8, kpack=default_kpack),
+            (torch.float16, 256): ROCmFlexConfig(32, 64, 1, 4, kpack=default_kpack),
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
-            ROCmFlexConfig(BLOCK1, BLOCK2, 1, w)
+            ROCmFlexConfig(BLOCK1, BLOCK2, 1, w, kpack=default_kpack)
             for BLOCK1 in [16, 64, 128]
             for BLOCK2 in [16, 32, 64, 128]
             for w in [4, 8]
@@ -1571,7 +1575,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
         self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
             # See Note: flex bwd configs
-            ROCmFlexBwDConfig(BLOCK1, BLOCK2, BLOCK2, BLOCK1, 1, w, mfma)
+            ROCmFlexBwDConfig(
+                BLOCK1, BLOCK2, BLOCK2, BLOCK1, 1, w, mfma, kpack=default_kpack
+            )
             for BLOCK1 in [16, 32, 64]
             for BLOCK2 in [32, 64, 128]
             for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
@@ -1580,22 +1586,23 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         ]
 
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = [
-            ROCmFlexDecodeConfig(32, 1, 4),
-            ROCmFlexDecodeConfig(64, 1, 4),
-            ROCmFlexDecodeConfig(128, 1, 4),
-            ROCmFlexDecodeConfig(32, 1, 8),
-            ROCmFlexDecodeConfig(64, 1, 8),
-            ROCmFlexDecodeConfig(128, 1, 8),
+            ROCmFlexDecodeConfig(32, 1, 4, kpack=default_kpack),
+            ROCmFlexDecodeConfig(64, 1, 4, kpack=default_kpack),
+            ROCmFlexDecodeConfig(128, 1, 4, kpack=default_kpack),
+            ROCmFlexDecodeConfig(32, 1, 8, kpack=default_kpack),
+            ROCmFlexDecodeConfig(64, 1, 8, kpack=default_kpack),
+            ROCmFlexDecodeConfig(128, 1, 8, kpack=default_kpack),
         ]
 
         self.exhaustive_flex_attn_fwd_configs: list[FlexConfig] = [
-            ROCmFlexConfig(BLOCK_M, BLOCK_N, num_stages, num_warps, mfma, wpeu)
+            ROCmFlexConfig(BLOCK_M, BLOCK_N, num_stages, num_warps, mfma, wpeu, kpack)
             for BLOCK_M in [16, 32, 64, 128]
             for BLOCK_N in [32, 64, 128]
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
+            for kpack in [1, 2]
         ]
 
         self.exhaustive_flex_attn_bwd_configs: list[FlexBwDConfig] = [
@@ -1609,6 +1616,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 num_warps,
                 mfma,
                 wpeu,
+                kpack,
             )
             for BLOCK_M1 in [16, 32, 64, 128]
             for BLOCK_N1 in [16, 32, 64, 128]
@@ -1618,17 +1626,21 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
+            for kpack in [1, 2]
             if BLOCK_N1 % BLOCK_M1 == 0
             and BLOCK_M2 % BLOCK_N2 == 0  # kernel static assertions
         ]
 
         self.exhaustive_flex_decode_configs: list[FlexDecodeConfig] = [
-            ROCmFlexDecodeConfig(block_n, num_stages, num_warps, mfma, wpeu, kpack=2)
+            ROCmFlexDecodeConfig(
+                block_n, num_stages, num_warps, mfma, wpeu, kpack=kpack
+            )
             for block_n in [16, 32, 64, 128]
             for num_stages in [1, 2]
             for num_warps in [2, 4, 8]
             for mfma in [0, 16]
             for wpeu in [0, int(8 // num_warps)]
+            for kpack in [1, 2]
         ]
 
     def _prune_exhaustive_configs(
@@ -1641,8 +1653,11 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             c
             for c in configs
             if not (
-                getattr(c, "matrix_instr_nonkdim", 0) == 2
-                and getattr(c, "kpack", 0) == 2
+                (
+                    getattr(c, "matrix_instr_nonkdim", 0) == 2
+                    and getattr(c, "kpack", 0) == 2
+                )
+                or (c.block_k <= 16 and getattr(c, "kpack", 0) == 2)
             )
         ]
         return pruned_configs
@@ -1673,7 +1688,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             # Defaults for AMD triton backend kern args if not set
             matrix_instr_nonkdim = getattr(conf, "matrix_instr_nonkdim", 16)
             waves_per_eu = getattr(conf, "waves_per_eu", 0)
-            kpack = getattr(conf, "kpack", 2)
+            # Use explicit kpack if set, otherwise determine optimal value based on
+            # architecture and BLOCK_K
+            kpack = getattr(conf, "kpack", get_default_kpack(conf.block_k))
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
@@ -1731,19 +1748,20 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
+        default_kpack = get_default_kpack()
         if head_dim <= 256:
             if dtype == torch.float32:
-                default_config = ROCmFlexConfig(64, 64, 1, 4)
+                default_config = ROCmFlexConfig(64, 64, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(128, 64, 1, 8)
+                default_config = ROCmFlexConfig(128, 64, 1, 8, kpack=default_kpack)
             default_config = self.default_flex_config.get(
                 (dtype, head_dim), default_config
             )
         else:
             if dtype == torch.float32:
-                default_config = ROCmFlexConfig(32, 16, 1, 4)
+                default_config = ROCmFlexConfig(32, 16, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(64, 32, 1, 4)
+                default_config = ROCmFlexConfig(64, 32, 1, 4, kpack=default_kpack)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1760,17 +1778,28 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
+        default_kpack = get_default_kpack()
         if dtype == torch.float32:
-            default_config = ROCmFlexBwDConfig(16, 16, 16, 16, 1, 4)
+            default_config = ROCmFlexBwDConfig(
+                16, 16, 16, 16, 1, 4, kpack=default_kpack
+            )
         elif head_dim <= 256:
             if head_dim == 64:
-                default_config = ROCmFlexBwDConfig(64, 64, 64, 64, 1, 4)
+                default_config = ROCmFlexBwDConfig(
+                    64, 64, 64, 64, 1, 4, kpack=default_kpack
+                )
             elif head_dim == 128:
-                default_config = ROCmFlexBwDConfig(64, 128, 128, 64, 1, 8)
+                default_config = ROCmFlexBwDConfig(
+                    64, 128, 128, 64, 1, 8, kpack=default_kpack
+                )
             else:
-                default_config = ROCmFlexBwDConfig(64, 64, 64, 64, 1, 4)
+                default_config = ROCmFlexBwDConfig(
+                    64, 64, 64, 64, 1, 4, kpack=default_kpack
+                )
         else:
-            default_config = ROCmFlexBwDConfig(16, 16, 16, 16, 1, 4)
+            default_config = ROCmFlexBwDConfig(
+                16, 16, 16, 16, 1, 4, kpack=default_kpack
+            )
 
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
@@ -1787,7 +1816,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
-        default_config = ROCmFlexDecodeConfig(64, 1, 4)
+        default_kpack = get_default_kpack()
+        default_config = ROCmFlexDecodeConfig(64, 1, 4, kpack=default_kpack)
 
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
