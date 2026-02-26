@@ -58,4 +58,10 @@ using PackedTensorAccessor32 = GenericPackedTensorAccessor<T, N, PtrTraits, int3
 
 template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
 using PackedTensorAccessor64 = GenericPackedTensorAccessor<T, N, PtrTraits, int64_t>;
+
+using torch::headeronly::PackedTensorAccessorMetadata;
+using torch::headeronly::make_packed_accessor_metadata;
+using torch::headeronly::packed_accessor_offset;
+using torch::headeronly::packed_accessor_get;
+
 } // namespace at
