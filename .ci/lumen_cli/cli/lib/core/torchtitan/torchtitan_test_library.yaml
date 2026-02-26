@@ -1,0 +1,34 @@
+# torchtitan Test Library Configuration
+# Each test plan maps to torchtitan's own test runners and pytest suites.
+# When tests are added/removed in torchtitan, the daily pin bump picks them up.
+
+torchtitan_unit_tests:
+  title: torchtitan CPU Unit Tests
+  id: torchtitan_unit_tests
+  steps:
+    - pytest tests/unit_tests --cov=. --durations=20 -vv
+
+torchtitan_features_integration:
+  title: torchtitan Feature Integration Tests (8 GPU)
+  id: torchtitan_features_integration
+  env_vars:
+    NGPU: "8"
+  steps:
+    - python -m tests.integration_tests.run_tests --test_suite features /tmp/output --ngpu 8
+
+torchtitan_models_integration:
+  title: torchtitan Model Integration Tests (8 GPU)
+  id: torchtitan_models_integration
+  env_vars:
+    NGPU: "8"
+  steps:
+    - python -m tests.integration_tests.run_tests --test_suite models /tmp/output --ngpu 8
+
+torchtitan_h100_integration:
+  title: torchtitan H100 Integration Tests (8 GPU)
+  id: torchtitan_h100_integration
+  env_vars:
+    NGPU: "8"
+    TORCH_SHOW_CPP_STACKTRACES: "1"
+  steps:
+    - python -m tests.integration_tests.run_tests --test_suite h100 /tmp/output --ngpu 8
