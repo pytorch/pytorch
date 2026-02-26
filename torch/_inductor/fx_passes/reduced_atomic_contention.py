@@ -8,7 +8,7 @@ writes across multiple partitions, reducing atomic contention.
 
 import logging
 import math
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.fx as fx
@@ -355,7 +355,7 @@ def _fit_to_memory_budget(
 
 def _extract_scatter_dim_and_index(
     indices_arg: Any,
-) -> tuple[int | None, fx.Node | None]:
+) -> tuple[Optional[int], Optional[fx.Node]]:
     """Extract scatter dimension and index node from indices argument."""
     # Case 1: Single index → dim=0
     if not isinstance(indices_arg, (list, tuple)):
@@ -377,7 +377,7 @@ def _extract_scatter_dim_and_index(
     return scatter_dim, index_node
 
 
-def _get_tensor_meta(node: fx.Node) -> dict[str, Any] | None:
+def _get_tensor_meta(node: fx.Node) -> Optional[dict[str, Any]]:
     """Extract tensor metadata from FX node."""
     if not hasattr(node, "meta") or "val" not in node.meta:
         return None

@@ -46,8 +46,7 @@ def _derive_module_name(depth: int = 1) -> str | None:
     """
     try:
         stack = inspect.stack()
-        if depth >= len(stack):
-            raise AssertionError
+        assert depth < len(stack)
         # FrameInfo is just a named tuple: (frame, filename, lineno, function, code_context, index)
         frame_info = stack[depth]
 

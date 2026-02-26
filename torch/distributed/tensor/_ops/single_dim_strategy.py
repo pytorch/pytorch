@@ -85,8 +85,7 @@ def _insert_single_dim_replication_strategy(
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     """
     for strategy in single_dim_strategies_with_placeholders:
-        if all(isinstance(p, Replicate) for p in strategy):
-            raise AssertionError
+        assert not all(isinstance(p, Replicate) for p in strategy)
     single_dim_strategies_with_placeholders.insert(
         0, [Replicate()] * (num_outputs + num_input_tensors)
     )
@@ -139,13 +138,11 @@ def _fill_single_dim_strategy_placeholders(
                         # with other metadata (e.g. split_factor) from the sharding class
                         expanded_strategy.append(shard_builder(maybe_placeholder.dim))
                     else:
-                        if not isinstance(maybe_placeholder, Placement):
-                            raise AssertionError
+                        assert isinstance(maybe_placeholder, Placement)
                         expanded_strategy.append(maybe_placeholder)
                 expanded_strategies_over_one_mesh_dim.append(expanded_strategy)
         else:
-            if not all(isinstance(p, Placement) for p in s):
-                raise AssertionError
+            assert all(isinstance(p, Placement) for p in s)
             expanded_strategies_over_one_mesh_dim.append(cast(list[Placement], (s)))
 
     return expanded_strategies_over_one_mesh_dim
@@ -158,8 +155,7 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
         if isinstance(obj, DTensorSpec):
             unique_placements.update(obj.placements)
         elif isinstance(obj, OpStrategy):
-            if len(obj.strategies) != 1:
-                raise AssertionError
+            assert len(obj.strategies) == 1
             unique_placements.update(obj.strategies[0].output_spec.placements)
         elif isinstance(obj, TupleStrategy):
             for child in obj.children:

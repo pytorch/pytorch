@@ -190,8 +190,7 @@ def barrier(
     """
 
     if rank is None:
-        if rank_tracing_decoder is not None:
-            raise AssertionError("Tracing requires rank information")
+        assert rank_tracing_decoder is None, "Tracing requires rank information"
 
     with store_timeout(store, barrier_timeout):
         last_member_key = _barrier_nonblocking(

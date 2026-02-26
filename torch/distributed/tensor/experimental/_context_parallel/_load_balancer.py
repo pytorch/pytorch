@@ -145,8 +145,7 @@ class _HeadTailLoadBalancer(_LoadBalancer):
         """
         seq_length = self.seq_length
         world_size = self.world_size
-        if seq_length % (world_size * 2) != 0:
-            raise AssertionError
+        assert seq_length % (world_size * 2) == 0
         chunk_size = seq_length // (world_size * 2)
         all_indices = []
 
@@ -262,10 +261,9 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
     def _generate_indices_for_batch(self, seq_length_per_doc, restore) -> Tensor:  # type: ignore[no-untyped-def]
         world_size = self.world_size
         device = self.device
-        if not all(
+        assert all(
             seq_length % (2 * world_size) == 0 for seq_length in seq_length_per_doc
-        ):
-            raise AssertionError
+        )
         chunk_length_per_doc = [
             seq_length // (2 * world_size) for seq_length in seq_length_per_doc
         ]
@@ -346,8 +344,7 @@ class _PTRRLoadBalancer(_LoadBalancer):
                 [0, 5, 6, 10]       # values = [9, 15, 8, 15], sum = 47
             ]
         """
-        if process_time.ndim != 1:
-            raise AssertionError
+        assert process_time.ndim == 1
 
         num_tasks = process_time.size(0)
 
@@ -463,8 +460,9 @@ class _PTRRLoadBalancer(_LoadBalancer):
 
         # NOTE: only support the case where the qkv block size are equal
         q_blk_size, kv_blk_size = block_mask.BLOCK_SIZE
-        if q_blk_size != kv_blk_size:
-            raise AssertionError("for now only support q_blk_size == kv_blk_size")
+        assert q_blk_size == kv_blk_size, (
+            "for now only support q_blk_size == kv_blk_size"
+        )
 
         indices = torch.arange(
             q_blk_size * ptrr_indices.size(1), device=ptrr_indices.device

@@ -244,19 +244,15 @@ else:
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
 
-            if not _layout.check_non_overlap():
-                raise AssertionError(
-                    "Please use a non-overlapping layout when creating a DeviceMesh."
-                )
-            if _rank_map.ndim != 1:
-                raise AssertionError("The rank map must be 1-dimensional")
-            if not _rank_map.is_contiguous():
-                raise AssertionError("The rank map must be contiguous")
-            if _rank_map.numel() < _layout.cosize():
-                raise AssertionError(
-                    f"The rank map contains {_rank_map.numel()} element, "
-                    f"which isn't large enough for layout {_layout}"
-                )
+            assert _layout.check_non_overlap(), (
+                "Please use a non-overlapping layout when creating a DeviceMesh."
+            )
+            assert _rank_map.ndim == 1, "The rank map must be 1-dimensional"
+            assert _rank_map.is_contiguous(), "The rank map must be contiguous"
+            assert _rank_map.numel() >= _layout.cosize(), (
+                f"The rank map contains {_rank_map.numel()} element, "
+                f"which isn't large enough for layout {_layout}"
+            )
 
             self._device_type = device_type
             self._layout = _layout
@@ -612,10 +608,9 @@ else:
                 )
             # Filter out None values. If any are None then they should all be None.
             dim_non_none_group_names = [n for n in dim_group_names if n is not None]
-            if dim_non_none_group_names and len(dim_non_none_group_names) != len(
+            assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
                 dim_group_names
-            ):
-                raise AssertionError
+            )
             return dim_non_none_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
@@ -805,11 +800,12 @@ else:
             root_mesh = self._get_root_mesh()
             slice_dim_group_name = []
             if len(self._dim_group_names) > 0:
-                if len(self._dim_group_names) != len(not_none(self._mesh_dim_names)):
-                    raise AssertionError(
-                        "The number of dim_group_names and mesh_dim_names "
-                        "should have the same length if the rank is in the mesh."
-                    )
+                assert len(self._dim_group_names) == len(
+                    not_none(self._mesh_dim_names)
+                ), (
+                    "The number of dim_group_names and mesh_dim_names "
+                    "should have the same length if the rank is in the mesh."
+                )
                 for name in submesh_dim_names:
                     if name in not_none(self._mesh_dim_names):
                         slice_dim_group_name.append(
@@ -1218,8 +1214,7 @@ else:
 
             if not detect_fake_mode() or not config.compile_on_one_rank:
                 # This is only valid when the current rank is part of the mesh.
-                if self._coordinate_on_dim is None:
-                    raise AssertionError
+                assert self._coordinate_on_dim is not None
                 return self._coordinate_on_dim[index]
 
             # This will cause the ops to be registered - so don't let RUFF

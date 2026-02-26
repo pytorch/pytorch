@@ -1125,10 +1125,8 @@ def _validate_with_mitigations(
         and mitigations.negated_sample
         and has_pmin_pmax(input_placements, output_placement)
     ):
-        if mitigations.negated_tensors is None:
-            raise AssertionError("negated_tensors is None")
-        if mitigations.negated_ground_truth is None:
-            raise AssertionError("negated_ground_truth is None")
+        assert mitigations.negated_tensors is not None
+        assert mitigations.negated_ground_truth is not None
         negated_combo = PlacementCombination(input_placements, output_placement)
         negated_valid, _ = validate_combination(
             op,
@@ -1146,8 +1144,7 @@ def _validate_with_mitigations(
         and mitigations.non_rounded_sample
         and has_any_partial(input_placements, output_placement)
     ):
-        if mitigations.non_rounded_ground_truth is None:
-            raise AssertionError("non_rounded_ground_truth is None")
+        assert mitigations.non_rounded_ground_truth is not None
         non_rounded_combo = PlacementCombination(input_placements, output_placement)
         non_rounded_valid, _ = validate_combination(
             op,
@@ -1165,10 +1162,8 @@ def _validate_with_mitigations(
         and mitigations.non_rounded_negated_sample
         and has_pmin_pmax(input_placements, output_placement)
     ):
-        if mitigations.non_rounded_negated_tensors is None:
-            raise AssertionError("non_rounded_negated_tensors is None")
-        if mitigations.non_rounded_negated_ground_truth is None:
-            raise AssertionError("non_rounded_negated_ground_truth is None")
+        assert mitigations.non_rounded_negated_tensors is not None
+        assert mitigations.non_rounded_negated_ground_truth is not None
         nr_negated_combo = PlacementCombination(input_placements, output_placement)
         nr_negated_valid, _ = validate_combination(
             op,
@@ -1191,11 +1186,10 @@ def _assert_keys_normalized(
 ) -> None:
     """Assert all combo keys have trivial shards already normalized to Replicate."""
     for key in keys:
-        if key != normalize_combo_key(key, input_shapes, output_shape):
-            raise AssertionError(
-                f"Key {key} contains un-normalized trivial shards; "
-                f"call normalize_combo_key before _compare_rules"
-            )
+        assert key == normalize_combo_key(key, input_shapes, output_shape), (
+            f"Key {key} contains un-normalized trivial shards; "
+            f"call normalize_combo_key before _compare_rules"
+        )
 
 
 def _compare_rules(
