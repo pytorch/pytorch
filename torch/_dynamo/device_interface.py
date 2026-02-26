@@ -594,14 +594,20 @@ class TpuInterface(DeviceInterface):
     # pyrefly: ignore [bad-override]
     class Worker:
         @staticmethod
+        def set_device(device: int) -> None:
+            caching_worker_current_devices["tpu"] = device
+
+        @staticmethod
+        def current_device() -> int:
+            if "tpu" in caching_worker_current_devices:
+                return caching_worker_current_devices["tpu"]
+            return torch.tpu.current_device()
+
+        @staticmethod
         def get_device_properties(device: torch.types.Device = None) -> Any:
             return namedtuple("TPUProperties", ["multi_processor_count"])(
                 1  # type: ignore[arg-type]
             )
-
-        @staticmethod
-        def current_device() -> int:
-            return 0
 
 
 device_interfaces: dict[str, type[DeviceInterface]] = {}
