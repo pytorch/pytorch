@@ -17,6 +17,8 @@ def read_triton_pin(device: str = "cuda") -> str:
     triton_file = "triton.txt"
     if device == "xpu":
         triton_file = "triton-xpu.txt"
+    elif device == "rocm":
+        triton_file = "triton-rocm.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
 

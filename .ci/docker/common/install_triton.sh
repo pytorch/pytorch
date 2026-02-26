@@ -20,6 +20,9 @@ if [ -n "${XPU_VERSION}" ]; then
 elif [ -n "${TRITON_CPU}" ]; then
   TRITON_REPO="https://github.com/triton-lang/triton-cpu"
   TRITON_TEXT_FILE="triton-cpu"
+elif [ -n "${ROCM_VERSION}" ]; then
+  TRITON_REPO="https://github.com/triton-lang/triton"
+  TRITON_TEXT_FILE="triton-rocm"
 else
   TRITON_REPO="https://github.com/triton-lang/triton"
   TRITON_TEXT_FILE="triton"
