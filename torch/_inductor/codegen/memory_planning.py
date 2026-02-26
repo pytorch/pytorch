@@ -5,7 +5,7 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Optional, Protocol, TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING
 
 import sympy
 
@@ -141,9 +141,9 @@ class Allocation(AllocationTreeNode):
     size_hint: int
     symbolic_size: sympy.Expr
     allocated: bool = False
-    pool: Optional[AllocationPool] = None
-    offset: Optional[sympy.Expr] = None
-    earliest_available: Optional[float] = None
+    pool: AllocationPool | None = None
+    offset: sympy.Expr | None = None
+    earliest_available: float | None = None
 
     def __post_init__(self) -> None:
         has_unbacked_sym = False
@@ -387,8 +387,8 @@ class AllocationPool:
     device: torch.device
     root: TemporalSplit
     can_expand: bool = True
-    restrict_live_range: Optional[LiveRange] = None
-    name: Optional[str] = None
+    restrict_live_range: LiveRange | None = None
+    name: str | None = None
     names_to_del: list[str] = dataclasses.field(default_factory=list)
     creation_cache: dict[str, str] = dataclasses.field(default_factory=dict)
 
@@ -553,7 +553,7 @@ class BufferGroup:
         self.node = node
         self.names = [node.get_name()]
         self.is_output = False
-        self.allocation: Optional[Allocation] = None
+        self.allocation: Allocation | None = None
         self.live_range = LiveRange(float("inf"), -float("inf"))
 
     def update_usage(self, timestep: int):
@@ -592,7 +592,7 @@ class PoolMemoryPlanningLine(MemoryPlanningLine):
     """Abstract base class for {Alloc,Dealloc}FromPoolLine"""
 
     group: BufferGroup
-    timestep: Optional[int] = None
+    timestep: int | None = None
 
     @property
     def node(self):
@@ -653,7 +653,7 @@ class MemoryPlanner:
 
     wrapper: Any
     pools: AllocationPools = dataclasses.field(default_factory=AllocationPools)
-    buffer_groups: Optional[list[BufferGroup]] = None
+    buffer_groups: list[BufferGroup] | None = None
 
     def plan(self, lines: list[Any]) -> list[Any]:
         """Call all the memory planning passes in sequence"""
