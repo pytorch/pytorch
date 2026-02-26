@@ -1787,13 +1787,11 @@ def tensor_map(tensor: Tensor, cb: Callable[[int, Tensor], Tensor | None]) -> Te
     """
     lm = enabled_local_tensor_mode()
     if lm is not None:
-        if not isinstance(tensor, LocalTensor):
-            raise AssertionError(f"Expected LocalTensor, got {type(tensor)}")
+        assert isinstance(tensor, LocalTensor)
         return lm.tensor_map(tensor, cb)
     else:
         r = cb(dist.get_rank(), tensor)
-        if r is None:
-            raise AssertionError("callback returned None")
+        assert r is not None
         return r
 
 

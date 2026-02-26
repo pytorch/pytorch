@@ -105,10 +105,8 @@ class WorkerSpec:
     virtual_local_rank: bool = False
 
     def __post_init__(self):
-        if self.local_world_size <= 0:
-            raise AssertionError
-        if self.monitor_interval <= 0:
-            raise AssertionError
+        assert self.local_world_size > 0
+        assert self.monitor_interval > 0
 
         if self.fn:
             warnings.warn(
@@ -118,8 +116,7 @@ class WorkerSpec:
                 category=DeprecationWarning,
             )
             self.entrypoint = self.fn
-        if not self.entrypoint:
-            raise AssertionError
+        assert self.entrypoint
 
     def get_entrypoint_name(self):
         """Get the entry point name.
@@ -130,8 +127,7 @@ class WorkerSpec:
         if isinstance(self.entrypoint, str):
             return os.path.basename(self.entrypoint)
         else:
-            if self.entrypoint is None:
-                raise AssertionError
+            assert self.entrypoint is not None
             return self.entrypoint.__qualname__
 
 
@@ -908,8 +904,7 @@ class SimpleElasticAgent(ElasticAgent):
         rdzv_handler = spec.rdzv_handler
 
         while True:
-            if self._worker_group.state == WorkerState.INIT:
-                raise AssertionError
+            assert self._worker_group.state != WorkerState.INIT
             time.sleep(monitor_interval)
             run_result = self._monitor_workers(self._worker_group)
             state = run_result.state

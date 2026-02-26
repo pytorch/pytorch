@@ -39,10 +39,9 @@ class LocalShardsWrapper(torch.Tensor):
     def __new__(
         cls, local_shards: list[torch.Tensor], local_offsets: list[tuple[int, ...]]
     ) -> "LocalShardsWrapper":
-        if not all(
+        assert all(
             tensor.device == local_shards[0].device for tensor in local_shards[1:]
-        ):
-            raise AssertionError
+        )
 
         # if empty shard, we create a empty tensor
         if len(local_shards) == 0:
@@ -147,11 +146,10 @@ class LocalShardsWrapper(torch.Tensor):
         res_shards_list = []
         if len(args[0].local_shards()) > 1:
             if args[0].local_shards()[0].ndim == 2:
-                if not (
+                assert (
                     args[0].storage_metadata().size[0] == view_shape[0]
                     and args[0].storage_metadata().size[1] == view_shape[1]
-                ):
-                    raise AssertionError
+                )
                 # This accounts for a DTensor quirk, when multiple shards are present on a rank, DTensor on
                 # init calls view_as() on the global tensor shape
                 # will fail because the view shape is not applicable to individual shards.
@@ -160,8 +158,7 @@ class LocalShardsWrapper(torch.Tensor):
                     for shard in args[0].local_shards()
                 ]
             elif args[0].local_shards()[0].ndim == 1:
-                if args[0].storage_metadata().size[0] != view_shape[0]:
-                    raise AssertionError
+                assert args[0].storage_metadata().size[0] == view_shape[0]
                 # This case is for optimizer sharding as regardless of sharding type, optimizer state is row wise sharded
                 res_shards_list = [
                     aten.view.default(shard, shard.shape, **kwargs)

@@ -320,10 +320,8 @@ class EntryState:
                 missing_ranks=getattr(self, "missing_ranks", None),
             )
         else:
-            if idx_map is None:
-                raise AssertionError("idx_map is None")
-            if all_entries is None:
-                raise AssertionError("all_entries is None")
+            assert idx_map is not None, "idx_map is None"
+            assert all_entries is not None, "all_entries is None"
             mismatch_collectives = {}
             for rank, error in errors:
                 idx = idx_map[rank]
@@ -409,10 +407,9 @@ class Op:
     ):
         self.profiling_name = event["profiling_name"]
         comm_lib_backend, name = self.profiling_name.split(":")
-        if comm_lib_backend not in ["nccl", "xccl"]:
-            raise AssertionError(
-                f"name formatting error? {comm_lib_backend} != 'nccl' or 'xccl'"
-            )
+        assert comm_lib_backend in ["nccl", "xccl"], (
+            f"name formatting error? {comm_lib_backend} != 'nccl' or 'xccl'"
+        )
         parts = name.split(" ")
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
@@ -420,17 +417,16 @@ class Op:
         # Store the hashed pg_name for accessing memberships, and original pg info for display
         self.pg_name = pg_name  # This is the hashed version used for memberships lookup
         self.original_pg_name, self.pg_desc = event["process_group"]
-        if type not in COLLECTIVES | P2P | {"coalesced"}:
-            raise AssertionError(f"{type} is not a supported operation")
+        assert type in COLLECTIVES | P2P | {"coalesced"}, (
+            f"{type} is not a supported operation"
+        )
         self.type = type
         if type == "send":
-            if not isinstance(meta, str):
-                raise AssertionError
+            assert isinstance(meta, str)
             s, d = meta.split("->")
             self._src, self._dst = int(s), int(d)
         elif type == "recv":
-            if not isinstance(meta, str):
-                raise AssertionError
+            assert isinstance(meta, str)
             d, s = meta.split("<-")
             self._dst, self._src = int(d), int(s)
         else:
@@ -458,14 +454,12 @@ class Op:
 
     @property
     def src(self) -> int:
-        if self.type not in P2P:
-            raise AssertionError("can't get src of non-p2p op")
+        assert self.type in P2P, "can't get src of non-p2p op"
         return self._src
 
     @property
     def dst(self) -> int:
-        if self.type not in P2P:
-            raise AssertionError("can't get dst of non-p2p op")
+        assert self.type in P2P, "can't get dst of non-p2p op"
         return self._dst
 
     def __repr__(self) -> str:

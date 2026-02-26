@@ -71,8 +71,7 @@ class HybridModel(torch.nn.Module):
             emb_lookups_cat = torch.cat(emb_lookups, dim=1)
 
         # Make sure combined PS dimension is always bigger or equal than the FC input
-        if NUM_PS * EMBEDDING_DIM < 512:
-            raise AssertionError
+        assert NUM_PS * EMBEDDING_DIM >= 512
         dim_normalizer = int(NUM_PS * EMBEDDING_DIM / 512)
         emb_lookups_reshaped = emb_lookups_cat.reshape(  # type: ignore[possibly-undefined]
             # pyrefly: ignore [unbound-name]
@@ -109,8 +108,7 @@ def _print_cont(msg):
 
 def _run_printable(cmd):
     proc = subprocess.run(shlex.split(cmd), capture_output=True, check=False)  # type: ignore[call-overload]
-    if proc.returncode != 0:
-        raise AssertionError
+    assert proc.returncode == 0
 
     buffer = io.BytesIO()
     torch.save(proc.stdout.decode("utf-8"), buffer)

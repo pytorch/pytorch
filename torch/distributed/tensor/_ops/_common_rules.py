@@ -120,8 +120,7 @@ def einop_rule(
                 dim_to_sharding[dim] = merge_sharding(
                     dim, dim_to_sharding[dim], mesh_dim
                 )
-                if dim_to_size[dim] != input_spec.shape[idx]:
-                    raise AssertionError
+                assert dim_to_size[dim] == input_spec.shape[idx]
 
             # after merging sharding, we check if there're multiple
             # sharding on the same mesh dim.
@@ -166,8 +165,7 @@ def einop_rule(
                         d in input_dim
                         and input_spec.dim_map[input_dim.index(d)] == mesh_dim
                     ):
-                        if input_spec.tensor_meta is None:
-                            raise AssertionError
+                        assert input_spec.tensor_meta is not None
                         global_shape = input_spec.tensor_meta.shape
                         local_shape, _ = compute_local_shape_and_global_offset(
                             global_shape,
@@ -212,8 +210,7 @@ def einop_rule(
     # XXX: since we still need to have intermediate shape calculation, we need
     # to pass in the shape here. We should remove this once sharding decomp works
     # for ops like addmm
-    if input_specs[0].tensor_meta is None:
-        raise AssertionError
+    assert input_specs[0].tensor_meta is not None
     tensor_meta = TensorMeta(
         torch.Size(output_shape),
         input_specs[0].tensor_meta.stride,

@@ -797,8 +797,7 @@ def _unflatten_optim_state_dict(
                 if part not in current:
                     current[part] = {}
                 # Move deeper into the nested structure
-                if not isinstance(current[part], dict):
-                    raise AssertionError
+                assert isinstance(current[part], dict)
                 current = current[part]
 
             # Set the value at the final level using the last part as the key

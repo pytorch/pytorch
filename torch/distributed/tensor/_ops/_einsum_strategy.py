@@ -30,10 +30,8 @@ class EinsumDims:
 
         # NOTE: only support at most two inputs, and single output
         # extend to support more inputs if needed in future
-        if len(input_dims) > 2:
-            raise AssertionError("Only support at most two inputs")
-        if len(output_dims) != 1:
-            raise AssertionError("Only support single output")
+        assert len(input_dims) <= 2, "Only support at most two inputs"
+        assert len(output_dims) == 1, "Only support single output"
         output_dim = output_dims[0]
         return input_dims, output_dim
 
@@ -65,10 +63,9 @@ class EinsumDims:
                 if is_batch_dim:
                     batch_dims.append(dim_char)
                 else:
-                    if len(input_dims) != 2:
-                        raise AssertionError(
-                            "free dimension only supported for two inputs!"
-                        )
+                    assert len(input_dims) == 2, (
+                        "free dimension only supported for two inputs!"
+                    )
                     lhs, rhs = input_dims
                     if dim_char in lhs:
                         lhs_out_only_dims.append(dim_char)

@@ -418,14 +418,12 @@ class MemTracker(TorchDispatchMode):
             dev_snap[_TOTAL_KEY] -= winfo.mem_consumed
             maybe_zero = True
         elif u_type == _UpdateType.REF:
-            if old_reftype is None:
-                raise AssertionError
+            assert old_reftype is not None
             # Adjust memory consumption between two reference types within the same device.
             dev_snap[old_reftype] -= winfo.mem_consumed
             dev_snap[winfo.reftype] += winfo.mem_consumed
         elif u_type == _UpdateType.SIZE:
-            if old_mem_consumed is None:
-                raise AssertionError
+            assert old_mem_consumed is not None
             # Adjust the memory consumed for a reference type due to a change in size.
             change = winfo.mem_consumed - old_mem_consumed
             dev_snap[winfo.reftype] += change
@@ -647,8 +645,7 @@ class MemTracker(TorchDispatchMode):
         #         used multiple times in the same iteration, which we allow and track.
         # For Case 1 and 3, we also initialize the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
         mod_name = self._mod_tracker.get_known_fqn(module)
-        if mod_name is None:
-            raise AssertionError
+        assert mod_name is not None
         if module not in self.memory_tracking:
             mod_stats = _ModMemStats(mod_name)
             param_mem, buffer_mem = self._track_module_params_and_buffers(

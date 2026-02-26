@@ -183,8 +183,7 @@ class Join:
 
     def _set_joinable_configs(self) -> None:
         r"""Set the :class:`_JoinConfig` of each participating :class:`Joinable`."""
-        if len(self._joinables) <= 0:
-            raise AssertionError
+        assert len(self._joinables) > 0
         is_first_joinable = True
         for joinable in self._joinables:
             joinable._join_config = _JoinConfig(
@@ -321,11 +320,10 @@ class Join:
             manager that the process has not yet joined if ``joinable`` is the
             first one passed into the context manager; ``None`` otherwise.
         """
-        if not hasattr(joinable, "_join_config"):
-            raise AssertionError(
-                f"Check that the {type(joinable)} constructor calls the "
-                "``Joinable`` constructor"
-            )
+        assert hasattr(joinable, "_join_config"), (
+            f"Check that the {type(joinable)} constructor calls the "
+            "``Joinable`` constructor"
+        )
 
         join_config = joinable._join_config
         # First joinable is responsible for the collective communications

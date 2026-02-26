@@ -724,8 +724,7 @@ def consolidate_safetensors_files_on_every_rank(
         if rank == 0:
             # Merge all output_files_data from all ranks
             all_output_files_data: dict[str, _OutputFileData] = {}
-            if gathered_output_files_data is None:
-                raise AssertionError
+            assert gathered_output_files_data is not None
             for rank_data in gathered_output_files_data:
                 all_output_files_data.update(rank_data)
 

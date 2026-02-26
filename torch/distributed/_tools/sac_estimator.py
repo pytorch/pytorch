@@ -243,8 +243,7 @@ class SACEstimator(TorchDispatchMode):
         # Tracks module FQN, force store random flag, and ``SACModMetadata``
         # Initializes metadata for non-leaf modules, marks leaf modules
         mod_fqn = self._mod_tracker.get_known_fqn(mod)
-        if mod_fqn is None:
-            raise AssertionError
+        assert mod_fqn is not None
         num_children = sum(1 for _ in mod.children())
         if num_children > 0:
             force_store_random = self._get_force_store_random(inputs)
@@ -262,8 +261,7 @@ class SACEstimator(TorchDispatchMode):
         #    - ``SACStats`` using the module's metadata and force store random flag
         #    - ``SACGreedyOrderMeta`` using the computed SAC statistics
         mod_fqn = self._mod_tracker.get_known_fqn(mod)
-        if mod_fqn is None:
-            raise AssertionError
+        assert mod_fqn is not None
         if mod_fqn in self._leaf_modules:
             return
         else:
@@ -376,8 +374,7 @@ class SACEstimator(TorchDispatchMode):
                             if i >= acm_stats.start_idx:
                                 mod_op_parent_idxs[mod_fqn] = i
                         else:
-                            if mod_fqn != "Global":
-                                raise AssertionError
+                            assert mod_fqn == "Global"
                             mod_op_parent_idxs[mod_fqn] = i
         # 7. If no parent tensor is found, then it's probably an inplace op on the arguments
         # so one can just store the current-op idx as parent idx
@@ -408,10 +405,9 @@ class SACEstimator(TorchDispatchMode):
                     out_storages_cpu.update(get_untyped_storages(o))
 
         # Check if there's more than 1 CUDA device
-        if len(cuda_devices) > 1:
-            raise AssertionError(
-                f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
-            )
+        assert len(cuda_devices) <= 1, (
+            f"{func.__name__}'s output has more than 1 CUDA devices {cuda_devices}"
+        )
 
         # 2. Get the memory consumed by output
         nbytes_cuda = sum(
@@ -452,8 +448,9 @@ class SACEstimator(TorchDispatchMode):
             if acm_stats := self._sac_mod_metadata.get(mod_fqn, None):
                 acm_stats.sac_metadata.append(acm)
             else:
-                if mod_fqn != "Global":
-                    raise AssertionError(f"Module {mod_fqn} not found in AC Mod Stats")
+                assert mod_fqn == "Global", (
+                    f"Module {mod_fqn} not found in AC Mod Stats"
+                )
                 self._sac_metadata.append(acm)
 
         return out
@@ -656,11 +653,9 @@ class SACEstimator(TorchDispatchMode):
             save_prediction_graph(tradeoff_pwlf, x, y, filename)
         # 9. Obtain the slopes, intercepts and breakpoints of the fitted piecewise linear functions
         slopes = tradeoff_pwlf.calc_slopes().tolist()
-        if not (
-            isinstance(tradeoff_pwlf.intercepts, np.ndarray)
-            and isinstance(tradeoff_pwlf.fit_breaks, np.ndarray)
-        ):
-            raise AssertionError
+        assert isinstance(tradeoff_pwlf.intercepts, np.ndarray) and isinstance(
+            tradeoff_pwlf.fit_breaks, np.ndarray
+        )
         intercepts = tradeoff_pwlf.intercepts.tolist()
         fit_breaks = tradeoff_pwlf.fit_breaks.tolist()
         return SACTradeOffStats(
@@ -948,8 +943,9 @@ class SACEstimator(TorchDispatchMode):
 
     def __enter__(self) -> Self:  # type: ignore[no-untyped-def]
         fake_mode = active_fake_mode()
-        if not isinstance(fake_mode, FakeTensorMode):
-            raise AssertionError("SAC Estimator should be called in FakeTensorMode")
+        assert isinstance(fake_mode, FakeTensorMode), (
+            "SAC Estimator should be called in FakeTensorMode"
+        )
         RuntimeEstimator.fake_mode = fake_mode
         self._mod_tracker.register_user_hooks(
             pre_fw_hook=self._pre_fw_hook,

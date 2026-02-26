@@ -22,8 +22,7 @@ def _orthogonalize(matrices, epsilon=0):
 
     QR factorization doesn't work with half-precision, but it is usually faster with a rank > 2.
     """
-    if not (len(matrices.shape) == 3 and matrices.shape[2] <= matrices.shape[1]):
-        raise AssertionError
+    assert len(matrices.shape) == 3 and matrices.shape[2] <= matrices.shape[1]
 
     num_matrices = matrices.shape[0]
     rank = matrices.shape[2]
@@ -632,8 +631,7 @@ def powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
-            if input_tensor_cp is None:
-                raise AssertionError
+            assert input_tensor_cp is not None
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -846,8 +844,7 @@ def batched_powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
-            if input_tensor_cp is None:
-                raise AssertionError
+            assert input_tensor_cp is not None
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838

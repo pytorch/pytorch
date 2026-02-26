@@ -179,20 +179,16 @@ def _pipelined_multi_all_gather_and_consume(
     backend_stream.wait_stream(torch.cuda.current_stream())
 
     for x, y in zip(shard, ag_out):
-        if not x.is_contiguous():
-            raise AssertionError(
-                "_pipelined_all_gather_and_consume: all tensors "
-                "in `shard` must be contiguous"
-            )
-        if not y.is_contiguous():
-            raise AssertionError(
-                "_pipelined_all_gather_and_consume: all tensors "
-                "in `ag_out` must be contiguous"
-            )
-        if x.shape[0] * group_size != y.shape[0]:
-            raise AssertionError
-        if x.shape[1:] != y.shape[1:]:
-            raise AssertionError
+        assert x.is_contiguous(), (
+            "_pipelined_all_gather_and_consume: all tensors "
+            "in `shard` must be contiguous"
+        )
+        assert y.is_contiguous(), (
+            "_pipelined_all_gather_and_consume: all tensors "
+            "in `ag_out` must be contiguous"
+        )
+        assert x.shape[0] * group_size == y.shape[0]
+        assert x.shape[1:] == y.shape[1:]
 
     def copy_shard(dst: list[torch.Tensor], src: list[torch.Tensor]) -> None:
         for d, s in zip(dst, src):
@@ -351,8 +347,7 @@ def _pipelined_produce_and_all2all(
     backend_stream.wait_stream(torch.cuda.current_stream())
 
     def get_p2p_buf(rank: int, idx: int) -> torch.Tensor:
-        if idx not in (0, 1):
-            raise AssertionError
+        assert idx in (0, 1)
         offset = 0 if idx == 0 else out_chunks[0].numel()
         return symm_mem.get_buffer(
             rank, out_chunks[0].shape, out_chunks[0].dtype, offset
@@ -609,8 +604,7 @@ def _fused_all_gather_matmul_impl(
 
     # Computing block-wise matmul along the first dim of A
     if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
-        if A_scale is None:
-            raise AssertionError
+        assert A_scale is not None
         A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
         A_scale_flat = A_scale_shard.new_empty(
             A_scale_shard.shape[0] * group.size(),
@@ -635,8 +629,7 @@ def _fused_all_gather_matmul_impl(
             return_A,
         )
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
-        if A_scale is None:
-            raise AssertionError
+        assert A_scale is not None
         A_scale_shards = (
             A_scale.movedim(gather_dim, 0).flatten(0, -2).chunk(group.size())
         )
@@ -660,13 +653,11 @@ def _fused_all_gather_matmul_impl(
         )
     else:
         if scale_mode == _ScaleMode.TENSOR_WISE:
-            if A_scale is None:
-                raise AssertionError
+            assert A_scale is not None
             for kwargs in kwargs_list:
                 kwargs["scale_a"] = A_scale
         else:
-            if scale_mode != _ScaleMode.UNSCALED:
-                raise AssertionError
+            assert scale_mode == _ScaleMode.UNSCALED
 
         def default_consumer(shard: torch.Tensor, rank: int) -> None:
             for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
@@ -1058,8 +1049,7 @@ def _fused_all_gather_scaled_matmul_fallback(
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
         A_scale = A_scale.movedim(gather_dim, 0).flatten(0, -2)
     else:
-        if scale_mode != _ScaleMode.TENSOR_WISE:
-            raise AssertionError
+        assert scale_mode == _ScaleMode.TENSOR_WISE
 
     def scaled_matmul(
         A: torch.Tensor,
@@ -1171,8 +1161,7 @@ def _fused_all_gather_scaled_matmul(
             group_name,
             True,
         )
-        if A is None:
-            raise AssertionError
+        assert A is not None
         return A, res
 
 
@@ -1747,8 +1736,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     rank = symm_mem.rank
     world_size = symm_mem.world_size
 
-    if tensor.shape[0] % world_size != 0:
-        raise AssertionError
+    assert tensor.shape[0] % world_size == 0
     a2a_res = torch.empty_like(tensor)
     chunks = a2a_res.chunk(world_size)
 
@@ -1786,8 +1774,7 @@ def _low_contention_reduce_scatter_with_workspace(
     rank = workspace.rank
     world_size = workspace.world_size
 
-    if tensor.shape[0] % world_size != 0:
-        raise AssertionError
+    assert tensor.shape[0] % world_size == 0
     chunks = tensor.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())

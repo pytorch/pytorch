@@ -291,8 +291,7 @@ def bucketize_single_dim_strategy(
        result as bucketizing the reduced input values.
     """
     input_meta, _boundaries_meta = args_schema
-    if not isinstance(input_meta, TensorMeta):
-        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    assert isinstance(input_meta, TensorMeta)
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
     for dim in range(len(input_meta.shape)):
         strategies.append(
@@ -783,8 +782,7 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
         raise AssertionError(f"Expected TupleStrategy, got {input_tuple_strategy}")
     input_strategies: list[OpStrategy] = []
     for child in input_tuple_strategy.children:
-        if not isinstance(child, OpStrategy):
-            raise AssertionError(f"Expected OpStrategy, got {child}")
+        assert isinstance(child, OpStrategy), f"Expected OpStrategy, got {child}"
         input_strategies.append(child)
     first_input_strategy = input_strategies[0]
     common_input_ndim = first_input_strategy.ndim
@@ -833,23 +831,19 @@ def cat_single_dim_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_list = args_schema[0]
     # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
-    if not isinstance(input_list, (tuple, list)):
-        raise AssertionError(type(input_list))
-    if not all(isinstance(tm, TensorMeta) for tm in input_list):
-        raise AssertionError
+    assert isinstance(input_list, (tuple, list)), type(input_list)
+    assert all(isinstance(tm, TensorMeta) for tm in input_list)
 
     if isinstance(input_list, list):
         input_list = tuple(input_list)
 
     num_inputs = len(input_list)
     ndim_set = {len(meta.shape) for meta in input_list}
-    if len(ndim_set) not in (1, 2):
-        raise AssertionError(
-            "Expected all cat inputs to be the same ndim, except empty tensors"
-        )
+    assert len(ndim_set) in (1, 2), (
+        "Expected all cat inputs to be the same ndim, except empty tensors"
+    )
     if len(ndim_set) == 2:
-        if 0 not in ndim_set:
-            raise AssertionError
+        assert 0 in ndim_set
     common_ndim = max(ndim_set)
     cat_dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     cat_dim = normalize_dim(cat_dim, common_ndim)
@@ -1300,8 +1294,9 @@ def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
     # eye.m_out has signature: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
     # The out kwarg is a DTensor that determines the sharding
     out_spec = op_schema.kwargs_schema["out"]
-    if not isinstance(out_spec, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy for out, got {type(out_spec)}")
+    assert isinstance(out_spec, OpStrategy), (
+        f"Expected OpStrategy for out, got {type(out_spec)}"
+    )
 
     return OpStrategy(
         [

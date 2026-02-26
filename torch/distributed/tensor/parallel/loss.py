@@ -112,10 +112,9 @@ def _propagate_tensor_meta(
     kwargs: dict[str, object],
 ) -> TensorMeta:
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    if op_info.schema is None:
-        raise AssertionError(
-            "op_info.schema should not be None after unwrap_to_op_info"
-        )
+    assert op_info.schema is not None, (
+        "op_info.schema should not be None after unwrap_to_op_info"
+    )
     tensor_meta = DTensor._op_dispatcher.sharding_propagator._propagate_tensor_meta(
         op_info.schema
     )
@@ -132,8 +131,7 @@ def _propagate_tensor_meta(
 # with all_reduce manually inserted to perform distributed computation.
 def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
     if half_to_float:
-        if x.dtype != torch.half:
-            raise AssertionError
+        assert x.dtype == torch.half
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -234,8 +232,7 @@ def _nll_loss_forward(
 
     if weight is not None:
         w = _weight_view(weight)
-        if local_weight is None:
-            raise AssertionError
+        assert local_weight is not None
         local_w = _weight_view(local_weight)
         x = x * local_w
     safe_target = torch.where(target != ignore_index, target, 0)
@@ -311,8 +308,7 @@ def _nll_loss_forward_handler(
             Shard(0) if i == mesh_dim else Replicate() for i in range(spec.mesh.ndim)
         ]
         local_weight = weight.redistribute(spec.mesh, sharded_placements)._local_tensor
-        if local_weight.shape[0] != x._local_tensor.shape[channel_dim]:
-            raise AssertionError
+        assert local_weight.shape[0] == x._local_tensor.shape[channel_dim]
 
     if reduction == Reduction.NONE.value:
         output_placements = target_placements
@@ -387,8 +383,7 @@ def _nll_loss_and_log_softmax_backward(
     safe_target = safe_target.squeeze(channel_dim).flatten()
     masked_safe_target = partial_placement._partition_value(safe_target, mesh, mesh_dim)
     # only update grad_input to -1 if not masked
-    if partial_placement.mask_buffer.data is None:
-        raise AssertionError
+    assert partial_placement.mask_buffer.data is not None
     grad_update = partial_placement.mask_buffer.data.to(grad_input.dtype) - 1.0
     arange_1d = torch.arange(
         masked_safe_target.shape[0], device=masked_safe_target.device

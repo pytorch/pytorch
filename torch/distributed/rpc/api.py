@@ -136,13 +136,13 @@ def _gather_to_leader(sequence_id, worker_name, obj, worker_names=None):
     with _all_gather_dict_lock:
         if not worker_names:
             worker_names = _ALL_WORKER_NAMES
-            if worker_name not in worker_names:
-                raise AssertionError(f"{worker_name} is not expected by leader.")
-        states = _all_gather_sequence_id_to_states[sequence_id]
-        if worker_name in states.gathered_objects:
-            raise AssertionError(
-                f"{worker_name} reported intent sequence id {sequence_id} twice. "
+            assert worker_name in worker_names, (
+                f"{worker_name} is not expected by leader."
             )
+        states = _all_gather_sequence_id_to_states[sequence_id]
+        assert worker_name not in states.gathered_objects, (
+            f"{worker_name} reported intent sequence id {sequence_id} twice. "
+        )
         states.gathered_objects[worker_name] = obj
         if worker_names == set(states.gathered_objects.keys()):
             states.proceed_signal.set()
@@ -152,10 +152,9 @@ def _broadcast_to_followers(sequence_id, objects_map):
     with _all_gather_dict_lock:
         states = _all_gather_sequence_id_to_states[sequence_id]
 
-    if states.proceed_signal.is_set():
-        raise AssertionError(
-            f"Termination signal sequence id {sequence_id} got set twice."
-        )
+    assert not states.proceed_signal.is_set(), (
+        f"Termination signal sequence id {sequence_id} got set twice."
+    )
     states.gathered_objects = objects_map
     states.proceed_signal.set()
 
@@ -202,10 +201,9 @@ def _all_gather(obj, worker_names=None, timeout: float = UNSET_RPC_TIMEOUT):
     function blocks until all workers have received the gathered results.
     """
     if not worker_names:
-        if _ALL_WORKER_NAMES is None:
-            raise AssertionError(
-                "`_ALL_WORKER_NAMES` is not initialized for `def _all_gather`."
-            )
+        assert _ALL_WORKER_NAMES is not None, (
+            "`_ALL_WORKER_NAMES` is not initialized for `def _all_gather`."
+        )
         worker_names = _ALL_WORKER_NAMES
     leader_name = min(worker_names)
 
@@ -532,8 +530,7 @@ for method_name, method in inspect.getmembers(PyRRef):
         owner, returns a reference to the local value.
     """
     docstring = getattr(method, "__doc__", None)
-    if docstring is None:
-        raise AssertionError("RRef user-facing methods should all have docstrings.")
+    assert docstring is not None, "RRef user-facing methods should all have docstrings."
 
     # Do surgery on pybind11 generated docstrings.
     docstring = docstring.replace(
@@ -691,10 +688,8 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
             )
         # attach profiling information
         if should_profile:
-            if not torch.autograd._profiler_enabled():
-                raise AssertionError
-            if rf is None:
-                raise AssertionError
+            assert torch.autograd._profiler_enabled()
+            assert rf is not None
             fut = rf._call_end_callbacks_on_future(rref._get_future())
             rref._set_profiling_future(fut)
 
@@ -749,10 +744,8 @@ def _invoke_rpc(
                 dst_worker_info, pickled_python_udf, tensors, rpc_timeout, is_async_exec
             )
         if should_profile:
-            if not torch.autograd._profiler_enabled():
-                raise AssertionError
-            if rf is None:
-                raise AssertionError
+            assert torch.autograd._profiler_enabled()
+            assert rf is not None
             # Schedule profiling callbacks to run when the future completes.
             # This returns a future that is completed when the original future
             # completes and the profiling callbacks have been completed as well,
