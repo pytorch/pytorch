@@ -39,7 +39,7 @@ import dis
 import time
 import traceback
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TextIO, Union
+from typing import Any, TextIO
 
 import torch
 from torch._dynamo.symbolic_convert import InstructionTranslatorBase
@@ -66,7 +66,7 @@ class ComptimeVar:
     def __init__(self, v: VariableTracker) -> None:
         self.__variable = v
 
-    def as_proxy(self) -> Union[VariableTracker, Sequence[VariableTracker]]:
+    def as_proxy(self) -> VariableTracker | Sequence[VariableTracker]:
         """
         Returns an fx.Proxy (or tuple/list of fx.Proxy) representing
         this variable in the FX graph we are assembling to pass
@@ -86,7 +86,7 @@ class ComptimeVar:
         """
         return self.__variable.is_proxy()
 
-    def as_fake(self) -> Union[FakeTensor, torch.SymInt]:
+    def as_fake(self) -> FakeTensor | torch.SymInt:
         """
         Returns a "fake" value (either a FakeTensor or a SymInt)
         representing the variable in question.  This only works
@@ -98,7 +98,7 @@ class ComptimeVar:
         """
         return self.__variable.as_proxy().node.meta["example_value"]
 
-    def size(self, dim: Optional[int] = None) -> Union[int, torch.SymInt]:
+    def size(self, dim: int | None = None) -> int | torch.SymInt:
         """
         Returns the size of the tensor (if dim is None) or the size
         at the dimension dim.  The returned size may be a SymInt.
@@ -214,9 +214,7 @@ class ComptimeContext:
             "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
         )
 
-    def print_graph(
-        self, *, verbose: bool = True, file: Optional[TextIO] = None
-    ) -> None:
+    def print_graph(self, *, verbose: bool = True, file: TextIO | None = None) -> None:
         """
         Print the partially constructed FX graph that would be passed
         to the user compiler after compilation.
@@ -235,12 +233,10 @@ class ComptimeContext:
             tx = tx.parent  # type: ignore[assignment]
         return tx
 
-    def print(self, val: Any, *, file: Optional[TextIO] = None) -> None:
+    def print(self, val: Any, *, file: TextIO | None = None) -> None:
         print(repr(val), file=file)
 
-    def print_disas(
-        self, *, file: Optional[TextIO] = None, stacklevel: int = 0
-    ) -> None:
+    def print_disas(self, *, file: TextIO | None = None, stacklevel: int = 0) -> None:
         """
         Print the current series of opcodes being executed (not including
         parent frames), including where you are in the particular opcode
@@ -256,7 +252,7 @@ class ComptimeContext:
         )
 
     def print_value_stack(
-        self, *, file: Optional[TextIO] = None, stacklevel: int = 0
+        self, *, file: TextIO | None = None, stacklevel: int = 0
     ) -> None:
         """
         Print the current Python value stack.  Note that this is NOT the same
@@ -272,9 +268,7 @@ class ComptimeContext:
         for s in tx.stack:
             print(f"- {s.debug_repr()}", file=file)
 
-    def print_locals(
-        self, *, file: Optional[TextIO] = None, stacklevel: int = 0
-    ) -> None:
+    def print_locals(self, *, file: TextIO | None = None, stacklevel: int = 0) -> None:
         """
         Print all of the locals available in the current context.
         By default this view is very limited; you can get more information
@@ -284,7 +278,7 @@ class ComptimeContext:
         for k, v in tx.symbolic_locals.items():
             print(f"{k} = {v.debug_repr()}", file=file)
 
-    def print_bt(self, *, file: Optional[TextIO] = None, stacklevel: int = 0) -> None:
+    def print_bt(self, *, file: TextIO | None = None, stacklevel: int = 0) -> None:
         """
         Print the user code backtrace, starting at the beginning of the
         frame Dynamo started evaluating.  Note that this MAY NOT go all
@@ -303,7 +297,7 @@ class ComptimeContext:
             file=file,
         )
 
-    def print_guards(self, *, file: Optional[TextIO] = None) -> None:
+    def print_guards(self, *, file: TextIO | None = None) -> None:
         """
         Print the currently installed guards for the Dynamo context.
         This does NOT include guards associated with variables that
@@ -328,7 +322,7 @@ class ComptimeContext:
         """
         return self.__tx
 
-    def sleep(self, sec: Union[int, float]) -> None:
+    def sleep(self, sec: int | float) -> None:
         time.sleep(sec)
 
 
@@ -437,7 +431,7 @@ class _Comptime:
         comptime(inner)
 
     @staticmethod
-    def sleep(sec: Union[int, float]) -> None:
+    def sleep(sec: int | float) -> None:
         comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 
