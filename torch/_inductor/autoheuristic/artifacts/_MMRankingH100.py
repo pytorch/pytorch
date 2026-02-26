@@ -30,7 +30,7 @@ class MMRankingH100(LearnedHeuristicDecision):
     def get_confidence_threshold(self) -> float:
         return 0.0
 
-    def get_choice(self, idx: int) -> Optional[str]:
+    def get_choice(self, idx: int) -> str | None:
         if idx < len(self.choices):
             return self.choices[idx]
         return None
@@ -242,7 +242,7 @@ class MMRankingH100(LearnedHeuristicDecision):
     def get_name(self) -> str:
         return 'mm'
 
-    def get_best_choices(self, context: AHContext) -> Optional[list[tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> list[tuple[float, int]] | None:
         if context.get_value('arith_intensity') <= 29.89772129058838:
             if context.get_value('n') <= 34.0:
                 if context.get_value('n') <= 18.0:
