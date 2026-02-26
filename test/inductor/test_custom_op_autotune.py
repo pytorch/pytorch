@@ -15,6 +15,7 @@ from torch._inductor.kernel.custom_op import (
     register_custom_op_autotuning,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 
@@ -663,6 +664,134 @@ class TestCustomOpAutoTune(TestCase):
             result = test_model(test_x, test_weight)
 
         torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
+
+    @skipIfXpu
+    def test_config_patching_in_generated_code(self):
+        """Test that coordinate_descent_tuning config_patches flows through to generated code."""
+        if self.device != "cuda":
+            self.skipTest(
+                "coordinate_descent_tuning test requires CUDA for Triton codegen"
+            )
+
+        test_op_name = f"test_lib::coord_descent_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.ones_like(x)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def coord_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @coord_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Register with config_patches containing coordinate_descent_tuning
+        register_custom_op_autotuning(
+            coord_op,
+            configs=[
+                CustomOpConfig(
+                    decomposition, config_patches={"coordinate_descent_tuning": True}
+                )
+            ],
+            name="coord_descent_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return coord_op(x, weight)
+
+        torch._dynamo.reset()
+
+        # Compile and capture generated code
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result, code = torch._inductor.utils.run_and_get_code(
+                test_model, test_x, test_weight
+            )
+
+        # Check that coordinate_descent_tuning is enabled in the generated code's inductor_meta
+        FileCheck().check("'coordinate_descent_tuning': True").run("\n".join(code))
+
+    @skipIfXpu
+    def test_split_config_patching_in_generated_code(self):
+        """Test that coordinate_descent_tuning config_patches flows through to generated code."""
+        if self.device != "cuda":
+            self.skipTest(
+                "coordinate_descent_tuning test requires CUDA for Triton codegen"
+            )
+
+        test_op_name = f"test_lib::coord_descent_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.ones(
+                x.shape[0], weight.shape[1], dtype=weight.dtype, device=weight.device
+            )
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def coord_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            if x.shape[0] == 128:
+                return torch.empty(
+                    x.shape[0],
+                    weight.shape[1],
+                    dtype=weight.dtype,
+                    device=weight.device,
+                )
+            return x @ weight
+
+        @coord_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Register with config_patches containing coordinate_descent_tuning
+        register_custom_op_autotuning(
+            coord_op,
+            configs=[
+                CustomOpConfig(
+                    decomposition, config_patches={"coordinate_descent_tuning": True}
+                )
+            ],
+            name="coord_descent_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+            dispatch_on={"tensor_name": "x", "dim": 0},
+            split_points=[128, 512],
+        )
+
+        test_x = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return coord_op(x, weight)
+
+        torch._dynamo.mark_dynamic(test_x, 0)
+
+        # Compile and capture generated code
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result, code = torch._inductor.utils.run_and_get_code(
+                test_model, test_x, test_weight
+            )
+
+        # Check that coordinate_descent_tuning is enabled in the main compiled code's inductor_meta
+        # Filter to main compiled code (with symbolic shapes), not benchmark modules (with concrete sizes)
+        import re
+
+        main_code = [c for c in code if re.search(r"\(s\d+,", c)]
+        self.assertTrue(len(main_code) > 0, "Expected main code with symbolic shapes")
+        FileCheck().check("'coordinate_descent_tuning': True").run(main_code[0])
 
 
 if __name__ == "__main__":

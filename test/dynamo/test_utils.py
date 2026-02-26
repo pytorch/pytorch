@@ -102,18 +102,18 @@ class TestUtils(TestCase):
             loss = loss_fn(output, target)
             loss.backward()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def add(x, y):
             return x + y
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it(x):
             y = x.sum()
             if y > 0:
                 return x + y.item()
             return x - y.item()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it2(x):
             y = x.sum()
             if y > 0:
@@ -330,7 +330,7 @@ class TestDynamoTimed(TestCase):
     def warmup(self):
         # Helper to make sure any process-global lru_caches (e.g., torch_key())
         # have already executed. Just compile something.
-        @torch.compile
+        @torch.compile(backend="inductor")
         def add(x, y):
             return x + y
 
