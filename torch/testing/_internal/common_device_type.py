@@ -1104,7 +1104,7 @@ class ops(_TestParametrizer):
                 dtypes = set(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Tries to pick a dtype that supports both forward or backward
-                supported = op.supported_dtypes(device_cls.device_type)
+                supported = set(op.supported_dtypes(device_cls.device_type))
                 supported_backward = op.supported_backward_dtypes(
                     device_cls.device_type
                 )
@@ -1828,6 +1828,15 @@ def has_hipsolver():
     return rocm_version >= (5, 3)
 
 
+# Skips a test on CUDA if cuSOLVER is not available,
+# and on ROCm if MAGMA is not available.
+def skipCUDAIfNoCusolverROCMIfNoMagma(fn):
+    if TEST_WITH_ROCM:
+        return skipCUDAIfNoMagma(fn)
+    else:
+        return skipCUDAIfNoCusolver(fn)
+
+
 # Skips a test on CUDA/ROCM if cuSOLVER/hipSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
     return skipCUDAIf(
@@ -2057,23 +2066,26 @@ def get_all_device_types() -> list[str]:
 
 # skip since currently flex attention requires at least `avx2` support on CPU.
 IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
-    not torch.xpu.is_available()
-    and not torch.cuda.is_available()
-    and not IS_MACOS
+    not IS_MACOS
     and torch.cpu._is_avx2_supported()
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )
 IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED = (
     torch.xpu.is_available() and torch.utils._triton.has_triton()
 )
+IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
+    torch.cuda.is_available()
+    and torch.utils._triton.has_triton()
+    and torch.cuda.get_device_capability() >= (8, 0)
+)
 flex_attention_supported_platform = unittest.skipUnless(
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
-    or IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
     or (
-        torch.cuda.is_available()
-        and torch.utils._triton.has_triton()
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ),
+        IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+        and not torch.xpu.is_available()
+        and not torch.cuda.is_available()
+    )
+    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
 if (

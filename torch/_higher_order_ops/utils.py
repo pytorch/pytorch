@@ -4,7 +4,7 @@ import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Optional, overload, TypeVar, Union
+from typing import Any, overload, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -157,19 +157,19 @@ def _maybe_reenter_make_fx(fn, subgraph_decomp_table=None):
 
 
 def check_meta_consistency(
-    lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
-    rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_list: list[torch.Tensor | torch.SymInt | int],
+    rhs_list: list[torch.Tensor | torch.SymInt | int],
     lhs_name: str,
     rhs_name: str,
     include_contiguity: bool = True,
 ) -> None:
     def diff_meta_pairs(
-        lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
-        rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+        lhs_list: list[torch.Tensor | torch.SymInt | int],
+        rhs_list: list[torch.Tensor | torch.SymInt | int],
     ) -> list[str]:
         def diff_meta(
-            lhs: Union[torch.Tensor, torch.SymInt, int],
-            rhs: Union[torch.Tensor, torch.SymInt, int],
+            lhs: torch.Tensor | torch.SymInt | int,
+            rhs: torch.Tensor | torch.SymInt | int,
         ) -> str:
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 return ", ".join(
@@ -202,8 +202,8 @@ def check_meta_consistency(
 
         # Manually check the device of lhs and rhs as this field is currently not part of TensorMetadata
         def diff_device(
-            lhs: Union[torch.Tensor, torch.SymInt, int],
-            rhs: Union[torch.Tensor, torch.SymInt, int],
+            lhs: torch.Tensor | torch.SymInt | int,
+            rhs: torch.Tensor | torch.SymInt | int,
         ) -> str:
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 if (
@@ -312,7 +312,12 @@ def _set_compilation_env():
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode_det = detect_fake_mode(inputs)
+    fake_mode_det = None
+    for inp in pytree.tree_leaves(inputs):
+        if isinstance(inp, FakeTensor):
+            fake_mode_det = inp.fake_mode
+            break
+
     fake_mode: AbstractContextManager = nullcontext()
     tracing_mode = "fake"
     if fake_mode_det is not None:
@@ -414,7 +419,7 @@ def _collect_fake_inputs(inputs):
     from torch._subclasses.fake_tensor import FakeTensor
 
     # Get the example values of the inputs.
-    inputs_fake: list[Union[FakeTensor, torch.Tensor, int]] = []
+    inputs_fake: list[FakeTensor | torch.Tensor | int] = []
     for inp in inputs:
         if isinstance(inp, (torch.fx.proxy.Proxy, torch.fx.node.Node)):
             inp = inp.node if isinstance(inp, torch.fx.proxy.Proxy) else inp
@@ -599,14 +604,20 @@ def unmask_none_gradients(grads, operands):
 
 
 def _maybe_fake_prop_ignore_unbacked(fn, args):
-    with ExitStack() as ctx_stack:
-        if (fake_mode := detect_fake_mode(args)) is not None:
-            ctx_stack.enter_context(fake_mode)
-            if fake_mode.shape_env is not None:
-                ctx_stack.enter_context(
-                    fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                )
-        return fn(*args)
+    with suspend_functionalization(), disable_functional_mode():
+        with disable_proxy_modes_tracing():
+            unfunc_args = [_from_fun(arg) for arg in args]
+        with ExitStack() as ctx_stack:
+            ctx_stack.enter_context(
+                torch.utils._python_dispatch._disable_current_modes()
+            )
+            if (fake_mode := detect_fake_mode(unfunc_args)) is not None:
+                ctx_stack.enter_context(fake_mode)
+                if fake_mode.shape_env is not None:
+                    ctx_stack.enter_context(
+                        fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+                    )
+            return fn(*unfunc_args)
 
 
 def redirect_to_mode(hop: OperatorBase, mode):
@@ -917,7 +928,7 @@ def get_tensor_mask(tensor_list: Iterable[Any]) -> list[bool]:
 
 
 def mask_list(
-    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
+    mask: list[bool], inp: list[Any], other: list[Any] | None = None
 ) -> list[Any]:
     # Masks elements on an `inp` list.
     # If other is None, then the elements of the `inp` list where the mask is False are removed
@@ -977,7 +988,7 @@ def diff_tensor_meta(
 #      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
 #      hops may receive int inputs from the shape of outer tensor inputs.
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
-def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]]):
+def validate_subgraph_args_types(lifted_args: tuple[Any, ...] | list[Any]):
     allowed_types = (torch.Tensor, int, torch.SymInt)
     if not all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
@@ -1014,7 +1025,7 @@ def check_input_alias_and_mutation_return_outputs(
     dict[int, int],
     dict[int, int],
     list[int],
-    Union[tuple[Any, ...], list[Any]],
+    tuple[Any, ...] | list[Any],
 ]:
     def _get_example_value(n):
         if not isinstance(n, torch.fx.Node):
@@ -1137,6 +1148,8 @@ class FunctionalizeCtxWrapper:
     def __init__(self, ctx, subgraph):
         self.ctx = ctx
         self.subgraph = subgraph
+        # Propagate so callers pass inputs as a list, enabling input deallocation.
+        self._boxed_call = getattr(subgraph, "_boxed_call", False)
 
     def __hash__(self):
         return id(self.subgraph)
@@ -1146,12 +1159,23 @@ class FunctionalizeCtxWrapper:
 
     def __call__(self, *args, **kwargs):
         if isinstance(self.subgraph, torch.fx.GraphModule):
-            # Running graph with interpreter is needed for propagating the stack_trace
-            with fx_traceback.preserve_node_meta():
-                return self.ctx.functionalize(torch.fx.Interpreter(self.subgraph).run)(
-                    *args, **kwargs
-                )
-        return self.ctx.functionalize(self.subgraph)(*args, **kwargs)
+            if self._boxed_call:
+                # Not all callers respect _boxed_call (e.g. reenter_make_fx).
+                if len(args) == 1 and isinstance(args[0], list):
+                    return self.ctx.functionalize(self.subgraph)(args[0])
+                return self.ctx.functionalize(self.subgraph)(list(args))
+            else:
+                # Running graph with interpreter is needed for propagating the stack_trace
+                with fx_traceback.preserve_node_meta():
+                    return self.ctx.functionalize(
+                        torch.fx.Interpreter(self.subgraph).run
+                    )(*args, **kwargs)
+        functionalized = self.ctx.functionalize(self.subgraph)
+        if self._boxed_call:
+            if len(args) == 1 and isinstance(args[0], list):
+                return functionalized(args[0])
+            return functionalized(list(args))
+        return functionalized(*args, **kwargs)
 
 
 # A wrapper over HigherOrderOperator that also carries its schema
@@ -1174,7 +1198,7 @@ class HopInstance:
 # This call_op can be used to call a HopInstance with
 # flat args and kwargs. We need to make use of the hop's schema's tree_spec
 # to unflatten the args and kwargs before calling the hop.
-def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
+def call_op(op: OpOverload | HopInstance, args, kwargs):
     if isinstance(op, OpOverload):
         return op(*args, **kwargs)
 
@@ -1212,10 +1236,10 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
 def materialize_as_graph(
     fn: Callable,
     args: tuple[Any, ...],
-    include_key_set: Optional[torch._C.DispatchKeySet] = None,
-    exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
+    include_key_set: torch._C.DispatchKeySet | None = None,
+    exclude_key_set: torch._C.DispatchKeySet | None = None,
     force_enable_grad=False,
-    subgraph_decomp_table: Optional[Mapping[OpOverload, Callable]] = None,
+    subgraph_decomp_table: Mapping[OpOverload, Callable] | None = None,
 ) -> torch.fx.GraphModule:
     if include_key_set is None:
         include_key_set = torch._C._dispatch_tls_local_include_set()
@@ -1224,25 +1248,31 @@ def materialize_as_graph(
 
     @torch._dynamo.disable(recursive=True, reason=None)
     def _materialize_as_graph_inner():
+        from torch._guards import active_fake_mode
+        from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
         with suspend_functionalization(), disable_functional_mode():
-            with disable_proxy_modes_tracing():
-                unfunc_t = [_from_fun(arg) for arg in args]
+            fake_mode = None
+            if _CURRENT_MAKE_FX_TRACER is not None:
+                fake_mode = _CURRENT_MAKE_FX_TRACER.fake_tensor_mode
+            if fake_mode is None:
+                fake_mode = active_fake_mode()
 
             with contextlib.ExitStack() as stack:
                 stack.enter_context(
                     torch.utils._python_dispatch._disable_current_modes()
                 )
+                if fake_mode is not None:
+                    stack.enter_context(fake_mode)
+
+                with disable_proxy_modes_tracing():
+                    unfunc_t = [_from_fun(arg) for arg in args]
+
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
                 )
                 if force_enable_grad:
                     stack.enter_context(torch.enable_grad())
-                # fake_mode is needed because parent tracer's fake_mode might
-                # be None but the associated inputs have fake mode or there
-                # is a global tracing context with fake mode. We nneed to
-                # make sure the fake mode when tracing subgraph is consistent.
-                if fake_mode := detect_fake_mode(unfunc_t):
-                    stack.enter_context(fake_mode)
                 return _maybe_reenter_make_fx(
                     fn, subgraph_decomp_table=subgraph_decomp_table
                 )(*unfunc_t)
@@ -1326,7 +1356,7 @@ def _has_gen_schema(op: HigherOrderOperator):
     )
 
 
-def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+def filter_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     if len(data) != len(masks):
         raise AssertionError(
             f"data length ({len(data)}) != masks length ({len(masks)})"
@@ -1334,6 +1364,6 @@ def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
     return [item for item, keep in zip(data, masks) if keep]
 
 
-def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+def fill_none_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]

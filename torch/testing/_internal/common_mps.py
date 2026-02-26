@@ -55,6 +55,7 @@ if torch.backends.mps.is_available():
             "contiguous",
             "cos",
             "cosh",
+            "cross",
             "diag",
             "diag_embed",
             "diagflat",
@@ -81,6 +82,7 @@ if torch.backends.mps.is_available():
             "imag",
             "index_add",
             "index_copy",
+            "index_fill",
             "index_select",
             "index_put",
             "isfinite",
@@ -88,6 +90,7 @@ if torch.backends.mps.is_available():
             "isreal",
             "item",
             "kron",
+            "linalg.cross",
             "linalg.diagonal",
             "linalg.householder_product",
             "linalg.svd",
@@ -346,7 +349,6 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int64,
                 torch.uint8,
-                torch.bool,
             ],
             "median": [torch.bool],
             "mode": None,
@@ -377,7 +379,6 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.int32,
                 torch.uint8,
-                torch.bool,
                 torch.int8,
             ],
             "nn.functional.batch_norm": [
@@ -526,8 +527,6 @@ if torch.backends.mps.is_available():
                 torch.bool,
                 torch.int8,
             ],
-            "nn.functional.padreflect": [torch.bool],
-            "nn.functional.padreplicate": [torch.bool],
             "nn.functional.padreplicate_negative": [torch.bool],
             "nn.functional.pdist": None,
             "nn.functional.relu": [torch.bool],
@@ -536,7 +535,6 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.int32,
                 torch.uint8,
-                torch.bool,
                 torch.int8,
             ],
             "nn.functional.softplus": [
@@ -547,12 +545,9 @@ if torch.backends.mps.is_available():
                 torch.int16,
             ],
             "nn.functional.norm": None,
-            "nn.functional.threshold": [torch.bool],
             "ormqr": None,
             "pca_lowrank": None,
-            "pow": [torch.bool],
             "qr": None,
-            "remainder": [torch.bool],
             "rounddecimals_0": [
                 torch.uint8,
                 torch.int8,
@@ -588,7 +583,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "trunc": [torch.bool],
             "var_meanunbiased": [
                 torch.uint8,
                 torch.int8,
@@ -921,15 +915,6 @@ if torch.backends.mps.is_available():
             "grid_sampler_3d": None,
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
-            "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
-            "linalg.solve_ex": [
-                torch.float16,
-                torch.float32,
-            ],  # missing `aten::lu_solve`.
-            "linalg.tensorsolve": [
-                torch.float16,
-                torch.float32,
-            ],  # missing `aten::lu_solve`.
             "aminmax": [torch.float32, torch.float16],
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'

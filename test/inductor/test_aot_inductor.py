@@ -1927,6 +1927,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
     @skipIfWindowsXPU(msg="crash on Windows XPU.")
+    @config.patch({"unbacked_symint_fallback": 128})
     def test_size_with_unbacked_add_expr_transitive(self):
         # Edge case with torch._check(expr1, expr2) + torch._check(expr2, unbacked).
         # When generating example input sizes for autotuning, it should coalesce
@@ -2897,6 +2898,7 @@ class AOTInductorTestsTemplate:
         torch._export.aot_compile(Model(), example_inputs)
 
     @skipCUDAIf(True, "Test for x86 backend")
+    @skipIfXpu(msg="Test for x86 backend")
     @unittest.skipIf(sys.platform == "darwin", "Skip MacOS")
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
     def test_buffer_mutation_and_force_mmap_weights(self):
@@ -3135,18 +3137,15 @@ class AOTInductorTestsTemplate:
                 result_package = model_package(*inputs_on_device)
             self.assertTrue(same(result_ref.cpu(), result_package.cpu()))
 
-    @unittest.skipIf(
-        config.triton.native_matmul, "sin and mm are fused in native matmul"
-    )
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
-                a = torch.sin(x)
+                a = torch.tanh(x)
                 b = torch.mm(a, y)
-                c = torch.sin(b)
+                c = torch.tanh(b)
                 d = torch.mm(b, c)
                 return d
 
@@ -3164,9 +3163,14 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "aoti_torch_mps_get_kernel_function(", 1
             )
         elif self.device == GPU_TYPE:
-            self.code_check_count(
-                model, example_inputs, "triton_poi_fused_sin_0 = loadKernel(", 1
-            )
+            if config.triton.native_matmul:
+                self.code_check_count(
+                    model, example_inputs, "triton_red_fused_mm_tanh_0(in_ptr0", 1
+                )
+            else:
+                self.code_check_count(
+                    model, example_inputs, "triton_poi_fused_tanh_0 = loadKernel(", 1
+                )
 
     def test_reuse_kernel_dynamic(self):
         class Model(torch.nn.Module):
@@ -3500,6 +3504,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -7905,6 +7910,141 @@ torch._inductor.aoti_load_package("{model_path}")
                 0,
                 f"Failed to load package in subprocess: {result.stdout + result.stderr}",
             )
+
+    @unittest.skip(
+        "Skip this test, only for local test. SIGFPE is produced when viewing "
+        "empty tensor with dim=0. See D86125095 for model-side workaround."
+    )
+    def test_view_zero_dim_empty_tensor(self):
+        """
+        Regression test for viewing an empty tensor with dim=0 in AOTInductor.
+
+        When calling .view(s55, -1, 52) where:
+        - The tensor being viewed has size u1 (unbacked symint from .item())
+        - s55 is a backed symint from a DIFFERENT tensor's .size(0)
+        - s55 can be 0 at runtime
+
+        Previously, the AOTInductor C++ runtime crashed with SIGFPE because:
+        - The -1 computation is: (u1*520) / (s55*52)
+        - When s55=0, this is division by zero
+
+        Now, we expect a proper RuntimeError to be raised with a meaningful
+        error message instead of crashing the process.
+
+        Key pattern from exported_model_graph_aoti.txt line 1182:
+        view_90: "bf16[s55, ((10*u1)//s55), 52]" = _broadcast_impl.view(getitem_1, -1, 52)
+        - _broadcast_impl has shape [u1, 520] (u1 is unbacked from .item())
+        - getitem_1 is s55 (backed from embeddings_1.size(0))
+        """
+
+        class Model(torch.nn.Module):
+            def forward(self, batch_sizes, embeddings):
+                # batch_sizes: i64[s8] - batch size counts per item
+                # embeddings: bf16[s55, s12] - embeddings tensor (s55 can be 0)
+                # s8 and s55 are INDEPENDENT backed symints
+
+                # Get s55 from embeddings.size(0) - backed symint
+                s55 = embeddings.size(0)
+
+                # Get u1 via sum().item() - unbacked symint
+                # This mimics: item_1: "Sym(u1)" = sum_2.item()
+                u1 = batch_sizes.sum().item()
+                torch._check(u1 >= 0)
+
+                # Create values tensor with shape [s8, 520]
+                s8 = batch_sizes.size(0)
+                values = embeddings.new_zeros(s8, 520)
+
+                # Create data via repeat_interleave - result has shape [u1, 520]
+                # This mimics:
+                #   idx64: "i64[u1]" = torch.repeat_interleave(arange, batch_sizes, ...)
+                #   _broadcast_impl: "bf16[u1, 520]" = cat_2[idx64]
+                data = torch.repeat_interleave(values, batch_sizes, dim=0)
+
+                # The problematic view: uses s55 (backed from embeddings, can be 0)
+                # but the tensor data has size u1 (unbacked) - DECOUPLED from s55
+                # When s55=0: -1 = (u1*520) / (s55*52) = 0/0
+                # This mimics line 1182:
+                #   view_90 = _broadcast_impl.view(getitem_1, -1, 52)
+                result = data.view(s55, -1, 52)
+
+                return result
+
+        # Compile with non-empty tensors
+        # At compile time: s8=3, s55=5, u1=5 (sum of batch_sizes = 2+2+1 = 5)
+        compile_batch_sizes = torch.tensor(
+            [2, 2, 1], dtype=torch.int64, device=self.device
+        )
+        compile_embeddings = torch.randn(5, 104, device=self.device)
+        compile_inputs = (compile_batch_sizes, compile_embeddings)
+
+        # Define dynamic shapes - s55 can be 0 at runtime!
+        s8 = Dim("s8", min=1, max=1024)
+        s55 = Dim("s55", min=0, max=1024)  # Can be 0!
+        s12 = Dim("s12", min=1, max=1024)
+        dynamic_shapes = {
+            "batch_sizes": {0: s8},
+            "embeddings": {0: s55, 1: s12},
+        }
+
+        # Export and compile
+        model = Model().to(self.device)
+        ep = torch.export.export(
+            model, compile_inputs, dynamic_shapes=dynamic_shapes, strict=False
+        )
+
+        package_path = torch._inductor.aoti_compile_and_package(ep)
+
+        with zipfile.ZipFile(package_path, "r") as z:
+            for name in z.namelist():
+                if name.endswith("wrapper.cpp"):
+                    content = z.read(name).decode("utf-8", errors="replace")
+                    # Verify that division and modulo operations are guarded
+                    # The new implementation emits AOTI_TORCH_CHECK calls before
+                    # computing size expressions that contain division/modulo
+                    FileCheck().check("AOTI_TORCH_CHECK(").check("by zero").run(content)
+
+        optimized = torch._inductor.aoti_load_package(package_path)
+
+        # Run with s55=0 (embeddings is empty) and u1=0 (batch_sizes sum to 0)
+        # data has shape [0, 520] (u1=0)
+        # view(s55=0, -1, 52): -1 = 0*520 / (0*52) = 0/0 = division by zero
+        # sum=0, u1=0
+        run_batch_sizes = torch.tensor([0], dtype=torch.int64, device=self.device)
+        run_embeddings = torch.randn(0, 104, device=self.device)  # s55=0
+        run_inputs = (run_batch_sizes, run_embeddings)
+
+        # Should raise RuntimeError instead of crashing with SIGFPE.
+        # The generated AOTI_TORCH_CHECK logs the error (including "by zero") to stderr
+        # before returning an error code, which is then converted to a RuntimeError.
+        # We capture stderr at the file descriptor level to verify the message is logged.
+        import tempfile
+
+        # Save original stderr fd and redirect to temp file to capture C++ LOG(ERROR) output
+        original_stderr_fd = os.dup(2)
+        with tempfile.NamedTemporaryFile(mode="w+", delete=False) as temp_stderr:
+            temp_stderr_path = temp_stderr.name
+
+        try:
+            with open(temp_stderr_path, "w") as new_stderr:
+                os.dup2(new_stderr.fileno(), 2)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        optimized(*run_inputs)
+                finally:
+                    # Flush and restore original stderr
+                    new_stderr.flush()
+                    os.dup2(original_stderr_fd, 2)
+                    os.close(original_stderr_fd)
+
+            # Read captured stderr and verify the "by zero" message was logged
+            with open(temp_stderr_path) as f:
+                stderr_content = f.read()
+            self.assertIn("by zero", stderr_content)
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_stderr_path):
+                os.unlink(temp_stderr_path)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
