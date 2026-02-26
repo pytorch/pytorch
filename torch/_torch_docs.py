@@ -6743,7 +6743,7 @@ Example::
 add_docstr(
     torch.amax,
     r"""
-amax(input, dim, keepdim=False, *, out=None) -> Tensor
+amax(input, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the maximum value of each slice of the :attr:`input` tensor in the given
 dimension(s) :attr:`dim`.
