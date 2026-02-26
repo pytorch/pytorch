@@ -717,6 +717,25 @@ print(t.is_pinned())
 
         torch._C._cuda_clearCublasWorkspaces()
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
+    @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @setBlasBackendsToDefaultFinally
+    @serialTest()
+    def test_cublas_unified_workspace(self):
+        # We run a cuBLAS matmul, guaranteeing a workspace present on the current stream
+        torch.backends.cuda.preferred_blas_library("cublas")
+        x = torch.randn(128, 128, device="cuda")
+        torch.matmul(x, x)
+        # Stash the maximum memory allocated after running matmuls
+        warmed_alloc = torch.cuda.max_memory_allocated()
+        torch.backends.cuda.preferred_blas_library("cublaslt")
+        torch.matmul(x, x)
+        lt_alloc = torch.cuda.max_memory_allocated()
+        # With unified workspaces, the peak memory allocation should not increase after
+        # switching to Lt, otherwise the temporary allocation would bump the peak
+        self.assertEqual(warmed_alloc, lt_alloc)
+
     def test_cublas_allow_tf32_get_set(self):
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
