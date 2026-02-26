@@ -78,8 +78,9 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
     def _get_grads(self, process_group, hook_type=None):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device = torch.device(f"{device_type}:{device_id}")
         gpu_model = DistributedDataParallel(
-            TestDdpCommHook().to(device_id),
+            TestDdpCommHook().to(device),
             device_ids=[device_id],
             process_group=process_group,
         )
@@ -203,12 +204,13 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
         flags = []
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device = torch.device(f"{device_type}:{device_id}")
         model = nn.Sequential(
             nn.Linear(2, 4000, bias=False),
             *[nn.Linear(4000, 4000, bias=False) for _ in range(10)],
         )
         gpu_model = DistributedDataParallel(
-            model.to(device_id),
+            model.to(device),
             device_ids=[device_id],
             process_group=process_group,
         )
@@ -220,8 +222,10 @@ class DistributedDataParallelCommHookTest(DistributedTestBase):
 
 
 if __name__ == "__main__":
-    assert not torch.cuda._initialized, (
-        "test_distributed must not have initialized CUDA context on main process"
-    )
+    dm = torch.get_device_module(device_type) if device_type != "cpu" else None
+    if dm is not None and hasattr(dm, "_initialized"):
+        assert not dm._initialized, (
+            "test_distributed must not have initialized accelerator context on main process"
+        )
 
     run_tests()
