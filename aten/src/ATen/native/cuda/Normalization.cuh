@@ -1071,8 +1071,8 @@ batch_norm_collect_statistics_channels_last_kernel(
 #else
       // In architectures with split caches, global fences are costly.
       // Here we preempt need for fences by committing stores to global memory.
-      cmtdStore((void*)&staging_mean[address_base], mean_th, false);
-      cmtdStore((void*)&staging_m2n[address_base], m2_th, false);
+      cmtdStore<accscalar_t, false>((void*)&staging_mean[address_base], mean_th);
+      cmtdStore<accscalar_t, false>((void*)&staging_m2n[address_base], m2_th);
       cmtdStore((void*)&staging_count[address_base], count_th);
 #endif
     }
@@ -1305,7 +1305,7 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
 #else
       // In architectures with split caches, global fences are costly.
       // Here we preempt need for fences by committing stores to global memory.
-      cmtdStore((void*)&staging_sum_dy[address_base], sum_dy_th, false);
+      cmtdStore<accscalar_t, false>((void*)&staging_sum_dy[address_base], sum_dy_th);
       cmtdStore((void*)&staging_sum_dy_xmu[address_base], sum_dy_xmu_th);
 #endif
     }

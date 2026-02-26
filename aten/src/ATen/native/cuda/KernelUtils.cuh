@@ -230,8 +230,8 @@ __device__ __forceinline__ void fastAtomicAdd(
 // This is useful in avoiding the need for fences.
 // If multiple stores are done in a row there is option to skip
 // waiting for commit for all but the last store.
-template <typename T>
-__device__ inline void cmtdStore(void* address, T value, bool wait_for_commit=true) {
+template <typename T, bool wait_for_commit = true>
+__device__ inline void cmtdStore(void* address, T value) {
       int constexpr num_long_per_val = sizeof(value)/sizeof(long);
       int constexpr num_int_per_val = sizeof(value)/sizeof(int);
       int constexpr num_short_per_val = sizeof(value)/sizeof(short);
