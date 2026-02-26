@@ -1120,6 +1120,175 @@ class TestDTensorDebugMode(TestCase):
         )
 
 
+class TestDebugModeCompileSafeHooks(TestCase):
+    """Test DebugMode.enable()/disable() with ModTracker.compile_safe_hooks."""
+
+    def test_debug_mode_loss_module_only(self):
+        """DebugMode stays on the stack but disabled; compile_safe_hooks
+        toggle enable/disable at loss_fn boundaries to log only its ops."""
+        from torch.distributed._tools.mod_tracker import ModTracker
+
+        class SimpleLoss(torch.nn.Module):
+            def forward(self, pred, target):
+                return ((pred - target) ** 2).mean()
+
+        class MLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(8, 16)
+                self.act = torch.nn.ReLU()
+                self.fc2 = torch.nn.Linear(16, 4)
+                self.loss_fn = SimpleLoss()
+
+            def forward_backward(self, x, target):
+                out = self.fc2(self.act(self.fc1(x)))
+                loss = self.loss_fn(out, target)
+                loss.backward()
+                return loss
+
+        def _filter_noisy_lines(s):
+            return "\n".join(
+                l
+                for l in s.splitlines()
+                if (
+                    "torch.ops.higher_order.invoke_leaf_function" not in l
+                    and "TreeSpec" not in l
+                )
+            )
+
+        def run(model, callable, x, target):
+            dm = DebugMode()
+
+            # disable DebugMode globally
+            dm.disable()
+
+            # enable DebugMode regionally with FWD/BWD hooks.
+            # use module_filter to enable only for loss_fn.
+            def pre_fw(fqn, tensors):
+                dm.enable()
+                dm._handle_annotate("[FWD loss]")
+
+            def post_fw(fqn, inputs, outputs):
+                dm.disable()
+
+            def pre_bw(fqn, grads):
+                dm.enable()
+                dm._handle_annotate("[BWD loss]")
+
+            def post_bw(fqn, grads):
+                dm.disable()
+
+            with (
+                dm,
+                ModTracker.compile_safe_hooks(
+                    model,
+                    pre_fw_hook=pre_fw,
+                    post_fw_hook=post_fw,
+                    pre_bw_hook=pre_bw,
+                    post_bw_hook=post_bw,
+                    module_filter=lambda fqn, mod: fqn == "loss_fn",
+                ),
+            ):
+                loss = callable.forward_backward(x, target)
+
+            return loss, _filter_noisy_lines(dm.debug_string())
+
+        torch.manual_seed(42)
+        model = MLP()
+        x = torch.randn(4, 8)
+        target = torch.randn(4, 4)
+
+        # --- Eager ---
+        loss_eager, logs_eager = run(model, model, x, target)
+
+        self.assertExpectedInline(
+            logs_eager,
+            """\
+  [annotate] [FWD loss]
+    aten::sub.Tensor(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::pow.Tensor_Scalar(t: f32[4, 4], 2)  ->  t: f32[4, 4]
+    aten::mean(t: f32[4, 4])  ->  t: f32[]
+  [annotate] [BWD loss]
+    aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
+    aten::div.Scalar(t: f32[4, 4], 16)  ->  t: f32[4, 4]
+    aten::pow.Tensor_Scalar(t: f32[4, 4], 1.0)  ->  t: f32[4, 4]
+    aten::mul.Scalar(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
+    aten::mul.Tensor(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::neg(t: f32[4, 4])  ->  t: f32[4, 4]
+    *]),""",
+        )
+
+        # --- Compiled (aot_eager) ---
+        model.zero_grad()
+        torch._dynamo.reset()
+        compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+        loss_compiled, logs_compiled = run(model, compiled, x, target)
+
+        self.assertExpectedInline(
+            logs_compiled,
+            """\
+  [annotate] [FWD loss]
+    aten::sub.Tensor(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::pow.Tensor_Scalar(t: f32[4, 4], 2)  ->  t: f32[4, 4]
+    aten::mean(t: f32[4, 4])  ->  t: f32[]
+  [annotate] [BWD loss]
+    aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
+    aten::div.Scalar(t: f32[4, 4], 16)  ->  t: f32[4, 4]
+    aten::pow.Tensor_Scalar(t: f32[4, 4], 1.0)  ->  t: f32[4, 4]
+    aten::mul.Scalar(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
+    aten::mul.Tensor(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::neg(t: f32[4, 4])  ->  t: f32[4, 4]
+    *]),""",
+        )
+
+    def test_enable_disable(self):
+        """disable() suppresses all logging; enable() resumes it."""
+        x = torch.randn(4, 4)
+
+        def run(fn):
+            dm = DebugMode()
+            with dm:
+                fn(dm, x)
+            return dm.debug_string()
+
+        # --- Eager: disabled logs nothing ---
+        self.assertExpectedInline(
+            run(lambda dm, x: (dm.disable(), x + x)),
+            """""",
+        )
+
+        # --- Eager: disable then re-enable logs only the re-enabled op ---
+        self.assertExpectedInline(
+            run(lambda dm, x: (dm.disable(), x + x, dm.enable(), x * x)),
+            """\
+    aten::mul.Tensor(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]""",
+        )
+
+        # --- Compiled (aot_eager): same behaviour ---
+        torch._dynamo.reset()
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def compiled_disabled(x):
+            return x + x
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def compiled_enabled(x):
+            return x * x
+
+        dm = DebugMode()
+        with dm:
+            dm.disable()
+            compiled_disabled(x)
+            dm.enable()
+            compiled_enabled(x)
+
+        self.assertExpectedInline(
+            dm.debug_string(),
+            """\
+    aten::mul.Tensor(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]""",
+        )
+
+
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""
 
