@@ -80,6 +80,9 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
+        # Workaround for Metal compiler bug with fused (x / A) % B, see PR 175481
+        use_safe_mod = div == 65536 and (mod & (mod - 1)) != 0
+
         x = self.doprint(x)
         if div != 1:
             div = self.doprint(div)
@@ -88,6 +91,8 @@ class MetalExprPrinter(ExprPrinter_):
             else:
                 x = f"metal::floor({x}) / ({div})"
         mod = self.doprint(mod)
+        if use_safe_mod:
+            return f"c10::metal::safe_mod({x}, {mod})"
         return f"({x}) % ({mod})"
 
     def _print_Min(self, expr: sympy.Expr) -> str:

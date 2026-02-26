@@ -1,5 +1,4 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 
 #include <array>

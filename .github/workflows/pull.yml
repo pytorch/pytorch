@@ -179,23 +179,6 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_10-gcc11-pch:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-gcc11-pch ') }}
-    name: linux-jammy-py3.10-gcc11-pch
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-gcc11-pch
-      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
-    secrets: inherit
-
   linux-jammy-py3_10-clang18-asan-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-py3.10-clang18-asan ') }}
     name: linux-jammy-py3.10-clang18-asan
@@ -441,7 +424,6 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm75
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
-      cuda-arch-list: '7.5'
       test-matrix: |
         { include: [
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
@@ -473,7 +455,6 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm75
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
-      cuda-arch-list: '7.5'
       test-matrix: |
         { include: [
           { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
