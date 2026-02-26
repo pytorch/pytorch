@@ -741,8 +741,8 @@ def single_mesh_dim_common_pointwise_strategy(
     return placements_list
 
 
-def _make_partial_strategy(
-    extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+def _common_pointwise_single_dim_strategy(
+    partial_extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
 ) -> Callable[
     [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
 ]:
@@ -777,10 +777,10 @@ def _make_partial_strategy(
                 else:
                     shard_placements.append(Replicate())
             placements.append(shard_placements)
-        if extra_rules:
+        if partial_extra_rules:
             n_tensors = len(tensor_arg_metas)
             expected_len = 1 + n_tensors
-            for rule in extra_rules:
+            for rule in partial_extra_rules:
                 # Filter rather than assert: some ops (e.g. mul.Tensor) mix
                 # unary rules (len 2, for scalar promotion) and binary rules
                 # (len 3, for tensor-tensor), so mismatched lengths are expected.
@@ -1032,61 +1032,61 @@ for op in pointwise_ops:
 for op in unary_linear_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_UNARY_LINEAR_RULES))
 
 for op in binary_additive_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_BINARY_ADDITIVE_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_BINARY_ADDITIVE_RULES))
 
 for op in binary_mul_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES + _MUL_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_UNARY_LINEAR_RULES + _MUL_RULES))
 
 for op in binary_div_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES + _DIV_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_UNARY_LINEAR_RULES + _DIV_RULES))
 
 for op in scalar_linear_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_UNARY_LINEAR_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_UNARY_LINEAR_RULES))
 
 for op in non_decreasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_MONOTONIC_INCREASING_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_MONOTONIC_INCREASING_RULES))
 
 for op in non_increasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_MONOTONIC_DECREASING_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_MONOTONIC_DECREASING_RULES))
 
 for op in linear_nondecreasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_LINEAR_NONDECREASING_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_LINEAR_NONDECREASING_RULES))
 
 for op in all_partial_preserving_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_ALL_PARTIAL_PRESERVING_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_ALL_PARTIAL_PRESERVING_RULES))
 
 register_single_dim_strategy(
     neg_ops,
     schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
-)(_make_partial_strategy(extra_rules=_NEG_RULES))
+)(_common_pointwise_single_dim_strategy(partial_extra_rules=_NEG_RULES))
 
 # Monotonic binary ops: max-preserving
 for op in monotonic_max_preserving_binary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(
-        _make_partial_strategy(
+        _common_pointwise_single_dim_strategy(
             # pyrefly: ignore[bad-argument-type]
-            extra_rules=_monotone_binary_base_rules
+            partial_extra_rules=_monotone_binary_base_rules
             + [[Partial("max"), Partial("max"), Partial("max")]]
         )
     )
@@ -1096,9 +1096,9 @@ for op in monotonic_min_preserving_binary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
     )(
-        _make_partial_strategy(
+        _common_pointwise_single_dim_strategy(
             # pyrefly: ignore[bad-argument-type]
-            extra_rules=_monotone_binary_base_rules
+            partial_extra_rules=_monotone_binary_base_rules
             + [[Partial("min"), Partial("min"), Partial("min")]]
         )
     )
@@ -1107,14 +1107,14 @@ for op in monotonic_min_preserving_binary_ops:
 for op in monotonic_binary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_monotone_binary_base_rules))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_monotone_binary_base_rules))
 
 # copy_(self, src): preserves all Partial types (2 tensor inputs → 3-element rules)
 register_single_dim_strategy(
     aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
 )(
-    _make_partial_strategy(
-        extra_rules=[
+    _common_pointwise_single_dim_strategy(
+        partial_extra_rules=[
             [Partial(r), Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
         ]
     )
