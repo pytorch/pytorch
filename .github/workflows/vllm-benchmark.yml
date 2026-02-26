@@ -41,8 +41,8 @@ jobs:
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
       docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-      torch_cuda_arch_list: '8.0 8.9 9.0 10.0'
-      build_environment: linux-jammy-cuda12.9-py3.12-gcc11
+      torch_cuda_arch_list: '8.0 8.9 9.0 10.0 12.0'
+      build_environment: linux-jammy-cuda13.0-py3.12-gcc11
     steps:
       - uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
@@ -85,7 +85,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           working-directory: pytorch/pytorch
-          docker-image-name: ci-image:pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm
+          docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm
 
   build:
     name: Build PyTorch and vLLM
