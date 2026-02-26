@@ -6199,11 +6199,12 @@ def rotate_half(
     Args:
         x: Input tensor with shape ``[..., dim]`` where dim is even
         interleaved: Rotation style.
-            - ``False`` (default): NeoX-style. Splits tensor in half and swaps:
-              ``[x0, x1, ..., x_{d/2-1}, x_{d/2}, ..., x_{d-1}]`` →
-              ``[-x_{d/2}, ..., -x_{d-1}, x0, ..., x_{d/2-1}]``
-            - ``True``: GPT-J-style. Rotates adjacent pairs:
-              ``[x0, x1, x2, x3, ...]`` → ``[-x1, x0, -x3, x2, ...]``
+
+            - ``False`` (default): NeoX-style. Splits tensor in half and swaps.
+              Maps ``[x0, x1, ..., x_{d/2-1}, x_{d/2}, ..., x_{d-1}]``
+              to ``[-x_{d/2}, ..., -x_{d-1}, x0, ..., x_{d/2-1}]``.
+            - ``True``: GPT-J-style. Rotates adjacent pairs.
+              Maps ``[x0, x1, x2, x3, ...]`` to ``[-x1, x0, -x3, x2, ...]``.
 
     Returns:
         Rotated tensor with same shape as input
