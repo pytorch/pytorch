@@ -1415,26 +1415,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
-        @register(torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw)
-        def handle_guarding_hint_or_throw(
-            self,
-            tx: "InstructionTranslator",
-            expr: VariableTracker,
-        ) -> VariableTracker | None:
-            if isinstance(expr, SymNodeVariable):
-                return VariableTracker.build(
-                    tx,
-                    torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
-                        expr.sym_num
-                    ),
-                )
-            elif expr.is_python_constant():
-                return expr
-            else:
-                return None
-
-        @register(torch.fx.experimental.symbolic_shapes.optimization_hint)
-        def handle_optimization_hint(
+        @register(torch.fx.experimental.symbolic_shapes.size_hint)
+        def handle_size_hint(
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
@@ -1444,7 +1426,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if isinstance(expr, SymNodeVariable):
                 return VariableTracker.build(
                     tx,
-                    torch.fx.experimental.symbolic_shapes.optimization_hint(
+                    torch.fx.experimental.symbolic_shapes.size_hint(
                         expr.sym_num, fallback_int
                     ),
                 )
@@ -2498,11 +2480,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
+            func_to_graphable,
             is_graphable_type,
             is_valid_output,
             to_graphable,
         )
-        from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
 
@@ -2611,20 +2593,23 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 fake_tensor_tls.allow_non_fake_inputs_override = old_val
             return res
 
-        f_callable = _LeafCallable(patched_fn)
+        # `flat_apply` wants a TreeSpec for the function input.
+        _, f_spec = func_to_graphable(patched_fn)
 
-        f_callable_proxy = tx.output.register_static_attr_and_return_proxy(
-            f"{fn.__name__}_callable", f_callable
+        # TreeSpec isn't graphable, so we register the function and input
+        # specs as attributes on the graph module.
+        f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+            f"{fn.__name__}_spec", f_spec
         )
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
             # pyrefly: ignore [unbound-name]
             input_spec,
         )
-        f_callable_proxy.node.type = type(f_callable)
+        f_spec_proxy.node.type = type(f_spec)
         # pyrefly: ignore [unbound-name]
         input_spec_proxy.node.type = type(input_spec)
-        all_args = (f_callable_proxy, input_spec_proxy, *proxified_flat_args)
+        all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
@@ -2769,8 +2754,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._dynamo.utils import _make_inlined
+        from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import (
-            _LeafCallable,
             invoke_leaf_function,
             make_leaf_function_wrappers,
         )
@@ -2806,17 +2791,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl, fake_impl, captured_out_spec
         )
 
-        real_impl_callable = _LeafCallable(wrapped_real_impl)
-        fake_impl_callable = _LeafCallable(wrapped_fake_impl)
+        _, real_impl_spec = func_to_graphable(wrapped_real_impl)
+        _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
 
-        def make_callable_proxy(name: str, spec: Any) -> Any:
+        def make_spec_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)
             proxy.node.type = type(spec)
             return proxy
 
-        real_impl_proxy = make_callable_proxy("real_fn", real_impl_callable)
-        fake_impl_proxy = make_callable_proxy("fake_fn", fake_impl_callable)
-        input_spec_proxy = make_callable_proxy("input_spec", input_spec)
+        real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
+        fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
+        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,

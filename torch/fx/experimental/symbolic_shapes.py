@@ -66,6 +66,7 @@ from torch._logging import dtrace_structured, LazyString, structured, trace_stru
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
+from torch.fx.experimental._config import AggressiveGuardFreeMode
 from torch.fx.experimental.recording import (
     FakeTensorMeta,
     record_shapeenv_event,
@@ -119,48 +120,6 @@ DimList = list
 log = logging.getLogger(__name__)
 
 
-from torch.fx.experimental.size_hinting import (
-    _guarding_hint_or_throw_base,
-    _optimization_hint_base,
-)
-
-
-def guarding_hint_or_throw(
-    a: Union[torch.SymInt, torch.SymBool, int, bool, SymNode],
-) -> Union[int, bool]:
-    """
-    Return a concrete hint for a symbolic value, for use in guarding decisions.
-
-    Returns Python bool (True/False) for boolean inputs (SymBool, bool),
-    and Python int for integer inputs (SymInt, int).
-    """
-    if isinstance(a, SymNode):
-        if a._hint is not None:
-            return a._hint
-        hint = a.shape_env.guarding_hint_or_throw(a.expr)
-        a._hint = hint
-        return hint
-    if isinstance(a, (torch.SymInt, torch.SymBool)):
-        return guarding_hint_or_throw(a.node)
-    if isinstance(a, bool):
-        return a
-    if type(a) is not int:
-        raise AssertionError(f"Expected int, got {type(a)}")
-    return a
-
-
-def optimization_hint(
-    a: Union[torch.SymInt, int], fallback: Optional[int] = None
-) -> int:
-    if isinstance(a, torch.SymInt):
-        if a.node._hint is not None:
-            return a.node._hint
-        return a.node.shape_env.optimization_hint(a.node.expr, fallback=fallback)
-    if type(a) is not int:
-        raise AssertionError(f"Expected int, got {type(a)}")
-    return a
-
-
 class GuardOnDataDependentSymNode(RuntimeError):
     cond: sympy.Basic
 
@@ -176,8 +135,7 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
-    "optimization_hint",
-    "guarding_hint_or_throw",
+    "size_hint",
     "guard_or_false",
     "guard_or_true",
     "has_symbolic_sizes_strides",
@@ -191,6 +149,7 @@ __all__ = [
     "guard_float",
     "guard_scalar",
     "canonicalize_bool_expr",
+    "hint_int",
     "SYMPY_INTERP",
     "free_symbols",
     "is_symbol_binding_fx_node",
@@ -408,10 +367,29 @@ def create_contiguous(shape: Sequence[Int]) -> list[Int]:
     return list(reversed(strides))
 
 
+@deprecated("used size_hint instead of hint_int", category=FutureWarning)
+def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
+    return size_hint(a, fallback)
+
+
+def size_hint(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
+    """
+    Retrieve the hint for an int (based on the underlying real values as observed
+    at runtime).  If no hint is available (e.g., because data dependent shapes),
+    if fallback is not None, use that instead to hint each unbacked symbol individually
+    (otherwise raise an error).
+    """
+    if isinstance(a, torch.SymInt):
+        return a.node.require_hint(fallback)
+    if type(a) is not int:
+        raise AssertionError(f"Expected int, got {type(a)}")
+    return a
+
+
 Scalar: TypeAlias = Union[torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool]
 
 
-def has_guarding_hint(a: Scalar) -> bool:
+def has_hint(a: Scalar) -> bool:
     if isinstance(a, SymTypes):
         return a.node.has_hint()
     return True
@@ -2644,8 +2622,7 @@ def cast_symbool_to_symint_guardless(
         return 1 if symbool else 0
     int_sym = _sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     return symbool.node.shape_env.create_symintnode(
-        int_sym,
-        hint=guarding_hint_or_throw(symbool) if has_guarding_hint(symbool) else None,
+        int_sym, hint=int(symbool.node.require_hint()) if has_hint(symbool) else None
     )
 
 
@@ -4046,11 +4023,6 @@ class ShapeEnv:
 
         self.specialization_stacks: dict[Source, traceback.StackSummary] = {}
 
-        # Used by _get_unbacked_replacements / _sub_unbacked_exprs for
-        # optimization_hint canonicalization of unbacked expressions.
-        self._equality_graph: Optional[dict[sympy.Expr, OrderedSet[sympy.Expr]]] = None
-        self._unbacked_replacements: Optional[dict[sympy.Expr, sympy.Expr]] = None
-
         self.trace_asserts = trace_asserts
 
         self.specializations: OrderedSet[Specialization] = OrderedSet()
@@ -4183,9 +4155,6 @@ class ShapeEnv:
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
-            # Cached state for optimization_hint unbacked canonicalization
-            "_equality_graph",
-            "_unbacked_replacements",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -6624,6 +6593,25 @@ class ShapeEnv:
 
         return None
 
+    def _maybe_evaluate_range_only(
+        self,
+        expr: sympy.Basic,
+        fallback: Optional[sympy.Basic] = None,
+    ) -> Optional[sympy.Basic]:
+        """
+        Lightweight range-based evaluation using only bound_sympy (value range
+        analysis), without expensive simplification, axiom matching, or symbol
+        reallocation.
+
+        Returns the resolved value if range analysis determines it, otherwise
+        returns fallback.
+        """
+        var_ranges = {x: self.var_to_range.get(x) for x in expr.free_symbols}
+        out = bound_sympy(expr, var_ranges)  # type: ignore[arg-type]
+        if out.is_singleton():
+            return out.lower
+        return fallback
+
     @_lru_cache
     def _maybe_evaluate_static(
         self,
@@ -6826,45 +6814,60 @@ class ShapeEnv:
                     expr = new_expr
         return expr
 
+    # TODO: overload for allow_none literal
     @lru_cache(256)
-    def guarding_hint_or_throw(self, expr: Union[sympy.Expr, int]) -> Union[int, bool]:
+    def size_hint(
+        self, expr: sympy.Basic, *, allow_none: bool = False
+    ) -> Optional[sympy.Basic]:
         """
-        Return a concrete hint for an expression.
-
-        Returns Python bool (True/False) for boolean expressions (e.g. Eq, Ne),
-        and Python int for integer expressions.
+        Gets a size hint for a given expression from the underlying shapes we had.
+        Does not introduce a guard, so only use this when you can guarantee that
+        your code is still valid for arbitrary shapes (such as optimization decisions)
         """
-        return _guarding_hint_or_throw_base(self, expr, {})
+        result_expr = safe_expand(expr).xreplace(self.backed_var_to_val)
+        if not result_expr.is_number:
+            from torch.utils._sympy.singleton_int import SingletonInt
 
+            if isinstance(result_expr, SingletonInt):
+                return None
+            r = self._maybe_evaluate_static(result_expr, compute_hint=True)
+            if r is not None:
+                return r
+            if allow_none:
+                return None
+
+            if self.real_tensor_prop_unbacked_vals:
+                unsound_expr = result_expr.xreplace(self.real_tensor_prop_unbacked_vals)
+                if not unsound_expr.free_symbols:
+                    log.warning(
+                        "propagate_real_tensors size_hint(%s) -> %s", expr, unsound_expr
+                    )
+                    trace_structured(
+                        "propagate_real_tensors",
+                        metadata_fn=lambda: {
+                            "expr": repr(expr),
+                            "result": repr(unsound_expr),
+                            "stack": structured.from_traceback(
+                                CapturedTraceback.extract(skip=1).summary()
+                            ),
+                        },
+                    )
+                    self.guard_or_defer_runtime_assert(
+                        sympy.Eq(result_expr, unsound_expr),
+                        f"propagate_real_tensors: {result_expr} == {unsound_expr}",
+                    )
+                    return unsound_expr
+
+            raise self._make_data_dependent_error(result_expr, expr)
+        return result_expr
+
+    # NB: keep in sync with size_hint
     @lru_cache(256)
-    def has_guarding_hint(self, expr: sympy.Expr) -> bool:
-        try:
-            self.guarding_hint_or_throw(expr)
-        except GuardOnDataDependentSymNode:
-            return False
-        return True
-
-    def optimization_hint(
-        self, expr: Union[sympy.Expr, int], fallback: Optional[int] = None
-    ) -> int:
-        """
-        Return a concrete integer hint for an expression.
-
-        This function should be used for non-guarding based optimizations. If you
-        want a hint that you can guard on, use the guarding_hint API instead.
-
-        This function will hint unbacked symbols using user provided optimization
-        hints. If not provided, fallback will be used along with some heuristics
-        that try to maximize consistency with the shape environment.
-
-        Special cases:
-        - Complex numbers (containing sympy.I): raises an error since tensor
-          dimensions cannot be complex.
-        - Infinity (int_oo, sympy.oo): returns sys.maxsize.
-        - NaN (sympy.nan): returns the fallback value.
-        """
-        return _optimization_hint_base(
-            self, expr, precomputed_replacements={}, fallback=fallback
+    def has_hint(self, expr: sympy.Expr) -> bool:
+        result_expr = safe_expand(expr).xreplace(self.backed_var_to_val)
+        return (
+            result_expr.is_number
+            or self._maybe_evaluate_static(result_expr) is not None
         )
 
     def _make_data_dependent_error(
@@ -7729,14 +7732,11 @@ class ShapeEnv:
         def compute_concrete_val() -> sympy.Basic:
             if hint is None:
                 # This is only ever called for expressions WITHOUT unbacked
-                # symbols.  guarding_hint_or_throw returns Python bool for
-                # boolean expressions and int for integer expressions;
-                # sympify converts them to the proper sympy types
-                # (True -> sympy.true, 5 -> Integer(5)).
-                r = self.guarding_hint_or_throw(orig_expr)
+                # symbols
+                r = self.size_hint(orig_expr)
                 if r is None:
                     raise AssertionError("r must not be None")
-                return sympy.sympify(r)
+                return r
             else:
                 return sympy.sympify(hint)
 
@@ -7808,9 +7808,31 @@ class ShapeEnv:
 
             # Try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
-            fast_result = self._maybe_fast_eval_comparison(expr)
-            if fast_result is not None:
-                return fast_result
+            if (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+                < AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS
+            ):
+                fast_result = self._maybe_fast_eval_comparison(expr)
+                if fast_result is not None:
+                    return fast_result
+
+            # Aggressive guard-free semantics:
+            # VALUE_RANGE_ANALYSIS: use value range analysis (bound_sympy) before returning fallback
+            # SKIP_RANGE_ANALYSIS: skip range analysis entirely, just return fallback_value
+            aggressive_level = (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+            )
+            if hint is None and aggressive_level > 0 and fallback_value is not None:
+                if aggressive_level >= AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS:
+                    # Skip range analysis entirely
+                    self._log_suppressed_dde(orig_expr, fallback_value)
+                    return fallback_value
+                else:
+                    # Level 1: try range analysis first
+                    range_result = self._maybe_evaluate_range_only(expr, fallback_value)
+                    if range_result is fallback_value:
+                        self._log_suppressed_dde(orig_expr, fallback_value)
+                    return range_result
 
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious

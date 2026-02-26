@@ -2009,7 +2009,7 @@
     "fx_placeholder_targets",
     "fx_placeholder_vals",
     "guard_bool",
-    "has_guarding_hint",
+    "has_hint",
     "is_symbolic",
     "parallel_and",
     "parallel_or",
