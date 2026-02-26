@@ -165,6 +165,8 @@ class CPUReproTests(TestCase):
             test_self = self
             conv_seen = False
 
+            from torch._higher_order_ops.wrap import inductor_compiled_code
+
             class RecordFunctions(TorchDispatchMode):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
@@ -182,6 +184,11 @@ class CPUReproTests(TestCase):
                         conv_seen = True
 
                     return func(*args, **kwargs)
+
+            @inductor_compiled_code.py_impl(RecordFunctions)
+            def _(mode, func, inputs):
+                with mode:
+                    return func(inputs)
 
             with RecordFunctions():
                 fn_compiled(inps)
@@ -5126,6 +5133,52 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+    def test_masked_handle_scalar_var(self):
+        def fn():
+            # Simplified reproducer of https://github.com/pytorch/pytorch/issues/173626
+            window_size = 7
+            shift_size = 3
+            height, width = 14, 14
+            img_mask = torch.zeros((1, height, width, 1), dtype=torch.float32)
+            h_slices = (
+                slice(0, -window_size),
+                slice(-window_size, -shift_size),
+                slice(-shift_size, None),
+            )
+            w_slices = (
+                slice(0, -window_size),
+                slice(-window_size, -shift_size),
+                slice(-shift_size, None),
+            )
+            count = 0
+            for h in h_slices:
+                for w in w_slices:
+                    img_mask[:, h, w, :] = count
+                    count += 1
+
+            masked_window = img_mask.view(
+                1,
+                height // window_size,
+                window_size,
+                width // window_size,
+                window_size,
+                1,
+            )
+            masked_window = (
+                masked_window.permute(0, 1, 3, 2, 4, 5)
+                .contiguous()
+                .view(-1, window_size * window_size)
+            )
+            attn_mask = masked_window.unsqueeze(1) - masked_window.unsqueeze(2)
+            res = attn_mask.masked_fill(attn_mask != 0, -100.0).masked_fill(
+                attn_mask == 0, 0.0
+            )
+            return res
+
+        metrics.reset()
+        self.common(fn, ())
+        check_metrics_vec_kernel_count(1)
+
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
         input = torch.randn(5, 128, dtype=torch.float32)
@@ -5927,6 +5980,48 @@ class CPUReproTests(TestCase):
                 atol = 1e-2 if dtype == torch.bfloat16 else 1e-5
                 rtol = 1e-2 if dtype == torch.bfloat16 else 1e-5
                 torch.testing.assert_close(ref_res, res, atol=atol, rtol=rtol)
+
+    # https://github.com/pytorch/pytorch/issues/136640
+    def test_inductor_dynamic_shapes_broadcasting(self) -> None:
+        def fn(x, y):
+            x_view = x.view(-1, 4)
+            y_view = y.view(-1, 4)
+            return x_view * y_view
+
+        x = torch.randn(4)
+        y = torch.randn(8)
+        out_ref = fn(x, y)
+        out_test = torch.compile(fn, dynamic=True, backend="inductor")(x, y)
+        self.assertEqual(out_ref, out_test)
+
+    # https://github.com/pytorch/pytorch/issues/119162
+    def test_inductor_rng_default_dtype(self) -> None:
+        @torch.compile
+        def fn():
+            tmp = torch.randn(4, 4, dtype=torch.bfloat16)
+            return tmp
+
+        try:
+            old = torch.get_default_dtype()
+            torch.set_default_dtype(torch.bfloat16)
+            out = fn()
+        finally:
+            torch.set_default_dtype(old)
+        # output dtype should be float32
+        self.assertEqual(out.dtype, torch.bfloat16)
+
+    def test_inductor_no_recursionerror_on_for_loops(self):
+        def forward(x):
+            for _ in range(10000):
+                x = 1.0 * x
+            return x
+
+        self.assertTrue(
+            same(
+                torch.compile(forward, backend="inductor")(torch.tensor([1.0])),
+                torch.tensor([1.0]),
+            )
+        )
 
 
 if __name__ == "__main__":

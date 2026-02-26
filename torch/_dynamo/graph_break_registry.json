@@ -325,6 +325,16 @@
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "var_getattr {self} {name}",
+      "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
+      "Hints": [
+        "Simplify your `__getattribute__` implementation, ",
+        "or replace it with a targeted `@property`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
+      "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo does not support checking key existence on `nn.Module` instances that have a custom `__getattribute__` method defined.",
       "Hints": [
         "Avoid defining `__getattribute__` in your module.",
@@ -3324,6 +3334,16 @@
         "Include at least one checkpoint: (1) include at least 2 ops and (2) make sure there is some ",
         "line of code that is not in a try/with block, and has an empty Python stack.",
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB6604": [
+    {
+      "Gb_type": "Missing CALL_INTRINSIC_2 handler",
+      "Context": "CALL_INTRINSIC_2 operand: {inst.argval}",
+      "Explanation": "No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
