@@ -108,8 +108,6 @@ If your new Docker image needs a library installed from a specific pinned commit
      GCC_VERSION=11
      VISION=yes
      KATEX=yes
-     UCX_COMMIT=${_UCX_COMMIT}
-     UCC_COMMIT=${_UCC_COMMIT}
      TRITON=yes
      NEW_ARG_1=yes
      ;;
