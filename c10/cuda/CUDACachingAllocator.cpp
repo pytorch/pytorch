@@ -17,8 +17,10 @@
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#endif
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -269,7 +271,8 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || \
+    defined(USE_ROCM)
 
 /*
 Note [Expandable Segments]
@@ -383,8 +386,13 @@ struct ExpandableSegment {
     // This allows for some cases where we have to unmap pages earlier in the
     // segment to put them at the end.
     max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
+#ifdef USE_ROCM
+    C10_CUDA_CHECK(hipMemAddressReserve(
+        &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+#else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
+#endif
   }
   ExpandableSegment(const ExpandableSegment&) = delete;
   ExpandableSegment(ExpandableSegment&&) = delete;
@@ -408,20 +416,22 @@ struct ExpandableSegment {
     // if it fails, use posix file handle
     if (CUDAAllocatorConfig::expandable_segments_handle_type() ==
         Expandable_Segments_Handle_Type::UNSPECIFIED) {
+#ifndef USE_ROCM
       CUDAAllocatorConfig::set_expandable_segments_handle_type(
           Expandable_Segments_Handle_Type::FABRIC_HANDLE);
       auto output = map(range);
       if (output.ptr != nullptr) {
         return output;
       }
+#endif
       // if fabric handle is not supported, use posix file handle.
       CUDAAllocatorConfig::set_expandable_segments_handle_type(
           Expandable_Segments_Handle_Type::POSIX_FD);
       return map(range);
     }
 
-    while (end > handles_.size()) {
-      handles_.emplace_back(std::nullopt);
+    if (end > handles_.size()) {
+      handles_.resize(end);
     }
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
@@ -451,27 +461,48 @@ struct ExpandableSegment {
         }
       }
       int flag = 0;
+#ifndef USE_ROCM
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuDeviceGetAttribute_(
           &flag,
           CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED,
           device_));
+#endif
       if (flag)
         prop.allocFlags.gpuDirectRDMACapable = 1;
       prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       prop.location.id = static_cast<int>(device_);
+#ifdef USE_ROCM
+      auto status = hipMemCreate(&handle, segment_size_, &prop, 0);
+#else
       auto status =
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
+#endif
       if (status != CUDA_SUCCESS) {
         if (status == CUDA_ERROR_OUT_OF_MEMORY) {
+#ifdef USE_ROCM
+          // hipMemCreate above returned hipErrorOutOfMemory and treated it
+          // like a sticky runtime error. Which means we need to clear it.
+          // Unlike the corresponding CUDA Driver API.
+          (void)hipGetLastError();
+#endif
           for (auto j : c10::irange(begin, i)) {
             // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             auto h = handles_.at(j).value();
             handles_.at(j) = std::nullopt;
+#ifdef USE_ROCM
+            C10_CUDA_CHECK(hipMemRelease(h.handle));
+#else
             C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
+#endif
           }
           trimHandles();
           return rangeFromHandles(begin, begin);
+#ifdef USE_ROCM
+        } else {
+          C10_CUDA_CHECK(status);
+        }
+#else
         } else if (
             CUDAAllocatorConfig::expandable_segments_handle_type() ==
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
@@ -487,6 +518,7 @@ struct ExpandableSegment {
         } else {
           C10_CUDA_DRIVER_CHECK(status);
         }
+#endif
       }
       handles_.at(i) = Handle{handle, std::nullopt};
     }
@@ -534,8 +566,13 @@ struct ExpandableSegment {
           Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
+#ifdef USE_ROCM
+          C10_CUDA_CHECK(hipMemExportToShareableHandle(
+              &fd, handle.handle, hipMemHandleTypePosixFileDescriptor, 0));
+#else
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
               &fd, handle.handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+#endif
           handle.shareable_handle = fd;
           LOG(INFO) << "use posix fd to share expandable segments.";
         }
@@ -546,6 +583,10 @@ struct ExpandableSegment {
             reinterpret_cast<const char*>(&*handle.shareable_handle),
             sizeof(int));
       } else {
+#ifdef USE_ROCM
+        TORCH_INTERNAL_ASSERT(
+            false, "expandable segment with fabric handle not supported");
+#else
         if (!handle.shareable_handle) {
           CUmemFabricHandle fabric_handle;
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
@@ -559,6 +600,7 @@ struct ExpandableSegment {
         buf.write(
             reinterpret_cast<const char*>(&*handle.shareable_handle),
             sizeof(CUmemFabricHandle));
+#endif
       }
     }
     return rangeFromHandles(begin, end);
@@ -597,9 +639,13 @@ struct ExpandableSegment {
           auto err = errno;
           close(static_cast<int>(pidfd));
           for (auto& h : segment->handles_) {
+#ifdef USE_ROCM
+            C10_CUDA_CHECK(hipMemRelease(h.value().handle));
+#else
             C10_CUDA_DRIVER_CHECK(
                 // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
                 DriverAPI::get()->cuMemRelease_(h.value().handle));
+#endif
             h = std::nullopt;
           }
           TORCH_CHECK(
@@ -609,17 +655,32 @@ struct ExpandableSegment {
           TORCH_CHECK(false, "pidfd_getfd: ", c10::utils::str_error(err));
         }
         CUmemGenericAllocationHandle handle = 0;
+#ifdef USE_ROCM
+        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
+            &handle,
+#if ROCM_VERSION >= 70100
+            reinterpret_cast<void*>(static_cast<uintptr_t>(myfd)),
+#else
+            (void*)(uintptr_t)&myfd,
+#endif
+            hipMemHandleTypePosixFileDescriptor));
+#else
         C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
             &handle,
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             (void*)(uintptr_t)myfd,
             CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+#endif
         LOG(INFO) << "use posix fd to import expandable segments.";
         close(static_cast<int>(myfd));
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
       close(static_cast<int>(pidfd));
     } else {
+#ifdef USE_ROCM
+      TORCH_INTERNAL_ASSERT(
+          false, "expandable segment with fabric handle not supported");
+#else
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
         CUmemFabricHandle fabric_handle;
@@ -634,6 +695,7 @@ struct ExpandableSegment {
         LOG(INFO) << "use fabric handle to import expandable segments.";
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
+#endif
     }
     segment->mapAndSetAccess(0, header.num_handles);
     return segment;
@@ -669,8 +731,12 @@ struct ExpandableSegment {
   ~ExpandableSegment() {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
+#ifdef USE_ROCM
+    C10_CUDA_CHECK(hipMemAddressFree(ptr_, segment_size_ * max_handles_));
+#else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
         ptr_, segment_size_ * max_handles_));
+#endif
   }
 
  private:
@@ -680,12 +746,25 @@ struct ExpandableSegment {
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     desc.location.id = static_cast<int>(device);
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+#ifdef USE_ROCM
+    C10_CUDA_CHECK(hipMemSetAccess(
+        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+#else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+#endif
   }
 
   void mapAndSetAccess(size_t begin, size_t end) {
     for (auto i : c10::irange(begin, end)) {
+#ifdef USE_ROCM
+      C10_CUDA_CHECK(hipMemMap(
+          ptr_ + i * segment_size_,
+          segment_size_,
+          0,
+          handles_.at(i).value().handle,
+          0ULL));
+#else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemMap_(
           ptr_ + i * segment_size_,
           segment_size_,
@@ -693,6 +772,7 @@ struct ExpandableSegment {
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           handles_.at(i).value().handle,
           0ULL));
+#endif
     }
     mapped_size_ += (end - begin) * segment_size_;
     setAccess(device_, begin, end);
@@ -719,19 +799,29 @@ struct ExpandableSegment {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
+#ifdef USE_ROCM
+      C10_CUDA_CHECK(hipMemUnmap(ptr_ + segment_size_ * i, segment_size_));
+#else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           ptr_ + segment_size_ * i, segment_size_));
+#endif
       if (h.shareable_handle) {
         close(std::get<int>(*h.shareable_handle));
       }
+#ifdef USE_ROCM
+      C10_CUDA_CHECK(hipMemRelease(h.handle));
+#else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemRelease_(h.handle));
+#endif
     }
     trimHandles();
   }
   void trimHandles() {
-    while (!handles_.empty() && !handles_.back()) {
-      handles_.pop_back();
-    }
+    auto it = std::find_if(
+        handles_.rbegin(),
+        handles_.rend(),
+        [](const std::optional<Handle>& opt) { return opt.has_value(); });
+    handles_.erase(it.base(), handles_.end());
   }
   void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
     size_t start = 0;

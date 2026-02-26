@@ -325,6 +325,16 @@
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "var_getattr {self} {name}",
+      "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
+      "Hints": [
+        "Simplify your `__getattribute__` implementation, ",
+        "or replace it with a targeted `@property`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
+      "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo does not support checking key existence on `nn.Module` instances that have a custom `__getattribute__` method defined.",
       "Hints": [
         "Avoid defining `__getattribute__` in your module.",
@@ -1546,6 +1556,17 @@
       ]
     }
   ],
+  "GB4026": [
+    {
+      "Gb_type": "triton.set_allocator not supported",
+      "Context": "triton.set_allocator called inside compiled region",
+      "Explanation": "triton.set_allocator is not supported inside torch.compile. It modifies global Triton allocator state and cannot be traced.",
+      "Hints": [
+        "Move triton.set_allocator() outside of the torch.compile region ",
+        "(call it before the compiled function)."
+      ]
+    }
+  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",
@@ -2622,6 +2643,16 @@
       ]
     }
   ],
+  "GB4271": [
+    {
+      "Gb_type": "__class__ assignment on user-defined object",
+      "Context": "object={self}, value={value}",
+      "Explanation": "Dynamo does not support reassigning __class__ on user-defined objects.",
+      "Hints": [
+        "Move the __class__ assignment outside of the torch.compile region."
+      ]
+    }
+  ],
   "GB0221": [
     {
       "Gb_type": "non-generator contextlib.contextmanager",
@@ -3306,6 +3337,16 @@
       ]
     }
   ],
+  "GB6604": [
+    {
+      "Gb_type": "Missing CALL_INTRINSIC_2 handler",
+      "Context": "CALL_INTRINSIC_2 operand: {inst.argval}",
+      "Explanation": "No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0276": [
     {
       "Gb_type": "Failed to make weakref to User Object",
@@ -3728,6 +3769,16 @@
       ]
     }
   ],
+  "GB5799": [
+    {
+      "Gb_type": "unsupported function.__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0313": [
     {
       "Gb_type": "torch.cond: differing branch outputs",
@@ -3866,6 +3917,20 @@
       "Explanation": "Expected init leaves.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB1297": [
+    {
+      "Gb_type": "Reconstruction failure (self-referential)",
+      "Context": "str(self)",
+      "Explanation": "Dynamo tried to reconstruct sourceless variable {self}, but it is self-referential. Dynamo must manually implement reconstruction rules for self-referentiable sourceless variables.",
+      "Hints": [
+        "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable ",
+        "that Dynamo cannot reconstruct, then remove it from the return statement.",
+        "Remove the self-reference in the variable. A self-referring list, for example, is `l = []; l.append(l)`.",
+        "Report an issue to PyTorch if you need self-referential reconstrtuction support.",
+        "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
       ]
     }
   ],

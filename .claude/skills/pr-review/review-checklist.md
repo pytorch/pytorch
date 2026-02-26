@@ -105,6 +105,43 @@ When reviewing changes to PyTorch APIs and user-facing code:
 - [ ] **Distributed primitives** - `torch.distributed`, RPC, and TCPStore have no auth/encryption and accept connections from anywhere; they are for internal networks only, not untrusted environments
 - [ ] **No new pickle usage** - Avoid adding `pickle.load` or `torch.load` without `weights_only=True` on paths that could receive untrusted data
 
+## Thread Safety & Concurrency
+
+### Python Threading
+
+- [ ] **No unprotected shared mutable state** - Shared data structures accessed from multiple threads are protected by locks or are inherently thread-safe
+- [ ] **Lock ordering** - When multiple locks are acquired, ordering is consistent to avoid deadlocks
+- [ ] **No GIL-reliant correctness** - Code that mutates shared state should not rely on the GIL for thread safety, since the GIL may not be present in free-threaded builds
+
+### C++ Threading
+
+- [ ] **No data races** - Shared mutable state is protected by mutexes or uses atomics with appropriate memory ordering
+- [ ] **RAII lock guards** - Prefer `std::lock_guard` or `std::unique_lock` over manual `lock()`/`unlock()` to ensure exception-safe unlocking
+- [ ] **No lock-order inversions** - When acquiring multiple locks, a consistent global ordering is followed
+- [ ] **Correct atomic memory ordering** - `std::memory_order_relaxed` is only used when ordering with other operations is genuinely unnecessary; default to `seq_cst` or use `acquire`/`release` pairs
+
+### CPython C API Thread Safety
+
+This is particularly important for PyTorch's autograd, which has multi-threaded C++ code calling into the CPython C API.
+
+- [ ] **GIL held for Python object access** - Any code that touches `PyObject*` (incref, decref, attribute access, container mutation) must hold the GIL. When releasing the GIL for long-running C++ work (`Py_BEGIN_ALLOW_THREADS`), verify no Python objects are accessed in that region
+- [ ] **Borrowed references across GIL release** - Borrowed references (`PyTuple_GET_ITEM`, `PyList_GET_ITEM`) become unsafe if the GIL is released and reacquired, since another thread may have mutated the container
+- [ ] **Decref-before-update hazard** - When replacing an item in a container (tuple, list, dict), update the container slot first, then `Py_DECREF` the old value. Decref can trigger `__del__` finalizers that re-enter and observe the container in an inconsistent state. Without the GIL (free-threaded builds), this is also a data race.
+
+### Free-Threaded Python (NoGIL, PEP 703)
+
+CPython 3.13t+ can run without the GIL. Code that was previously safe under the GIL may have races in free-threaded builds:
+
+- [ ] **No implicit GIL serialization assumptions** - Code paths that assume only one thread can execute Python at a time are broken under NoGIL. Look for shared mutable state accessed from C extensions without explicit locking
+- [ ] **Raw `PyTuple_SET_ITEM` / `PyList_SET_ITEM`** - These are raw slot writes with no memory ordering guarantees. In free-threaded builds, concurrent reads from other threads may see stale or torn values. Consider whether the data structure could be accessed concurrently and whether atomic operations or the thread-safe API alternatives are needed
+- [ ] **Module-level mutable state in C extensions** - Global/static `PyObject*` variables or C-level caches accessed from multiple threads need synchronization in NoGIL builds
+
+### PyTorch-Specific Concurrency
+
+- [ ] **Autograd engine multi-threading** - The autograd engine runs node `apply()` methods from worker threads. Code in custom autograd node implementations must be safe for concurrent execution across different nodes, and must hold the GIL when accessing Python objects
+- [ ] **CUDA stream synchronization** - Operations across different CUDA streams require explicit synchronization (`cudaStreamSynchronize`, `cudaEventRecord`/`cudaStreamWaitEvent`). Missing synchronization can cause silent data corruption
+- [ ] **DataLoader worker safety** - Objects shared between the main process and DataLoader worker processes (or threads) must be fork-safe or use appropriate IPC mechanisms
+
 ## Performance
 
 ### Obvious Regressions
