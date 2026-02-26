@@ -4815,6 +4815,42 @@ common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
 
 
+class AsyncCollectiveUnwrapTests(torch._inductor.test_case.TestCase):
+    def test_unwrap_async_collective_tensors(self):
+        from unittest.mock import patch
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            _maybe_unwrap_async_collective_tensors,
+        )
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        t1 = torch.randn(4, 4)
+        t2 = torch.randn(4, 4)
+        act = AsyncCollectiveTensor(t1)
+
+        with patch(
+            "torch.distributed._functional_collectives.wait_tensor"
+        ) as mock_wait:
+            result = _maybe_unwrap_async_collective_tensors(
+                {"x": act, "y": t2, "n": 16}
+            )
+
+        self.assertIs(result["x"], t1)
+        self.assertIs(result["y"], t2)
+        self.assertEqual(result["n"], 16)
+        mock_wait.assert_called_once_with(t1)
+
+    def test_no_async_tensors_passthrough(self):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            _maybe_unwrap_async_collective_tensors,
+        )
+
+        kwargs = {"x": torch.randn(4), "n": 32}
+        result = _maybe_unwrap_async_collective_tensors(kwargs)
+        self.assertIs(result["x"], kwargs["x"])
+        self.assertEqual(result["n"], 32)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
