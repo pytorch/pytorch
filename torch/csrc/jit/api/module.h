@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/frontend/source_range.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/named_value.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -34,6 +33,7 @@
 
 namespace torch::jit {
 
+using ::c10::AnyType;
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 using ::c10::QualifiedName;
