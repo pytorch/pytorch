@@ -810,8 +810,8 @@ def single_mesh_dim_common_pointwise_strategy(
     return placements_list
 
 
-def _make_partial_strategy(
-    extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+def _common_pointwise_single_dim_strategy(
+    partial_extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
 ) -> Callable[
     [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
 ]:
@@ -846,10 +846,10 @@ def _make_partial_strategy(
                 else:
                     shard_placements.append(Replicate())
             placements.append(shard_placements)
-        if extra_rules:
+        if partial_extra_rules:
             n_tensors = len(tensor_arg_metas)
             expected_len = 1 + n_tensors
-            for rule in extra_rules:
+            for rule in partial_extra_rules:
                 # Filter rather than assert: some ops (e.g. mul.Tensor) mix
                 # unary rules (len 2, for scalar promotion) and binary rules
                 # (len 3, for tensor-tensor), so mismatched lengths are expected.
@@ -862,7 +862,7 @@ def _make_partial_strategy(
 
 def _register(
     op: OpOverload,
-    extra_rules: list[list[Placement]] | None = None,
+    partial_extra_rules: list[list[Placement]] | None = None,
     static_argnum: int = 0,
 ) -> None:
     """Register a single-dim strategy for an op, auto-detecting foreach schema."""
@@ -871,7 +871,7 @@ def _register(
     else:
         schema = RuntimeSchemaInfo(static_argnum, static_kwargkey=["out"])
     register_single_dim_strategy(op, schema_info=schema)(
-        _make_partial_strategy(extra_rules=extra_rules)
+        _common_pointwise_single_dim_strategy(partial_extra_rules=partial_extra_rules)
     )
 
 
@@ -1137,7 +1137,7 @@ for op in non_increasing_unary_ops:
 for op in linear_nondecreasing_unary_ops:
     register_single_dim_strategy(
         op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_make_partial_strategy(extra_rules=_LINEAR_NONDECREASING_RULES))
+    )(_common_pointwise_single_dim_strategy(partial_extra_rules=_LINEAR_NONDECREASING_RULES))
 
 for op in all_partial_preserving_unary_ops:
     _register(op, _ALL_PARTIAL_PRESERVING_RULES)
