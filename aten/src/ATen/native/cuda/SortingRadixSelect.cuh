@@ -445,76 +445,6 @@ __device__ __forceinline__ void countRadixLoop(
   }
 }
 
-// Aggregates radix matches across all warps and distributes results back to all threads.
-// Uses double-buffering via buffer_index (0 or 1) to alternate between two smem segments,
-// preventing race conditions between concurrent iterations. Since countRadixUsingMaskDataSmem
-// performs __syncthreads() internally, at most two loop iterations can be in flight
-// simultaneously, so two buffers are sufficient. buffer_index is toggled after each
-// countRadixUsingMaskDataSmem invocation.
-template <
-    typename CountType,
-    int RadixSize,
-    int RadixBits>
-__device__ __forceinline__ void countRadixAggregateCounts(
-    CountType counts[RadixSize], // counts[i] will be the number of matching
-                                 // elements ((val & desiredMask) == desired)
-                                 // that have the digits [radixDigitPos,
-                                 // radixDigitPos+RADIX_BITS-1] set to i.
-    CountType* smem, // shared memory for inter-warp reduction of counts.
-    int buffer_index){ // buffer index for smem.
-
-  // Maximum number of warps per workgroup. HIP workgroups have at most 1024 threads.
-  // Warp size is at least 32 (can be 64 on some architectures), so we use 32 for safety.
-  // This sizes shared memory buffers to accommodate all possible warps: 1024/32 = 32.
-  constexpr uint MAX_WARPS = 1024/32;
-  const int buffer_offset = buffer_index * MAX_WARPS * RadixSize; // offset of the buffer in smem.
-  const uint WARP_BITS = __builtin_ctz(warpSize);
-
-  const uint num_warps = blockDim.x >> WARP_BITS;  // Actual number of warps in this block
-  const uint warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / warpSize
-  const int lane_id = at::cuda::getLaneId(); // = threadIdx.x % warpSize
-
-  // Stage 1: Each warp's lane 0 stores its counts in smem.
-  // Layout after Stage 1: [warp0: all radix bins], [warp1: all radix bins], ...
-  // this layout starts from index buffer_offset.
-  if (lane_id == 0) {
-#pragma unroll
-    for (uint32_t i = 0; i < RadixSize; ++i) {
-      smem[
-            buffer_offset
-          + warp_id * RadixSize
-          + i
-          ] = counts[i];
-    }
-  }
-
-  __syncthreads(); // wait for all warps to finish storing their counts to smem.
-
-  // Stage 2: Warp0 performs reduction for all bins.
-  // Layout after Stage 2: [final radix0 sum], [final radix1 sum], ..., [final radix(RadixSize-1) sum]
-  // this layout starts from index buffer_offset.
-  if (warp_id == 0 && lane_id < RadixSize) {
-    CountType sum = 0;
-#pragma unroll
-    for (int w = 0; w < num_warps; ++w) {
-      sum += smem[
-                    buffer_offset
-                  + w * RadixSize
-                  + lane_id
-                  ];
-    }
-    smem[buffer_offset + lane_id] = sum;
-  }
-
-  __syncthreads(); // Wait for warp 0 to finish reduction.
-
-  // Stage 3: Each thread reads the final counts from smem.
-#pragma unroll
-  for (uint32_t i = 0; i < RadixSize; ++i) {
-    counts[i] = smem[buffer_offset + i];
-  }
-}
-
 // This function counts the distribution of all input values in a
 // slice we are selecting by radix digit at `radixDigitPos`, but only
 // those that pass the filter `((v & desiredMask) == desired)`.
@@ -536,7 +466,6 @@ __device__ void countRadixUsingMaskDataSmem(
                            // digits [radixDigitPos, radixDigitPos+RADIX_BITS-1]
                            // set to i in the warp.
     CountType* smem, // shared memory for inter-warp reduction of counts.
-    int buffer_index, // buffer index for smem.
     bitwise_t
         desired, // combined with desiredMask to filter relevant elements. An
                  // element is relevant if ((val & desiredMask) == desired).
@@ -558,6 +487,14 @@ __device__ void countRadixUsingMaskDataSmem(
   for (int i = 0; i < RadixSize; ++i) {
     counts[i] = 0; // initialize counts to 0.
   }
+
+  // initialize smem to 0. This is for reduction of counts across all warps.
+  if (threadIdx.x < RadixSize) {
+    smem[threadIdx.x] = 0;
+  }
+
+  __syncthreads(); // wait for all threads in the block to finish initializing
+                   // smem.
 
   // count the distribution of the bits in the radix digit at `radixDigitPos` to
   // `radixDigitPos`+RADIX_BITS-1 for values that match the desired pattern
@@ -584,11 +521,27 @@ __device__ void countRadixUsingMaskDataSmem(
         });
   }
 
-  // aggregate counts across all warps and distribute results back to all threads.
-  countRadixAggregateCounts<CountType, RadixSize, RadixBits>(
-    counts,
-    smem,
-    buffer_index);
+  // accumulate the counts across all warps.
+  // sum for each warp is added to smem by thread 0 in the warp.
+  if (at::cuda::getLaneId() == 0) {
+#pragma unroll
+    for (uint32_t i = 0; i < RadixSize; ++i) {
+      gpuAtomicAddNoReturn(
+          &smem[i],
+          counts[i]); // thread0 in warp atomically adds the counts to smem.
+    }
+  }
+
+  __syncthreads(); // wait for all warps to finish adding their counts to smem.
+
+// each thread reads the final counts from smem.
+#pragma unroll
+  for (uint32_t i = 0; i < RadixSize; ++i) {
+    counts[i] = smem[i];
+  }
+
+  __syncthreads(); // wait for all threads in the block to finish reading the
+                   // counts.
 }
 
 // This is the main loop of the findPattern function that finds the unique value
@@ -899,14 +852,6 @@ __device__ void radixSelect(
   __syncthreads(); // so the initialization is visible to all threads in the
                    // blocks.
 
-  // buffer index for smem. We use two segments of smem for inter-warp communication of counts.
-  // Given the counting operation in countRadixUsingMaskDataSmem performs __syncthreads() internally,
-  // we need to alternate between the at most two segments of smem to avoid race conditions.
-  // No more than two iterations of the loop will be "in flight" at any given time because
-  // of the __syncthreads() in countRadixUsingMaskDataSmem.
-  // buffer_index is either 0 or 1. It is toggled after each countRadixUsingMaskDataSmem invocation.
-  int buffer_index = 0;
-
 #endif
 
   // We only consider elements x such that (x & desiredMask) == desired
@@ -953,7 +898,6 @@ __device__ void radixSelect(
         RADIX_BITS>(
         counts,
         smem,
-        buffer_index,
         desired,
         desiredMask,
         digitPos,
@@ -962,9 +906,6 @@ __device__ void radixSelect(
         data,
         dataSmem,
         dataSmemSize);
-
-    buffer_index ^= 1; // toggle buffer index.
-
 #else
     countRadixUsingMask<
         scalar_t,
