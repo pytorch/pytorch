@@ -104,8 +104,14 @@ class OutputAliasInfo:
     base_idx: int | None
     # If it is a Tensor, what the dynamic dims are (otherwise is None)
     dynamic_dims: set[int] | None
-    # requires_grad
+    # Whether the output tensor has requires_grad=True. Use for
+    # preserving output properties (mark_non_differentiable, alias reconstruction).
     requires_grad: bool
+    # Whether this output participates in backward as
+    # a tangent. Normally the same as requires_grad, but False for views created
+    # under no_grad() that inherit requires_grad from their base without having a
+    # grad_fn. Use when constructing tangent lists for torch.autograd.grad().
+    requires_grad_for_backward: bool
     # Sequence of ViewMeta objects.
     #
     # Provides us the means to re-run view functions on other tensors.

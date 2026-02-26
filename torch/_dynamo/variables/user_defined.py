@@ -1172,10 +1172,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
             dict_proxy = {
-                name: VariableTracker.build(
-                    tx, value, source=self.source and AttrSource(self.source, name)
+                key: VariableTracker.build(
+                    tx,
+                    value,
+                    source=self.source
+                    and DictGetItemSource(AttrSource(self.source, "__dict__"), key),
                 )
-                for name, value in self.value.__dict__.items()
+                for key, value in self.value.__dict__.items()
             }
             self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
         return self.dict_vt
