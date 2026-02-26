@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 _VLLM_TEST_LIBRARY_PATH = Path(__file__).parent / "vllm_test_library.yaml"
 _DISABLED_VLLM_TESTS_PATH = Path(__file__).parent / "disabled_vllm_tests.yaml"
-_DISABLED_VLLM_TESTS_ISSUE = 0  # Set to the GitHub issue number after creation
+_DISABLED_VLLM_TESTS_ISSUE = 175899
 
 
 def _load_vllm_test_library_yaml() -> dict[str, Any]:

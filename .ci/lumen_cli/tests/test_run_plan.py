@@ -227,7 +227,10 @@ def _cmds(patch_module):
 def test_deselect_injected_for_test_level(patch_module):
     """Test-level node IDs (with ::) produce --deselect."""
     patch_module.disabled_mock.return_value = [
-        {"test": "test_foo.py::test_x", "issue": "http://issue/1"}
+        {
+            "test": "test_foo.py::test_x",
+            "issue": "https://github.com/pytorch/pytorch/issues/175899",
+        }
     ]
     patch_module.run_test_plan("plan_a", "cpu", _SIMPLE_TESTS_MAP)
     cmds = _cmds(patch_module)
@@ -240,7 +243,10 @@ def test_deselect_injected_for_test_level(patch_module):
 def test_ignore_injected_for_file_level(patch_module):
     """File-level node IDs (no ::) produce --ignore."""
     patch_module.disabled_mock.return_value = [
-        {"test": "test_foo.py", "issue": "http://issue/1"}
+        {
+            "test": "test_foo.py",
+            "issue": "https://github.com/pytorch/pytorch/issues/175899",
+        }
     ]
     patch_module.run_test_plan("plan_a", "cpu", _SIMPLE_TESTS_MAP)
     cmds = _cmds(patch_module)
@@ -265,7 +271,10 @@ def test_non_pytest_steps_not_modified(patch_module):
         }
     }
     patch_module.disabled_mock.return_value = [
-        {"test": "test.py::test_z", "issue": "http://issue/1"}
+        {
+            "test": "test.py::test_z",
+            "issue": "https://github.com/pytorch/pytorch/issues/175899",
+        }
     ]
     patch_module.run_test_plan("mixed_steps", "cpu", tests_map)
     cmds = _cmds(patch_module)
@@ -282,7 +291,10 @@ def test_non_pytest_steps_not_modified(patch_module):
 def test_disabled_and_rerun_flags_both_present(patch_module):
     """Disabled flags and rerun flags compose into a single pytest invocation."""
     patch_module.disabled_mock.return_value = [
-        {"test": "skip.py::test_x", "issue": "http://issue/1"}
+        {
+            "test": "skip.py::test_x",
+            "issue": "https://github.com/pytorch/pytorch/issues/175899",
+        }
     ]
     patch_module.run_test_plan("plan_a", "cpu", _SIMPLE_TESTS_MAP)
     for cmd in _cmds(patch_module):
@@ -404,7 +416,7 @@ def test_load_yaml_valid_entries(tmp_path, vllm_module):
         raise AssertionError(f"Expected 2 entries, got {len(entries)}")
     if entries[0] != {
         "test": "a.py",
-        "issue": "https://github.com/pytorch/pytorch/issues/1",
+        "issue": "https://github.com/pytorch/pytorch/issues/175899",
     }:
         raise AssertionError(f"Unexpected first entry: {entries[0]}")
     if entries[1]["test"] != "b.py::test_x":
@@ -447,7 +459,7 @@ def test_load_github_failure_returns_empty(vllm_module):
         raise OSError("network error")
 
     with (
-        mock_patch.object(vllm_module, "_DISABLED_VLLM_TESTS_ISSUE", 99999),
+        mock_patch.object(vllm_module, "_DISABLED_VLLM_TESTS_ISSUE", 175899),
         mock_patch.object(vllm_module.urllib.request, "urlopen", _raise),
     ):
         result = vllm_module._load_disabled_vllm_tests_from_github()
@@ -460,11 +472,11 @@ def test_load_github_filters_malformed_entries(vllm_module):
     fake_resp = FakeResponse(
         {
             "body": "```yaml\ndisabled_tests:\n  - bad_key: oops\n  - test: good.py\n```",
-            "html_url": "https://github.com/issue/99999",
+            "html_url": "https://github.com/pytorch/pytorch/issues/175899",
         }
     )
     with (
-        mock_patch.object(vllm_module, "_DISABLED_VLLM_TESTS_ISSUE", 99999),
+        mock_patch.object(vllm_module, "_DISABLED_VLLM_TESTS_ISSUE", 175899),
         mock_patch.object(
             vllm_module.urllib.request, "urlopen", lambda *a, **kw: fake_resp
         ),
@@ -475,7 +487,7 @@ def test_load_github_filters_malformed_entries(vllm_module):
         raise AssertionError(f"Expected 1 entry, got {len(entries)}")
     if entries[0]["test"] != "good.py":
         raise AssertionError(f"Expected 'good.py', got '{entries[0]['test']}'")
-    if entries[0]["issue"] != "https://github.com/issue/99999":
+    if entries[0]["issue"] != "https://github.com/pytorch/pytorch/issues/175899":
         raise AssertionError(f"Expected issue URL, got '{entries[0]['issue']}'")
 
 
