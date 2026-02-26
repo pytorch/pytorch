@@ -49,6 +49,7 @@ struct alignas(1) Float8_e4m3fn {
   inline C10_HOST_DEVICE Float8_e4m3fn(float value);
   inline C10_HOST_DEVICE operator float() const;
   inline C10_HOST_DEVICE bool isnan() const;
+  inline C10_HOST_DEVICE bool isinf() const;
 };
 
 inline std::ostream& operator<<(std::ostream& out, const Float8_e4m3fn& value) {
@@ -254,6 +255,11 @@ inline C10_HOST_DEVICE Float8_e4m3fn::operator float() const {
 
 inline C10_HOST_DEVICE bool Float8_e4m3fn::isnan() const {
   return (x & 0b01111111) == 0b01111111;
+}
+
+inline C10_HOST_DEVICE bool Float8_e4m3fn::isinf() const {
+  // Note: fp8e4m3fn does not have infinity, so this always returns false.
+  return false;
 }
 
 /// Arithmetic

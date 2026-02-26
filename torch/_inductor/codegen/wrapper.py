@@ -1431,7 +1431,6 @@ class PythonWrapperCodegen(CodeGen):
         for name, buf in self.get_graph_inputs().items():
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
-
             line = f"assert not {name}.isnan().any().item()"
             self.prefix.writeline(line)
             line = f"assert not {name}.isinf().any().item()"
