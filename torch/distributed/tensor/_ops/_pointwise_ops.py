@@ -72,6 +72,10 @@ binary_additive_ops = [
     aten.sub.Tensor,
     aten.sub.out,
     aten.sub_.Tensor,
+    aten._foreach_add.List,
+    aten._foreach_add_.List,
+    aten._foreach_sub.List,
+    aten._foreach_sub_.List,
 ]
 
 _BINARY_ADDITIVE_RULES: list[list[Placement]] = [
@@ -89,8 +93,25 @@ _BINARY_ADDITIVE_RULES: list[list[Placement]] = [
 ]
 
 # mul: partials propagate through either arg. div: only through numerator.
-binary_mul_ops = [aten.mul.Tensor, aten.mul.out, aten.mul_.Tensor]
-binary_div_ops = [aten.div.Tensor, aten.div.out, aten.div_.Tensor]
+binary_mul_ops = [
+    aten.mul.Tensor,
+    aten.mul.out,
+    aten.mul_.Tensor,
+    aten._foreach_mul.List,
+    aten._foreach_mul.Tensor,
+    aten._foreach_mul_.List,
+    aten._foreach_mul_.Tensor,
+]
+binary_div_ops = [
+    aten.div.Tensor,
+    aten.div.out,
+    aten.div_.Tensor,
+    aten._foreach_div.List,
+    aten._foreach_div.Tensor,
+    aten._foreach_div_.List,
+    aten._foreach_div_.Tensor,
+]
+
 
 # _UNARY_LINEAR_RULES handles the scalar promotion case: Python's __mul__/__truediv__
 # promote scalars to 0-dim tensors, so aten.mul.Scalar dispatches as aten.mul.Tensor
@@ -112,6 +133,21 @@ scalar_linear_ops = [
     aten.div_.Scalar,
     aten.mul.Scalar,
     aten.mul_.Scalar,
+    aten._foreach_add.Scalar,
+    aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
+    aten._foreach_div.Scalar,
+    aten._foreach_div.ScalarList,
+    aten._foreach_div_.Scalar,
+    aten._foreach_div_.ScalarList,
+    aten._foreach_mul.Scalar,
+    aten._foreach_mul.ScalarList,
+    aten._foreach_mul_.Scalar,
+    aten._foreach_mul_.ScalarList,
+    aten._foreach_sub.Scalar,
+    aten._foreach_sub.ScalarList,
+    aten._foreach_sub_.Scalar,
+    aten._foreach_sub_.ScalarList,
 ]
 
 # Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
@@ -198,7 +234,13 @@ _NON_INCREASING_RULES: list[list[Placement]] = [
 ]
 
 # neg is linear: -(A1 + A2) = -A1 + -A2
-neg_ops = [aten.neg.default, aten.neg.out, aten.neg_.default]
+neg_ops = [
+    aten.neg.default,
+    aten.neg.out,
+    aten.neg_.default,
+    aten._foreach_neg.default,
+    aten._foreach_neg_.default,
+]
 
 _NEG_RULES: list[list[Placement]] = _UNARY_LINEAR_RULES + _NON_INCREASING_RULES
 
@@ -260,6 +302,7 @@ monotonic_max_preserving_binary_ops = [
     aten.maximum.default,
     aten.maximum.out,
     prims.fmax.default,
+    aten._foreach_maximum_.List,
 ]
 
 _MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
@@ -601,6 +644,32 @@ pointwise_ops = [
     prims.ne.default,
     prims.spherical_bessel_j0.default,
     prims.zeta.default,
+    # Foreach ops without specialized partial rules
+    aten._foreach_abs.default,
+    aten._foreach_abs_.default,
+    aten._foreach_addcdiv_.Scalar,
+    aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_addcdiv_.Tensor,
+    aten._foreach_addcmul.Scalar,
+    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcmul_.ScalarList,
+    aten._foreach_addcmul_.Tensor,
+    aten._foreach_clamp_max_.Scalar,
+    aten._foreach_clamp_min_.Scalar,
+    aten._foreach_lerp_.Scalar,
+    aten._foreach_pow.List,
+    aten._foreach_pow.ScalarList,
+    aten._foreach_reciprocal_.default,
+    aten._foreach_sqrt.default,
+    aten._foreach_sqrt_.default,
+    aten._foreach_zero_.default,
+    aten._foreach_exp.default,
+    aten._foreach_exp_.default,
+    aten._foreach_cos.default,
+    aten._foreach_cos_.default,
+    aten._foreach_log.default,
+    aten._foreach_log_.default,
+    aten._amp_foreach_non_finite_check_and_unscale_.default,
 ]
 
 
@@ -813,6 +882,23 @@ def _common_pointwise_single_dim_strategy(
     return strategy
 
 
+def _register(
+    op: OpOverload,
+    partial_extra_rules: list[list[Placement]] | None = None,
+    static_argnum: int = 0,
+) -> None:
+    """Register a single-dim strategy for an op, auto-detecting foreach schema."""
+    if "_foreach_" in str(op) or "_amp_foreach_" in str(op):
+        schema = RuntimeSchemaInfo(needs_pytree=True)
+    else:
+        schema = RuntimeSchemaInfo(static_argnum, static_kwargkey=["out"])
+    register_single_dim_strategy(op, schema_info=schema)(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=partial_extra_rules  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+
 def copy_strategy(op_schema: OpSchema) -> StrategyType:
     """
     Strategy for copy_ that preserves any Partial placement.
@@ -1021,141 +1107,55 @@ norm_partial_avoidable_redistribute_ops = {
 
 # Register single-dim strategies for all categorized ops.
 for op in unary_linear_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _UNARY_LINEAR_RULES)
 
 for op in binary_additive_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_BINARY_ADDITIVE_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _BINARY_ADDITIVE_RULES)
 
 for op in binary_mul_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
-            + _MUL_RULES
-        )
-    )
+    _register(op, _UNARY_LINEAR_RULES + _MUL_RULES)
 
 for op in binary_div_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
-            + _DIV_RULES
-        )
-    )
+    _register(op, _UNARY_LINEAR_RULES + _DIV_RULES)
 
 for op in scalar_linear_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _UNARY_LINEAR_RULES, static_argnum=1)
 
 for op in non_decreasing_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_NON_DECREASING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _NON_DECREASING_RULES)
 
 for op in non_increasing_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_NON_INCREASING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _NON_INCREASING_RULES)
 
 for op in linear_nondecreasing_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_LINEAR_NONDECREASING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _LINEAR_NONDECREASING_RULES)
 
 for op in all_partial_preserving_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_ALL_PARTIAL_PRESERVING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _ALL_PARTIAL_PRESERVING_RULES)
 
-register_single_dim_strategy(
-    neg_ops,
-    schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
-)(
-    _common_pointwise_single_dim_strategy(
-        partial_extra_rules=_NEG_RULES  # pyrefly: ignore[bad-argument-type]
-    )
-)
+for op in neg_ops:
+    _register(op, _NEG_RULES)
 
 # Monotonic binary ops: max-preserving
 for op in monotonic_max_preserving_binary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES)
 
 # Monotonic binary ops: min-preserving
 for op in monotonic_min_preserving_binary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES)
 
 # Monotonic binary ops: no specific partial preservation
 for op in monotonic_binary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_MONOTONE_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _MONOTONE_BINARY_BASE_RULES)
 
+
+# copy_(self, src): preserves all Partial types (2 tensor inputs → 3-element rules)
 for op in all_partial_preserving_binary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_ALL_PARTIAL_BINARY_PRESERVING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
+    _register(op, _ALL_PARTIAL_BINARY_PRESERVING_RULES)
 
-# Generic pointwise ops: just Shard + Replicate strategies
+# Generic pointwise ops: just Shard + Replicate strategies (no partial rules)
 for op in pointwise_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(_common_pointwise_single_dim_strategy())
+    _register(op)
 
 
 # TODO: add all for_each ops
