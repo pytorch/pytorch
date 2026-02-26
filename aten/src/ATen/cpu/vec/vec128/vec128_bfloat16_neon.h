@@ -2,6 +2,7 @@
 
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
+#include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_reduced_precision_common_neon.h>
 #include <ATen/cpu/vec/vec_base.h>
@@ -245,6 +246,13 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
  public:
   using Vectorized16::Vectorized16;
 
+#ifdef CPU_CAPABILITY_SVE128
+  Vectorized(svbfloat16_t v) : Vectorized16(svget_neonq(v)) {}
+  operator svbfloat16_t() const {
+    return svset_neonq(svundef_bf16(), values);
+  }
+#endif
+
   Vectorized() = default;
 
   Vectorized(c10::BFloat16 val)
@@ -435,6 +443,20 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
   Vectorized ge(const Vectorized& other) const;
   Vectorized lt(const Vectorized& other) const;
   Vectorized le(const Vectorized& other) const;
+
+#ifdef CPU_CAPABILITY_SVE128
+  template <typename step_t>
+  static Vectorized<BFloat16> arange(
+      BFloat16 base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
+    __at_align__ BFloat16 buffer[size()];
+    for (int64_t i = 0; i < size(); i++) {
+      buffer[i] = base + i * step;
+    }
+    return svget_neonq(
+        svld1_bf16(ptrue, reinterpret_cast<bfloat16_t*>(buffer)));
+  }
+#endif
 }; // Vectorized<c10::BFloat16>
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(
@@ -456,6 +478,24 @@ inline Vectorized<c10::BFloat16> convert_float_bfloat16(
   at_bfloat16x4_t x1 = Vectorized<c10::BFloat16>::convert_bf16_f32(a);
   at_bfloat16x4_t x2 = Vectorized<c10::BFloat16>::convert_bf16_f32(b);
   return Vectorized<c10::BFloat16>(at_vcombine_bf16(x1, x2));
+}
+
+inline void load_fp32_from_bf16(const BFloat16* data, Vectorized<float>& out) {
+  __at_align__ float values[Vectorized<float>::size()];
+  for (const auto k : c10::irange(Vectorized<float>::size())) {
+    values[k] = data[k];
+  }
+  out = Vectorized<float>::loadu(values);
+}
+
+inline void load_fp32_from_bf16(
+    const BFloat16* data,
+    Vectorized<float>& out1,
+    Vectorized<float>& out2) {
+  Vectorized<BFloat16> bf16_vec = Vectorized<BFloat16>::loadu(data);
+  auto floats = convert_bfloat16_float(bf16_vec);
+  out1 = std::get<0>(floats);
+  out2 = std::get<1>(floats);
 }
 
 template <typename Op>
@@ -693,6 +733,60 @@ Vectorized<c10::BFloat16> inline fnmsub(
 }
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
+
+#if !(!defined(C10_MOBILE) && defined(__aarch64__))
+
+#define CONVERT_NON_VECTORIZED_INIT(type, name)                     \
+  inline std::tuple<Vectorized<float>, Vectorized<float>>           \
+      convert_##name##_float(const Vectorized<type>& a) {           \
+    constexpr int64_t K = Vectorized<type>::size();                 \
+    __at_align__ float arr[K];                                      \
+    __at_align__ type arr2[K];                                      \
+    a.store(arr2);                                                  \
+    for (int64_t i = 0; i < K; i++) {                               \
+      arr[i] = static_cast<float>(arr2[i]);                         \
+    }                                                               \
+    return std::make_tuple(                                         \
+        Vectorized<float>::loadu(arr),                              \
+        Vectorized<float>::loadu(arr + Vectorized<float>::size())); \
+  }                                                                 \
+  inline Vectorized<type> convert_float_##name(                     \
+      const Vectorized<float>& a, const Vectorized<float>& b) {     \
+    constexpr int64_t K = Vectorized<type>::size();                 \
+    __at_align__ float arr[K];                                      \
+    __at_align__ type arr2[K];                                      \
+    a.store(arr);                                                   \
+    b.store(arr + Vectorized<float>::size());                       \
+    for (int64_t i = 0; i < K; i++) {                               \
+      arr2[i] = static_cast<type>(arr[i]);                          \
+    }                                                               \
+    return Vectorized<type>::loadu(arr2);                           \
+  }
+
+#define LOAD_FP32_NON_VECTORIZED_INIT(type, name)                           \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out) {                           \
+    __at_align__ float values[Vectorized<float>::size()];                   \
+    for (const auto k : c10::irange(Vectorized<float>::size())) {           \
+      values[k] = data[k];                                                  \
+    }                                                                       \
+    out = Vectorized<float>::loadu(values);                                 \
+  }                                                                         \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out1, Vectorized<float>& out2) { \
+    __at_align__ float values[Vectorized<type>::size()];                    \
+    for (const auto k : c10::irange(Vectorized<type>::size())) {            \
+      values[k] = data[k];                                                  \
+    }                                                                       \
+    out1 = Vectorized<float>::loadu(values);                                \
+    out2 = Vectorized<float>::loadu(values + Vectorized<float>::size());    \
+  }
+
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
+
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
+
+#endif
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

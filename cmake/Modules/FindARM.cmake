@@ -160,8 +160,9 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       set(CXX_SVE_FOUND FALSE CACHE BOOL "SVE not available on host")
       message(STATUS "No SVE processor on this machine.")
     else()
-      # If SVE256 support is found, set CXX_SVE_FOUND to TRUE and notify the user
+      # Any compiler that supports SVE256 also supports SVE128
       set(CXX_SVE_FOUND TRUE CACHE BOOL "SVE available on host")
+      set(CXX_SVE128_FOUND TRUE CACHE BOOL "CXX SVE128 support")
       message(STATUS "SVE support detected.")
     endif()
 
