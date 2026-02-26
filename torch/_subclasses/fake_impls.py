@@ -944,6 +944,9 @@ def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType |
         return 0
     elif guard_or_false(index > size):
         return size
+    elif guard_or_false(index >= 0):
+        return torch.sym_min(index, size)
+
     return None
 
 
