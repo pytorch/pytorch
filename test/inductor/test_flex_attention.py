@@ -70,7 +70,6 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
-from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
 
@@ -1416,9 +1415,6 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @skipIfRocm(
-        msg="Temporary skip due to regression in triton 3.7 - Flex Attention failure"
-    )
     def test_small_block_mask(self, device):
         compiled_create_block_mask = torch.compile(create_block_mask)
 
@@ -2350,9 +2346,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @skip_on_cpu
-    @skipIfRocm(
-        msg="Temporary skip due to regression in triton 3.7 - Flex Attention failure"
-    )
     def test_return_aux_deprecation_warnings(self, device, dtype):
         """Test that deprecation warnings are issued for legacy parameters"""
         import warnings
@@ -6095,9 +6088,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
 
     @supported_platform
-    @skipIfRocm(
-        msg="Temporary skip due to regression in triton 3.7 - Flex Attention failure"
-    )
     def test_doc_mask_clamped_repro(self, device):
         def _offsets_to_doc_ids_tensor(offsets):
             device = offsets.device
@@ -7869,9 +7859,6 @@ class TestLearnableBiases(InductorTestCase):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
     @skip_on_cpu
-    @skipIfRocm(
-        msg="Temporary skip due to regression in triton 3.7 - Flex Attention failure"
-    )
     def test_flex_attention_logging(self, device):
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = os.path.join(tmpdir, "flex_attention_configs")

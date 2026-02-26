@@ -39,7 +39,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
-    NAVI_ARCH,
     skipIfRocm,
     skipIfRocmArch,
 )
@@ -682,9 +681,6 @@ class TestExternKernelCaller(TestCase):
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @requires_gpu()
-    @skipIfRocmArch(
-        NAVI_ARCH
-    )  # Temporary skip due to regression in triton 3.7 - slow test only on NAVI
     def test_extern_kernel_benchmark_request_variations(self):
         """
         Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
