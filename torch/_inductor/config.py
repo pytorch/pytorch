@@ -1075,6 +1075,15 @@ class aten_distributed_optimizations:
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
 
+    # Default bucketing mode for auto and manual overlap scheduling
+    # "default": traced bucketing, fully lowered by inductor during compilation
+    # "custom_ops": temporary bucketing using custom ops to hide parts from inductor
+    # "custom_ops_multidtype": same as custom_ops but buckets multiple dtypes
+    #     (e.g. bf16 and fp32) into one bucket
+    bucket_mode: Literal["default", "custom_ops", "custom_ops_multidtype"] = (
+        "custom_ops_multidtype"
+    )
+
     # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
     prioritize_bucketing_during_scheduling: bool = True
 
