@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+from collections import namedtuple
+from enum import Enum, IntEnum
 
 import sympy
 
@@ -97,6 +99,43 @@ class TestCodegenTriton(InductorTestCase):
                 ]
             ),
         )
+
+    def test_sanitize_for_repr(self):
+        from torch._inductor.codegen.wrapper import _sanitize_for_repr
+
+        class Color(Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        class Priority(IntEnum):
+            LOW = 0
+            HIGH = 1
+
+        # Enum -> value
+        self.assertEqual(_sanitize_for_repr(Color.RED), "red")
+        self.assertEqual(_sanitize_for_repr(Priority.HIGH), 1)
+
+        # Recursion into containers
+        self.assertEqual(
+            _sanitize_for_repr({"a": Color.RED, "b": [Priority.LOW, 42]}),
+            {"a": "red", "b": [0, 42]},
+        )
+
+        # Tuples
+        self.assertEqual(
+            _sanitize_for_repr((Color.BLUE, 1)),
+            ("blue", 1),
+        )
+
+        # Namedtuples
+        Pair = namedtuple("Pair", ["x", "y"])
+        result = _sanitize_for_repr(Pair(Color.RED, Priority.HIGH))
+        self.assertIsInstance(result, Pair)
+        self.assertEqual(result, Pair("red", 1))
+
+        # Non-enum passthrough
+        self.assertEqual(_sanitize_for_repr(42), 42)
+        self.assertEqual(_sanitize_for_repr("hello"), "hello")
 
 
 if __name__ == "__main__":
