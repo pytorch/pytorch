@@ -66,11 +66,10 @@ jobs:
   docs-link-check:
     name: docs link check
     needs:
-      - docs-push
       - get-label-type
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
     runs-on: ${{ needs.get-label-type.outputs.label-type }}linux.2xlarge
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
       issues: write
@@ -86,11 +85,16 @@ jobs:
       - name: Install linkchecker
         run: pip install linkchecker
 
-      - name: Download Python docs artifact
+      - name: Wait for and download Python docs artifact
         uses: actions/download-artifact@v4
         with:
           name: python-docs-html
           path: docs/build/html
+          # Poll for artifact from docs-push/build-docs-python job
+          # Retry for up to 30 minutes (Python docs build takes ~20-25 min)
+          retry-on-error: true
+          retry-max-attempts: 30
+          retry-delay: 60000
 
       - name: Check internal links and anchors
         id: linkcheck
