@@ -92,3 +92,8 @@ from torch._higher_order_ops.print import _register_dtensor_impl
 
 
 _register_dtensor_impl()
+
+from torch._higher_order_ops.invoke_leaf_function import _register_dtensor_dispatch
+
+
+_register_dtensor_dispatch()

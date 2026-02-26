@@ -426,10 +426,10 @@ class ModTracker:
               first submodule only fire if the tracing input has
               ``requires_grad=True``, since ``aot_export`` only captures backward
               paths for tensors that required grad at trace time.
-            - Tensor subclasses (e.g., ``DTensor``) are not supported.
-              ``invoke_leaf_function`` has no dispatch rule for subclasses, so hooks
-              will fail even in eager mode. Use ``register_user_hooks`` instead for
-              subclass tensors.
+            - ``DTensor`` inputs are supported. Under ``torch.compile``,
+              DTensors are unwrapped to local tensors so hooks receive plain
+              ``torch.Tensor`` at runtime. In eager mode, hooks receive
+              ``DTensor`` objects directly.
 
         Example::
 
