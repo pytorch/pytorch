@@ -620,7 +620,8 @@ class CompiledFxGraph(OutputCode):
             from torch._higher_order_ops.wrap import OutputTensorMeta
 
             fake_vals = [
-                x.meta["val"] for x in gm.graph.find_nodes(op="output")[0].args[0]
+                x.meta["val"] if x is not None else None
+                for x in gm.graph.find_nodes(op="output")[0].args[0]
             ]
             for t in fake_vals:
                 if isinstance(t, torch.Tensor) and any(
