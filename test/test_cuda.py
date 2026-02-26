@@ -619,8 +619,7 @@ print(t.is_pinned())
         def _check_default():
             default = torch.backends.cuda.preferred_blas_library()
             if torch.version.cuda:
-                # CUDA logic is easy, it's always cublas
-                self.assertTrue(default == torch._C._BlasBackend.Cublas)
+                self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 gcn_arch = str(
@@ -4977,6 +4976,14 @@ print(value, end="")
 
     def test_allocator_fuzz(self):
         # fuzz
+        if (
+            torch.version.hip
+            and "expandable_segments:True"
+            in torch._C._accelerator_getAllocatorSettings()
+        ):
+            raise unittest.SkipTest(
+                "ROCm needs https://github.com/ROCm/rocm-systems/pull/3023"
+            )
         state = random.getstate()
         random.seed(123)
         N = 10000

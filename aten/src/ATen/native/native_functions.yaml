@@ -8435,9 +8435,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU: index_fill_
-    CUDA: index_fill_
-    MPS: index_fill_mps_
+    CPU, CUDA, MPS: index_fill_
   autogen: index_fill.int_Scalar_out
 
 - func: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
@@ -8450,8 +8448,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: index_fill_
-    MPS: index_fill_mps_
+    CPU, CUDA, MPS: index_fill_
   autogen: index_fill.int_Tensor_out
 
 - func: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
@@ -9818,8 +9815,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lgamma_out
-    MPS: lgamma_out_mps
+    CPU, CUDA, MPS: lgamma_out
   tags: pointwise
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
@@ -9839,8 +9835,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: digamma_out
-    MPS: digamma_out_mps
+    CPU, CUDA, MPS: digamma_out
   tags: pointwise
 
 - func: digamma(Tensor self) -> Tensor
@@ -9854,8 +9849,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: polygamma_out
-    MPS: polygamma_out_mps
+    CPU, CUDA, MPS: polygamma_out
   tags: pointwise
 
 - func: polygamma(int n, Tensor self) -> Tensor
