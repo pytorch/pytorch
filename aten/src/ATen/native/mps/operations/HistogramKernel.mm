@@ -41,11 +41,11 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   const bool has_weight = weight.has_value();
 
   if (has_weight) {
-    TORCH_CHECK(weight.value().is_contiguous(), "histogramdd(): weight should be contiguous on MPS");
     TORCH_INTERNAL_ASSERT(weight.value().dim() == 1 && weight.value().numel() == N);
     TORCH_INTERNAL_ASSERT(weight.value().scalar_type() == input.scalar_type());
   }
 
+  const int64_t weight_stride = has_weight ? weight.value().stride(0) : 0;
   const int64_t D = input.size(1);
   size_t bin_edges_numel = 0;
   TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
@@ -135,7 +135,8 @@ void histogramdd_kernel_impl(Tensor& hist_output,
                      rightmost_edge,
                      thread_histograms.strides(),
                      bin_selection_algorithm,
-                     has_weight);
+                     has_weight,
+                     weight_stride);
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
