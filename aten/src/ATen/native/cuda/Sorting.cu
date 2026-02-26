@@ -31,7 +31,14 @@ __global__ void gatherKthValue(
     cuda::detail::TensorInfo<int64_t, index_t> indices) {
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of index_t
+#ifndef USE_ROCM
   __shared__ int smem[C10_WARP_SIZE]; // one per each warp, up to warp limit
+#else
+  // Maximum shared memory size for radix select (used in countRadixAggregateCounts): NUM_BUFFERS * MAX_WARPS * RADIX_SIZE.
+  // HIP workgroups have at most 1024 threads. Warp size is at least 32 (can be 64 on some
+  // architectures), so we use 32 for safety: 2 buffers * (1024/32) warps * 4 radix bins = 256.
+  __shared__ int smem[256];
+#endif
 
   index_t slice = getLinearBlockId<index_t>();
   if (slice >= numInputSlices) {
@@ -108,7 +115,14 @@ __global__ void gatherMedian(
     bool ignore_nan) {
   // Shared memory for the subroutine RadixSelect. Note that RadixSelect converts the
   // floating point type to int with the same relative ordering.
+#ifndef USE_ROCM
   __shared__ int smem[C10_WARP_SIZE]; // one per each warp, up to warp limit
+#else
+  // Maximum shared memory size for radix select (used in countRadixAggregateCounts): NUM_BUFFERS * MAX_WARPS * RADIX_SIZE.
+  // HIP workgroups have at most 1024 threads. Warp size is at least 32 (can be 64 on some
+  // architectures), so we use 32 for safety: 2 buffers * (1024/32) warps * 4 radix bins = 256.
+  __shared__ int smem[256];
+#endif
 
   index_t slice = getLinearBlockId<index_t>();
   if (slice >= numInputSlices) {
