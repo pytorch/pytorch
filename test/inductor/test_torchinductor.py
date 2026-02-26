@@ -5013,8 +5013,8 @@ class CommonTemplate:
 
         x = torch.randn([2, 1, 16, 20])
         w = torch.randn([1, 1, 5, 5])
-
-        torch._dynamo.mark_dynamic(x, 0)
+        # X get specialized ! dilation can't be dynamic.
+        torch._dynamo.maybe_mark_dynamic(x, 0)
 
         atol = None
         rtol = None
@@ -11213,6 +11213,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 test_self = self
                 matmul_seen = False
 
+                from torch._higher_order_ops.wrap import inductor_compiled_code
+
                 class TestRefMode(TorchDispatchMode):
                     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
@@ -11232,6 +11234,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                             test_self.assertIsNone(inp_refs[1]())
 
                         return func(*args, **kwargs)
+
+                @inductor_compiled_code.py_impl(TestRefMode)
+                def _(mode, func, inputs):
+                    with mode:
+                        return func(inputs)
 
                 with TestRefMode():
                     fn_compiled(inps)
@@ -14731,6 +14738,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
                 matmul_seen = False
 
+                from torch._higher_order_ops.wrap import inductor_compiled_code
+
                 class TestRefMode(TorchDispatchMode):
                     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
@@ -14747,6 +14756,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                             assert inp_refs[1]() is None
 
                         return func(*args, **kwargs)
+
+                @inductor_compiled_code.py_impl(TestRefMode)
+                def _(mode, func, inputs):
+                    with mode:
+                        return func(inputs)
 
                 with TestRefMode():
                     fn_compiled(inps)

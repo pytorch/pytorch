@@ -1540,7 +1540,6 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         elif isinstance(fx_arg, (tuple, list)):
             logger.info("Argument %s is a tuple/list. Promoting each element.", fx_arg)
             return type(fx_arg)(
-                # pyrefly: ignore [bad-argument-type]
                 self._maybe_promote_arg(node, fx_arg_elem, dtype)
                 for fx_arg_elem in fx_arg
             )
