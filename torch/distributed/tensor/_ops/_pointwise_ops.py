@@ -500,10 +500,10 @@ pointwise_ops = [
     aten.pow.Tensor_Tensor_out,
     aten.pow_.Scalar,
     aten.pow_.Tensor,
+    aten.rad2deg.out,
     aten.reciprocal.default,
     aten.reciprocal.out,
     aten.reciprocal_.default,
-    aten.rad2deg.out,
     aten.remainder.Scalar,
     aten.remainder.Scalar_Tensor,
     aten.remainder.Scalar_out,
@@ -587,8 +587,16 @@ pointwise_ops = [
     *linear_nondecreasing_unary_ops,
     *all_partial_preserving_unary_ops,
     *monotonic_binary_ops,
-    *[op for op in monotonic_max_preserving_binary_ops if op not in partial_preserving_ops],
-    *[op for op in monotonic_min_preserving_binary_ops if op not in partial_preserving_ops],
+    *[
+        op
+        for op in monotonic_max_preserving_binary_ops
+        if op not in partial_preserving_ops
+    ],
+    *[
+        op
+        for op in monotonic_min_preserving_binary_ops
+        if op not in partial_preserving_ops
+    ],
 ]
 
 
