@@ -318,6 +318,7 @@ template <
     typename CountType,
     int RadixSize,
     int RadixBits,
+    bool prefetch,
     typename DataAccessor>
 __device__ __forceinline__ void countRadixLoop(
     CountType counts[RadixSize], // counts[i] will be the number of matching
@@ -395,32 +396,38 @@ __device__ __forceinline__ void countRadixLoop(
 
   // phase 2: processing 1 element at an iteration.
 
-  // prefetching. This is specifically useful for global memory access.
-  scalar_t v = unroll_segment + threadIdx.x < loopBound
-      ? getData(unroll_segment + threadIdx.x)
-      : static_cast<scalar_t>(0);
-  // we pad loopbound to round_up(loopbound, warpSize) to make sure all threads
-  // in the warp participate in the ballot.
+  // prefetching pattern if prefetch is true.
+  // prefetching pattern is only useful for global memory access.
+  scalar_t v_curr;
+  if constexpr (prefetch) {
+    v_curr = unroll_segment + threadIdx.x < loopBound
+        ? getData(unroll_segment + threadIdx.x)
+        : static_cast<scalar_t>(0);
+  }
   for (index_t i = unroll_segment + threadIdx.x;
-       i < round_up(
-               static_cast<index_t>(loopBound), static_cast<index_t>(warpSize));
+       i < loopBound;
        i += blockDim.x) {
-    // prefetch the next element.
-    scalar_t v_next = i + blockDim.x < loopBound ? getData(i + blockDim.x)
-                                                 : static_cast<scalar_t>(0);
+        scalar_t v_local; // the current element.
+        scalar_t v_next; // the next element. Used for prefetching.
 
-    bool hasVal = false;
-    bitwise_t digitInRadix = static_cast<bitwise_t>(0);
-    if (i < loopBound) {
-      bitwise_t val = TopKTypeConfig<scalar_t>::convert(v);
-      // check if bit pattern matches the pattern we have already discovered for
-      // topk value v.
-      hasVal = ((val & desiredMask) == desired);
-      // get the bits [radixDigitPos, radixDigitPos+RADIX_BITS-1] of the value
-      // v.
-      digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(
-          val, radixDigitPos, RadixBits);
-    }
+        if constexpr (prefetch) {
+          // prefetch the next element.
+          v_local = v_curr;
+          v_next = i + blockDim.x < loopBound ? getData(i + blockDim.x)
+                                              : static_cast<scalar_t>(0);
+        }
+        else {
+          v_local = getData(i); // if no prefetching, just get the current element.
+        }
+
+        bitwise_t val = TopKTypeConfig<scalar_t>::convert(v_local);
+        // check if bit pattern matches the pattern we have already discovered for
+        // topk value v.
+        bool hasVal = ((val & desiredMask) == desired);
+        // get the bits [radixDigitPos, radixDigitPos+RADIX_BITS-1] of the value
+        // v.
+        bitwise_t digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(
+            val, radixDigitPos, RadixBits);
 
 // counting across the warp.
 #pragma unroll
@@ -432,7 +439,9 @@ __device__ __forceinline__ void countRadixLoop(
       counts[j] += __popcll(WARP_BALLOT(vote));
     }
 
-    v = v_next; // closing the prefetching loop.
+    if constexpr (prefetch) {
+      v_curr = v_next; // closing the prefetching loop.
+    }
   }
 }
 
@@ -493,7 +502,7 @@ __device__ void countRadixUsingMaskDataSmem(
   // current warp.
   if (dataSmemSize >
       0) { // if shared memory is filled, use dataSmem as the input data.
-    countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits>(
+    countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits, /*prefetch =*/ false>(
         counts,
         desired,
         desiredMask,
@@ -501,7 +510,7 @@ __device__ void countRadixUsingMaskDataSmem(
         dataSmemSize,
         [&](index_t i) -> scalar_t { return dataSmem[i]; });
   } else { // if shared memory is not filled, fall back to global memory.
-    countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits>(
+    countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits, /*prefetch =*/ true>(
         counts,
         desired,
         desiredMask,
@@ -740,21 +749,15 @@ __device__ __forceinline__ void fillDataSmem(
     scalar_t v = threadIdx.x < sliceSize
         ? doLdg(&data[threadIdx.x * withinSliceStride])
         : static_cast<scalar_t>(0);
-    // we pad sliceSize to round_up(sliceSize, warpSize) to make sure all
-    // threads in the warp participate in the ballot.
-    for (index_t i = threadIdx.x; i <
-         round_up(static_cast<index_t>(sliceSize),
-                  static_cast<index_t>(warpSize));
+
+    for (index_t i = threadIdx.x; i < sliceSize;
          i += blockDim.x) {
       scalar_t v_next = (i + blockDim.x) < sliceSize
           ? doLdg(&data[(i + blockDim.x) * withinSliceStride])
           : static_cast<scalar_t>(0);
 
-      bool match = false;
-      if (i < sliceSize) {
-        match =
-            ((TopKTypeConfig<scalar_t>::convert(v) & desiredMask) == desired);
-      }
+      bool match =
+          (TopKTypeConfig<scalar_t>::convert(v) & desiredMask) == desired;
 
       // Warp-level ballot
       uint64_t ballot = WARP_BALLOT(
