@@ -23,12 +23,6 @@ cmake --version
 echo "Environment variables:"
 env
 
-# The sccache wrapped version of nvcc gets put in /opt/cache/lib in docker since
-# there are some issues if it is always wrapped, so we need to add it to PATH
-# during CI builds.
-# https://github.com/pytorch/pytorch/blob/0b6c0898e6c352c8ea93daec854e704b41485375/.ci/docker/common/install_cache.sh#L97
-export PATH="/opt/cache/lib:$PATH"
-
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
   export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
@@ -39,16 +33,6 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
   # Disable FBGEMM for CUDA 13 builds
   export USE_FBGEMM=0
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
-  if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
-    # TODO: there is a linking issue when building with UCC using clang,
-    # disable it for now and to be fix later.
-    # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
-    export USE_UCC=1
-    export USE_SYSTEM_UCC=1
-  fi
 fi
 
 if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
@@ -217,6 +201,11 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
   export CXX=clang++
+  # TODO: Removeme once all the wrappers are gone
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    sudo rm -f /opt/cache/bin/clang++
+  fi
+
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
@@ -230,10 +219,6 @@ fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
   export USE_PER_OPERATOR_HEADERS=0
-fi
-
-if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
-    export USE_PRECOMPILED_HEADERS=1
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
