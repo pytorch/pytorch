@@ -17,7 +17,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._math_ops import _NormPartial
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
@@ -254,13 +257,10 @@ _MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
 # Ops that preserve specific Partial types through the operation.
 # For example, torch.maximum preserves Partial("max") because
 # max(max(a), max(b)) == max(a, b).
+# .out variants stay on old path until PR2 adds out-variant infrastructure
 partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
-    aten.maximum.default: "max",
     aten.maximum.out: "max",
-    prims.fmax.default: "max",
-    aten.minimum.default: "min",
     aten.minimum.out: "min",
-    prims.fmin.default: "min",
 }
 
 
@@ -603,24 +603,6 @@ pointwise_ops = [
     prims.ne.default,
     prims.spherical_bessel_j0.default,
     prims.zeta.default,
-    # Categorized ops below are also in the new category lists above.
-    # They remain here for registration via register_op_strategy until
-    # a follow-up PR switches them to register_single_dim_strategy.
-    *non_decreasing_unary_ops,
-    *non_increasing_unary_ops,
-    *linear_nondecreasing_unary_ops,
-    *all_partial_preserving_unary_ops,
-    *monotonic_binary_ops,
-    *[
-        op
-        for op in monotonic_max_preserving_binary_ops
-        if op not in partial_preserving_ops
-    ],
-    *[
-        op
-        for op in monotonic_min_preserving_binary_ops
-        if op not in partial_preserving_ops
-    ],
 ]
 
 
@@ -1039,32 +1021,137 @@ norm_partial_avoidable_redistribute_ops = {
     aten.mul_.Scalar,
 }
 
-for op in linear_pointwise_ops:
-    if op in norm_partial_avoidable_redistribute_ops:
-        register_op_strategy(
-            op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
-        )(linear_pointwise_strategy)
-    else:
-        register_op_strategy(
-            op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-        )(linear_pointwise_strategy)
+# Register single-dim strategies for all categorized ops.
 
-for op in partial_preserving_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        partial_preserving_pointwise_strategy
+for op in unary_linear_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
+        )
     )
 
-# Register copy_ with its custom strategy that preserves all Partial types
-register_op_strategy(
-    aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-)(copy_strategy)
-register_op_strategy(
-    prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-)(copy_strategy)
+for op in binary_additive_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_BINARY_ADDITIVE_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
 
-for op in pointwise_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        pointwise_strategy
+for op in binary_mul_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
+            + _MUL_RULES
+        )
+    )
+
+for op in binary_div_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
+            + _DIV_RULES
+        )
+    )
+
+for op in scalar_linear_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+for op in non_decreasing_unary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_NON_DECREASING_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+for op in non_increasing_unary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_NON_INCREASING_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+for op in linear_nondecreasing_unary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_LINEAR_NONDECREASING_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+for op in all_partial_preserving_unary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_ALL_PARTIAL_PRESERVING_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+register_single_dim_strategy(
+    neg_ops,
+    schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
+)(
+    _common_pointwise_single_dim_strategy(
+        partial_extra_rules=_NEG_RULES  # pyrefly: ignore[bad-argument-type]
+    )
+)
+
+# Monotonic binary ops: max-preserving
+for op in monotonic_max_preserving_binary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+# Monotonic binary ops: min-preserving
+for op in monotonic_min_preserving_binary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+# Monotonic binary ops: no specific partial preservation
+for op in monotonic_binary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_MONOTONE_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+for op in all_partial_preserving_binary_ops:
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_ALL_PARTIAL_BINARY_PRESERVING_RULES  # pyrefly: ignore[bad-argument-type]
+        )
     )
 
 # TODO: add all for_each ops
