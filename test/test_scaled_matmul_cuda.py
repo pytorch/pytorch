@@ -71,7 +71,7 @@ if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
-f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
+f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
 
@@ -673,8 +673,14 @@ class TestFP8Matmul(TestCase):
 
         if torch.cuda.is_available():
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
-                layouts_supported = (x_cm, y_cm) == (True, False) or torch.cuda.get_device_properties(0).major == 10
+                # SM 10 and 11 support all permutations, SM 12 TT and TN, SM 9 only TN
+                major, minor = torch.cuda.get_device_capability(0)
+                if major in (10, 11):
+                    layouts_supported = True
+                elif major == 12 and (minor == 1 or _get_torch_cuda_version() >= (13, 1)):
+                    layouts_supported = x_cm
+                else:
+                    layouts_supported = (x_cm, y_cm) == (True, False)
                 with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
                     self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
 
@@ -745,8 +751,10 @@ class TestFP8Matmul(TestCase):
             raise ValueError(f'format must be mxfp8|nvfp4|mxfp4, got "{format}"')
 
         if format == 'nvfp4':
-            assert x_global_scales.numel() == w_global_scales.numel()
-            assert x_global_scales.numel() == G
+            if x_global_scales.numel() != w_global_scales.numel():
+                raise AssertionError(f"scale numel mismatch: {x_global_scales.numel()} != {w_global_scales.numel()}")
+            if x_global_scales.numel() != G:
+                raise AssertionError(f"scale numel should be {G}, got {x_global_scales.numel()}")
 
         # Compute mxfp8 grouped mm output
         y_lp = scaled_grouped_mm_wrap(
@@ -763,7 +771,8 @@ class TestFP8Matmul(TestCase):
         )
 
         # Assert no NaNs
-        assert not y_lp.isnan().any(), "low-precision output contains NaN"
+        if y_lp.isnan().any():
+            raise AssertionError("low-precision output contains NaN")
 
         # Assert outputs are close
         torch.testing.assert_close(y_lp, y_bf16, atol=8.0e-2, rtol=8.0e-2)
@@ -889,8 +898,10 @@ class TestFP8Matmul(TestCase):
             raise ValueError(f'format must be mxfp8|nvfp4, got "{format}"')
 
         if format == 'nvfp4':
-            assert x_global_scales.numel() == w_global_scales.numel()
-            assert x_global_scales.numel() == G
+            if x_global_scales.numel() != w_global_scales.numel():
+                raise AssertionError(f"scale numel mismatch: {x_global_scales.numel()} != {w_global_scales.numel()}")
+            if x_global_scales.numel() != G:
+                raise AssertionError(f"scale numel should be {G}, got {x_global_scales.numel()}")
 
         # Compute low-precision grouped gemm.
         y_lp = scaled_grouped_mm_wrap(
@@ -1369,8 +1380,10 @@ class TestFP8Matmul(TestCase):
             if lhs_block == 1:
                 x_scales = x_scales.t().contiguous().t()
                 lhs_recipe = ScalingType.BlockWise1x128
-                assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
-                assert (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]), f"{x_scales.stride=}"
+                if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{x_scales.shape=}")
+                if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
+                    raise AssertionError(f"{x_scales.stride=}")
                 x_hp = hp_from_1x128(x_fp8, x_scales_original)
             else:
                 lhs_recipe = ScalingType.BlockWise128x128
@@ -1388,8 +1401,10 @@ class TestFP8Matmul(TestCase):
             if rhs_block == 1:
                 y_scales = y_scales.t().contiguous().t()
                 rhs_recipe = ScalingType.BlockWise1x128
-                assert (y_scales.shape[0] == N and y_scales.shape[1] == K // 128), f"{y_scales.shape=}"
-                assert (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]), f"{y_scales.stride=}"
+                if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{y_scales.shape=}")
+                if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
+                    raise AssertionError(f"{y_scales.stride=}")
                 y_hp = hp_from_1x128(y_fp8, y_scales_original)
             else:
                 rhs_recipe = ScalingType.BlockWise128x128
@@ -1568,8 +1583,10 @@ class TestFP8Matmul(TestCase):
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
             lhs_recipe = ScalingType.BlockWise1x128
-            assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
-            assert (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]), f"{x_scales.stride=}"
+            if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                raise AssertionError(f"{x_scales.shape=}")
+            if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
+                raise AssertionError(f"{x_scales.stride=}")
         else:
             lhs_recipe = ScalingType.BlockWise128x128
             x_scales, pad_amount = _pad_128x128_scales(x_scales)
@@ -1579,8 +1596,10 @@ class TestFP8Matmul(TestCase):
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
             rhs_recipe = ScalingType.BlockWise1x128
-            assert (y_scales.shape[0] == N and y_scales.shape[1] == K // 128), f"{y_scales.shape=}"
-            assert (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]), f"{y_scales.stride=}"
+            if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
+                raise AssertionError(f"{y_scales.shape=}")
+            if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
+                raise AssertionError(f"{y_scales.stride=}")
         else:
             rhs_recipe = ScalingType.BlockWise128x128
             y_scales, pad_amount = _pad_128x128_scales(y_scales)
@@ -1830,7 +1849,8 @@ class TestFP8Matmul(TestCase):
         )
 
         sqnr = compute_error(C_ref, C)
-        assert sqnr.item() > approx_match_sqnr_target
+        if sqnr.item() <= approx_match_sqnr_target:
+            raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
@@ -2091,7 +2111,8 @@ class TestFP8Matmul(TestCase):
             torch.testing.assert_close(C, C_ref, atol=0, rtol=0)
         else:
             sqnr = compute_error(C_ref, C)
-            assert sqnr.item() > approx_match_sqnr_target
+            if sqnr.item() <= approx_match_sqnr_target:
+                raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
