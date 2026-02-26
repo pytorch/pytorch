@@ -18,7 +18,7 @@
 #include <ATen/cpu/vec/vec256/vec256_int.h>
 #include <ATen/cpu/vec/vec256/vec256_qint.h>
 #endif
-#if !defined(CPU_CAPABILITY_SVE256) || !defined(__ARM_FEATURE_BF16)
+#if !defined(CPU_CAPABILITY_SVE) || !defined(__ARM_FEATURE_BF16)
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #endif
 #include <ATen/cpu/vec/vec256/vec256_half.h>
