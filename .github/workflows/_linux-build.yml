@@ -47,6 +47,11 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
+      timeout-minutes:
+        required: false
+        default: 480
+        type: number
+        description: timeout for the job
       selected-test-configs:
         description: |
           A comma-separated list of test configurations from the test matrix to keep,
@@ -131,7 +136,7 @@ jobs:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
-    timeout-minutes: 480
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
@@ -186,10 +191,19 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
+
+      - name: Calculate docker image s390x (test-only, remove later)
+        id: calculate-docker-image-s390x
+        if: inputs.build-environment == 'linux-s390x-binary-manywheel'
+        uses: AlekseiNikiforovIBM/pytorch-test-infra/.github/actions/calculate-docker-image@s390x-calculate-docker-image
+        with:
+          docker-build-script: ${{ inputs.build-environment != 'linux-s390x-binary-manywheel' && './build.sh' || './manywheel/build.sh' }}
+          docker-image-name: ${{ inputs.docker-image-name }}
+          use-aws: ${{ inputs.build-environment != 'linux-s390x-binary-manywheel' }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -265,8 +279,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-          DOCKER_IMAGE_S390X: ${{ inputs.docker-image-name }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || steps.calculate-docker-image-s390x.outputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -277,7 +290,6 @@ jobs:
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
-            USED_IMAGE="${DOCKER_IMAGE_S390X}"
             # ensure that docker container cleanly exits in 12 hours
             # if for some reason cleanup action doesn't stop container
             # when job is cancelled
@@ -288,7 +300,6 @@ jobs:
             env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           else
             JENKINS_USER="--user jenkins"
-            USED_IMAGE="${DOCKER_IMAGE}"
             DOCKER_SHELL_CMD=
           fi
 
@@ -355,7 +366,7 @@ jobs:
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${USED_IMAGE}" \
+            "${DOCKER_IMAGE}" \
             ${DOCKER_SHELL_CMD}
           )
 
@@ -475,3 +486,13 @@ jobs:
           # on s390x stop the container for clean worker stop
           docker stop -a || true
           docker kill -a || true
+
+          # If podman build command is interrupted,
+          # it can leave a couple of processes still running.
+          # Order them to stop for clean shutdown.
+          # It looks like sometimes some processes remain
+          # after first cleanup.
+          # Wait a bit and do cleanup again. It looks like it helps.
+          docker system prune --build -f || true
+          sleep 60
+          docker system prune --build -f || true

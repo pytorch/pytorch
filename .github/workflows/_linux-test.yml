@@ -148,10 +148,19 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image }}
+
+      - name: Calculate docker image s390x (test-only, remove later)
+        id: calculate-docker-image-s390x
+        if: inputs.build-environment == 'linux-s390x-binary-manywheel'
+        uses: AlekseiNikiforovIBM/pytorch-test-infra/.github/actions/calculate-docker-image@s390x-calculate-docker-image
+        with:
+          docker-build-script: ${{ inputs.build-environment != 'linux-s390x-binary-manywheel' && './build.sh' || './manywheel/build.sh' }}
+          docker-image-name: ${{ inputs.docker-image }}
+          use-aws: ${{ inputs.build-environment != 'linux-s390x-binary-manywheel' }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -338,8 +347,7 @@ jobs:
           SCCACHE_BUCKET: ${{ !contains(matrix.runner, 'b200') && 'ossci-compiler-cache-circleci-v2' || '' }}
           SCCACHE_REGION: ${{ !contains(matrix.runner, 'b200') && 'us-east-1' || '' }}
           SHM_SIZE: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && '2g' || '1g' }}
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-          DOCKER_IMAGE_S390X: ${{ inputs.docker-image }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || steps.calculate-docker-image-s390x.outputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
@@ -383,12 +391,10 @@ jobs:
             # if for some reason cleanup action doesn't stop container
             # when job is cancelled
             DOCKER_SHELL_CMD="sleep 12h"
-            USED_IMAGE="${DOCKER_IMAGE_S390X}"
           else
             SHM_OPTS="--shm-size=${SHM_SIZE}"
             JENKINS_USER="--user jenkins"
             DOCKER_SHELL_CMD=
-            USED_IMAGE="${DOCKER_IMAGE}"
           fi
 
           # Just create an empty HF_CACHE dir if it doesn't exist. This dir is not
@@ -474,7 +480,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -v "${HF_CACHE}:${HF_CACHE}" \
             -w /var/lib/jenkins/workspace \
-            "${USED_IMAGE}" \
+            "${DOCKER_IMAGE}" \
             ${DOCKER_SHELL_CMD}
           )
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
@@ -579,3 +585,13 @@ jobs:
           # on s390x stop the container for clean worker stop
           docker stop -a || true
           docker kill -a || true
+
+          # If podman build command is interrupted,
+          # it can leave a couple of processes still running.
+          # Order them to stop for clean shutdown.
+          # It looks like sometimes some processes remain
+          # after first cleanup.
+          # Wait a bit and do cleanup again. It looks like it helps.
+          docker system prune --build -f || true
+          sleep 60
+          docker system prune --build -f || true

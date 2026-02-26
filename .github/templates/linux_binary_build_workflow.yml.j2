@@ -76,7 +76,7 @@ jobs:
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
-      timeout-minutes: 420
+      timeout-minutes: 600
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       timeout-minutes: 300
@@ -114,6 +114,7 @@ jobs:
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
+      timeout-minutes: 420
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" and config["gpu_arch_version"] in ["12.6"] %}

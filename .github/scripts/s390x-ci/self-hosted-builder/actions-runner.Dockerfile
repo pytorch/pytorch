@@ -105,15 +105,7 @@ WORKDIR /home/actions-runner
 # and it doesn't work for non-root user
 RUN virtualenv --system-site-packages venv
 
-# copy prebuilt manywheel docker image for builds and tests
-# build command is:
-# GPU_ARCH_TYPE=cpu-s390x "$(pwd)/manywheel/build_docker.sh"
-# and save command is:
-# docker image save -o manywheel-s390x.tar pytorch/manylinuxs390x-builder:cpu-s390x
-#
-COPY --chown=actions-runner:actions-runner manywheel-s390x.tar /home/actions-runner/manywheel-s390x.tar
-
-RUN curl -L https://github.com/actions/runner/releases/download/v2.322.0/actions-runner-linux-x64-2.322.0.tar.gz | tar -xz
+RUN curl -L https://github.com/actions/runner/releases/download/v2.331.0/actions-runner-linux-x64-2.331.0.tar.gz | tar -xz
 
 ENTRYPOINT ["/usr/bin/entrypoint"]
 CMD ["/usr/bin/actions-runner"]
