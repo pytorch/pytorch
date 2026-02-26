@@ -8355,7 +8355,39 @@ for shape in [(1,), ()]:
         self.assertTrue(pow2_sv.data is c)
         self.assertIsNone(pow2_sv.unpack_hook)
 
-    def test_cant_create_saved_tensors(self):
+    def test_saved_tensor_constructor_with_hooks(self):
+        pack_count = [0]
+        unpack_count = [0]
+
+        def pack_hook(x):
+            pack_count[0] += 1
+            return x
+
+        def unpack_hook(x):
+            unpack_count[0] += 1
+            return x
+
+        a = torch.randn(5, requires_grad=True)
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            saved = torch._C._autograd._make_saved_tensor(a, is_output=False)
+            self.assertEqual(pack_count[0], 1)
+            self.assertEqual(unpack_count[0], 0)
+
+            unpacked = saved.unpack()
+            self.assertEqual(pack_count[0], 1)
+            self.assertEqual(unpack_count[0], 1)
+
+            unpacked2 = saved.unpack()
+            self.assertEqual(pack_count[0], 1)
+            self.assertEqual(unpack_count[0], 2)
+
+        # Check tensor equality outside the hooks context to avoid
+        # triggering additional pack hooks from assertEqual internals
+        self.assertEqual(unpacked, a)
+        self.assertEqual(unpacked2, a)
+
+    def test_saved_tensor_constructor_forbidden_without_flag(self):
+        a = torch.randn(5, requires_grad=True)
         with self.assertRaisesRegex(
             RuntimeError,
             "Trying to create a SavedTensor object from Python is forbidden",
@@ -15645,6 +15677,17 @@ class TestAutogradMultipleDispatch(TestCase):
             "backward() should invoke __torch_function__ on tensor subclasses",
         )
         self.assertEqual(x.grad, 2 * torch.ones_like(x))
+
+    def test_trace_backward_nonsquare_171704(self):
+        # https://github.com/pytorch/pytorch/issues/171704
+        for shape in [(5, 2), (7, 3), (4, 1), (1, 5), (2, 5)]:
+            with self.subTest(shape=shape):
+                x = torch.randn(shape, dtype=torch.float64, requires_grad=True)
+                torch.trace(x).backward()
+                expected = torch.zeros(shape, dtype=torch.float64)
+                for i in range(min(shape)):
+                    expected[i, i] = 1.0
+                self.assertEqual(x.grad, expected)
 
 
 # Import test cases from below autograd/ here. These are found
