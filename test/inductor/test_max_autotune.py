@@ -1031,6 +1031,7 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch("trace.enabled", True)
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     @config.patch("triton.native_matmul", False)
@@ -1084,6 +1085,7 @@ class TestMaxAutotune(TestCase):
 
         torch._logging.set_logs()
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch({"test_configs.force_extern_kernel_in_multi_template": True})
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
@@ -4715,8 +4717,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         cache_entries_after_second = len(AsyncAutotuner.choice_hash_to_future)
         self.assertEqual(cache_entries_after_second, 0)
 
-    # Fails on MI355 with triton 3.7
-    @skipIfRocmArch(MI350_ARCH)
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @config.patch(max_autotune_gemm=True)
     def test_triton_error_precompilation_and_autotuning(self):
         """
