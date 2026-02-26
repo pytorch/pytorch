@@ -1604,6 +1604,59 @@ class TestSDPAFailureModes(NNTestCase):
         self.assertEqual(out.shape, (2, 2, 0, 8))
         self.assertEqual(out, torch.zeros(2, 2, 0, 8, dtype=dtype, device=device))
 
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_sdpa_unbacked_no_dde(self, device):
+        """
+        Test that scaled_dot_product_attention with dynamic symbolic dimensions
+        does not raise GuardOnDataDependentSymNode when checking for empty tensors.
+        This tests the TORCH_GUARD_OR_FALSE fix in attention.cpp.
+        Regression test for D94287846.
+        """
+
+        def func(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v)
+
+        dtype = torch.float32
+        q = torch.rand(4, 2, 8, 16, dtype=dtype, device=device)
+        k = torch.rand(4, 2, 8, 16, dtype=dtype, device=device)
+        v = torch.rand(4, 2, 8, 16, dtype=dtype, device=device)
+
+        torch._dynamo.mark_dynamic(q, 0)
+        torch._dynamo.mark_dynamic(k, 0)
+        torch._dynamo.mark_dynamic(v, 0)
+
+        torch._dynamo.reset()
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(q, k, v)
+        expected = func(q, k, v)
+        self.assertEqual(result.shape, expected.shape)
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_sdpa_empty_unbacked_no_dde(self, device):
+        """
+        Test that scaled_dot_product_attention with zero sequence length and
+        dynamic dimensions does not raise GuardOnDataDependentSymNode.
+        This tests the early return path in attention.cpp with symbolic shapes.
+        Regression test for D94287846.
+        """
+
+        def func(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v)
+
+        dtype = torch.float32
+        q = torch.rand(2, 2, 0, 8, dtype=dtype, device=device)
+        k = torch.rand(2, 2, 0, 8, dtype=dtype, device=device)
+        v = torch.rand(2, 2, 0, 8, dtype=dtype, device=device)
+
+        torch._dynamo.mark_dynamic(q, 2)
+        torch._dynamo.mark_dynamic(k, 2)
+        torch._dynamo.mark_dynamic(v, 2)
+
+        torch._dynamo.reset()
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(q, k, v)
+        self.assertEqual(result.shape, (2, 2, 0, 8))
+
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
