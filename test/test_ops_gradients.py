@@ -64,7 +64,7 @@ class TestBwdGradients(TestGradients):
                 device, dtype, op, self._get_safe_inplace(op.get_inplace())
             )
 
-    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
+    @skipIfRocm(msg="Fails with Triton 3.7")
     # Test that gradients of gradients are computed correctly
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_gradgrad(self, device, dtype, op):

@@ -4299,7 +4299,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 tma_heuristic.mm_configs = original_tma_mm_configs
                 mm_heuristic.mm_configs = original_mm_mm_configs
 
-    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(
         not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
     )

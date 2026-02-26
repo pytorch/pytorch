@@ -4308,7 +4308,7 @@ class TestCudaMallocAsync(TestCase):
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
-    @skipIfRocmArch(MI350_ARCH)
+    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_memory_plots(self):
         for context, stacks in (
             ("all", "all" if IS_LINUX else "python"),
