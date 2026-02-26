@@ -92,7 +92,8 @@ def count_ops(
 
     # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
     if op is not None:
-        assert not isinstance(op, list)
+        if isinstance(op, list):
+            raise AssertionError("Expected op to not be a list")
         ops = [op]
     if freq is not None:
         freqs = [freq]
@@ -105,24 +106,30 @@ def count_ops(
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
             err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
-            assert actual_count == freq, err_msg
+            if actual_count != freq:
+                raise AssertionError(err_msg)
     else:
-        assert freqs_ge is not None
+        if freqs_ge is None:
+            raise AssertionError("Expected freqs_ge to not be None")
         for op, freq_ge in zip(ops, freqs_ge):
             actual_count = 0
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            assert actual_count >= freq_ge, (
-                f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
-            )
+            if actual_count < freq_ge:
+                raise AssertionError(
+                    f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
+                )
     return gm
 
 
 def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: set[str]):
     if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
         return_node = list(graph.nodes)[-1]
-        assert return_node.target == "output"
+        if return_node.target != "output":
+            raise AssertionError(
+                f"Expected return_node.target to be 'output', got {return_node.target}"
+            )
         for x in return_node.args[0]:
             fwd_outputs.add(str(x))
 

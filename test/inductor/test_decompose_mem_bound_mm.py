@@ -86,7 +86,8 @@ class TestDecomposeMemMM(TestCase):
             return False
         for key1 in ref_dict:
             key2 = "_orig_mod." + key1
-            assert key2 in res_dict, f"{key1} does not exist in traced module"
+            if key2 not in res_dict:
+                raise AssertionError(f"{key1} does not exist in traced module")
             if not torch.allclose(
                 ref_dict[key1], res_dict[key2], rtol=self.rtol, atol=self.atol
             ):

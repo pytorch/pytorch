@@ -289,31 +289,34 @@ class TestFunctorchDispatcher(TestCase):
     def test_register_a_batching_rule_for_composite_implicit_autograd(
         self, registration
     ):
-        assert registration not in FuncTorchBatchedRegistrations, (
-            f"You've added a batching rule for a CompositeImplicitAutograd operator {registration}. "
-            "The correct way to add vmap support for it is to put it into BatchRulesDecomposition to "
-            "reuse the CompositeImplicitAutograd decomposition"
-        )
+        if registration in FuncTorchBatchedRegistrations:
+            raise AssertionError(
+                f"You've added a batching rule for a CompositeImplicitAutograd operator {registration}. "
+                "The correct way to add vmap support for it is to put it into BatchRulesDecomposition to "
+                "reuse the CompositeImplicitAutograd decomposition"
+            )
 
     @dispatch_registrations(
         "FuncTorchBatchedDecomposition", xfail_functorch_batched_decomposition
     )
     def test_register_functorch_batched_decomposition(self, registration):
-        assert registration in CompositeImplicitAutogradRegistrations, (
-            f"The registrations in BatchedDecompositions.cpp must be for CompositeImplicitAutograd "
-            f"operations. If your operation {registration} is not CompositeImplicitAutograd, "
-            "then please register it to the FuncTorchBatched key in another file."
-        )
+        if registration not in CompositeImplicitAutogradRegistrations:
+            raise AssertionError(
+                f"The registrations in BatchedDecompositions.cpp must be for CompositeImplicitAutograd "
+                f"operations. If your operation {registration} is not CompositeImplicitAutograd, "
+                "then please register it to the FuncTorchBatched key in another file."
+            )
 
     @dispatch_registrations(
         "CompositeImplicitAutograd", xfail_not_implemented, filter_vmap_implementable
     )
     def test_unimplemented_batched_registrations(self, registration):
-        assert registration in FuncTorchBatchedDecompositionRegistrations, (
-            f"Please check that there is an OpInfo that covers the operator {registration} "
-            "and add a registration in BatchedDecompositions.cpp. "
-            "If your operator isn't user facing, please add it to the xfail list"
-        )
+        if registration not in FuncTorchBatchedDecompositionRegistrations:
+            raise AssertionError(
+                f"Please check that there is an OpInfo that covers the operator {registration} "
+                "and add a registration in BatchedDecompositions.cpp. "
+                "If your operator isn't user facing, please add it to the xfail list"
+            )
 
 
 instantiate_parametrized_tests(TestFunctorchDispatcher)

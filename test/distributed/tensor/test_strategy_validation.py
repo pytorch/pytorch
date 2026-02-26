@@ -1271,6 +1271,46 @@ class TestCompareOperatorEndToEnd(TestCase):
         self._with_even_sizes(run)
 
 
+class TestMainModule(TestCase):
+    """Test that strategy_validation can be run as a main module."""
+
+    def _run_module(self, *extra_args):
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "torch.distributed.tensor._ops.strategy_validation",
+                "--device",
+                "cpu",
+                *extra_args,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Module exited with code {result.returncode}.\n"
+            f"stderr: {result.stderr[-2000:]}",
+        )
+        return result.stdout
+
+    def test_run_as_module_default(self):
+        """Running with no args should validate 'add' and exit cleanly."""
+        stdout = self._run_module()
+        self.assertIn("add", stdout)
+        self.assertIn("Correct", stdout)
+
+    def test_run_with_op_flag(self):
+        """Running with --op mul --incorrect-only should work."""
+        stdout = self._run_module("--op", "mul", "--incorrect-only")
+        self.assertIn("mul", stdout)
+
+
 class TestOpInfoLookup(TestCase):
     """Tests for get_opinfo_by_name, _find_opinfo_candidates, and resolve_op_names."""
 

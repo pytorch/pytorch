@@ -2,6 +2,7 @@
 import contextlib
 import logging
 import math
+import os
 from collections.abc import Callable
 from functools import lru_cache
 from typing import Any, cast, TypeVar
@@ -207,7 +208,12 @@ GEMM_TEMPLATE = r"""
 {%- endif %}
 
 {%- if num_threads > 1 %}
+    {%- set use_dynamic_threads = ((config.cpp.threads < 1) and (num_threads == cpu_count)) or config.cpp.dynamic_threads %}
+    {%- if use_dynamic_threads %}
+    #pragma omp parallel
+    {%- else %}
     #pragma omp parallel num_threads({{num_threads}})
+    {%- endif %}
     {
         {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
@@ -1606,6 +1612,7 @@ class CppGemmTemplate(CppTemplate):
             is_woq_int4=self.is_woq_int4(),
             q_group_size=q_group_size_node,
             qscale_and_zeros=qscale_and_zeros,
+            cpu_count=os.cpu_count(),
         )
         return options
 

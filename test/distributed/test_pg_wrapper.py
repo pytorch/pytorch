@@ -564,8 +564,9 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
 
 
 if __name__ == "__main__":
-    assert not (torch.cuda.is_initialized() or torch.xpu.is_initialized()), (
-        "test_pg_wrapper must not have initialized CUDA/XPU context on main process"
-    )
+    if torch.cuda.is_initialized() or torch.xpu.is_initialized():
+        raise AssertionError(
+            "test_pg_wrapper must not have initialized CUDA/XPU context on main process"
+        )
 
     run_tests()

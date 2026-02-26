@@ -153,7 +153,7 @@ bool MPSHooks::isPinnedPtr(const void* data) const {
 }
 
 Allocator* MPSHooks::getPinnedMemoryAllocator() const {
-  return at::mps::getIMPSAllocator();
+  return at::mps::getIMPSAllocator(true);
 }
 
 using at::MPSHooksRegistry;
