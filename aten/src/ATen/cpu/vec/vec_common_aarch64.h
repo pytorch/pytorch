@@ -8,6 +8,9 @@
 #ifdef CPU_CAPABILITY_SVE128
 // SVE128: NEON Vectorized types with SVE bridge operators
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_double_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_int_aarch64.h>
+#include <ATen/cpu/vec/vec128/vec128_uint_aarch64.h>
 #include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_half_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
@@ -25,6 +28,9 @@
 
 #else // NEON (DEFAULT)
 #include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_double_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_int_aarch64.h>
+#include <ATen/cpu/vec/vec128/vec128_uint_aarch64.h>
 #include <ATen/cpu/vec/vec128/vec128_half_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
