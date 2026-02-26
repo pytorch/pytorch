@@ -34,19 +34,34 @@ Usage::
 
 import contextlib
 import functools
-import inspect
 import logging
-import os
-import traceback
-import weakref
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._logging import warning_once
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.fx.graph import _parse_stack_trace
-from torch.utils._dtype_abbrs import dtype_abbrs
+
+# Import _utils module for mutable globals
+from torch.utils._debug_mode import _utils
+from torch.utils._debug_mode._calls import (
+    _AnnotateCall,
+    _get_call_name,
+    _OpCall,
+    _OutputPlacementCall,
+    _RedistributeCall,
+    _TritonKernelCall,
+)
+from torch.utils._debug_mode._utils import (
+    _compute_rel_diff,
+    _get_user_stack_trace,
+    _run_dispatch_hooks,
+    _run_dispatch_pre_log_hooks,
+    _stringify_dtensor_spec,
+    hash_tensor_fn,
+    norm_hash_fn,
+    TensorIdTracker,
+)
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _get_current_dispatch_mode_stack,
@@ -59,209 +74,17 @@ from torch.utils._pytree import (
     tree_map_only,
     tree_map_with_path,
 )
-from torch.utils._traceback import CapturedTraceback
-from torch.utils.weak import WeakIdRef
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.device_interface import DeviceInterface
     from torch.distributed._tools.mod_tracker import ModTracker
 
 
 log = logging.getLogger(__name__)
 
-__all__ = ["DebugMode", "get_active_debug_mode"]
 
-
-REDISTRIBUTE_FUNC = "redistribute_input"
-# registered dispatch call hooks
-_DISPATCH_RECORD_HOOKS: list[Callable] = []
-_DISPATCH_LOG_HOOKS: list[Callable] = []
-_DISPATCH_PRE_LOG_HOOKS: list[Callable] = []
-# Tracks if we're in inductor benchmarking, and temporarily disables logging
-# (for ignoring autotuning kernel launches which don't affect the user-facing result)
-_IN_INDUCTOR_BENCHMARK = False
-# For record_outputs, log_tensor_hashes hooks for triton kernels.
-# Stores kernel outputs in call.record["output"]
-_RECORD_TRITON_OUTPUTS = False
-# Annotates kernel output hashes, and stores them in call.post_hashes
-_TRITON_OUTPUT_HASH_FN = None
-# Annotates kernel input hashes, and stores them in call.pre_hashes
-_TRITON_INPUT_HASH_FN = None
 # Counter for active DebugMode instances (fast path for get_active_debug_mode)
 _ACTIVE_DEBUG_MODE_COUNT = 0
-
-
-def _stringify_shape(shape) -> str:
-    return f"[{', '.join([str(x) for x in shape])}]"
-
-
-def _stringify_device_mesh(mesh) -> str:
-    return f"DM({', '.join([str(s) for s in mesh.shape])})"
-
-
-def _stringify_placement(placement) -> str:
-    return f"[{', '.join([str(p) for p in placement])}]"
-
-
-def _stringify_attributes(tensor, attributes) -> str:
-    pairs = {}
-    for attr in attributes:
-        if hasattr(tensor, attr):
-            pairs[attr] = getattr(tensor, attr)
-    if len(pairs) == 0:
-        return ""
-    return f"{{{', '.join([f'{k}={v}' for k, v in pairs.items()])}}}"
-
-
-def _stringify_dtensor_spec(spec) -> str:
-    from torch.distributed.tensor._dtensor_spec import DTensorSpec
-
-    return DTensorSpec.format_shard_order_str(spec.placements, spec.shard_order)
-
-
-class TensorIdTracker:
-    def __init__(self) -> None:
-        self.tensor_memo: dict[WeakIdRef, int] = {}
-        self.next_tensor_id = 0
-
-    def _id(self, tensor) -> int:
-        with torch._C._DisablePythonDispatcher():
-            o = WeakIdRef(tensor)
-
-            def del_memo() -> None:
-                self.tensor_memo.pop(o, None)
-
-            weakref.finalize(tensor, del_memo)
-            if o not in self.tensor_memo:
-                self.tensor_memo[o] = self.next_tensor_id
-                self.next_tensor_id += 1
-            return self.tensor_memo[o]
-
-
-def _tensor_debug_string(tensor, attributes, tensor_memo=None) -> str:
-    """Convert tensor to debug string representation."""
-
-    if isinstance(tensor, torch.Tensor):
-        tensor_debug_str = f"{dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_attributes(tensor, attributes)}"
-        id_str = f"${tensor_memo._id(tensor)}" if tensor_memo is not None else ""
-        if isinstance(tensor, torch.distributed.tensor.DTensor):
-            # omitted device mesh
-            return f"dt{id_str}: {tensor_debug_str}| {_stringify_dtensor_spec(tensor._spec)}"
-        elif isinstance(tensor, FakeTensor):
-            return f"ft{id_str}: {tensor_debug_str}"
-        else:
-            return f"t{id_str}: {tensor_debug_str}"
-    else:
-        raise RuntimeError(f"Unsupported tensor type: {type(tensor)}")
-
-
-def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
-    from torch.distributed.tensor._dtensor_spec import DTensorSpec
-
-    def to_str(x):
-        if isinstance(x, torch.Tensor):
-            return _tensor_debug_string(x, attributes, tensor_memo)
-        elif isinstance(x, DTensorSpec):
-            return _stringify_dtensor_spec(x)
-        return x
-
-    arg = tree_map(to_str, arg)
-    return str(arg)
-
-
-def norm_hash_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor | float:
-    """
-    from Observer. Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
-    replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
-    This is used to generate a deterministic summary value for tensor comparison.
-    """
-    with torch._C._DisablePythonDispatcher():
-        if not (t.is_floating_point() or t.is_complex()):
-            t = t.float()
-        t = t.contiguous()
-
-        if t.is_complex():
-            t_float = t.to(dtype=torch.complex128)
-        else:
-            t_float = t.to(dtype=torch.float64)
-
-        out = t_float.norm(p=1)
-        if use_scalar:
-            return out.item()
-        return out
-
-
-def _compute_rel_diff(hash1, hash2):
-    # Relative difference: |hash1 - hash2| / max(|hash1|, |hash2|, eps)
-    numerator = abs(hash1 - hash2)
-    denominator = max(abs(hash1), abs(hash2), 1e-10)
-    return numerator / denominator
-
-
-def hash_tensor_fn(t: torch.Tensor, use_scalar: bool = False) -> torch.Tensor | int:
-    """
-    wrapper over torch.hash_tensor
-    """
-    if isinstance(t, torch.distributed.tensor.DTensor):
-        t = t.to_local()
-
-    if t.is_floating_point():
-        t_clean = t.to(dtype=torch.float64)
-    elif t.is_complex():
-        t_clean = t.to(dtype=torch.complex128).view(torch.float64)
-    else:
-        t_clean = t.to(dtype=torch.int64)
-
-    if t.numel() > 0:
-        out = torch.hash_tensor(t_clean)
-    else:
-        out = torch.zeros((), device=t_clean.device, dtype=torch.uint64)
-
-    if use_scalar:
-        return out.item()  # type: ignore[attribute]
-    return out
-
-
-def _get_stack_trace() -> str:
-    from torch.fx.experimental.symbolic_shapes import uninteresting_files
-
-    summary = CapturedTraceback.extract().summary()
-    summary = summary[:-4]  # filter out DebugMode frames
-    summary = [
-        frame for frame in summary if frame.filename not in uninteresting_files()
-    ]
-    summary = traceback.StackSummary.from_list(summary)
-    return "".join(summary.format())
-
-
-def _get_user_stack_trace(stack_trace_str: str) -> str | None:
-    # Extract user code stack trace, filtering out torch internals.
-    torch_dir = os.path.dirname(inspect.getfile(torch))
-    filter_fn = lambda file, name, code: not file.startswith(torch_dir + os.path.sep)  # noqa: E731
-    trace = _parse_stack_trace(stack_trace_str, filter_fn=filter_fn)
-    if trace:
-        return f"File: {trace.file}:{trace.lineno} in {trace.name}, code: {trace.code}"
-    return None
-
-
-def _maybe_get_autograd_trace() -> str | None:
-    if torch._C._current_autograd_node() is not None:
-        tb = torch._C._current_autograd_node().metadata.get("traceback_")  # type: ignore[attr-defined]
-        if tb:
-            return "".join(tb)
-    return None
-
-
-def _get_op_name(op) -> str:
-    if isinstance(op, torch._ops.OpOverload):
-        op_name = op.__qualname__
-    elif hasattr(op, "__module__") and hasattr(op, "__name__"):
-        op_name = f"{op.__module__}.{op.__name__}"
-    else:
-        op_name = str(op)
-    return op_name
-
 
 _annotate_decorated = False
 
@@ -288,378 +111,6 @@ def _ensure_annotate_decorated():
             return None
 
         _annotate_decorated = True
-
-
-class _DebugCall:
-    """Base class for tracking operator calls in DebugMode"""
-
-    def __init__(
-        self,
-        call_depth: int,
-        record: dict[str, Any] | None = None,
-        log: dict[str, Any] | None = None,
-        stack: bool = False,
-    ) -> None:
-        self.call_depth = call_depth
-        if stack:
-            self.stack_trace = _get_stack_trace()
-            self.fwd_stack_trace = _maybe_get_autograd_trace()
-
-        # results from dispatch hooks
-        self.record = record
-        self.log = log
-        self.output_str: str | None = None
-
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
-    ) -> None:
-        """
-        To reduce memory consumption, this method stringifies args/kwargs, stores the result, and deletes original args/kwargs.
-        """
-        raise NotImplementedError(
-            "Subclasses must implement stringify_args(), even if no-op"
-        )
-
-    def stringify_output(
-        self,
-        output: Any,
-        attributes: list[str],
-        tensor_memo: TensorIdTracker | None = None,
-    ) -> None:
-        """Store stringified version of call output in self.output_str"""
-        if tree_all(lambda x: x is None, output):
-            return
-        output_str = tree_map(lambda x: _arg_to_str(x, attributes, tensor_memo), output)
-        self.output_str = f"  ->  {str(output_str)}"
-
-    def render(self, attributes: list[str]) -> str:
-        raise NotImplementedError("Subclasses must implement string render()")
-
-    def __repr__(self) -> str:
-        return self.render([])
-
-
-class _OpCall(_DebugCall):
-    """Normal operator call"""
-
-    def __init__(
-        self,
-        op,
-        args: tuple,
-        kwargs: dict,
-        call_depth: int,
-        stack: bool = False,
-    ) -> None:
-        super().__init__(call_depth, stack=stack)
-        self.op = op
-        self.args = args
-        self.kwargs = kwargs
-
-        self.args_str: str | None = None
-        self.kwargs_str: str | None = None
-
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
-    ) -> None:
-        self.args_str = ", ".join(
-            _arg_to_str(arg, attributes, tensor_memo) for arg in self.args
-        )
-        if self.kwargs:
-            self.kwargs_str = ", " + ", ".join(
-                f"{k}={_arg_to_str(v, attributes, tensor_memo)}"
-                for k, v in self.kwargs.items()
-            )
-        else:
-            self.kwargs_str = ""
-        del self.args
-        del self.kwargs
-
-    def render(self, attributes: list[str]) -> str:
-        if self.args_str is not None:
-            args_str = self.args_str
-        else:
-            args_str = ", ".join(_arg_to_str(arg, attributes) for arg in self.args)
-
-        if self.kwargs_str is not None:
-            kwargs_str = self.kwargs_str
-        else:
-            if self.kwargs:
-                kwargs_str = ", " + ", ".join(
-                    f"{k}={_arg_to_str(v, attributes)}" for k, v in self.kwargs.items()
-                )
-            else:
-                kwargs_str = ""
-
-        if isinstance(self.op, torch._ops.OpOverload):
-            op_name = self.op.__qualname__
-        elif hasattr(self.op, "__module__") and hasattr(self.op, "__name__"):
-            op_name = f"{self.op.__module__}.{self.op.__name__}"
-        else:
-            op_name = str(self.op)
-
-        base_str = f"{op_name}({args_str}{kwargs_str})"
-
-        if self.output_str:
-            base_str += self.output_str
-        if self.log:
-            base_str += f"  # {self.log}"
-        return base_str
-
-    def __iter__(self):
-        # for BC; tuple(self) returns (op, args, kwargs, call_depth)
-        if self.args_str is not None:
-            yield from [self.op, self.args_str, self.kwargs_str, self.call_depth]
-        else:
-            yield from [self.op, self.args, self.kwargs, self.call_depth]
-
-
-class _RedistributeCall(_DebugCall):
-    def __init__(
-        self,
-        arg,
-        src_placement,
-        dst_placement,
-        transform_info_str,
-        call_depth,
-        stack=False,
-        is_explicit=False,
-    ) -> None:
-        super().__init__(call_depth, stack=stack)
-        self.arg = arg
-        self.src_placement = src_placement
-        self.dst_placement = dst_placement
-        self.transform_info_str = transform_info_str
-        self.is_explicit = is_explicit
-        self.is_outer_call = isinstance(arg, int)
-
-        self.arg_str: str | None = None
-
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
-    ) -> None:
-        self.arg_str = f"{_arg_to_str(self.arg, attributes, tensor_memo)}"
-        del self.arg
-
-    def render(self, attributes: list[str]) -> str:
-        if self.arg_str is not None:
-            arg_str = self.arg_str
-        else:
-            arg_str = f"{_arg_to_str(self.arg, attributes)}"
-
-        if self.transform_info_str is not None:  # prioritize over src/dst placements
-            placement_str = f"trace: {self.transform_info_str}"
-        else:
-            src_placement_str = _arg_to_str(self.src_placement, attributes)
-            dst_placement_str = _arg_to_str(self.dst_placement, attributes)
-            placement_str = f"{src_placement_str} -> {dst_placement_str}"
-
-        # DebugMode will add redistribute_input logs at 2 levels,
-        # once per redistribute decision, and once per redistributed input.
-        # We only annotate [implicit/explicit] logs on the former (outer-level call).
-        if self.is_outer_call:
-            annotation = " [implicit] "
-        elif self.is_explicit:
-            annotation = " [explicit] "
-        else:
-            annotation = ""
-
-        base_str = f"{REDISTRIBUTE_FUNC}{annotation}({arg_str}, {placement_str})"
-        if self.output_str:
-            base_str += self.output_str
-        return base_str
-
-    def __iter__(self):
-        # for BC; tuple(self) returns (op, placement info, kwargs, call_depth)
-        if self.arg_str is not None:
-            arg = self.arg_str
-        else:
-            arg = self.arg
-
-        yield REDISTRIBUTE_FUNC
-        if self.transform_info_str:
-            yield [arg, self.transform_info_str]
-        else:
-            yield [arg, self.src_placement, self.dst_placement]
-        yield {}
-        yield self.call_depth
-
-
-class _OutputPlacementCall(_DebugCall):
-    """Records output placement for a DTensor op."""
-
-    def __init__(self, placements_str: str, call_depth: int) -> None:
-        super().__init__(call_depth)
-        self.placements_str = placements_str
-
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
-    ) -> None:
-        pass  # Already stringified
-
-    def render(self, attributes: list[str]) -> str:
-        return f"-> output: {self.placements_str}"
-
-
-class _TritonKernelCall(_DebugCall):
-    """Triton kernel call from Inductor"""
-
-    def __init__(
-        self,
-        kernel_name: str,
-        kwargs: dict[str, Any],
-        call_depth: int,
-    ):
-        super().__init__(call_depth)
-        self.kernel_name = kernel_name
-        self.kwargs = kwargs
-        self.kwargs_str: str | None = None
-
-        self.pre_hashes: dict[str, Any] | None = None
-        self.post_hashes: dict[str, Any] | None = None
-
-    def stringify_args(
-        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
-    ) -> None:
-        # Optionally hash kernel inputs before launch
-        global _TRITON_INPUT_HASH_FN
-        if hash_fn := _TRITON_INPUT_HASH_FN:
-            self.pre_hashes = {
-                k: hash_fn(v)
-                for k, v in self.kwargs.items()
-                if isinstance(v, torch.Tensor)
-            }
-
-        if self.kwargs:
-            self.kwargs_str = ", ".join(
-                f"{k}={_arg_to_str(v, attributes, tensor_memo)}"
-                for k, v in self.kwargs.items()
-            )
-        else:
-            self.kwargs_str = ""
-
-    def render(self, attributes: list[str]) -> str:
-        base_str = f"[triton] {self.kernel_name}({self.kwargs_str})"
-        if self.pre_hashes:
-            pre_hashes_str = ", ".join(f"{k}: {v}" for k, v in self.pre_hashes.items())
-            pre_hashes_str = (
-                "\n  "
-                + "  " * self.call_depth
-                + f"# pre-kernel hashes: {{{pre_hashes_str}}}"
-            )
-        else:
-            pre_hashes_str = ""
-        if self.post_hashes:
-            post_hashes_str = ", ".join(
-                f"{k}: {v}" for k, v in self.post_hashes.items()
-            )
-            post_hashes_str = (
-                "\n  "
-                + "  " * self.call_depth
-                + f"# post-kernel hashes: {{{post_hashes_str}}}"
-            )
-        else:
-            post_hashes_str = ""
-        return f"{base_str}{pre_hashes_str}{post_hashes_str}\n"
-
-    def finalize(self, device_interface: "DeviceInterface"):
-        # synchronize -> hash/store kernel results
-        global _RECORD_TRITON_OUTPUTS, _TRITON_OUTPUT_HASH_FN
-        device_interface.synchronize(device_interface.current_device())
-        if _RECORD_TRITON_OUTPUTS:
-            self.record = {
-                "output": {
-                    k: v.clone() if isinstance(v, torch.Tensor) else v
-                    for k, v in self.kwargs.items()
-                }
-            }
-        if hash_fn := _TRITON_OUTPUT_HASH_FN:
-            self.post_hashes = {
-                k: hash_fn(v)
-                for k, v in self.kwargs.items()
-                if isinstance(v, torch.Tensor)
-            }
-
-        # don't store tensors
-        del self.kwargs
-
-    def __iter__(self):
-        yield from [self.kernel_name, (), self.kwargs_str, self.call_depth]
-
-
-class _AnnotateCall(_DebugCall):
-    """Custom annotation call"""
-
-    def __init__(
-        self, tag: Any, header: str, call_depth: int, stack: bool = False
-    ) -> None:
-        super().__init__(call_depth, stack=stack)
-        self.tag = tag
-        self.header = header
-
-    def render(self, attributes: list[str]) -> str:
-        return f"[{self.header}] {self.tag}"
-
-    def __iter__(self):
-        yield from [
-            f"[{self.header}] {self.tag}",
-            (),
-            {},
-            self.call_depth,
-        ]
-
-
-def _run_hook(hook, *args):
-    out = hook(*args)
-    if out is not None and not isinstance(out, dict):
-        raise AssertionError(f"hook must return None or dict, got {type(out).__name__}")
-    return out
-
-
-def _run_dispatch_pre_log_hooks(call: _DebugCall, func, types, args, kwargs) -> None:
-    global _DISPATCH_PRE_LOG_HOOKS
-    if _DISPATCH_PRE_LOG_HOOKS:
-        for hook in _DISPATCH_PRE_LOG_HOOKS:
-            hook_out = _run_hook(hook, func, types, args, kwargs, call)
-            if hook_out is not None:
-                # Store pre-hook results in call.log
-                if call.log is None:
-                    call.log = {}
-                call.log.update(hook_out)
-
-
-def _run_dispatch_hooks(call: _DebugCall, func, types, args, kwargs, result) -> None:
-    global _DISPATCH_RECORD_HOOKS, _DISPATCH_LOG_HOOKS
-    if _DISPATCH_RECORD_HOOKS:
-        record = {}
-        for hook in _DISPATCH_RECORD_HOOKS:
-            hook_out = _run_hook(hook, func, types, args, kwargs, result)
-            if hook_out is not None:
-                record.update(hook_out)
-        if record:
-            call.record = record
-
-    if _DISPATCH_LOG_HOOKS:
-        # Preserve existing log from pre-hooks (e.g., input_hash)
-        if call.log is None:
-            call.log = {}
-        for hook in _DISPATCH_LOG_HOOKS:
-            hook_out = _run_hook(hook, func, types, args, kwargs, result)
-            if hook_out is not None:
-                call.log.update(hook_out)
-
-
-def _get_call_name(call: _DebugCall) -> str:
-    """String identifying _DebugCall (e.g. func, kernel, module name)"""
-    if isinstance(call, _OpCall):
-        return _get_op_name(call.op)
-    elif isinstance(call, _TritonKernelCall):
-        return call.kernel_name
-    elif isinstance(call, _AnnotateCall):
-        return f"[{call.header}] {call.tag}"
-    elif isinstance(call, _RedistributeCall):
-        return REDISTRIBUTE_FUNC
-    else:
-        return str(call)
 
 
 @torch.library.custom_op("debug_mode_ops::annotate", mutates_args=())
@@ -832,15 +283,14 @@ class DebugMode(TorchDispatchMode):
         self._output_info[op_index] = result
 
     # Without this override, running torch.compile under DebugMode
-    # will force torch.compile to always use the “eager” backend
+    # will force torch.compile to always use the "eager" backend
     # With this, DebugMode will not take effect on torch.compile
     @classmethod
     def ignore_compile_internals(cls) -> bool:
         return True
 
     def _record_call(self, call) -> None:
-        global _IN_INDUCTOR_BENCHMARK
-        if _IN_INDUCTOR_BENCHMARK:
+        if _utils._IN_INDUCTOR_BENCHMARK:
             return
 
         if str(call).startswith("profiler::_record_function"):
@@ -1232,23 +682,21 @@ class DebugMode(TorchDispatchMode):
         pre_log_hook signature is (func, types, args, kwargs, call) and is executed before
         the operation. It allows capturing state before in-place mutations.
         """
-        global _DISPATCH_RECORD_HOOKS, _DISPATCH_LOG_HOOKS, _DISPATCH_PRE_LOG_HOOKS
-
         if record_hook:
-            _DISPATCH_RECORD_HOOKS.append(record_hook)
+            _utils._DISPATCH_RECORD_HOOKS.append(record_hook)
         if log_hook:
-            _DISPATCH_LOG_HOOKS.append(log_hook)
+            _utils._DISPATCH_LOG_HOOKS.append(log_hook)
         if pre_log_hook:
-            _DISPATCH_PRE_LOG_HOOKS.append(pre_log_hook)
+            _utils._DISPATCH_PRE_LOG_HOOKS.append(pre_log_hook)
         try:
             yield
         finally:
             if record_hook:
-                _DISPATCH_RECORD_HOOKS.pop()
+                _utils._DISPATCH_RECORD_HOOKS.pop()
             if log_hook:
-                _DISPATCH_LOG_HOOKS.pop()
+                _utils._DISPATCH_LOG_HOOKS.pop()
             if pre_log_hook:
-                _DISPATCH_PRE_LOG_HOOKS.pop()
+                _utils._DISPATCH_PRE_LOG_HOOKS.pop()
 
     @staticmethod
     @contextlib.contextmanager
@@ -1263,14 +711,13 @@ class DebugMode(TorchDispatchMode):
             )
             return {"output": out}
 
-        global _RECORD_TRITON_OUTPUTS
         try:
-            _old_record_triton = _RECORD_TRITON_OUTPUTS
-            _RECORD_TRITON_OUTPUTS = True
+            _old_record_triton = _utils._RECORD_TRITON_OUTPUTS
+            _utils._RECORD_TRITON_OUTPUTS = True
             with DebugMode.dispatch_hooks(record_hook=dispatch_hook):
                 yield
         finally:
-            _RECORD_TRITON_OUTPUTS = _old_record_triton
+            _utils._RECORD_TRITON_OUTPUTS = _old_record_triton
 
     @staticmethod
     @contextlib.contextmanager
@@ -1344,13 +791,12 @@ class DebugMode(TorchDispatchMode):
                 return None
             return out
 
-        global _TRITON_INPUT_HASH_FN, _TRITON_OUTPUT_HASH_FN
         try:
             if hash_inputs:
-                _old_input_hfn = _TRITON_INPUT_HASH_FN
-                _TRITON_INPUT_HASH_FN = fn
-            _old_output_hfn = _TRITON_OUTPUT_HASH_FN
-            _TRITON_OUTPUT_HASH_FN = fn
+                _old_input_hfn = _utils._TRITON_INPUT_HASH_FN
+                _utils._TRITON_INPUT_HASH_FN = fn
+            _old_output_hfn = _utils._TRITON_OUTPUT_HASH_FN
+            _utils._TRITON_OUTPUT_HASH_FN = fn
             with DebugMode.dispatch_hooks(
                 log_hook=_dispatch_post_hook,
                 pre_log_hook=_dispatch_pre_log_hook if hash_inputs else None,
@@ -1358,8 +804,8 @@ class DebugMode(TorchDispatchMode):
                 yield
         finally:
             if hash_inputs:
-                _TRITON_INPUT_HASH_FN = _old_input_hfn  # type: ignore[assignment]
-            _TRITON_OUTPUT_HASH_FN = _old_output_hfn
+                _utils._TRITON_INPUT_HASH_FN = _old_input_hfn  # type: ignore[assignment]
+            _utils._TRITON_OUTPUT_HASH_FN = _old_output_hfn
 
     @staticmethod
     @contextlib.contextmanager
@@ -1368,12 +814,11 @@ class DebugMode(TorchDispatchMode):
         Context manager for disabling logging during inductor benchmarking,
         so logs don't contain all kernels launched from autotuning.
         """
-        global _IN_INDUCTOR_BENCHMARK
         try:
-            _IN_INDUCTOR_BENCHMARK = True
+            _utils._IN_INDUCTOR_BENCHMARK = True
             yield
         finally:
-            _IN_INDUCTOR_BENCHMARK = False
+            _utils._IN_INDUCTOR_BENCHMARK = False
 
     @property
     def logs(self):
