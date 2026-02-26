@@ -2730,12 +2730,7 @@ class BuiltinVariable(VariableTracker):
                 return variables.GetAttrVariable(obj, name, source=source)
         elif isinstance(obj, variables.TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
-            try:
-                member = getattr(obj.value, name)
-            except AttributeError:
-                raise_observed_exception(AttributeError, tx)
-                raise
-
+            member = getattr(obj.value, name)
             if isinstance(
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
@@ -2754,6 +2749,12 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)  # type: ignore[arg-type, union-attr]
             return VariableTracker.build(tx, member, source)
+
+        elif istype(obj, variables.UserFunctionVariable) and name in (
+            "__name__",
+            "__module__",
+        ):
+            return VariableTracker.build(tx, getattr(obj.fn, name))
         else:
             try:
                 return obj.var_getattr(tx, name)

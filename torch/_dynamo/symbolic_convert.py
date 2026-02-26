@@ -3620,27 +3620,17 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        fn = NestedUserFunctionVariable(
-            fn_name,
-            code,
-            self.f_globals,
-            defaults,
-            kwdefaults,
-            closure,
+        self.push(
+            NestedUserFunctionVariable(
+                fn_name,
+                code,
+                self.f_globals,
+                defaults,
+                kwdefaults,
+                annotations,
+                closure,
+            )
         )
-        if annotations:
-            assert isinstance(annotations, TupleVariable)
-            # Convert the attribute to a dictionary before assigning it
-            # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
-            items = annotations.items
-            ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
-                mutation_type=ValueMutationNew(),
-            )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
-        self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -4288,7 +4278,7 @@ class InstructionTranslatorBase(
             # same as => arg1.__type_params__ = arg2
             assert isinstance(arg1, BaseUserFunctionVariable)
             arg1.call_method(
-                self,  # pyrefly: ignore[bad-argument-type]
+                self,
                 "__setattr__",
                 [ConstantVariable.create("__type_params__"), arg2],
                 {},
@@ -4341,12 +4331,7 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.call_method(
-                self,  # pyrefly: ignore[bad-argument-type]
-                "__setattr__",
-                [ConstantVariable.create("__annotations__"), attr],
-                {},
-            )
+            fn.annotations = attr
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -4358,9 +4343,7 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
-                "__annotations__", ann
-            )
+            fn.annotations = ann
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
