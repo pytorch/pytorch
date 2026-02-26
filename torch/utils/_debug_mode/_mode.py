@@ -216,6 +216,8 @@ class DebugMode(TorchDispatchMode):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
+        self.enabled = True
+
         _ensure_annotate_decorated()
         self.supports_higher_order_operators = True
 
@@ -318,6 +320,9 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        if not self.enabled:
+            return func(*args, **kwargs)
+
         call = _OpCall(
             func, args, kwargs, self.call_depth, stack=self.record_stack_trace
         )
@@ -362,9 +367,20 @@ class DebugMode(TorchDispatchMode):
         else:
             self.call_depth -= 1
 
+    def enable(self) -> None:
+        """Enable dispatch recording. Pairs with :meth:`disable`."""
+        self.enabled = True
+
+    def disable(self) -> None:
+        """Disable dispatch recording without removing from the mode stack."""
+        self.enabled = False
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        if not self.enabled:
+            return func(*args, **kwargs)
 
         # Handle record_function entries
         if self.record_profiler_context:
@@ -571,6 +587,9 @@ class DebugMode(TorchDispatchMode):
         transform_info_str: str | None = None,
         is_explicit: bool = False,
     ):
+        if not self.enabled:
+            yield
+            return
         try:
             self._record_call(
                 _RedistributeCall(
@@ -590,7 +609,7 @@ class DebugMode(TorchDispatchMode):
 
     def record_output_placements(self, output_spec) -> None:
         """Record output placements for a DTensor op as a separate line."""
-        if not self.record_output:
+        if not self.enabled or not self.record_output:
             return
         from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
@@ -602,7 +621,9 @@ class DebugMode(TorchDispatchMode):
 
     def record_triton_kernel(
         self, kernel_name: str, kwargs: dict[str, Any]
-    ) -> _TritonKernelCall:
+    ) -> _TritonKernelCall | None:
+        if not self.enabled:
+            return None
         call = _TritonKernelCall(kernel_name, kwargs, self.call_depth + 1)
         call.stringify_args(self.record_tensor_attributes)
         self.operators.append(call)
@@ -826,6 +847,8 @@ class DebugMode(TorchDispatchMode):
 
     def _handle_annotate(self, tag):
         """Handles DebugMode._annotate()"""
+        if not self.enabled:
+            return
         call = _AnnotateCall(tag, "annotate", self.call_depth, self.record_stack_trace)
         self.operators.append(call)
 
