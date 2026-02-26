@@ -13,6 +13,15 @@
 #endif
 
 namespace at::native {
+namespace mps {
+
+#ifdef USE_MPS_BUNDLED_METAL_LIBRARY
+static auto& lib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Indexing_metallib.h>
+#endif
+
+} // namespace mps
 
 TORCH_IMPL_FUNC(gather_out_mps)
 (const Tensor& self_arg, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& output) {
@@ -146,6 +155,32 @@ static void scatter_mps_general(const Tensor& self_arg,
               "scatter(): self, src and output must have the same scalar type");
   TORCH_CHECK(dim >= 0 && dim < self.dim(), "scatter(): Indexing dim ", dim, " is out of bounds of tensor");
   TORCH_CHECK(!self.is_complex(), "scatter(): Yet not supported for complex");
+
+  // Validate index bounds on device to avoid host-device synchronization
+  {
+    MPSStream* stream = getCurrentMPSStream();
+
+    int64_t size_limit = self.size(dim);
+    uint64_t numel = index.numel();
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> encoder = stream->commandEncoder();
+
+        // Select kernel based on index dtype
+        std::string kernel_name = index.scalar_type() == ScalarType::Long ? "validate_scatter_indices_int64"
+                                                                          : "validate_scatter_indices_int32";
+
+        id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(kernel_name);
+        [encoder setComputePipelineState:pso];
+
+        mtl_setArgs(encoder, index, size_limit, numel, stream->getErrorBuffer());
+        [encoder setBuffer:stream->getErrorBuffer() offset:0 atIndex:3];
+
+        mtl_dispatch1DJob(encoder, pso, numel);
+      }
+    });
+  }
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
