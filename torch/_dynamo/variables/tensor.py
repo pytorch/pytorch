@@ -1547,7 +1547,14 @@ class TensorVariable(VariableTracker):
         *,
         value: VariableTracker | None = None,
     ) -> VariableTracker | None:
-        # Skip decomposition - we have an FMA-based lowering that matches eager CUDA behavior
+        if value is not None and config.enable_dynamo_decompositions:
+            result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
+                tx, [tensor1, tensor2], {}
+            )
+            result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
+                tx, [result, value], {}
+            )
+            return self.call_method(tx, "add_", [result], {})
         return None
 
     def method___contains__(
