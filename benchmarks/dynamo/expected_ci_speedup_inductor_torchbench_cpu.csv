@@ -1,0 +1,16 @@
+#name,backend,data_type,shape,wrapper,perf_speedup_target_c7i_metal_24xl
+phlippe_densenet,inductor,float32,static,default,1.46474287
+basic_gnn_edgecnn,inductor,float32,dynamic,default,1.30092957
+llama_v2_7b_16h,inductor,float32,dynamic,default,1.23234331
+resnet50,inductor,float32,dynamic,default,1.67742767
+mobilenet_v3_large,inductor,float32,static,cpp,2.63311706
+functorch_maml_omniglot,inductor,float32,dynamic,cpp,1.126799
+yolov3,export-aot-inductor,float32,static,default,1.40687424
+mobilenet_v2,export-aot-inductor,float32,static,default,2.90375357
+resnext50_32x4d,export-aot-inductor,float32,dynamic,default,1.49299689
+resnext50_32x4d,inductor,amp,static,default,1.47023111
+vgg16,inductor,amp,static,default,1.2692454
+llama,inductor,amp,static,default,1.33157028
+mnasnet1_0,inductor,amp,static,cpp,2.1296814
+#mobilenet_v2,inductor,amp,dynamic,cpp,2.27774577 # https://github.com/pytorch/pytorch/issues/131693
+densenet121,export-aot-inductor,amp,static,default,1.25591385

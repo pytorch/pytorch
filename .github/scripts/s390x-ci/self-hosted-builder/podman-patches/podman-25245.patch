@@ -1,0 +1,21 @@
+diff --git a/pkg/rootless/rootless_linux.c b/pkg/rootless/rootless_linux.c
+index 4f71d49e5c..3d74af6a6c 100644
+--- a/pkg/rootless/rootless_linux.c
++++ b/pkg/rootless/rootless_linux.c
+@@ -658,7 +658,7 @@ create_pause_process (const char *pause_pid_file_path, char **argv)
+   if (pipe (p) < 0)
+     return -1;
+
+-  pid = fork ();
++  pid = syscall_clone (SIGCHLD, NULL);
+   if (pid < 0)
+     {
+       close (p[0]);
+@@ -689,7 +689,7 @@ create_pause_process (const char *pause_pid_file_path, char **argv)
+       close (p[0]);
+
+       setsid ();
+-      pid = fork ();
++      pid = syscall_clone (SIGCHLD, NULL);
+       if (pid < 0)
+         _exit (EXIT_FAILURE);

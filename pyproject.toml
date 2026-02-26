@@ -1,0 +1,382 @@
+# Package ######################################################################
+
+[build-system]
+requires = [
+    # 70.1.0: min version for integrated bdist_wheel command from wheel package
+    # 77.0.0: min version for SPDX expression support for project.license
+    "setuptools>=70.1.0,<82",
+    "cmake>=3.27",
+    "ninja",
+    "numpy",
+    "packaging",
+    "pyyaml",
+    "requests",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
+    "typing-extensions>=4.10.0",
+]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    # This list should be kept in sync with the requirements-build.txt
+    # in PyTorch root until the project fully migrates to pyproject.toml
+    # after which this can be removed as it is already specified in the
+    # [build-system] section
+    "setuptools>=70.1.0,<80.0",  # setuptools develop deprecated on 80.0
+    "cmake>=3.27",
+    "ninja",
+    "numpy",
+    "packaging",
+    "pyyaml",
+    "requests",
+    "six",  # dependency chain: NNPACK -> PeachPy -> six
+    "typing-extensions>=4.10.0",
+
+    # This list should be kept in sync with the requirements.txt in
+    # PyTorch root until the project fully migrates to pyproject.toml
+    "build[uv]",
+    "expecttest>=0.3.0",
+    "filelock",
+    "fsspec>=0.8.5",
+    "hypothesis",
+    "jinja2",
+    "lintrunner; platform_machine != 's390x' and platform_machine != 'riscv64'",
+    "networkx>=2.5.1",
+    "optree>=0.13.0",
+    "psutil",
+    "sympy>=1.13.3",
+    "typing-extensions>=4.15.0",
+    "wheel",
+]
+
+[project]
+name = "torch"
+description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
+readme = "README.md"
+requires-python = ">=3.10"
+# TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
+# FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
+# TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
+# to an error on 2026.02.18. See also: https://github.com/pypa/setuptools/issues/4903
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "PyTorch Team", email = "packages@pytorch.org" }]
+keywords = ["pytorch", "machine learning"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dynamic = [
+    "entry-points",
+    "dependencies",
+    "scripts",
+    "version",
+]
+
+[project.urls]
+Homepage = "https://pytorch.org"
+Repository = "https://github.com/pytorch/pytorch"
+Documentation = "https://pytorch.org/docs"
+"Issue Tracker" = "https://github.com/pytorch/pytorch/issues"
+Forum = "https://discuss.pytorch.org"
+
+[project.optional-dependencies]
+optree = ["optree>=0.13.0"]
+opt-einsum = ["opt-einsum>=3.3"]
+pyyaml = ["pyyaml"]
+
+# Linter tools #################################################################
+
+[tool.isort]
+src_paths = ["caffe2", "torch", "torchgen", "functorch", "test"]
+extra_standard_library = ["typing_extensions"]
+skip_gitignore = true
+skip_glob = ["third_party/*"]
+atomic = true
+profile = "black"
+indent = 4
+line_length = 88
+lines_after_imports = 2
+multi_line_output = 3
+include_trailing_comma = true
+combine_as_imports = true
+
+[tool.usort]
+preserve_inline_comments = true
+collapse_blank_lines_in_category = false
+
+[tool.usort.known]
+first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
+standard_library = ["typing_extensions"]
+
+[tool.ruff]
+line-length = 88
+src = ["caffe2", "torch", "torchgen", "functorch", "test"]
+
+[tool.ruff.per-file-target-version]
+"**/py312_intrinsics.py" = "py312"
+
+[tool.ruff.format]
+docstring-code-format = true
+quote-style = "double"
+
+[tool.ruff.lint]
+# NOTE: Synchoronize the ignores with .flake8
+external = [
+    "B001",
+    "B902",
+    "B950",
+    "E121",
+    "E122",
+    "E128",
+    "E131",
+    "E704",
+    "E723",
+    "F723",
+    "F812",
+    "P201",
+    "P204",
+    "T484",
+    "TOR901",
+]
+ignore = [
+    # these ignores are from flake8-bugbear; please fix!
+    "B007", "B008", "B017",
+    "B018", # Useless expression
+    "B023",
+    "B028", # No explicit `stacklevel` keyword argument found
+    "E402",
+    "C408", # C408 ignored because we like the dict keyword argument syntax
+    "E501", # E501 is not flexible enough, we're using B950 instead
+    "E741",
+    "EXE001",
+    "F405",
+    "FURB122", # writelines
+    # these ignores are from ruff NPY; please fix!
+    "NPY002",
+    # these ignores are from ruff PERF; please fix!
+    "PERF203",
+    "PERF401",
+    # these ignores are from PYI; please fix!
+    "PYI024",
+    "PYI036",
+    "PYI041",
+    "PYI056",
+    "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
+    "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
+    "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
+    "SIM110", # Checks for for loops that can be replaced with a builtin function, like any or all.
+    "SIM114", # Combine `if` branches using logical `or` operator
+    "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
+    "SIM117",
+    "SIM300", # Yoda condition detected
+    "UP007", # keep-runtime-typing
+    "UP045", # keep-runtime-typing
+    "TC006",
+    # TODO: Remove Python-3.10 specific suppressions
+    "B905",
+]
+select = [
+    "B",
+    "B904", # Re-raised error without specifying the cause via the from keyword
+    "C4",
+    "G",
+    "E",
+    "EXE",
+    "F",
+    "SIM",
+    "W",
+    # Not included in flake8
+    "FURB",
+    "LOG",
+    "NPY",
+    "PERF",
+    "PGH004",
+    "PIE",
+    "PLC0131", # type bivariance
+    "PLC0132", # type param mismatch
+    "PLC1802", # len({expression}) used as condition without comparison
+    "PLC0205", # string as __slots__
+    "PLC3002", # unnecessary-direct-lambda-call
+    "PLC0414", # Import alias does not rename original package
+    "PLE",
+    "PLR0133", # constant comparison
+    "PLR0206", # property with params
+    "PLR1722", # use sys exit
+    "PLR1736", # unnecessary list index
+    "PLW0127", # Self-assignment of variable
+    "PLW0129", # assert on string literal
+    "PLW0131", # named expr without context
+    "PLW0133", # useless exception statement
+    "PLW0245", # super without brackets
+    "PLW0406", # import self
+    "PLW0711", # binary op exception
+    "PLW1501", # bad open mode
+    "PLW1507", # shallow copy os.environ
+    "PLW1509", # preexec_fn not safe with threads
+    "PLW2101", # useless lock statement
+    "PLW3301", # nested min max
+    "PT006", # TODO: enable more PT rules
+    "PT014", # duplicate parameterize case
+    "PT022",
+    "PT023",
+    "PT024",
+    "PT025",
+    "PT026",
+    "PYI",
+    "Q003",  # avoidable escaped quote
+    "Q004",  # unnecessary escaped quote
+    "RSE",
+    "RUF007", # pairwise over zip
+    "RUF008", # mutable dataclass default
+    "RUF013", # ban implicit optional
+    "RUF015", # access first ele in constant time
+    "RUF016", # type error non-integer index
+    "RUF017",
+    "RUF018", # no assignment in assert
+    "RUF019", # unnecessary-key-check
+    "RUF020", # never union
+    "RUF024", # from keys mutable
+    "RUF026", # default factory kwarg
+    "RUF030", # No print statement in assert
+    "RUF033", # default values __post_init__ dataclass
+    "RUF041", # simplify nested Literal
+    "RUF048", # properly parse `__version__`
+    "RUF200", # validate pyproject.toml
+    "S324", # for hashlib FIPS compliance
+    "SLOT",
+    "TC",
+    "TRY002", # ban vanilla raise (todo fix NOQAs)
+    "TRY203",
+    "TRY401", # verbose-log-message
+    "UP",
+    "YTT",
+    "S101",
+]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve types, even if a file imports `from __future__ import annotations`.
+keep-runtime-typing = true
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = [
+    "F401",
+]
+"*.pyi" = [
+    "PYI011", # typed-argument-default-in-stub
+    "PYI021", # docstring-in-stub
+    "PYI053", # string-or-bytes-too-long
+]
+"functorch/docs/source/tutorials/**" = [
+    "F401",
+]
+"test/export/**" = [
+    "PGH004",
+    "S101",
+]
+"test/typing/**" = [
+    "PGH004"
+]
+"test/typing/reveal/**" = [
+    "F821",
+]
+"test/torch_np/numpy_tests/**" = [
+    "F821",
+    "NPY201",
+]
+"test/dynamo/test_bytecode_utils.py" = [
+    "F821",
+]
+"test/dynamo/test_debug_utils.py" = [
+    "UP037",
+]
+"test/dynamo/test_misc.py" = [
+    "PGH004",
+]
+"test/jit/**" = [
+    "PLR0133", # tests require this for JIT
+    "PYI",
+    "RUF015",
+    "S101",
+    "UP", # We don't want to modify the jit test as they test specify syntax
+]
+"test/test_jit.py" = [
+    "PLR0133", # tests require this for JIT
+    "PYI",
+    "RUF015",
+    "S101",
+    "UP", # We don't want to modify the jit test as they test specify syntax
+]
+"test/inductor/s429861_repro.py" = [
+    "PGH004",
+]
+"test/inductor/test_torchinductor.py" = [
+    "UP037",
+]
+# autogenerated #TODO figure out why file level noqa is ignored
+"torch/_appdirs.py" = ["PGH004"]
+"torch/jit/_shape_functions.py" = ["PGH004"]
+"torch/_inductor/fx_passes/serialized_patterns/**" = ["F401", "F501"]
+"torch/_inductor/autoheuristic/artifacts/**" = ["F401", "F501"]
+"torch/_inductor/codegen/**" = [
+    "PGH004"
+]
+"torchgen/api/types/__init__.py" = [
+    "F401",
+    "F403",
+]
+"torch/utils/collect_env.py" = [
+    "UP", # collect_env.py needs to work with older versions of Python
+]
+"torch/_vendor/**" = [
+    "UP", # No need to mess with _vendor
+]
+"tools/linter/**" = [
+    "LOG015" # please fix
+]
+# S101 migration: Remaining test folders/files still needing migration (ignore S101 for now)
+# Note: test/export/**, test/jit/**, test/torch_np/numpy_tests/** have S101 added to existing entries above
+"test/distributed/**" = ["S101"]
+"test/dynamo/**" = ["S101"]
+"test/functorch/**" = ["S101"]
+"test/inductor/**" = ["S101"]
+"test/onnx/**" = ["S101"]
+"test/quantization/**" = ["S101"]
+# torch/ folders still needing S101 migration
+"torch/_dynamo/**" = ["S101"]
+"torch/_inductor/**" = ["S101"]
+"torch/distributed/**" = ["S101"]
+
+[tool.codespell]
+ignore-words = "tools/linter/dictionary.txt"
+
+[tool.spin]
+package = 'torch'
+
+[tool.spin.commands]
+"Build" = [
+  ".spin/cmds.py:lint",
+  ".spin/cmds.py:fixlint",
+  ".spin/cmds.py:quicklint",
+  ".spin/cmds.py:quickfix",
+]
+"Regenerate" = [
+  ".spin/cmds.py:regenerate_version",
+  ".spin/cmds.py:regenerate_type_stubs",
+  ".spin/cmds.py:regenerate_clangtidy_files",
+  ".spin/cmds.py:regenerate_github_workflows",
+]

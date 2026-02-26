@@ -1,0 +1,17 @@
+BERT_pytorch,128
+Background_Matting, 16
+LearningToPaint,1024
+alexnet,1024
+dcgan,1024
+densenet121,64
+mnasnet1_0,256
+mobilenet_v2,128
+mobilenet_v3_large,256
+nvidia_deeprecommender,1024
+pytorch_unet,8
+resnet18,512
+resnet50,128
+resnext50_32x4d,128
+shufflenet_v2_x1_0,512
+squeezenet1_1,512
+vgg16,128

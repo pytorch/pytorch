@@ -1,0 +1,23 @@
+value {
+  tag: "dummy"
+  histo {
+    max: 1023
+    num: 1024
+    sum: 523776
+    sum_squares: 357389824
+    bucket_limit: 0
+    bucket_limit: 186
+    bucket_limit: 372
+    bucket_limit: 558
+    bucket_limit: 744
+    bucket_limit: 930
+    bucket_limit: 1023
+    bucket: 0
+    bucket: 186
+    bucket: 186
+    bucket: 186
+    bucket: 186
+    bucket: 186
+    bucket: 94
+  }
+}

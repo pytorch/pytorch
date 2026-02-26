@@ -1,0 +1,29 @@
+# Basic benchmark configuration for PyTorch transformer benchmarks
+# Usage: python score_mod.py --config config_basic.yaml
+
+# Core parameters
+dynamic: false
+calculate_bwd: true
+dtype: "bfloat16"
+
+# Shape parameters - larger sweep
+b: [1, 2, 4, 8, 16]  # batch sizes
+nh: ["16,16", "16,2", "32,32", "32,4"]  # [query_heads,key_value_heads]
+s: [512, 1024, 2048, 4096, 8192]  # sequence lengths
+d: [64, 128]  # head dimensions (limited to 128 for Flash Attention/cuDNN compatibility)
+
+# All attention types
+mods: ["noop", "causal", "rel", "head_bias", "alibi", "sliding_window", "prefix_lm", "softcap"]
+
+# Multiple backends for comparison (SDPA + Flash Attention) - flex is always included internally
+backend: ["efficient", "math", "cudnn", "fav2"]
+max_autotune: true  # Enable torch.compile with max-autotune for optimal performance
+
+# Decoding and cache settings
+decoding: false
+kv_size: null
+
+# Metrics and output
+throughput: true  # Calculate memory bandwidth & TFLOPS
+save_path: "comprehensive_results.csv"  # Save to CSV
+output_json_for_dashboard: "attn_bench_basic.json"

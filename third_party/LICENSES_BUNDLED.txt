@@ -1,0 +1,7 @@
+The PyTorch repository and source distributions bundle several libraries that are 
+compatibly licensed.  We list these here.
+
+Name: miniz-3.0.2
+License: MIT
+Files: ./miniz-3.0.2
+  For details, see: ./miniz-3.0.2/LICENSE

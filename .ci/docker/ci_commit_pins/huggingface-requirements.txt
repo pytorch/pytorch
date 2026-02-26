@@ -1,0 +1,2 @@
+transformers==5.2.0
+soxr==0.5.0

@@ -1,0 +1,20 @@
+build/
+dist/
+functorch.egg-info/
+*__pycache__*
+functorch/version.py
+.gdbinit
+t.py
+.vscode/
+ccache.sh
+docs/build
+docs/src
+docs/source/generated
+.DS_Store
+op_analysis/*.txt
+
+# Editor temporaries
+*.swn
+*.swo
+*.swp
+*.swm

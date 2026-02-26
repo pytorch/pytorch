@@ -1,0 +1,70 @@
+name: Binary docker build
+
+description: Build docker image for binary builds
+
+inputs:
+  docker-image-name:
+    description: Docker image name for PR builds
+    required: true
+  docker-build-dir:
+    description: Location of the build.sh relative to .ci/docker
+    required: true
+  custom-tag-prefix:
+    description: Custom tag prefix for the docker image
+    required: false
+  DOCKER_TOKEN:
+    description: Docker token for authentication
+    required: true
+  DOCKER_ID:
+    description: Docker ID for authentication
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout PyTorch
+      uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+    - name: Calculate docker image
+      id: calculate-docker-image
+      uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+      with:
+        docker-image-name: ${{ inputs.docker-image-name }}
+        docker-build-dir: .ci/docker
+        custom-tag-prefix: ${{ inputs.custom-tag-prefix }}
+        docker-build-script: ${{ inputs.docker-build-dir }}/build.sh
+        always-rebuild: true
+        push: true
+
+    - name: Tag and (if WITH_PUSH) push docker image to docker.io
+      env:
+        DOCKER_TOKEN: ${{ inputs.DOCKER_TOKEN }}
+        DOCKER_ID: ${{ inputs.DOCKER_ID }}
+        DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
+        DOCKER_IMAGE_PREFIX: ${{ inputs.custom-tag-prefix }}
+        CREATED_FULL_DOCKER_IMAGE_NAME: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      shell: bash
+      run: |
+        set -euox pipefail
+        GITHUB_REF=${GITHUB_REF:-$(git symbolic-ref -q HEAD || git describe --tags --exact-match)}
+        GIT_BRANCH_NAME=${GITHUB_REF##*/}
+        GIT_COMMIT_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
+        CI_FOLDER_SHA=$(git rev-parse HEAD:.ci/docker)
+
+        DOCKER_IMAGE_NAME_PREFIX=docker.io/pytorch/${DOCKER_IMAGE_NAME}:${DOCKER_IMAGE_PREFIX}
+
+        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}
+        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
+        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
+        docker tag ${CREATED_FULL_DOCKER_IMAGE_NAME} ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}
+
+        # Pretty sure Github will mask tokens and I'm not sure if it will even be
+        # printed due to pipe, but just in case
+        set +x
+        if [[ ${WITH_PUSH:-false} == "true" ]]; then
+          echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          docker push ${DOCKER_IMAGE_NAME_PREFIX}
+          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_BRANCH_NAME}
+          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${GIT_COMMIT_SHA}
+          docker push ${DOCKER_IMAGE_NAME_PREFIX}-${CI_FOLDER_SHA}
+        fi

@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
+
+#pragma once
+
+#include <ck_tile/host/kernel_launch.hpp>
+#include <c10/macros/Macros.h>
+
+namespace ck_tile {
+// Added by hipification to become a no-op on non supported architectures
+template <int MinBlockPerCu, typename Kernel, typename... Args>
+#if CK_TILE_USE_LAUNCH_BOUNDS
+__launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
+#endif
+    __global__ void kentry_pt(Args... args)
+{
+#if (defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__))
+    Kernel{}(args...);
+#else
+    CUDA_KERNEL_ASSERT(false && "Fatal! Attempting to call a CK SDPA kernel on unsupported hardware");
+#endif
+}
+
+template <typename Arch, int MinBlockPerCu, typename Kernel, typename... Args>
+#if CK_TILE_USE_LAUNCH_BOUNDS
+__launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
+#endif
+    __global__ void kentry_pt(Args... args)
+{
+#if (defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__))
+    Kernel{}(args...);
+#else
+    CUDA_KERNEL_ASSERT(false && "Fatal! Attempting to call a CK SDPA kernel on unsupported hardware");
+#endif
+}
+
+
+// Pytorch specific version
+// return a anonymous functor(lambda) to be called later
+// the KernelImpl should be a class without non-static data member, or let's say
+// can be instantiate with "KernelImpl{}"
+//
+// the "static __device__ operator()(some_arg)" is the entry point of KernelImpl
+//
+// Arch can be used to support linking multiple object files that have the same kernel compiled for
+// different architectures. In this case each object file has to use a different tag (gfx9_t,
+// gfx12_t etc.), so the kernel will have different symbols for each architecture.
+//
+template <int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU,
+          typename Arch     = void,
+          typename KernelImpl,
+          typename... Args>
+CK_TILE_HOST auto
+make_kernel_pt(KernelImpl /*f*/, dim3 grid_dim, dim3 block_dim, std::size_t lds_byte, Args... args)
+{
+    const auto kernel = []() {
+        if constexpr(std::is_void_v<Arch>)
+        {
+            return kentry_pt<MinBlockPerCu, KernelImpl, Args...>;
+        }
+        else
+        {
+            return kentry_pt<Arch, MinBlockPerCu, KernelImpl, Args...>;
+        }
+    }();
+    return [=](const stream_config& s) {
+        kernel<<<grid_dim, block_dim, lds_byte, s.stream_id_>>>(args...);
+    };
+}
+} // namespace ck_tile

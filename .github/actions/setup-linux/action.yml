@@ -1,0 +1,109 @@
+name: Setup Linux
+
+description: Set up Docker workspace on EC2
+
+runs:
+  using: composite
+  steps:
+    - name: Display EC2 information
+      shell: bash
+      run: |
+        set -euo pipefail
+        function get_ec2_metadata() {
+          # Pulled from instance metadata endpoint for EC2
+          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+          category=$1
+          # If it is GCP runner (runner name contains gcp), do not run this
+          runner_name_str=${{ runner.name }}
+          if [[ -f /.inarc ]]; then
+            echo "ARC Runner, no info on ec2 metadata"
+          elif [[ $runner_name_str == *"gcp"* || $runner_name_str == *"google"* ]]; then
+            echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
+          else
+            curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          fi
+        }
+        echo "ami-id: $(get_ec2_metadata ami-id)"
+        echo "instance-id: $(get_ec2_metadata instance-id)"
+        echo "instance-type: $(get_ec2_metadata instance-type)"
+        echo "system info $(uname -a)"
+
+    - name: Print GPU info (if present)
+      shell: bash
+      run: if [ -f /usr/bin/nvidia-smi ]; then nvidia-smi; fi
+
+    - name: Check if in a container runner
+      shell: bash
+      id: check_container_runner
+      run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
+
+    - name: Start docker if docker daemon is not running
+      shell: bash
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      run: |
+        if ! docker version >/dev/null 2>/dev/null; then
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker daemon..." && sudo systemctl start docker;
+          fi
+        fi
+
+    - name: Install uv
+      uses: pytorch/test-infra/.github/actions/setup-uv@main
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      with:
+        python-version: "3.12"
+
+    - name: Install pip
+      shell: bash
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      run: |
+        set -euo pipefail
+        if command -v pip3 &> /dev/null; then
+          echo "pip3 is already installed."
+        else
+          echo "pip3 not found, installing..."
+          uv tool install pip
+        fi
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+
+    - name: Kill any existing containers, clean up images
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      shell: bash
+      run: |
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true
+        # Prune all of the docker images
+        docker system prune -af
+
+    - name: Check that the docker daemon is running
+      shell: bash
+      continue-on-error: true
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
+      run: |
+        set +x
+
+        max_attempts=30
+        delay=10
+        attempt=1
+
+        for attempt in $(seq 1 $max_attempts); do
+          echo "Attempt $attempt of $max_attempts: Checking if Docker daemon is running..."
+          if docker info > /dev/null 2>&1; then
+            echo "Docker is running. Proceeding with the next steps"
+            exit 0
+          else
+            echo "Docker is not running yet."
+            echo "Retrying in $delay seconds..."
+            sleep $delay
+          fi
+        done
+        echo "Reached maximum attempts to connect to Docker. Exiting."
+        exit 1

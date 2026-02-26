@@ -1,0 +1,10 @@
+# a.h
+  a
+
+  # indented comment should do nothing
+symC
+
+
+
+# bbb.h
+  symDef
