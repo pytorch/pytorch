@@ -471,7 +471,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             print(l)
             x += 1
             # if reconstruction failed on the graph break, we should error here
-            assert torch.compiler.is_compiling()
+            assert torch.compiler.is_compiling()  # noqa: S101
             return l
 
         @torch.compile(backend="eager", fullgraph=True)
@@ -547,7 +547,7 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
             dup_top_inst = create_dup_top().opname
             for i, inst in enumerate(instructions):
                 if inst.opname == "BUILD_LIST" and i + 2 < len(instructions):
-                    assert not (
+                    assert not (  # noqa: S101
                         instructions[i + 1].opname == dup_top_inst
                         and instructions[i + 2].opname == "STORE_FAST"
                     ), "found list stored as tmp"

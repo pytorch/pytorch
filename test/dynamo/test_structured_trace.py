@@ -296,21 +296,24 @@ class StructuredTraceTest(TestCase):
             frame_id=1,
             frame_compile_id=2,
         )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
+        if cid != torch._guards.CompileId.from_string(str(cid)):
+            raise AssertionError("CompileId round-trip failed")
 
         cid = torch._guards.CompileId(
             compiled_autograd_id=1,
             frame_id=2,
             frame_compile_id=3,
         )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
+        if cid != torch._guards.CompileId.from_string(str(cid)):
+            raise AssertionError("CompileId round-trip failed")
 
         cid = torch._guards.CompileId(
             compiled_autograd_id=1,
             frame_id=None,
             frame_compile_id=None,
         )
-        assert cid == torch._guards.CompileId.from_string(str(cid))
+        if cid != torch._guards.CompileId.from_string(str(cid)):
+            raise AssertionError("CompileId round-trip failed")
 
         for bad_cid in ["-/-", "-/1", "1/-", "!1/2", "!1/-/-"]:
             with self.assertRaises(ValueError):
@@ -815,7 +818,7 @@ class StructuredTraceTest(TestCase):
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 1}
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
-{"artifact": {"name": "torch_dynamo_resume_in_fn_at_805_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_fn_at_808_ORIGINAL_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"describe_storage": {"id": 0, "describer_id": "ID", "size": 4}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 {"describe_tensor": {"id": 0, "ndim": 1, "dtype": "torch.float32", "device": "device(type='cpu')", "size": [1], "dynamo_hint_overrides": {}, "is_leaf": true, "stride": [1], "storage": 0, "view_func": "VIEW_FUNC", "describer_id": "ID"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 {"describe_source": {"describer_id": "ID", "id": 0, "source": "L['x']"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
@@ -833,7 +836,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "inductor_post_grad_graph", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": {"filename": "FILENAME", "file_path": "FILENAME"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"artifact": {"name": "fx_graph_cache_miss", "encoding": "json"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-{"artifact": {"name": "torch_dynamo_resume_in_fn_at_805_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"artifact": {"name": "torch_dynamo_resume_in_fn_at_808_MODIFIED_BYTECODE", "encoding": "string"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 """,  # noqa: B950
