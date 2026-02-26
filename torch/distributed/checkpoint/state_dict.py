@@ -647,6 +647,18 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
             param_group["lr"] = lrs.pop(0)
     optim.zero_grad(set_to_none=True)
 
+    # reset the step counter to 0 for all parameters, since we only called step()
+    # to initialize the optimizer state structure. the step counter should remain
+    # at 0 until the user actually calls step() themselves. This prevents
+    # get_optimizer_state_dict from modifying the optimizer's behavior.
+    for param in optim.state.keys():
+        if "step" in optim.state[param]:
+            # for most optimizers, step is a tensor
+            if isinstance(optim.state[param]["step"], torch.Tensor):
+                optim.state[param]["step"].zero_()
+            else:
+                optim.state[param]["step"] = 0
+
 
 def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> dict[str, ValueType]:
     """
