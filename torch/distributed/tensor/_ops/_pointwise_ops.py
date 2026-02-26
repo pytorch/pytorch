@@ -592,6 +592,103 @@ pointwise_ops = [
 ]
 
 
+def pointwise_strategy(
+    op_schema: OpSchema,
+    linearity: int = -1,
+    preserve_partial: str | None = None,
+) -> OpStrategy:
+    """Strategy for pointwise ops on the old registration path."""
+    followed_strategy_index = -1
+    max_shards = -1
+    max_ndim = -1
+
+    if op_schema.is_inplace_op():
+        # inplace op should follow the first arg strategy
+        followed_strategy = op_schema.args_schema[0]
+        followed_strategy_index = 0
+    elif op_schema.is_out_variant_op():
+        # out variant op should follow the out kwarg strategy
+        followed_strategy = op_schema.kwargs_schema["out"]
+        # out variant is technically a kwarg for the strategy to follow so it does not
+        # have an "index", we set it to a reasonably large number just to indicate it's
+        # not a valid index
+        followed_strategy_index = 100
+    else:
+        # normal pointwise op, we choose to follow the arg with
+        # the max shards in case operands needs reshard
+        # in case of multiple operands with max shard, we take
+        # the one with the max number of dimensions
+        for idx, arg_strategy in enumerate(op_schema.args_schema):
+            if not isinstance(arg_strategy, OpStrategy):
+                continue
+            arg_max_shards = arg_strategy.max_num_shards()
+            arg_max_ndim = arg_strategy.ndim
+            if (arg_max_shards > max_shards) or (
+                arg_max_shards == max_shards and arg_max_ndim > max_ndim
+            ):
+                followed_strategy_index = idx
+                max_shards = arg_max_shards
+                max_ndim = arg_max_ndim
+        followed_strategy = op_schema.args_schema[followed_strategy_index]
+
+    assert isinstance(followed_strategy, OpStrategy), (
+        f"no strategy to follow for {op_schema}!"
+    )
+    return common_pointwise_strategy(
+        op_schema.op,
+        op_schema.args_schema,
+        followed_strategy,
+        followed_strategy_index,
+        linearity,
+        preserve_partial=preserve_partial,
+    )
+
+
+def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Linear pointwise operators can propagate pending reductions.
+    For example, c = add(a, b); if a is pending sum, then c will be
+    pending sum as well without any communication overhead.
+
+    Note that:
+    1. Only unary and binary operations are supported, out variant
+      ops are not supported.
+    2. There're multiple types of linearity, refer to the doc of
+      common_pointwise_strategy for more details.
+    """
+    linearity_type = linear_pointwise_ops.get(op_schema.op, -1)
+    return pointwise_strategy(op_schema, linearity=linearity_type)
+
+
+def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for pointwise ops that preserve specific Partial types.
+
+    For example, torch.maximum preserves Partial("max") placements because
+    max(max(a), max(b)) == max(a, b). Similarly, torch.minimum preserves
+    Partial("min") placements.
+    """
+    preserve_partial = partial_preserving_ops.get(op_schema.op)
+    return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
+
+
+def single_mesh_dim_pointwise_strategy(
+    op: OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+    linearity: int = -1,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
+
+
+def single_mesh_dim_linear_pointwise_strategy(
+    linearity: int = -1,
+) -> Callable[
+    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+]:
+    return functools.partial(single_mesh_dim_pointwise_strategy, linearity=linearity)
+
+
 def single_mesh_dim_common_pointwise_strategy(
     args_schema: ArgsType,
     linearity: int = -1,
@@ -696,103 +793,6 @@ def _make_partial_strategy(
         return placements
 
     return strategy
-
-
-def single_mesh_dim_pointwise_strategy(
-    op: OpOverload,
-    args_schema: ArgsType,
-    kwargs_schema: KwargsType,
-    linearity: int = -1,
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
-
-
-def single_mesh_dim_linear_pointwise_strategy(
-    linearity: int = -1,
-) -> Callable[
-    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
-]:
-    return functools.partial(single_mesh_dim_pointwise_strategy, linearity=linearity)
-
-
-def pointwise_strategy(
-    op_schema: OpSchema,
-    linearity: int = -1,
-    preserve_partial: str | None = None,
-) -> OpStrategy:
-    """Strategy for pointwise ops on the old registration path."""
-    followed_strategy_index = -1
-    max_shards = -1
-    max_ndim = -1
-
-    if op_schema.is_inplace_op():
-        # inplace op should follow the first arg strategy
-        followed_strategy = op_schema.args_schema[0]
-        followed_strategy_index = 0
-    elif op_schema.is_out_variant_op():
-        # out variant op should follow the out kwarg strategy
-        followed_strategy = op_schema.kwargs_schema["out"]
-        # out variant is technically a kwarg for the strategy to follow so it does not
-        # have an "index", we set it to a reasonably large number just to indicate it's
-        # not a valid index
-        followed_strategy_index = 100
-    else:
-        # normal pointwise op, we choose to follow the arg with
-        # the max shards in case operands needs reshard
-        # in case of multiple operands with max shard, we take
-        # the one with the max number of dimensions
-        for idx, arg_strategy in enumerate(op_schema.args_schema):
-            if not isinstance(arg_strategy, OpStrategy):
-                continue
-            arg_max_shards = arg_strategy.max_num_shards()
-            arg_max_ndim = arg_strategy.ndim
-            if (arg_max_shards > max_shards) or (
-                arg_max_shards == max_shards and arg_max_ndim > max_ndim
-            ):
-                followed_strategy_index = idx
-                max_shards = arg_max_shards
-                max_ndim = arg_max_ndim
-        followed_strategy = op_schema.args_schema[followed_strategy_index]
-
-    assert isinstance(followed_strategy, OpStrategy), (
-        f"no strategy to follow for {op_schema}!"
-    )
-    return common_pointwise_strategy(
-        op_schema.op,
-        op_schema.args_schema,
-        followed_strategy,
-        followed_strategy_index,
-        linearity,
-        preserve_partial=preserve_partial,
-    )
-
-
-def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
-    """
-    Linear pointwise operators can propagate pending reductions.
-    For example, c = add(a, b); if a is pending sum, then c will be
-    pending sum as well without any communication overhead.
-
-    Note that:
-    1. Only unary and binary operations are supported, out variant
-      ops are not supported.
-    2. There're multiple types of linearity, refer to the doc of
-      common_pointwise_strategy for more details.
-    """
-    linearity_type = linear_pointwise_ops.get(op_schema.op, -1)
-    return pointwise_strategy(op_schema, linearity=linearity_type)
-
-
-def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
-    """
-    Strategy for pointwise ops that preserve specific Partial types.
-
-    For example, torch.maximum preserves Partial("max") placements because
-    max(max(a), max(b)) == max(a, b). Similarly, torch.minimum preserves
-    Partial("min") placements.
-    """
-    preserve_partial = partial_preserving_ops.get(op_schema.op)
-    return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
 
 
 def copy_strategy(op_schema: OpSchema) -> StrategyType:
