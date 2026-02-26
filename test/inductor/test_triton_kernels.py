@@ -1159,7 +1159,7 @@ def forward(self, x_1, output_1):
         num_bufs_allocated = code.count(code_string)
         if (
             inductor_config.cpp_wrapper
-            and not inductor_config.triton.autotune_at_compile_time
+            and inductor_config.triton.autotune_at_compile_time is False
             and has_triton_tensor_descriptor_host_tma()
         ):
             # Lazy kernel compilation may conditionally construct tensordescriptor
