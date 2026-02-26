@@ -5182,243 +5182,23 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         return body_name
 
-    @staticmethod
-    def _flatten_args_and_kwargs(fn_args_vt, kwargs):
-        """Flatten fn_args_vt and kwargs into proxyable proxies and arg sources.
-
-        Walks through all positional and keyword arguments using
-        VariableTracker.visit to collect leaf tensors/symnodes for proxy
-        matching, and sources for building the replacement dict on cache hit.
-
-        Returns (proxy_node_to_idx, flat_proxies, arg_sources):
-          - proxy_node_to_idx: dict mapping fx.Node → index for O(1) lookup.
-            Deduplicates nodes (only first occurrence is kept).
-          - flat_proxies: list of Proxy objects in index order, for reuse on
-            cache hit without constructing new Proxy wrappers.
-          - arg_sources: list of Source objects from all VTs with a source
-            (includes non-tensor VTs like modules)
-
-        TODO: support pytree registered objects — VariableTracker.visit may
-        not be sufficient for those.
-        """
-        # Maps fx.Node → index for O(1) freevar matching and natural dedup.
-        proxy_node_to_idx: dict[torch.fx.Node, int] = {}
-        flat_proxies: list[Proxy] = []
-        arg_sources: list[Source] = []
-
-        def _collect(vt: VariableTracker) -> None:
-            if vt.is_tensor() or isinstance(vt, SymNodeVariable):
-                proxy = vt.as_proxy()
-                if proxy.node not in proxy_node_to_idx:
-                    proxy_node_to_idx[proxy.node] = len(flat_proxies)
-                    flat_proxies.append(proxy)
-            source = getattr(vt, "source", None)
-            if source is not None:
-                arg_sources.append(source)
-
-        all_vts: list[VariableTracker] = list(fn_args_vt) + list(kwargs.values())
-        VariableTracker.visit(_collect, all_vts)
-        return proxy_node_to_idx, flat_proxies, arg_sources
-
-    @staticmethod
-    def _get_fn_id(fn_var):
-        if isinstance(fn_var, UserFunctionVariable):
-            return id(fn_var.get_function())
-        elif isinstance(fn_var, UnspecializedNNModuleVariable):
-            return id(fn_var.value.forward.__func__)  # type: ignore[attr-defined]
-        return None
-
-    @staticmethod
-    def _build_freevar_mapping(p_args, proxy_node_to_idx):
-        """Map each lifted freevar in p_args to a user arg index or a Source.
-
-        For each lifted arg in p_args[2:] (skipping body_node and body_name),
-        if its fx.Node matches a node in proxy_node_to_idx, it came from a
-        user argument. Otherwise it's a captured variable (e.g. module weight)
-        and we store its Source so we can re-derive the correct proxy on
-        cache hit.
-
-        Returns list of (idx, data) tuples:
-          - idx >= 0, data=None: came from flat user arg at that index
-          - idx == -1, data=Source: captured variable
-        """
-        freevar_mapping: list[tuple[int, Any]] = []
-        for outer_proxy in p_args[2:]:
-            matched_idx = proxy_node_to_idx.get(outer_proxy.node, -1)
-            if matched_idx >= 0:
-                freevar_mapping.append((matched_idx, None))
-            else:
-                grapharg = outer_proxy.node.meta.get("grapharg", None)
-                source = grapharg.source if grapharg is not None else None
-                assert source is not None, (
-                    f"is_pure freevar has no source: node.op={outer_proxy.node.op} "
-                    f"node.name={outer_proxy.node.name} — this likely means a "
-                    f"function argument was not included in the proxy matching"
-                )
-                freevar_mapping.append((-1, source))
-        return freevar_mapping
-
-    def _get_pure_cache(self, tx, fn_var):
-        from torch._guards import InvokeSubgraphCache
-
-        invoke_subgraph_cache = (
-            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
-                torch._higher_order_ops.invoke_subgraph
-            )
-        )
-        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
-            return None
-        fn_id = self._get_fn_id(fn_var)
-        if fn_id is None:
-            return None
-        return invoke_subgraph_cache.get_pure_cache_entry(fn_id)
-
-    def _save_pure_cache(
-        self, tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r, example_value
-    ):
-        from torch._guards import InvokeSubgraphCache, PureSubgraphCacheEntry
-
-        invoke_subgraph_cache = (
-            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
-                torch._higher_order_ops.invoke_subgraph
-            )
-        )
-        if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
-            return
-
-        fn_id = self._get_fn_id(fn_var)
-        if fn_id is None:
-            return
-
-        proxy_node_to_idx, _, arg_sources = self._flatten_args_and_kwargs(
-            fn_args_vt, kwargs
-        )
-        freevar_mapping = self._build_freevar_mapping(p_args, proxy_node_to_idx)
-
-        single_tensor_output = isinstance(body_r, TensorVariable)
-
-        # Validate output types: single tensor, or tuple/list of tensors.
-        if single_tensor_output:
-            assert isinstance(body_r, TensorVariable)
-        else:
-            assert isinstance(body_r, (TupleVariable, ListVariable)), (
-                f"is_pure: expected single tensor or tuple/list output, got {type(body_r)}"
-            )
-            for item in body_r.items:
-                assert isinstance(item, TensorVariable), (
-                    f"is_pure: sequence output contains non-tensor: {type(item)}"
-                )
-
-        # allow_side_effects is disabled for is_pure in _call_function, so
-        # example_value contains only user outputs (no extra intermediates).
-        output_metadata = [
-            (t.shape, t.stride(), t.dtype, t.device, t.requires_grad)
-            for t in example_value
-        ]
-
-        entry = PureSubgraphCacheEntry(
-            body_name=body_name,
-            body_gmod=body_gmod,
-            config=config,
-            freevar_mapping=freevar_mapping,
-            single_tensor_output=single_tensor_output,
-            output_metadata=output_metadata,
-            arg_sources=arg_sources,
-        )
-        invoke_subgraph_cache.add_pure_cache_entry(fn_id, entry)
-
-    def _stamp_out_cached_subgraph(self, tx, fn_args_vt, kwargs, cached):
-        from .builder import VariableBuilder
-
-        _, flat_proxies, new_arg_sources = self._flatten_args_and_kwargs(
-            fn_args_vt, kwargs
-        )
-
-        # Build a replacement dict: old arg source → new arg source.
-        # Captured variable sources (e.g. L['self'].linear.weight) form a
-        # Source tree rooted at one of the top-level arg sources (e.g.
-        # L['self']). When the same function is called with a different module
-        # instance, the root source changes (e.g. L['self'] on call 1 vs
-        # L['self'].layers[1] on call 2). We map old roots to new roots so
-        # Source.clone() can rewrite the entire tree.
-        # pyrefly: ignore[implicit-any]
-        source_replacement = {}
-        for old_source, new_source in zip(cached.arg_sources, new_arg_sources):
-            if old_source != new_source:
-                source_replacement[old_source] = new_source
-
-        # Lookup existing placeholders by source so we can reuse them below
-        # instead of creating duplicates via VariableBuilder.
-        existing_source_to_node: dict = {}
-        for node in tx.output.graph.find_nodes(op="placeholder"):
-            ga = node.meta.get("grapharg", None)
-            if ga is not None and ga.source is not None:
-                existing_source_to_node[ga.source] = node
-
-        # Rebuild proxy args from the cached freevar mapping
-        new_lifted_args = []
-        for user_arg_idx, data in cached.freevar_mapping:
-            if user_arg_idx >= 0:
-                new_lifted_args.append(flat_proxies[user_arg_idx])
-            else:
-                # Captured variable: rewrite the source to point to the
-                # current invocation's args, then use VariableBuilder to
-                # create a VT with the correct outer-graph proxy.
-                source = data
-                new_source = source
-                if source_replacement:
-                    new_source = source.clone(lambda s: source_replacement.get(s, s))
-
-                if new_source in existing_source_to_node:
-                    node = existing_source_to_node[new_source]
-                    new_lifted_args.append(torch.fx.Proxy(node, tx.output.current_tracer))
-                else:
-                    value = tx.output.resolve_source_value(new_source)
-                    vt = VariableBuilder(tx, new_source)(value)
-                    new_lifted_args.append(vt.as_proxy())
-
-        # Construct fresh FakeTensors from cached metadata.
-        assert tx.fake_mode is not None
-        with tx.fake_mode:
-            example_value = tuple(
-                torch.empty_strided(
-                    shape, stride, dtype=dtype, device=device, requires_grad=req_grad
-                )
-                for shape, stride, dtype, device, req_grad in cached.output_metadata
-            )
-
-        body_node = make_attr(tx, cached.body_name)
-        p_args = (body_node, cached.body_name, *new_lifted_args)
-        flat_variable = add_call_function(
-            tx,
-            torch._higher_order_ops.invoke_subgraph,
-            tuple(p_args),
-            {},
-            example_value,
-            cached.config,
-        )
-
-        if cached.single_tensor_output:
-            return flat_variable.items[0]  # type: ignore[attr-defined]
-        return flat_variable
-
     def _call_function(
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._dynamo import invoke_subgraph_cache as isc
+        from torch._dynamo.utils import dynamo_timed
+
         fn_var = args[0]
         fn_args_vt = args[1:]
 
-        # Extract config and is_pure from the marked function.
         config = None
-        is_pure = False
         if hasattr(fn_var, "get_function"):
             try:
                 fn = fn_var.get_function()
                 config = getattr(fn, "__marked_compile_region_config__", None)
-                is_pure = getattr(fn, "__marked_compile_region_is_pure__", False)
             except Exception:
                 log.warning(
                     "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
@@ -5426,31 +5206,52 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 )
                 raise
 
-        if is_pure:
-            cached = self._get_pure_cache(tx, fn_var)
-            if cached is not None:
-                return self._stamp_out_cached_subgraph(tx, fn_args_vt, kwargs, cached)
+        auto_cache = torch._dynamo.config.invoke_subgraph_auto_guard_cache
 
-        # Normal path: trace the subgraph.
-        # Pure functions have no side effects, so disable allow_side_effects
-        # to prevent collect_intermediate_outputs from adding extra SymInt
-        # outputs that complicate caching.
+        # Auto-cache lookup
+        if auto_cache:
+            with dynamo_timed("invoke_subgraph_cache_lookup"):
+                flat = isc.flatten_args(tx, fn_args_vt, kwargs)
+                match = isc.find_cache_match(
+                    tx, fn_var, flat.flat_vts, flat.arg_sources
+                )
+            if match is not None:
+                hc_log.debug(
+                    "auto_guard_cache: cache hit for '%s', reusing subgraph '%s'",
+                    fn_var,
+                    match.body_name,
+                )
+                with dynamo_timed("invoke_subgraph_stamp_out"):
+                    return isc.stamp_out_cached_subgraph(tx, fn_args_vt, kwargs, match)
+
+        # Snapshot guards before tracing for auto-cache delta computation
+        guards_before = None
+        if auto_cache:
+            guards_before = tx.output.guards.inner.copy()
+
+        # Trace the subgraph.
+        # Auto-cached functions have no side effects, so disable
+        # allow_side_effects to prevent collect_intermediate_outputs from
+        # adding extra SymInt outputs that complicate caching.
         assert self._HOP_NAME is not None
         old_allow_side_effects = self.allow_side_effects
-        if is_pure:
+        if auto_cache:
             self.allow_side_effects = False
-        try:
-            (
-                p_args,
-                p_kwargs,
-                example_value,
-                body_r,
-                body_gmod,
-                body_name,
-                body_graph_output_vts,
-            ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
-        finally:
-            self.allow_side_effects = old_allow_side_effects
+        with dynamo_timed("invoke_subgraph_trace"):
+            try:
+                (
+                    p_args,
+                    p_kwargs,
+                    example_value,
+                    body_r,
+                    body_gmod,
+                    body_name,
+                    body_graph_output_vts,
+                ) = self.create_wrapped_node(
+                    tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME
+                )
+            finally:
+                self.allow_side_effects = old_allow_side_effects
 
         if len(p_kwargs) > 0:
             unimplemented(
@@ -5472,10 +5273,27 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             *p_args[1:],
         )
 
-        if is_pure:
-            self._save_pure_cache(
-                tx, fn_var, fn_args_vt, kwargs, body_name, body_gmod, config, p_args, body_r, example_value
-            )
+        # Auto-cache save
+        if auto_cache:
+            flat = isc.flatten_args(tx, fn_args_vt, kwargs)
+            if isc.is_auto_cacheable(body_r, flat.flat_vts):
+                condition = isc.build_auto_cache_condition(
+                    tx, flat.flat_vts, flat.arg_sources, guards_before
+                )
+                if condition is not None:
+                    isc.save_cache_entry(
+                        tx,
+                        fn_var,
+                        flat.proxy_node_to_idx,
+                        flat.arg_sources,
+                        body_name,
+                        body_gmod,
+                        config,
+                        p_args,
+                        body_r,
+                        example_value,
+                        condition,
+                    )
 
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
             tx,

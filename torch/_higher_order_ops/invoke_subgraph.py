@@ -77,7 +77,6 @@ class NestedCompileRegionOptions:
     decompositions: Optional[dict[str, Any]] = None
 
 
-
 def _extract_nested_region_config(fn):
     """
     Extract the NestedCompileRegionOptions from the HOP subgraph gm.meta["nested_region_config"]
@@ -268,7 +267,6 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
 def mark_compile_region(
     fn=None,
     options: Optional[NestedCompileRegionOptions] = None,
-    is_pure: bool = False,
 ):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
@@ -283,8 +281,6 @@ def mark_compile_region(
         options: Optional config to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
-        is_pure: When True, asserts that repeated calls produce the same
-            subgraph, allowing Dynamo to skip tracing on subsequent calls.
     """
 
     def wrap(func):
@@ -297,7 +293,6 @@ def mark_compile_region(
 
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
         func.__marked_compile_region_config__ = options  # type: ignore[attr-defined]
-        func.__marked_compile_region_is_pure__ = is_pure  # type: ignore[attr-defined]
 
         return inner
 

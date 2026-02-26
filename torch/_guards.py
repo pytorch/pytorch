@@ -758,6 +758,25 @@ class PureSubgraphCacheEntry:
     arg_sources: list[Any]  # list[Source]
 
 
+@dataclass
+class AutoCacheCondition:
+    # Per flattened input VT: (tag, metadata).
+    #   ("tensor", (shape, stride, dtype, device, requires_grad))
+    #   ("symnode", python_type)
+    #   ("constant", value)
+    #   ("module", None)
+    # Tensor metadata is checked here because TENSOR_MATCH guards for
+    # subgraph inputs may already exist before tracing and thus won't
+    # appear in the guard delta.
+    input_checks: list[tuple[str, Any]]
+
+    # Guards captured during the trace (delta from before/after).
+    # Each entry: (source, type_str, expected_value)
+    # Keyword-dependent info (e.g. DICT_CONTAINS key/invert) is baked into
+    # expected by the dispatch table, so create_fn is not needed.
+    guards: list[tuple[Any, str, Any]]
+
+
 class InvokeSubgraphCache(HopSubgraphCache):
     def __init__(self) -> None:
         self.autograd_cache: dict[str, Callable] = {}
@@ -769,7 +788,11 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
-        self.pure_subgraph_cache: dict[int, PureSubgraphCacheEntry] = {}
+        # fn_id → list of (condition, cache_entry) pairs. Walked linearly
+        # on lookup; first matching condition wins.
+        self.auto_subgraph_cache: dict[
+            int, list[tuple[AutoCacheCondition, PureSubgraphCacheEntry]]
+        ] = defaultdict(list)
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
         self.dynamo_installed_submodules[fn_id].append(identifier)
@@ -824,11 +847,23 @@ class InvokeSubgraphCache(HopSubgraphCache):
         """Retrieve the effect types for a given invoke_subgraph identifier."""
         return self.effects_cache.get(identifier, None)
 
-    def add_pure_cache_entry(self, fn_id: int, entry: PureSubgraphCacheEntry) -> None:
-        self.pure_subgraph_cache[fn_id] = entry
+    def add_auto_cache_entry(
+        self,
+        fn_id: int,
+        condition: AutoCacheCondition,
+        entry: PureSubgraphCacheEntry,
+    ) -> None:
+        self.auto_subgraph_cache[fn_id].insert(0, (condition, entry))
 
-    def get_pure_cache_entry(self, fn_id: int) -> PureSubgraphCacheEntry | None:
-        return self.pure_subgraph_cache.get(fn_id, None)
+    def find_auto_cache_entry(
+        self,
+        fn_id: int,
+        evaluator: Callable[[AutoCacheCondition, PureSubgraphCacheEntry], bool],
+    ) -> PureSubgraphCacheEntry | None:
+        for condition, entry in self.auto_subgraph_cache.get(fn_id, []):
+            if evaluator(condition, entry):
+                return entry
+        return None
 
 
 class HopDispatchSetCache:
