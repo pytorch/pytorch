@@ -236,8 +236,10 @@ _monotone_binary_base_rules: list[list[Placement]] = [
 partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.maximum.default: "max",
     aten.maximum.out: "max",
+    prims.fmax.default: "max",
     aten.minimum.default: "min",
     aten.minimum.out: "min",
+    prims.fmin.default: "min",
 }
 
 # The linear pointwise ops map, key is op, value is the type of linearity.
