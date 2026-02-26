@@ -53,7 +53,8 @@ def _clear_traced_params_buffers(
         const_keys: List of keys that represent constants to be cleared.
     """
     for key in const_keys:
-        assert key in traced_module._buffers
+        if key not in traced_module._buffers:
+            raise AssertionError(f"Key {key} not found in traced_module._buffers")
         # We don't want constants to show up as a buffer in the state dict.
         # Instead they should just be a direct attribute.
         buffer = traced_module._buffers[key]

@@ -12,6 +12,8 @@ __all__ = [
     # Base error
     "OnnxExporterError",
     "ONNXProgram",
+    "ExportableModule",
+    "InputObserver",
 ]
 
 from typing import Any, TYPE_CHECKING
@@ -25,6 +27,8 @@ from torch._C._onnx import (  # Deprecated members that are excluded from __all_
 )
 
 from . import errors, ops
+from ._internal.exporter._exportable_module import ExportableModule
+from ._internal.exporter._input_observer import InputObserver
 from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.torchscript_exporter import (  # Deprecated members that are excluded from __all__
     symbolic_helper,
@@ -49,7 +53,9 @@ if TYPE_CHECKING:
 
 # Set namespace for exposed private names
 ONNXProgram.__module__ = "torch.onnx"
+ExportableModule.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
+InputObserver.__module__ = "torch.onnx"
 
 # TODO(justinchuby): Remove these two properties
 producer_name = "pytorch"
@@ -73,15 +79,13 @@ def export(
     # Dynamo only options
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
-    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
-    | None = None,
+    custom_translation_table: dict[Callable, Callable] | None = None,
     report: bool = False,
     optimize: bool = True,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = False,
     # BC options
     export_params: bool = True,
     keep_initializers_as_inputs: bool = False,
@@ -154,9 +158,6 @@ def export(
             This is useful for debugging the exporter. This option is only valid when dynamo is True.
         artifacts_dir: The directory to save the debugging artifacts like the report and the serialized
             exported program. This option is only valid when dynamo is True.
-        fallback: Whether to fallback to the TorchScript exporter if the dynamo exporter fails.
-            This option is only valid when dynamo is True. When fallback is enabled, It is
-            recommended to set dynamic_axes even when dynamic_shapes is provided.
         export_params: **When ``f`` is specified**: If false, parameters (weights) will not be exported.
 
             You can also leave it unspecified and use the returned :class:`torch.onnx.ONNXProgram`
@@ -174,8 +175,7 @@ def export(
             You can also leave it unspecified and use the returned :class:`torch.onnx.ONNXProgram`
             to control how initializers are treated when serializing the model.
         dynamic_axes:
-            Prefer specifying ``dynamic_shapes`` when ``dynamo=True`` and when ``fallback``
-            is not enabled.
+            Deprecated: Prefer specifying ``dynamic_shapes`` when ``dynamo=True``.
 
             By default the exported model will have the shapes of all input and output tensors
             set to exactly match those given in ``args``. To specify axes of tensors as
@@ -268,30 +268,25 @@ def export(
         :class:`torch.onnx.ONNXProgram` if dynamo is True, otherwise None.
 
     .. versionchanged:: 2.6
-        *training* is now deprecated. Instead, set the training mode of the model before exporting.
-        *operator_export_type* is now deprecated. Only ONNX is supported.
-        *do_constant_folding* is now deprecated. It is always enabled.
-        *export_modules_as_functions* is now deprecated.
-        *autograd_inlining* is now deprecated.
+        ``training`` is now deprecated. Instead, set the training mode of the model before exporting.
+        ``operator_export_type`` is now deprecated. Only ONNX is supported.
+        ``do_constant_folding`` is now deprecated. It is always enabled.
+        ``export_modules_as_functions`` is now deprecated.
+        ``autograd_inlining`` is now deprecated.
     .. versionchanged:: 2.7
-        *optimize* is now True by default.
+        ``optimize`` is now True by default.
     .. versionchanged:: 2.9
-        *dynamo* is now True by default.
+        ``dynamo`` is now True by default.
+    .. versionchanged:: 2.11
+        ``fallback`` option has been removed.
     """
-    if dynamo is True or isinstance(model, torch.export.ExportedProgram):
+    if dynamo is True or isinstance(
+        model, (torch.export.ExportedProgram, ExportableModule)
+    ):
         from torch.onnx._internal.exporter import _compat
 
         if isinstance(args, torch.Tensor):
             args = (args,)
-        # Prepare legacy export parameters for potential fallback
-        legacy_export_kwargs = {
-            "training": training,
-            "operator_export_type": operator_export_type,
-            "do_constant_folding": do_constant_folding,
-            "custom_opsets": custom_opsets,
-            "export_modules_as_functions": export_modules_as_functions,
-            "autograd_inlining": autograd_inlining,
-        }
 
         return _compat.export_compat(
             model,
@@ -314,8 +309,6 @@ def export(
             profile=profile,
             dump_exported_program=dump_exported_program,
             artifacts_dir=artifacts_dir,
-            fallback=fallback,
-            legacy_export_kwargs=legacy_export_kwargs,
         )
     else:
         import warnings

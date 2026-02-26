@@ -125,7 +125,7 @@ class CutlassExperimentConfig(ExperimentConfig):
     def to_options(self) -> dict[str, Any]:
         return {
             **super().to_options(),
-            "cuda.cutlass_instantiation_level": self.cutlass_instantiation_level,
+            "cutlass.cutlass_instantiation_level": self.cutlass_instantiation_level,
         }
 
 
@@ -367,7 +367,10 @@ def calculate_table_data(results: list[ExperimentResults]) -> dict:
 
     for experiment_result in results:
         for key, value in experiment_result.asdict().items():
-            assert key in UNITS, f"Unknown key {key}"
+            if key not in UNITS:
+                raise AssertionError(
+                    f"Unknown key '{key}'. Expected one of: {list(UNITS.keys())}"
+                )
             table_data[key + UNITS[key]].append(value)
 
         if experiment_result.name == "aten":

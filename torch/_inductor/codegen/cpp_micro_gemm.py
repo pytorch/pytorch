@@ -4,7 +4,6 @@ import operator
 import sys
 from collections.abc import Callable
 from enum import Enum
-from typing import Optional
 
 import torch
 
@@ -233,7 +232,7 @@ class CppMicroGemmConfig:
     compute_dtype: torch.dtype
     vec_isa_cls: type[VecISA]
     register_blocking: GemmBlocking
-    extra_check: Optional[Callable[..., bool]] = None
+    extra_check: Callable[..., bool] | None = None
 
 
 micro_gemm_configs: dict[type[CppMicroGemm], list[CppMicroGemmConfig]] = {}
@@ -689,7 +688,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     //   which introduces an additional transpose overhead of [K, N] compared to the non-transpose version.
     // Second implementation:
     //   Directly perform inner product calculation in sub-blocks,
-    //   which introduces an additional vector reduction of [M, N] compared to the non-tranpose version.
+    //   which introduces an additional vector reduction of [M, N] compared to the non-transpose version.
     // Therefore, when M * N / (K * N) is large, the first implementation has better performance.
     {%- if tail_n %}
     if (K % Vectorized::size() == 0 && N % Vectorized::size() == 0 && 24 * BLOCK_M > K) {
@@ -2106,7 +2105,7 @@ def create_micro_gemm(
     num_threads=-1,
     use_ref=True,
     q_group_size=None,
-) -> Optional[CppMicroGemm]:
+) -> CppMicroGemm | None:
     """
     Based on the provided info, try to find the config of the micro-kernel that would
     deliver the best performance in terms of lower latency for this case.
@@ -2140,7 +2139,7 @@ def create_micro_gemm(
     from ..utils import has_free_symbols
 
     dynamic_M = has_free_symbols((m,))
-    m = V.graph.sizevars.size_hint(m, fallback=1) if dynamic_M else m
+    m = V.graph.sizevars.optimization_hint(m, fallback=1)
     assert isinstance(m, int) or m.is_number, m
     if output_dtype is None:
         output_dtype = input_dtype

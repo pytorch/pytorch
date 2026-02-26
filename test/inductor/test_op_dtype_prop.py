@@ -108,34 +108,32 @@ class TestCase(InductorTestCase):
             fp32_cast_in_code = "to(tl.float32)" in code
             self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
 
-        @requires_gpu()
-        @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
-        @parametrize(
-            "reduction_func",
-            [
-                torch.prod,
-                torch.sum,
-                torch.argmax,
-                torch.argmin,
-                torch.min,
-                torch.max,
-            ],
-        )
-        @parametrize("input_dtype", [torch.float16, torch.bfloat16])
-        @config.patch("triton.use_block_ptr", True)
-        def test_low_precision_reduction(
-            self, input_shape, reduction_func, input_dtype
-        ):
-            @torch.compile
-            def func(a, b, c, d):
-                return reduction_func(a * b * c * d)
+    @requires_gpu()
+    @parametrize("input_shape", [(32, 32), (32, 128), (256, 32)])
+    @parametrize(
+        "reduction_func",
+        [
+            torch.prod,
+            torch.sum,
+            torch.argmax,
+            torch.argmin,
+            torch.min,
+            torch.max,
+        ],
+    )
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+    @config.patch("triton.use_block_ptr", True)
+    def test_low_precision_reduction(self, input_shape, reduction_func, input_dtype):
+        @torch.compile
+        def func(a, b, c, d):
+            return reduction_func(a * b * c * d)
 
-            inps = (torch.rand(input_shape, device=GPU_TYPE, dtype=input_dtype),) * 4
-            with config.patch("triton.codegen_upcast_to_fp32", False):
-                func_opt = torch._dynamo.optimize("inductor")(func)
-                code = run_and_get_triton_code(func_opt, *inps)
-                self.assertTrue(".to(tl.float32)" in code)
-                self.assertEqual(func(*inps), func_opt(*inps))
+        inps = (torch.rand(input_shape, device=GPU_TYPE, dtype=input_dtype),) * 4
+        with config.patch("triton.codegen_upcast_to_fp32", False):
+            func_opt = torch._dynamo.optimize("inductor")(func)
+            code = run_and_get_triton_code(func_opt, *inps)
+            self.assertTrue(".to(tl.float32)" in code)
+            self.assertEqual(func(*inps), func_opt(*inps))
 
     def test_op_dtype_support(self):
         """
@@ -208,10 +206,6 @@ class TestCase(InductorTestCase):
                 "round": "nearbyint",
                 # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
                 "sqrt": "sqrt_rn",
-            },
-            "xpu": {
-                "round": "nearbyint",
-                "sqrt": "sqrt",
             },
         }
         if GPU_TYPE in triton_op_name_overrides:
@@ -342,6 +336,36 @@ class TestCase(InductorTestCase):
         # the original dtype.
         num_downcasts = code.count(f".to({triton_type(dtype)})")
         self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
+
+    @requires_gpu()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
+    def test_unbacked_float_uses_fp64_signature(self):
+        """
+        Test that unbacked float scalars from .item() use fp64 in kernel signature
+        and are cast down to fp32 when used with fp32 tensors.
+
+        This verifies the fix for precision loss when Python floats or unbacked
+        float symbols were hardcoded to fp32 in Triton kernel signatures.
+        """
+
+        def fn(inputs, scalar_tensor):
+            # .item() creates an unbacked float symbol that becomes a kernel arg
+            val = scalar_tensor.item()
+            return torch._foreach_mul(inputs, val)
+
+        inputs = [torch.randn(8, device=GPU_TYPE, dtype=torch.float32)]
+        scalar = torch.tensor(
+            0.333333333333333333, device=GPU_TYPE, dtype=torch.float64
+        )
+
+        compiled = torch.compile(fn, fullgraph=True)
+        code = run_and_get_triton_code(compiled, inputs, scalar)
+
+        # The unbacked float should be passed as fp64 ('ks0': 'fp64' in signature)
+        # and cast down to fp32 for use with the fp32 tensor
+        self.assertIn("'ks0': 'fp64'", code)
+        self.assertIn(".to(tl.float32)", code)
 
 
 instantiate_device_type_tests(

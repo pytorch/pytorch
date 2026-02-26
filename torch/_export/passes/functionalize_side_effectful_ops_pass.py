@@ -1,5 +1,4 @@
 import copy
-from typing import Optional
 
 import torch
 from torch._export.pass_base import (
@@ -45,8 +44,8 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
 
     def __init__(self) -> None:
         super().__init__()
-        self._dep_token: Optional[ProxyValue] = None
-        self._next_dep_token_index: Optional[int] = None
+        self._dep_token: ProxyValue | None = None
+        self._next_dep_token_index: int | None = None
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         # Early return if no non-functional assertions.
@@ -87,13 +86,15 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
             kwargs={**kwargs, "dep_token": self._dep_token},
             meta=meta,
         )
-        assert self._next_dep_token_index is not None
+        if self._next_dep_token_index is None:
+            raise AssertionError("_next_dep_token_index must not be None")
         self._dep_token.node.name = f"dep_token{self._next_dep_token_index}"
         self._next_dep_token_index += 1
 
         return self._dep_token
 
     def output(self, results: list[Argument], meta: NodeMetadata) -> ProxyValue:
-        assert self._dep_token is not None
+        if self._dep_token is None:
+            raise AssertionError("_dep_token must not be None")
 
         return super().output(results=(*results, self._dep_token), meta=meta)  # type: ignore[arg-type]

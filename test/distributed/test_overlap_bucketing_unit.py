@@ -450,6 +450,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             traced.graph,
             collective_info,
             scheduled,
+            bucket_only_internode_comms=False,
         )
         bucketer.bucket_collectives()
 
@@ -460,6 +461,83 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         FileCheck().check("cat.default").check("all_reduce.default").check(
             "split_with_sizes"
         ).check_count("%mm", 2).run(graph_str)
+
+    def test_no_cross_type_bucketing_ar_and_rs(self):
+        """
+        Test that all_reduce and reduce_scatter on the same PG with
+        matching reduce_op and dtype are NOT bucketed together.
+
+        bucket_key() returns (group_name, reduce_op, dtype) for both
+        all_reduce and reduce_scatter. Without the collective type in
+        the key, they would be incorrectly grouped together.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 2
+
+            ar1 = torch.ops._c10d_functional.all_reduce(a, "sum", group_name)
+            ar2 = torch.ops._c10d_functional.all_reduce(b, "sum", group_name)
+
+            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                a, "sum", group_size, group_name
+            )
+            rs2 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                b, "sum", group_size, group_name
+            )
+
+            ar1_out = torch.ops._c10d_functional.wait_tensor(ar1)
+            ar2_out = torch.ops._c10d_functional.wait_tensor(ar2)
+            rs1_out = torch.ops._c10d_functional.wait_tensor(rs1)
+            rs2_out = torch.ops._c10d_functional.wait_tensor(rs2)
+
+            return ar1_out.sum() + ar2_out.sum() + rs1_out.sum() + rs2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+            traced = make_fx(func)(a, b)
+
+        ar1, ar2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        rs1, rs2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+
+        # No hiding — all exposed
+        hiding_annotations = {}
+
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            scheduled,
+            bucket_only_internode_comms=False,
+        )
+        bucketer.bucket_collectives()
+
+        # all_reduce ops should be bucketed together (1 bucketed all_reduce)
+        ar_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_reduce.default,
+        )
+        self.assertEqual(len(ar_nodes), 1)
+
+        # reduce_scatter ops should be bucketed together (1 bucketed reduce_scatter)
+        rs_nodes = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        self.assertEqual(len(rs_nodes), 1)
 
     def test_can_bucket_multidtype_collectives(self):
         """
@@ -721,6 +799,99 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         f.check("pre_bucket_all_gather").check("all_gather_into_tensor_out")
         f.run(graph_str)
 
+    def test_dead_fusible_code_no_crash(self):
+        """
+        Test that dead fusible code (fusion regions with no external outputs)
+        does not crash collapse_fusion_regions, and that collapse/expand
+        round-trips preserve the graph.
+
+        Regression test for the bug where dead code created a fusion region
+        with no external outputs, causing fuse_by_partitions to crash with
+        "AssertionError: last_output_node is None".
+        """
+
+        def func_with_dead_fusible_code(x, y):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                x, group_size, group_name
+            )
+
+            # Dead fusible chain - not consumed by output
+            dead1 = x + 1.0
+            dead2 = dead1 * 2.0
+            dead3 = dead2 + dead1  # noqa: F841
+
+            # Live fusible chain
+            live1 = y + 1.0
+            live2 = live1 * 2.0
+
+            mm_result = torch.mm(y, y)
+            live3 = mm_result + 1.0
+
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return (live2 + live3 + ag_out).sum()
+
+        from torch._inductor.fx_passes.fusion_regions import (
+            build_fusion_regions,
+            collapse_fusion_regions,
+            expand_fusion_regions,
+        )
+
+        with FakeTensorMode():
+            x = torch.randn(16, 16)
+            y = torch.randn(16, 16)
+            gm = make_fx(func_with_dead_fusible_code)(x, y)
+
+        graph_str_before = gm.print_readable(print_output=False)
+
+        region_of = build_fusion_regions(gm)
+        new_region_of = collapse_fusion_regions(gm, region_of)
+
+        # Expand back and verify graph is preserved
+        expand_fusion_regions(gm, new_region_of)
+        gm.recompile()
+        graph_str_after = gm.print_readable(print_output=False)
+        self.assertEqual(graph_str_before, graph_str_after)
+
+    @torch._inductor.config.patch(deterministic=True)
+    def test_deterministic_mode_no_benchmark_error(self):
+        """
+        Test that deterministic mode doesn't error when running overlap scheduling.
+
+        Before the fix, deterministic mode would error when trying to benchmark
+        compute nodes. Now it uses analytical estimation instead.
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+
+            # Compute with gemm
+            mm_result = torch.mm(a, b)
+            pointwise = mm_result + 1.0
+
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return (pointwise + ag_out).sum()
+
+        with FakeTensorMode():
+            a = torch.randn(16, 16, device=self.device)
+            b = torch.randn(16, 16, device=self.device)
+            gm = make_fx(func)(a, b)
+
+        # Should not error in deterministic mode (would have errored before fix)
+        schedule_overlap_bucketing(gm)
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -877,7 +1048,7 @@ class TestCrossPGOverlap(InductorTestCase):
             return 0.0
 
         out = schedule_overlap_bucketing(
-            traced, custom_runtime_estimation=custom_runtime
+            traced, custom_runtime_estimation=custom_runtime, max_off_bucket_gb=None
         )
 
         # Get scheduled order
@@ -1015,6 +1186,230 @@ class TestFusibleNodeOverlap(InductorTestCase):
         FileCheck().check("all_gather_into_tensor").check("add").check("mul").check(
             "sub"
         ).check("wait_tensor").run(graph_str)
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestOverlapSchedulingFixes(InductorTestCase):
+    """
+    Test cases for specific bug fixes in overlap scheduling.
+    These tests would fail without their corresponding fixes.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=16, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_no_self_dependency_cycle_with_dtype_conversion(self):
+        """
+        Test that bucketing collectives with dtype conversion doesn't create
+        self-dependency cycles.
+
+        This tests the fix in augmented_graph_helper.py that adds != new_node
+        checks to prevent self-dependencies when merging nodes.
+
+        The bug: When two convert_element_type nodes (inputs to all_gathers)
+        have timeline dependencies between them and both get merged into
+        _pre_bucket_all_gather, the dependency becomes a self-dependency
+        which causes _stable_topological_sort to fail.
+        """
+
+        def func(a, b, c, d):
+            group_name = dist.distributed_c10d._get_default_group().group_name
+            group_size = 16
+
+            # Multiple all_gathers with dtype conversion
+            # The convert nodes will have timeline dependencies between them
+            conv_a = torch.ops.prims.convert_element_type.default(a, torch.bfloat16)
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_a, group_size, group_name
+            )
+
+            conv_b = torch.ops.prims.convert_element_type.default(b, torch.bfloat16)
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_b, group_size, group_name
+            )
+
+            # Compute between all_gathers
+            mm = torch.mm(c, d)
+
+            conv_c = torch.ops.prims.convert_element_type.default(c, torch.bfloat16)
+            ag3 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_c, group_size, group_name
+            )
+
+            conv_d = torch.ops.prims.convert_element_type.default(d, torch.bfloat16)
+            ag4 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_d, group_size, group_name
+            )
+
+            # Wait for all
+            w1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            w2 = torch.ops._c10d_functional.wait_tensor(ag2)
+            w3 = torch.ops._c10d_functional.wait_tensor(ag3)
+            w4 = torch.ops._c10d_functional.wait_tensor(ag4)
+
+            return w1.sum() + w2.sum() + w3.sum() + w4.sum() + mm.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            d = torch.ones(4, 4, device=self.device)
+
+            traced = make_fx(func)(a, b, c, d)
+
+        # Run full overlap scheduling with bucketing enabled
+        # This would fail with AssertionError in _stable_topological_sort
+        # before the self-dependency fix
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=True,
+            insert_overlap_deps=True,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=None,
+            collective_estimator="analytical",
+            enable_fusion_regions=False,
+        )
+        # This should complete without cycle error
+        result = scheduler.run()
+        result.graph.lint()
+
+    def test_no_cycle_with_fusion_regions_and_bucketing(self):
+        """
+        Test that fusion regions + bucketing doesn't create cycles.
+
+        This tests multiple fixes:
+        1. Self-dependency prevention (augmented_graph_helper.py)
+        2. Track erased getitem nodes (const_fold.py, fusion_regions.py)
+        3. Skip DCE during expansion (const_fold.py, fusion_regions.py)
+
+        The scenario: Fusion regions collapse fusible ops into call_module nodes.
+        When bucketing merges collectives, getitem nodes from fusion outputs
+        get erased. Without proper tracking and DCE skip, this causes cycles
+        or assertion failures.
+        """
+
+        def func(a, b, c, d):
+            group_name = dist.distributed_c10d._get_default_group().group_name
+            group_size = 16
+
+            # Start collectives
+            conv_a = torch.ops.prims.convert_element_type.default(a, torch.bfloat16)
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_a, group_size, group_name
+            )
+
+            conv_b = torch.ops.prims.convert_element_type.default(b, torch.bfloat16)
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_b, group_size, group_name
+            )
+
+            # Fusible compute chain (will become a fusion region)
+            x = c + 1
+            x = x * 2
+            x = x - 3
+            x = x / 4
+
+            # Wait and use results
+            w1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            w2 = torch.ops._c10d_functional.wait_tensor(ag2)
+
+            # More collectives
+            conv_c = torch.ops.prims.convert_element_type.default(c, torch.bfloat16)
+            ag3 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_c, group_size, group_name
+            )
+
+            conv_d = torch.ops.prims.convert_element_type.default(d, torch.bfloat16)
+            ag4 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_d, group_size, group_name
+            )
+
+            # Another fusible chain
+            y = d + 1
+            y = y * 2
+
+            w3 = torch.ops._c10d_functional.wait_tensor(ag3)
+            w4 = torch.ops._c10d_functional.wait_tensor(ag4)
+
+            return w1.sum() + w2.sum() + w3.sum() + w4.sum() + x.sum() + y.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            d = torch.ones(4, 4, device=self.device)
+
+            traced = make_fx(func)(a, b, c, d)
+
+        # Run with fusion regions enabled - this exercises all the fixes
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=True,
+            insert_overlap_deps=True,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=None,
+            collective_estimator="analytical",
+            enable_fusion_regions=True,  # Enable fusion regions
+        )
+        # This should complete without errors
+        result = scheduler.run()
+        result.graph.lint()
+
+
+class TestForeachGroupsUnit(InductorTestCase):
+    """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
+
+    @unittest.skipIf(not HAS_GPU, "Requires GPU")
+    def test_foreach_groups_correctness(self):
+        """Test that foreach grouping computes correct groups and copies data correctly."""
+        from torch._inductor.fx_passes.bucketing import (
+            _ALL_DTYPES,
+            _compute_foreach_groups,
+            _pre_bucket_all_gather,
+        )
+
+        t1 = torch.randn(10, device="cuda")
+        t2 = torch.randn(20, device="cuda", dtype=torch.float16)
+        t3 = torch.randn(10, device="cuda")
+        ag_ins = [t1, t2, t3]
+        out_dtypes = [torch.float32, torch.float16, torch.float32]
+        out_dtype_ints = [_ALL_DTYPES.index(d) for d in out_dtypes]
+
+        # Mixed dtypes should produce groups with -1 delimiter
+        groups = _compute_foreach_groups(ag_ins, out_dtypes)
+        self.assertIsNotNone(groups)
+        self.assertIn(-1, groups)
+
+        # With and without groups should produce identical results
+        result_with = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, groups
+        )
+        result_without = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, None
+        )
+        self.assertTrue(torch.allclose(result_with, result_without))
 
 
 if __name__ == "__main__":

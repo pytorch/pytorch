@@ -3,11 +3,18 @@ from torch._inductor.runtime.benchmarking import benchmarker
 
 
 def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
-    assert sparsity <= 1.0 and sparsity >= 0.0, (
-        "sparsity should be a value between 0 and 1"
-    )
-    assert M % blocksize[0] == 0
-    assert N % blocksize[1] == 0
+    if not (sparsity <= 1.0 and sparsity >= 0.0):
+        raise AssertionError(
+            f"sparsity should be a value between 0 and 1, but got {sparsity}"
+        )
+    if M % blocksize[0] != 0:
+        raise AssertionError(
+            f"M ({M}) must be divisible by blocksize[0] ({blocksize[0]})"
+        )
+    if N % blocksize[1] != 0:
+        raise AssertionError(
+            f"N ({N}) must be divisible by blocksize[1] ({blocksize[1]})"
+        )
     shape = (B, M // blocksize[0], N // blocksize[1])[int(B == 0) :]
     A = torch.bernoulli(torch.full(shape, 1 - sparsity, dtype=dtype, device=device))
     expected_nnz = int((1 - sparsity) * M * N / (blocksize[0] * blocksize[1]))
@@ -208,9 +215,10 @@ if __name__ == "__main__":
     if args.star > 0:
         import torch.sparse._triton_ops
 
-        assert {len(m_list), len(n_list), len(k_list), len(bm_list), len(bk_list)} == {
-            1
-        }
+        if {len(m_list), len(n_list), len(k_list), len(bm_list), len(bk_list)} != {1}:
+            raise AssertionError(
+                "When --star is set, m, n, k, bm, bk lists must all have length 1"
+            )
         m = m_list[0]
         n = n_list[0] or m
         k = k_list[0] or m

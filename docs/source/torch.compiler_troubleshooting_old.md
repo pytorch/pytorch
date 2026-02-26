@@ -10,7 +10,7 @@ orphan: true
 
 :::{note}
 This document is outdated and is now mainly a primary resource on how to run the `torch.compile` minifier.
-Please see the [updated troubleshooting document](https://pytorch.org/docs/main/torch.compiler_troubleshooting.html).
+Please see the [updated troubleshooting document](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_troubleshooting.html).
 There is also a more [comprehensive manual for torch.compile](https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.ivdr7fmrbeab)
 available.
 :::

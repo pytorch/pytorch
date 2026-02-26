@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -14,8 +14,8 @@ _EMPTY_NN_MODULE_STACK_KEY = "_empty_nn_module_stack_from_metadata_hook"
 
 def _node_metadata_hook(
     node: torch.fx.Node,
-    metadata: Optional[dict[str, Any]] = None,
-    fake_mode: Optional[FakeTensorMode] = None,
+    metadata: dict[str, Any] | None = None,
+    fake_mode: FakeTensorMode | None = None,
 ) -> None:
     """
     Hook for adding the appropriate metadata to nodes that are created during a
@@ -35,9 +35,8 @@ def _node_metadata_hook(
     # pyrefly: ignore [bad-assignment]
     fake_mode = fake_mode or contextlib.nullcontext()
 
-    assert node.op == "call_function" and callable(node.target), (
-        f"node: {node}, target: {node.target}"
-    )
+    if node.op != "call_function" or not callable(node.target):
+        raise AssertionError(f"node: {node}, target: {node.target}")
 
     if (
         isinstance(node.target, torch._ops.OpOverload)
@@ -84,7 +83,6 @@ def _node_metadata_hook(
         "torch_fn",
         (
             f"{node.target.__name__}_0",
-            # pyrefly: ignore [missing-attribute]
             f"{node.target.__class__.__name__}.{node.target.__name__}",
         ),
     )
@@ -96,7 +94,8 @@ def _set_node_metadata_hook(gm: torch.fx.GraphModule, f):
     Takes a callable which will be called after we create a new node. The
     callable takes the newly created node as input and returns None.
     """
-    assert callable(f), "node_metadata_hook must be a callable."
+    if not callable(f):
+        raise AssertionError("node_metadata_hook must be a callable.")
 
     # Add the hook to all submodules
     for m in gm.modules():

@@ -7,14 +7,20 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
+import torch.distributed.config as dist_config
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._logging import LazyString
+from torch._prims.rng_prims import run_dtensor_rng_op
+from torch.distributed import _local_tensor
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._argmin_argmax import argmin_argmax_handler
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._nonlinear_redux import (
+    argminmax_handler,
+    minmax_dim_handler,
+)
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -156,8 +162,10 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
-            aten.argmin.default: argmin_argmax_handler,
-            aten.argmax.default: argmin_argmax_handler,
+            aten.argmin.default: argminmax_handler,
+            aten.argmax.default: argminmax_handler,
+            aten.max.dim: minmax_dim_handler,
+            aten.min.dim: minmax_dim_handler,
         }
 
     # ********************************************************************************************
@@ -218,11 +226,19 @@ class OpDispatcher:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
             if try_cache and not _are_we_tracing():
-                return self.sharding_propagator.propagate_op_sharding(op_info.schema)
+                result = self.sharding_propagator.propagate_op_sharding(op_info.schema)
             else:
-                return self.sharding_propagator.propagate_op_sharding_non_cached(
+                result = self.sharding_propagator.propagate_op_sharding_non_cached(
                     op_info.schema
                 )
+            if logger.handlers and logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "sharding_prop MISS (C++ fast path): %s -> %s",
+                    op_info.schema,
+                    # pyrefly: ignore [missing-attribute]
+                    result.output_spec,
+                )
+            return result
         except NotImplementedError:
             if torch._C._dispatch_has_kernel_for_dispatch_key(
                 op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
@@ -249,8 +265,13 @@ class OpDispatcher:
         assert output_sharding is not None, "output sharding should not be None"
         assert op_info is not None, "op_info should never be None"
 
+        # Record output placements for debugging
+        debug_mode = get_active_debug_mode()
+        if debug_mode is not None and output_sharding.output_spec is not None:
+            debug_mode.record_output_placements(output_sharding.output_spec)
+
         mesh = op_info.compute_mesh
-        participating = mesh.get_coordinate() is not None
+        participating = mesh._is_current_rank_part_of_mesh()
         local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case
@@ -278,9 +299,20 @@ class OpDispatcher:
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
-                    # Default to `OffsetBasedRNGTracker` if the parallelism API
-                    # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
+                    # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
+                    # Skip RNG state sync during tracing to avoid lazily initializing real RNG state under fake mode.
+                    run_state_sync = not _are_we_tracing()
+                    if not run_state_sync:
+                        logger.info(
+                            "DTensor RNG tracker is being lazily initialized during tracing. "
+                            "RNG states may not be synchronized across ranks, which can lead "
+                            "to silent incorrectness. Please call `torch.manual_seed()` with "
+                            "the same seed on all ranks before compiling DTensor random ops.",
+                            stacklevel=2,
+                        )
+                    random._rng_tracker = random.OffsetBasedRNGTracker(
+                        mesh, run_state_sync
+                    )
 
                 first_arg, first_local_arg = (
                     cast(dtensor.DTensor, args[0]),
@@ -294,17 +326,48 @@ class OpDispatcher:
                 assert maybe_user_generator is None or isinstance(
                     maybe_user_generator, torch.Generator
                 )
-                # maybe_user_generator = None
-                rng_context = (
-                    random._rng_tracker._distribute_region(
-                        first_arg._spec, generator=maybe_user_generator
-                    )
-                    if random._rng_tracker and not first_local_arg.is_meta
-                    else contextlib.nullcontext()
-                )
-                # For DTensor random operator, run it within a RNGTracker context to
-                # ensure the random number generator is properly distributed.
-                with rng_context:
+
+                if (
+                    random._rng_tracker
+                    and not first_local_arg.is_meta
+                    and random._rng_tracker.distribute_region_enabled
+                ):
+                    if (
+                        maybe_user_generator is not None
+                        or first_local_arg.device.type != "cuda"
+                        or _local_tensor.enabled_local_tensor_mode()
+                        or (
+                            not _are_we_tracing()
+                            and type(first_local_arg) is not torch.Tensor
+                        )
+                    ):
+                        with random._rng_tracker._distribute_region(
+                            first_arg._spec, generator=maybe_user_generator
+                        ):
+                            local_results = op_call(
+                                *local_tensor_args, **op_info.local_kwargs
+                            )
+                    else:
+                        # CUDA device without user generator, use HOP for traceability
+                        if dist_config.compile_on_one_rank:
+                            raise NotImplementedError(
+                                "run_dtensor_rng_op is not yet compatible with compile_on_one_rank"
+                            )
+                        assert isinstance(
+                            random._rng_tracker, random.OffsetBasedRNGTracker
+                        )
+                        start_offset_incr, end_offset_incr = (
+                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
+                        )
+                        local_results = run_dtensor_rng_op(
+                            start_offset_incr,
+                            end_offset_incr,
+                            op_call,
+                            *local_tensor_args,
+                            **op_info.local_kwargs,
+                        )
+                else:
+                    # No rng_tracker, meta tensor, or distribute_region disabled
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
@@ -369,6 +432,11 @@ class OpDispatcher:
         """
         Tail of main dispatching logic, called from C++ fast path.
         """
+
+        # Record output placements for debugging
+        debug_mode = get_active_debug_mode()
+        if debug_mode is not None and output_sharding.output_spec is not None:
+            debug_mode.record_output_placements(output_sharding.output_spec)
 
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
@@ -521,9 +589,25 @@ class OpDispatcher:
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
             op_call, None
         )
+        if runtime_schema_info is None:
+            runtime_schema_info = (
+                self.sharding_propagator.op_to_schema_info_for_single_dim_strategy.get(
+                    op_call, None
+                )
+            )
 
-        if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
-            # flatten args/kwargs when op says necessary
+        # Auto-detect needs_pytree if any arg is a list/tuple containing tensors
+        def _contains_tensor(arg: object) -> bool:
+            if isinstance(arg, (list, tuple)):
+                return any(isinstance(item, torch.Tensor) for item in arg)
+            return False
+
+        needs_pytree = (
+            runtime_schema_info is not None and runtime_schema_info.needs_pytree
+        ) or any(_contains_tensor(arg) for arg in args)
+
+        if needs_pytree:
+            # flatten args/kwargs when op says necessary or args contain lists/tuples
             tree_args, args_spec = pytree.tree_flatten(args)
             args_list: Sequence[object] = tree_args
         else:
@@ -561,6 +645,9 @@ class OpDispatcher:
             if isinstance(v, dtensor.DTensor):
                 local_kwargs[k] = v._local_tensor
                 kwargs_schema[k] = v._spec
+                if compute_mesh is None:
+                    # record the first compute device mesh from kwargs
+                    compute_mesh = v.device_mesh
             elif isinstance(v, torch.Tensor):
                 compute_mesh = compute_mesh or try_find_mesh_from_args(
                     op_call, args_list

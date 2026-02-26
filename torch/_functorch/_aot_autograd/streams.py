@@ -1,4 +1,4 @@
-from typing import Any, Optional, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 import torch.fx
 import torch.fx.traceback
@@ -12,15 +12,22 @@ from torch.utils._runtime_estimation import (
     get_transfer_time,
 )
 
+
+if TYPE_CHECKING:
+    from .schemas import ViewAndMutationMeta  # noqa: TC004
+
 from .indexed_dict import IndexedDict
 
+
+aten = torch.ops.aten
 
 Node: TypeAlias = torch.fx.Node
 Graph: TypeAlias = torch.fx.Graph
 
 
 def get_roofline_estimate(node: Node) -> float:
-    assert node.op == "call_function", "non-func node in roofline estimate"
+    if node.op != "call_function":
+        raise AssertionError(f"non-func node in roofline estimate: {node.op}")
 
     def map_value(x: Any) -> Any:
         return x.meta.get("value", x) if isinstance(x, Node) else x
@@ -62,7 +69,7 @@ def get_device(node: Node) -> torch.device:
     return node.meta["val"].device
 
 
-def get_stream(node: Node) -> Optional[int]:
+def get_stream(node: Node) -> int | None:
     maybe_annotation = node.meta.get("custom", None)
     if maybe_annotation is not None:
         return node.meta["custom"].get("stream", None)
@@ -113,16 +120,20 @@ def insert_wait_event_before_node(graph: Graph, node: Node, event_ind: int) -> N
 
 
 def populate_stream_timeline(
-    stream_to_timeline: dict[Optional[int], IndexedDict[Node, float]],
+    stream_to_timeline: dict[int | None, IndexedDict[Node, float]],
     graph: Graph,
-    stream_index: Optional[int],
+    stream_index: int | None,
 ) -> IndexedDict[Node, float]:
     if stream_index not in stream_to_timeline:
         stream_to_timeline[stream_index] = IndexedDict()
         total_time = 0.0
         for node in graph.nodes:
             # mlazos: not sure if we should include forward here too but don't think it matters
-            if is_bwd_node(node) and get_stream(node) == stream_index:
+            if (
+                node.op == "call_function"
+                and is_bwd_node(node)
+                and get_stream(node) == stream_index
+            ):
                 total_time += get_roofline_estimate(node)
                 stream_to_timeline[stream_index][node] = (
                     total_time  # NB: total time includes the node's runtime
@@ -138,21 +149,24 @@ def populate_stream_timeline(
 # we attempt to find the point which to deallocate based on the estimated timestamps.
 def handle_synced_deallocation(
     graph: Graph,
-    stream_to_exec_trace: dict[Optional[int], IndexedDict[Node, float]],
+    stream_to_exec_trace: dict[int | None, IndexedDict[Node, float]],
     node: Node,
     last_usage: Node,
 ) -> None:
-    assert is_bwd_node(node), (
-        "synced allocations should only be handled on backward nodes"
-    )
-    assert is_bwd_node(last_usage), (
-        "synced allocations should only be handled on backward nodes"
-    )
+    if not is_bwd_node(node):
+        raise AssertionError(
+            "synced allocations should only be handled on backward nodes"
+        )
+    if not is_bwd_node(last_usage):
+        raise AssertionError(
+            "synced allocations should only be handled on backward nodes"
+        )
     allocating_stream = get_stream(node)
     side_stream = get_stream(last_usage)
-    assert allocating_stream != side_stream, (
-        "allocating and side stream should be different for synced deallocations"
-    )
+    if allocating_stream == side_stream:
+        raise AssertionError(
+            "allocating and side stream should be different for synced deallocations"
+        )
     if not torch.cuda.is_available():
         # fallback to record_stream in this case
         with graph.inserting_after(node):
@@ -244,12 +258,12 @@ def insert_backward_syncs(gm: torch.fx.GraphModule) -> None:
     """Inserts stream syncs for backward nodes if consumer and producer are on different streams"""
     node_to_wait_event_ind: dict[Node, int] = {}
     for node in gm.graph.nodes:
-        if is_bwd_node(node):
+        if node.op == "call_function" and is_bwd_node(node):
             flat_args = _get_flat_args(node, {})
             cur_node_stream = get_stream(node)
 
             for arg in flat_args:
-                if is_bwd_node(arg):
+                if arg.op == "call_function" and is_bwd_node(arg):
                     arg_stream = get_stream(arg)
                     if arg_stream != cur_node_stream and get_device(arg).type != "cpu":
                         insert_sync(gm.graph, node, arg, node_to_wait_event_ind)
@@ -264,9 +278,9 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
     # I think this is fine because you should have large tensors if you're using streams
     # although perhaps I could add a constant 10us per op ahead of the first stream op?
     # a trace of all the nodes running in a given stream
-    stream_to_exec_trace: dict[Optional[int], IndexedDict[Node, float]] = {}
+    stream_to_exec_trace: dict[int | None, IndexedDict[Node, float]] = {}
     for node in gm.graph.nodes:
-        if is_bwd_node(node):
+        if node.op == "call_function" and is_bwd_node(node):
             allocating_stream = get_stream(node)
             users = list(node.users.keys())
             if not users:
@@ -279,3 +293,60 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
                 handle_synced_deallocation(
                     gm.graph, stream_to_exec_trace, node, last_user
                 )
+
+
+def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
+    for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
+        arg_stream = get_stream(epi_copy.args[1])
+        copy_stream = get_stream(epi_copy)
+        if arg_stream != copy_stream:
+            set_stream(epi_copy, get_stream_or_current_stream(epi_copy.args[1]))
+
+
+def populate_fw_metadata_with_stream_indices(
+    gm: torch.fx.GraphModule, fw_metadata: "ViewAndMutationMeta"
+) -> None:
+    """
+    Populates fw_metadata.mutated_inp_stream_indices with stream indices from the compiled graph.
+
+    The forward graph outputs are structured as:
+    (*mutated_inputs, *user_outputs, *intermediate_bases, *saved_tensors, *saved_symints)
+
+    We extract the stream index for each mutated input from the graph's output node.
+    """
+
+    num_mutated_inps = fw_metadata.num_mutated_inp_runtime_indices
+    if num_mutated_inps == 0:
+        fw_metadata.mutated_inp_stream_indices = []
+        return
+
+    # Find the output node in the graph
+    output_node = None
+    for node in gm.graph.find_nodes(op="output"):
+        output_node = node
+        break
+
+    if output_node is None:
+        raise AssertionError(
+            "No output node found in the graph when extracting stream indices"
+        )
+
+    # The output node's args[0] is a tuple/list of all outputs
+    output_args = output_node.args[0]
+
+    # Extract stream indices for the first num_mutated_inps outputs
+    stream_indices = []
+    for i in range(num_mutated_inps):
+        if i < len(output_args):
+            output_arg = output_args[i]
+            # Get the stream index from the node metadata
+            stream_idx = (
+                get_stream(output_arg)
+                if isinstance(output_arg, torch.fx.Node)
+                else None
+            )
+            stream_indices.append(stream_idx)
+        else:
+            stream_indices.append(None)
+
+    fw_metadata.mutated_inp_stream_indices = stream_indices

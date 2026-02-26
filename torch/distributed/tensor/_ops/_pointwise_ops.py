@@ -37,6 +37,7 @@ from torch.utils._typing_utils import not_none
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 # leave the remaining pointwise_ops list here for convenience,
 # Below ops are some pointwise ops that are yet to be supported,
 # they might not be a complete list.
@@ -53,6 +54,28 @@ aten = torch.ops.aten
 #     "real",  # complex data type only
 # ]
 
+# Linear pointwise ops, split by linearity type.
+unary_linear_ops = [aten.to.dtype]
+
+binary_additive_ops = [
+    aten.add.Tensor,
+    aten.add_.Tensor,
+    aten.sub.Tensor,
+    aten.sub_.Tensor,
+]
+
+# mul: partials propagate through either arg. div: only through numerator.
+binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor]
+binary_div_ops = [aten.div.Tensor, aten.div_.Tensor]
+
+scalar_linear_ops = [
+    aten.div.Scalar,
+    aten.div_.Scalar,
+    aten.mul.Scalar,
+    aten.mul_.Scalar,
+]
+
+neg_ops = [aten.neg.default, aten.neg_.default]
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
@@ -174,11 +197,9 @@ pointwise_ops = [
     aten.digamma.default,
     aten.digamma.out,
     aten.digamma_.default,
-    aten.div.Tensor,
     aten.div.Tensor_mode,
     aten.div.out,
     aten.div.out_mode,
-    aten.div_.Tensor,
     aten.div_.Tensor_mode,
     aten.eq.Tensor,
     aten.eq.Tensor_out,
@@ -226,6 +247,8 @@ pointwise_ops = [
     aten.frac.default,
     aten.frac.out,
     aten.frac_.default,
+    aten.gcd.default,
+    aten.gcd.out,
     aten.ge.Scalar,
     aten.ge.Tensor,
     aten.gelu.default,
@@ -316,9 +339,7 @@ pointwise_ops = [
     aten.nan_to_num.out,
     aten.nan_to_num_.default,
     aten.ne.Scalar,
-    aten.neg.default,
     aten.neg.out,
-    aten.neg_.default,
     aten.nextafter.default,
     aten.nextafter.out,
     aten.nextafter_.default,
@@ -381,6 +402,8 @@ pointwise_ops = [
     aten.sinh.default,
     aten.sinh.out,
     aten.sinh_.default,
+    aten.special_erfcx.default,
+    aten.special_erfcx.out,
     aten.sqrt.default,
     aten.sqrt.out,
     aten.sqrt_.default,
@@ -417,22 +440,32 @@ pointwise_ops = [
     aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
+    # prims ops
+    # please keep the entries below alphabetically sorted
+    prims.bessel_i0e.default,
+    prims.bessel_i1.default,
+    prims.bessel_i1e.default,
+    prims.bessel_j0.default,
+    prims.bessel_j1.default,
+    prims.div.default,
+    prims.erfcx.default,
+    prims.gcd.default,
+    prims.frexp.default,
+    prims.ndtri.default,
+    prims.ne.default,
+    prims.spherical_bessel_j0.default,
+    prims.zeta.default,
 ]
 
-# the linear pointwise ops map, key is op, value is the type of linearity
-linear_pointwise_ops = {
-    aten.to.dtype: 0,
-    aten.add.Tensor: 1,
-    aten.add_.Tensor: 1,
-    aten.sub.Tensor: 1,
-    aten.sub_.Tensor: 1,
-    aten.div.Scalar: 0,
-    aten.div_.Scalar: 0,
-    aten.mul.Scalar: 0,
-    aten.mul_.Scalar: 0,
-    aten.mul.Tensor: 2,
-    aten.mul_.Tensor: 2,
-    aten.copy_.default: 1,
+
+# Reconstruct the original linear_pointwise_ops dict for the existing registration path.
+linear_pointwise_ops: dict[OpOverload, int] = {
+    **dict.fromkeys(unary_linear_ops, 0),
+    **dict.fromkeys(binary_additive_ops, 1),
+    **dict.fromkeys(binary_mul_ops, 2),
+    **dict.fromkeys(binary_div_ops, 2),
+    **dict.fromkeys(scalar_linear_ops, 0),
+    **dict.fromkeys(neg_ops, 0),
 }
 
 # Ops that preserve specific Partial types through the operation.
@@ -441,8 +474,10 @@ linear_pointwise_ops = {
 partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.maximum.default: "max",
     aten.maximum.out: "max",
+    prims.fmax.default: "max",
     aten.minimum.default: "min",
     aten.minimum.out: "min",
+    prims.fmin.default: "min",
 }
 
 
@@ -604,6 +639,16 @@ def single_mesh_dim_common_pointwise_strategy(
     return placements_list
 
 
+def copy_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for copy_ that preserves any Partial placement.
+
+    copy_ simply copies data and should preserve whatever Partial placement
+    the destination has, regardless of the reduce_op type (sum, avg, max, min, etc.).
+    """
+    return pointwise_strategy(op_schema, preserve_partial="all")
+
+
 def common_pointwise_strategy(
     op,
     args_schema: Sequence[object],
@@ -675,7 +720,10 @@ def common_pointwise_strategy(
                     )
 
                 # Check if this partial type should be preserved
-                if preserve_partial is not None and placement.is_partial(
+                # preserve_partial="all" preserves any Partial type (used for copy_)
+                if preserve_partial == "all":
+                    out_placements.append(placement)
+                elif preserve_partial is not None and placement.is_partial(
                     preserve_partial
                 ):
                     out_placements.append(placement)
@@ -811,6 +859,14 @@ for op in partial_preserving_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         partial_preserving_pointwise_strategy
     )
+
+# Register copy_ with its custom strategy that preserves all Partial types
+register_op_strategy(
+    aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(copy_strategy)
+register_op_strategy(
+    prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(copy_strategy)
 
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(

@@ -1,9 +1,8 @@
-# mypy: ignore-errors
+from __future__ import annotations
 
 import warnings
-from collections.abc import KeysView
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -19,6 +18,10 @@ from .descriptors import BufferAOTInput, DifferentiableAOTInput, ParamAOTInput
 from .schemas import AOTConfig, FakifiedFlatArgs
 
 
+if TYPE_CHECKING:
+    from collections.abc import Generator, KeysView
+
+
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
@@ -28,12 +31,12 @@ def process_inputs(
     flat_args: list[Any],
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
-    shape_env: Optional[ShapeEnv],
+    shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
 ) -> FakifiedFlatArgs:
     with fake_mode:
 
-        def convert(idx, x):
+        def convert(idx: int, x: Any) -> Any:
             if shape_env is not None and not ignore_shape_env:
                 from torch._dynamo.source import ConstantSource
 
@@ -54,15 +57,20 @@ def process_inputs(
             if not isinstance(x, torch.Tensor):
                 return x
             if isinstance(x, FakeTensor):
-                assert x.fake_mode is fake_mode
+                # In the case of cross compilation we will have example inputs
+                # with a different fake mode than our tracing fake mode.
+                # In these cases we want to clone the fake tensor into our
+                # inner fake mode.
+                if x.fake_mode is not fake_mode:
+                    return fake_mode.from_tensor(x)
                 return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
                 if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    assert all(
-                        getattr(x, attr).fake_mode is fake_mode for attr in attrs
-                    )
-                    return x
+                    if all(getattr(x, attr).fake_mode is fake_mode for attr in attrs):
+                        return x
+                    # FakeTensor subclass from a different mode.
+                    # Fall through to refakify.
 
             # see note [Tensor Fakification and Symbol Caching]
             symbolic_context = None
@@ -98,7 +106,7 @@ def process_inputs(
 
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
+) -> tuple[FakeTensorMode, ShapeEnv | None]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
@@ -113,7 +121,7 @@ def _try_get_metadata_from_dynamo(
     param_keys: KeysView[str],
     full_args_num: int,
     full_args_descs: list[DifferentiableAOTInput],
-) -> tuple[Optional[list[torch._guards.Source]], list[int]]:
+) -> tuple[list[torch._guards.Source | None] | None, list[int]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
     We first verify that `mod` does come from Dynamo, then we handle cases where
@@ -146,16 +154,22 @@ def _try_get_metadata_from_dynamo(
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
     # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
     # Additionally, we mark static indices for cudagraphs.
-    param_name_to_source = mod._param_name_to_source
+    param_name_to_source = cast(
+        dict[str, torch._guards.Source], mod._param_name_to_source
+    )
     seen_sources = set()
 
-    aot_autograd_arg_pos_to_source = []
+    aot_autograd_arg_pos_to_source: list[torch._guards.Source | None] = []
     static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
     for i, name in enumerate(param_keys):
-        assert name in param_name_to_source, f"{name} not found."
+        if name not in param_name_to_source:
+            raise AssertionError(f"{name} not found in param_name_to_source")
         source = param_name_to_source[name]
-        assert source not in seen_sources, source
+        if source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
+        if source is None:
+            raise AssertionError(f"source must not be None for {name}")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
@@ -165,12 +179,14 @@ def _try_get_metadata_from_dynamo(
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-        assert hasattr(node, "_dynamo_source")
+        if not hasattr(node, "_dynamo_source"):
+            raise AssertionError(f"node {node} must have _dynamo_source attribute")
         source = node._dynamo_source
         # `source`` specifies the source from user code. ddp optimizer may have
         # intermediate values becoming submodule placeholders which does not
         # have a source
-        assert source is None or source not in seen_sources, source
+        if source is not None and source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name if source else str(source)
@@ -193,12 +209,15 @@ def _try_get_metadata_from_dynamo(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
 
-    assert full_args_num == len(aot_autograd_arg_pos_to_source)
+    if full_args_num != len(aot_autograd_arg_pos_to_source):
+        raise AssertionError(
+            f"full_args_num={full_args_num} != len(aot_autograd_arg_pos_to_source)={len(aot_autograd_arg_pos_to_source)}"
+        )
     return aot_autograd_arg_pos_to_source, static_input_indices
 
 
 @contextmanager
-def _detect_attribute_assignment(mod: torch.nn.Module):
+def _detect_attribute_assignment(mod: torch.nn.Module) -> Generator[None, None, None]:
     # Do not allow assignment of tensor attributes during export unless
     # the attribute is registered as a buffer.
 
@@ -230,18 +249,20 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         *NN_MODULE_LAZY_STD_ATTRS,
     }
 
-    def _get_attributes(mod):
+    def _get_attributes(mod: torch.nn.Module) -> dict[str, Any]:
         # return any attributes of a module that are not standard attributes
         return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
 
-    def _get_all_module_attributes(mod):
+    def _get_all_module_attributes(mod: torch.nn.Module) -> dict[str, dict[str, Any]]:
         # return attributes from all modules and submodules
         result = {}
         for name, submodule in mod.named_modules():
             result[name] = _get_attributes(submodule)
         return result
 
-    def _restore_all_module_attributes(mod, snapshot):
+    def _restore_all_module_attributes(
+        mod: torch.nn.Module, snapshot: dict[str, dict[str, Any]]
+    ) -> None:
         # restore attributes to all modules and submodules
         for name, submodule in mod.named_modules():
             if name in snapshot:
@@ -259,10 +280,12 @@ def _detect_attribute_assignment(mod: torch.nn.Module):
         # after exit, compare state of attributes with snapshot
         # to detect which tensor attributes were assigned
 
-        def _collect_assigned_tensor_attributes(snapshot, new_attrs):
+        def _collect_assigned_tensor_attributes(
+            snapshot: dict[str, dict[str, Any]], new_attrs: dict[str, dict[str, Any]]
+        ) -> list[str]:
             assigned_tensor_attributes = []
 
-            def _compare_values(path, old_val, new_val):
+            def _compare_values(path: str, old_val: Any, new_val: Any) -> None:
                 """Recursively compare values, handling containers."""
                 # Same object, no change
                 if old_val is new_val:

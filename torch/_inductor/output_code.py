@@ -50,6 +50,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch.fx._graph_pickler import _node_metadata_key_filter_safe, _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -203,12 +204,21 @@ def cudagraph_post_compile(
     runs it on compiled_graph.
     Mutates the `compiled_graph.current_callable` and `cudagraphs`
     """
+    from torch._inductor.compiler_bisector import CompilerBisector
+
     assert compiled_graph.current_callable is not None
     assert compiled_graph.cudagraph_info is not None
     cached_info = compiled_graph.cudagraph_info
     cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
+
+    # Check if bisector wants to disable cudagraphs for this graph
+    if CompilerBisector.disable_subsystem("inductor", "cudagraphs"):
+        BoxedBool.disable(cudagraphs)
+        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+        log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
+        return
 
     if not cudagraph_fail_reasons:
         fx_kwargs = compiled_graph.fx_kwargs
@@ -272,6 +282,14 @@ def cudagraph_partition_post_compile(
     Assuming all partition functions are cudagraphified and share the same order
     as `compiled_graph.partition_maps`. See [Note: Graph Partition Map for CUDAGraph].
     """
+    from torch._inductor.compiler_bisector import CompilerBisector
+
+    if CompilerBisector.disable_subsystem("inductor", "cudagraphs"):
+        BoxedBool.disable(cudagraphs)
+        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+        log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
+        return
+
     assert compiled_graph.cudagraph_info is not None
     cudagraph_fail_reasons = compiled_graph.cudagraph_info.cudagraph_fail_reasons
 
@@ -598,6 +616,34 @@ class CompiledFxGraph(OutputCode):
         # This is set at compile time to avoid runtime overhead
         self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
 
+        if self._wrap_compiled_regions:
+            from torch._higher_order_ops.wrap import OutputTensorMeta
+
+            fake_vals = [
+                x.meta["val"] if x is not None else None
+                for x in gm.graph.find_nodes(op="output")[0].args[0]
+            ]
+            for t in fake_vals:
+                if isinstance(t, torch.Tensor) and any(
+                    isinstance(s, torch.SymInt) for s in t.shape
+                ):
+                    raise RuntimeError(
+                        "wrap_compiled_regions does not support dynamic shapes yet"
+                    )
+            # FakeTensors are not picklable; store metadata for FX graph cache
+            self.fake_outputs = tuple(
+                OutputTensorMeta(
+                    tuple(t.shape),
+                    tuple(t.stride()),
+                    t.dtype,
+                    str(t.device),
+                    t.requires_grad,
+                )
+                if isinstance(t, torch.Tensor)
+                else t
+                for t in fake_vals
+            )
+
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
             # For torch._inductor.config.graph_partition = True,
@@ -733,11 +779,18 @@ class CompiledFxGraph(OutputCode):
         # Apply inductor_compiled_code HOP wrapper if configured
         # This is done in post_compile to ensure it works with cached artifacts
         if self._wrap_compiled_regions and self.current_callable is not None:
+            from torch._higher_order_ops.wrap import InductorCompiledCallable
+
             original_callable = self.current_callable
+
+            # Create a wrapper that holds both the compiled callable and FX graph
+            inductor_callable = InductorCompiledCallable(
+                original_callable, self.fake_outputs
+            )
 
             def wrapped_callable(inputs):
                 if is_in_torch_dispatch_mode():
-                    return inductor_compiled_code(original_callable, inputs)
+                    return inductor_compiled_code(inductor_callable, inputs)
                 else:
                     return original_callable(inputs)
 
@@ -754,6 +807,8 @@ class CompiledFxGraph(OutputCode):
         self.current_callable = None
         self.recursively_apply_fns = None
         self.compiled_fn_runner = None
+        # Note: _serialized_fx_graph is already in serializable form (SerializedGraphModule)
+        # so it doesn't need to be cleared
 
     def write_to_disk(self) -> str:
         from torch._dynamo.utils import counters
@@ -936,19 +991,27 @@ class RegionalOutputCode(OutputCode):
     """
 
     # The serialized graph module as bytes (using GraphPickler)
-    _serialized_graph_module: Optional[bytes] = dataclasses.field(
-        default=None, init=False
-    )
+    _serialized_graph_module: Optional[bytes] = None
 
     # The actual graph module (cleared during serialization)
-    _graph_module: Optional[torch.nn.Module] = dataclasses.field(
-        default=None, init=False
-    )
+    _graph_module: Optional[torch.nn.Module] = None
 
-    def __init__(self, graph_module: torch.nn.Module):
+    # Optional filter for ops during serialization
+    _ops_filter: Callable[[str], bool] | None = None
+
+    def __init__(
+        self,
+        graph_module: torch.fx.GraphModule,
+        ops_filter: Callable[[str], bool] = _ops_filter_safe,
+        node_metadata_key_filter: Optional[Callable[[str], bool]] = (
+            _node_metadata_key_filter_safe
+        ),
+    ):
         """
         Args:
             graph_module: The torch.fx.GraphModule returned by regional_inductor
+            ops_filter: Optional filter function for op names during serialization.
+                If provided, only ops whose name passes the filter will be serialized.
         """
         super().__init__()
         self._graph_module = graph_module
@@ -959,9 +1022,19 @@ class RegionalOutputCode(OutputCode):
         self._inner_boxed_call = isinstance(
             module.graph._codegen, torch.fx.graph._BoxedCodeGen
         )
+        self._ops_filter = ops_filter
+        self._node_metadata_key_filter = node_metadata_key_filter
 
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        """Execute the regional compiled graph."""
+    def __call__(self, inputs: list[Any]) -> Any:
+        """
+        Execute the regional compiled graph.
+
+        Args:
+            inputs: A mutable list of inputs. Must be a list (not an arbitrary
+                Sequence) because the boxed calling convention allows the callee
+                to mutably clear the list when inputs become dead, enabling early
+                memory deallocation.
+        """
         if self._graph_module is None:
             raise RuntimeError(
                 "RegionalOutputCode has no graph module loaded. "
@@ -1050,12 +1123,8 @@ class RegionalOutputCode(OutputCode):
             self._serialized_graph_module = GraphPickler.dumps(
                 graph_module,
                 options=Options(
-                    ops_filter=None,
-                    ignore_metadata_fields=(
-                        "source_fn_stack",
-                        "nn_module_stack",
-                        "fwd_source_fn_stack",
-                    ),
+                    ops_filter=self._ops_filter,
+                    node_metadata_key_filter=self._node_metadata_key_filter,
                 ),
             )
             # Clear the graph module to avoid pickling it with standard pickle

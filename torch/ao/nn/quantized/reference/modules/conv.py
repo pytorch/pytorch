@@ -322,7 +322,10 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         and the backend should be able to fuse the ops with `*` into a quantized conv1d
         """
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError(
+                f"Expected self.padding to be a tuple, got {type(self.padding)}"
+            )
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
@@ -402,7 +405,10 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         x -- quant --- *dequant --  *F.convTranspose2d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv2d
         """
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError(
+                f"Expected self.padding to be a tuple, got {type(self.padding)}"
+            )
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
 
@@ -485,7 +491,10 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         and the backend should be able to fuse the ops with `*` into a quantized conv3d
         """
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError(
+                f"Expected self.padding to be a tuple, got {type(self.padding)}"
+            )
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(

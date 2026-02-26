@@ -57,6 +57,8 @@ LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
 GET_DTRACE_STRUCTURED = False
 
+LOG_PREFIX = "dedicated_log_torch_trace_"
+
 
 @dataclass
 class LogRegistry:
@@ -198,6 +200,7 @@ DEFAULT_LOGGING = {
     "fsdp": logging.INFO,
     "ddp_graphs": True,
     "graph_breaks": True,
+    "side_effects": True,
     "guards": True,
     "recompiles": True,
     "dynamic": logging.INFO,
@@ -226,6 +229,7 @@ def set_logs(
     graph_code: bool = False,
     graph_code_verbose: bool = False,
     graph_breaks: bool = False,
+    side_effects: bool = False,
     graph_sizes: bool = False,
     guards: bool = False,
     recompiles: bool = False,
@@ -363,6 +367,10 @@ def set_logs(
         graph_breaks (:class:`bool`):
             Whether to emit the graph breaks encountered by TorchDynamo.
             Default: ``False``
+
+        side_effects (:class:`bool`):
+            Whether to emit side effects (mutations, hooks, etc.) that TorchDynamo
+            codegenerates in the output graph. Default: ``False``
 
         graph_sizes (:class:`bool`):
             Whether to emit tensor sizes of the graph captured by TorchDynamo.
@@ -549,6 +557,7 @@ def set_logs(
         graph_code=graph_code,
         graph_code_verbose=graph_code_verbose,
         graph_breaks=graph_breaks,
+        side_effects=side_effects,
         graph_sizes=graph_sizes,
         guards=guards,
         recompiles=recompiles,
@@ -1153,6 +1162,13 @@ def _init_logs(log_file_name=None) -> None:
     # configuration
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
 
+    # If TORCH_COMPILE_DEBUG=1 is set but no TORCH_TRACE, automatically use
+    # the torch_compile_debug directory for trace logs (to simplify tlparse usage)
+    if trace_dir_name is None and os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1":
+        import torch._dynamo.config as dynamo_config
+
+        trace_dir_name = os.path.join(dynamo_config.debug_dir_root, "tlparse")
+
     if dtrace_dir_name := os.environ.get(DTRACE_ENV_VAR, None):
         GET_DTRACE_STRUCTURED = True
         trace_dir_name = dtrace_dir_name
@@ -1246,11 +1262,15 @@ class LazyTraceHandler(logging.StreamHandler):
                 self.stream = tempfile.NamedTemporaryFile(  # noqa: SIM115
                     mode="w+",
                     suffix=".log",
-                    prefix=f"dedicated_log_torch_trace_{ranksuffix}",
+                    prefix=LOG_PREFIX + ranksuffix,
                     dir=self.root_dir,
                     delete=False,
                 )
                 log.info("LazyTraceHandler: logging to %s", self.stream.name)
+                # Log tlparse path via inductor logger so it shows when
+                # TORCH_LOGS="inductor" is enabled
+                inductor_log = logging.getLogger("torch._inductor")
+                inductor_log.info("tlparse raw data: %s", self.stream.name)
             else:
                 # We go poof, remove and no-op
                 trace_log.removeHandler(self)

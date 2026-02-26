@@ -993,7 +993,7 @@ Example::
 add_docstr(
     torch.as_tensor,
     r"""
-as_tensor(data: Any, dtype: Optional[dtype] = None, device: Optional[DeviceLikeType]) -> Tensor
+as_tensor(data: Any, *, dtype: Optional[dtype] = None, device: Optional[DeviceLikeType]) -> Tensor
 
 Converts :attr:`data` into a tensor, sharing data and preserving autograd
 history if possible.

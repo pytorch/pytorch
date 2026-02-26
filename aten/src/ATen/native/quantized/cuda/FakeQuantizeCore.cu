@@ -41,15 +41,13 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
         iter,
         [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
           // Clamp the float value before casting to avoid undefined behavior with inf/nan
+          const float raw_qval = std::nearbyint(input_val * inv_scale) + zero_point;
           const float qval_float = fminf(static_cast<float>(quant_max),
-                                         fmaxf(static_cast<float>(quant_min),
-                                               std::nearbyint(input_val * inv_scale) + zero_point));
+                                         fmaxf(static_cast<float>(quant_min), raw_qval));
           const auto qval = static_cast<int64_t>(qval_float);
           return {
-            // fake_quantized value
-            (qval - zero_point) * scale,
-            // mask for grad
-            ((quant_min <= qval) && (qval <= quant_max))
+              (qval - zero_point) * scale,
+              ((quant_min <= raw_qval) && (raw_qval <= quant_max))  // Use raw_qval for mask
           };
         }
       );
@@ -60,15 +58,13 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
         iter,
         [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
           // Clamp the float value before casting to avoid undefined behavior with inf/nan
+          const float raw_qval = std::nearbyint(input_val * inv_scale) + zero_point;
           const float qval_float = fminf(static_cast<float>(quant_max),
-                                         fmaxf(static_cast<float>(quant_min),
-                                               std::nearbyint(input_val * inv_scale) + zero_point));
+                                         fmaxf(static_cast<float>(quant_min), raw_qval));
           const auto qval = static_cast<int64_t>(qval_float);
           return {
-            // fake_quantized value
-            (qval - zero_point) * scale,
-            // mask for grad
-            ((quant_min <= qval) && (qval <= quant_max))
+              (qval - zero_point) * scale,
+              ((quant_min <= raw_qval) && (raw_qval <= quant_max))  // Use raw_qval for mask
           };
         }
       );
