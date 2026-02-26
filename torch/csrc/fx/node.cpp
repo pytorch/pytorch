@@ -364,9 +364,9 @@ static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static struct PyMemberDef NodeBase_members[] = {
     {"_erased", T_BOOL, offsetof(NodeBase, _erased), 0, nullptr},
-    {"_prev", T_OBJECT_EX, offsetof(NodeBase, _prev), 0, nullptr},
-    {"_next", T_OBJECT_EX, offsetof(NodeBase, _next), 0, nullptr},
-    {"graph", T_OBJECT_EX, offsetof(NodeBase, graph), 0, nullptr},
+    {"_prev", T_OBJECT, offsetof(NodeBase, _prev), 0, nullptr},
+    {"_next", T_OBJECT, offsetof(NodeBase, _next), 0, nullptr},
+    {"graph", T_OBJECT, offsetof(NodeBase, graph), 0, nullptr},
     {"name", T_OBJECT_EX, offsetof(NodeBase, name), 0, nullptr},
     {"op", T_OBJECT_EX, offsetof(NodeBase, op), 0, nullptr},
     {"target", T_OBJECT_EX, offsetof(NodeBase, target), 0, nullptr},
@@ -1290,9 +1290,9 @@ static PyObject* NodeBase_getstate(
   }
   PyErr_Clear();
 
-  // Add all the required fields
-  if (PyDict_SetItemString(dict.get(), "graph", node->graph) < 0)
-    return nullptr;
+  // graph, _prev, _next are omitted — the owning Graph restores them
+  // in Graph.__setstate__; standalone Node pickle produces a detached
+  // node (with these fields as None via T_OBJECT NULL semantics).
   if (PyDict_SetItemString(dict.get(), "name", node->name) < 0)
     return nullptr;
   if (PyDict_SetItemString(dict.get(), "op", node->op) < 0)
@@ -1316,12 +1316,6 @@ static PyObject* NodeBase_getstate(
 
   THPObjectPtr erased(PyBool_FromLong(node->_erased));
   if (PyDict_SetItemString(dict.get(), "_erased", erased.get()) < 0)
-    return nullptr;
-  if (PyDict_SetItemString(
-          dict.get(), "_prev", reinterpret_cast<PyObject*>(node->_prev)) < 0)
-    return nullptr;
-  if (PyDict_SetItemString(
-          dict.get(), "_next", reinterpret_cast<PyObject*>(node->_next)) < 0)
     return nullptr;
   if (PyDict_SetItemString(dict.get(), "_input_nodes", node->_input_nodes) < 0)
     return nullptr;

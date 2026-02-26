@@ -1213,6 +1213,183 @@ static int GraphBase_set_owning_module(
   return 0;
 }
 
+// __getstate__: serialize Graph for pickling
+// Saves the linked list of nodes as a flat list of live Node objects.
+// Node.__getstate__ omits graph/_prev/_next (breaking circular refs),
+// so pickle can serialize the nodes without pulling in the whole graph.
+// The lookup table is rebuilt on restore.
+static PyObject* GraphBase_getstate(
+    PyObject* self,
+    PyObject* Py_UNUSED(ignored)) {
+  GraphBase* gb = reinterpret_cast<GraphBase*>(self);
+
+  THPObjectPtr dict(PyDict_New());
+  if (!dict) {
+    return nullptr;
+  }
+
+  // Merge the Python subclass __dict__
+  THPObjectPtr instance_dict(PyObject_GetAttrString(self, "__dict__"));
+  if (instance_dict) {
+    if (PyDict_Update(dict.get(), instance_dict.get()) < 0) {
+      return nullptr;
+    }
+  }
+  PyErr_Clear();
+
+  // Save _owning_module
+  PyObject* om = gb->_owning_module ? gb->_owning_module : Py_None;
+  if (PyDict_SetItemString(dict.get(), "_owning_module", om) < 0)
+    return nullptr;
+
+  // Collect all nodes (including _root) as live objects in linked-list order.
+  // Element 0 is the root sentinel; real nodes follow.
+  if (!gb->_root) {
+    PyErr_SetString(PyExc_RuntimeError, "Graph has no _root node");
+    return nullptr;
+  }
+
+  THPObjectPtr nodes(PyList_New(0));
+  if (!nodes) {
+    return nullptr;
+  }
+  if (PyList_Append(nodes.get(), gb->_root) < 0)
+    return nullptr;
+
+  THPObjectPtr cur(PyObject_GetAttrString(gb->_root, "_next"));
+  if (!cur) {
+    return nullptr;
+  }
+  while (cur.get() != gb->_root) {
+    if (PyList_Append(nodes.get(), cur.get()) < 0)
+      return nullptr;
+    THPObjectPtr next(PyObject_GetAttrString(cur.get(), "_next"));
+    if (!next) {
+      return nullptr;
+    }
+    cur = std::move(next);
+  }
+
+  if (PyDict_SetItemString(dict.get(), "_nodes", nodes.get()) < 0)
+    return nullptr;
+
+  return dict.release();
+}
+
+// __setstate__: restore Graph from pickled state
+// _nodes contains live (already-unpickled) Node objects.  We set their
+// graph back-pointer, relink _prev/_next, and rebuild the lookup table.
+static PyObject* GraphBase_setstate(PyObject* self, PyObject* state) {
+  if (!PyDict_Check(state)) {
+    PyErr_SetString(PyExc_TypeError, "state must be a dict");
+    return nullptr;
+  }
+  GraphBase* gb = reinterpret_cast<GraphBase*>(self);
+
+  // Extract the special keys we handle ourselves
+  THPObjectPtr nodes(PyMapping_GetItemString(state, "_nodes"));
+  if (!nodes || !PyList_Check(nodes.get())) {
+    PyErr_SetString(PyExc_TypeError, "state must contain a '_nodes' list");
+    return nullptr;
+  }
+
+  PyObject* owning_module = nullptr;
+  THPObjectPtr om_holder(PyMapping_GetItemString(state, "_owning_module"));
+  if (om_holder) {
+    owning_module = om_holder.get();
+  } else {
+    PyErr_Clear();
+  }
+
+  // Restore _owning_module
+  PyObject* old_om = gb->_owning_module;
+  if (owning_module && owning_module != Py_None) {
+    gb->_owning_module = Py_NewRef(owning_module);
+  } else {
+    gb->_owning_module = nullptr;
+  }
+  Py_XDECREF(old_om);
+
+  // Restore remaining dict items into self.__dict__
+  PyObject *key = nullptr, *value = nullptr;
+  Py_ssize_t pos = 0;
+  while (PyDict_Next(state, &pos, &key, &value)) {
+    const char* key_str = PyUnicode_AsUTF8(key);
+    if (!key_str) {
+      return nullptr;
+    }
+    if (strcmp(key_str, "_nodes") == 0 ||
+        strcmp(key_str, "_owning_module") == 0) {
+      continue;
+    }
+    if (PyObject_SetAttr(self, key, value) < 0) {
+      return nullptr;
+    }
+  }
+
+  // _nodes[0] is the root sentinel; remaining elements are real nodes.
+  Py_ssize_t n = PyList_GET_SIZE(nodes.get());
+  if (n == 0) {
+    PyErr_SetString(PyExc_ValueError, "_nodes list must not be empty");
+    return nullptr;
+  }
+
+  // Create a fresh lookup table
+  THPObjectPtr new_lt(
+      PyObject_CallNoArgs((PyObject*)&FindNodesLookupTableType));
+  if (!new_lt) {
+    return nullptr;
+  }
+  Py_XDECREF(gb->_find_nodes_lookup_table);
+  gb->_find_nodes_lookup_table = new_lt.release();
+
+  // Pre-intern attribute names used in the loop
+  static PyObject* graph_str = PyUnicode_InternFromString("graph");
+  static PyObject* prev_str = PyUnicode_InternFromString("_prev");
+  static PyObject* next_str = PyUnicode_InternFromString("_next");
+
+  // Set graph back-pointer, relink _prev/_next, and insert into lookup table
+  for (Py_ssize_t i = 0; i < n; ++i) {
+    PyObject* node = PyList_GET_ITEM(nodes.get(), i);
+    PyObject* prev = PyList_GET_ITEM(nodes.get(), (i - 1 + n) % n);
+    PyObject* next = PyList_GET_ITEM(nodes.get(), (i + 1) % n);
+    if (PyObject_SetAttr(node, graph_str, self) < 0)
+      return nullptr;
+    if (PyObject_SetAttr(node, prev_str, prev) < 0)
+      return nullptr;
+    if (PyObject_SetAttr(node, next_str, next) < 0)
+      return nullptr;
+    if (i > 0) {
+      if (!FindNodesLookupTable_insert_impl(
+              gb->_find_nodes_lookup_table, node)) {
+        PyErr_SetString(
+            PyExc_RuntimeError, "Failed to insert node into lookup table");
+        return nullptr;
+      }
+    }
+  }
+
+  // Set _root and _len
+  Py_XDECREF(gb->_root);
+  gb->_root = Py_NewRef(PyList_GET_ITEM(nodes.get(), 0));
+  gb->_len = n - 1; // exclude root
+
+  Py_RETURN_NONE;
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+static PyMethodDef GraphBase_methods[] = {
+    {"__getstate__",
+     GraphBase_getstate,
+     METH_NOARGS,
+     "Return state for pickling."},
+    {"__setstate__",
+     GraphBase_setstate,
+     METH_O,
+     "Restore state from pickling."},
+    {nullptr, nullptr, 0, nullptr} // Sentinel
+};
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMemberDef GraphBase_members[] = {
     {"_root", T_OBJECT_EX, offsetof(GraphBase, _root), 0, "The root node"},
@@ -1274,7 +1451,7 @@ static PyTypeObject GraphBaseType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    nullptr, /* tp_methods */
+    GraphBase_methods, /* tp_methods */
     GraphBase_members, /* tp_members */
     GraphBase_getset, /* tp_getset */
     nullptr, /* tp_base */
