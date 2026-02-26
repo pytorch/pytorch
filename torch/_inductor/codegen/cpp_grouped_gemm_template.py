@@ -1,7 +1,7 @@
 import contextlib
 import logging
 from collections.abc import Callable
-from typing import Any, cast, Optional, TypeVar
+from typing import Any, cast, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -160,8 +160,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         beta: int = 1,
         alpha: int = 1,
         has_bias: bool = False,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[dict[int, ir.IRNode]] = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
+        act_mapping: dict[int, ir.IRNode] | None = None,
         gemm_grouped_num: int = 1,
     ) -> None:
         """
@@ -201,9 +201,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         alpha: int = 1,
         has_bias: tuple[bool, ...] = (False, False),
         trans_w: bool = False,
-        input_indices: Optional[list[int]] = None,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[dict[int, ir.IRNode]] = None,  # gemm idx to its act buf
+        input_indices: list[int] | None = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
+        act_mapping: dict[int, ir.IRNode] | None = None,  # gemm idx to its act buf
     ) -> DataProcessorTemplateWrapper:
         # Input nodes order: x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
         gemm_grouped_num = len(has_bias)
@@ -356,9 +356,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
     def render(  # type: ignore[override,return,no-untyped-def]
         self,
         kernel: CppTemplateKernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        flag_template_buffer_has_other_users: bool | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
         assert self.act_mapping
@@ -423,7 +423,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
         epilogues: list[ir.IRNode] = []
-        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]] = []
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] = []
         gemm_output_buffers: list[ir.Buffer] = []
         for out_buf_idx in range(self.gemm_grouped_num):
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut" + str(
@@ -437,7 +437,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             "epilogue_creator is not supported yet in Grouped GEMM Template"
         )
 
-        kernel_args: dict[str, Optional[ir.IRNode]] = {}
+        kernel_args: dict[str, ir.IRNode | None] = {}
         for x_idx in range(wgt_start_idx):
             kernel_args["X" + str(x_idx)] = act_deduplicated[x_idx]
         for w_idx in range(self.gemm_grouped_num):

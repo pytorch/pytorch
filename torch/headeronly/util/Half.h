@@ -489,8 +489,7 @@ inline C10_HOST_DEVICE Half::operator sycl::half() const {
 
 // CUDA intrinsics
 
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)) || \
-    (defined(__clang__) && defined(__CUDA__))
+#if defined(__CUDACC__) || defined(__HIPCC__)
 inline __device__ Half __ldg(const Half* ptr) {
   return __ldg(reinterpret_cast<const __half*>(ptr));
 }
@@ -516,8 +515,7 @@ inline C10_HOST_DEVICE Half operator/(const Half& a, const Half& b)
 }
 
 inline C10_HOST_DEVICE Half operator-(const Half& a) {
-#if (defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 530) || \
-    defined(__HIP_DEVICE_COMPILE__)
+#if (defined(__CUDA_ARCH__)) || defined(__HIP_DEVICE_COMPILE__)
   return __hneg(a);
 #elif defined(__SYCL_DEVICE_ONLY__)
   return -c10::bit_cast<sycl::half>(a);
