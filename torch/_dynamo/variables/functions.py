@@ -393,7 +393,15 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+            dict_proxy: dict[str, VariableTracker] = {}
+            if hasattr(self, "fn"):  # Use `.get_function()` instead?
+                dict_proxy = {
+                    name: VariableTracker.build(
+                        tx, value, source=self.source and AttrSource(self.source, name)
+                    )
+                    for name, value in self.fn.__dict__.items()
+                }
+            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
         return self.dict_vt
 
     def call_method(
@@ -2494,32 +2502,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 raise ValueError(f"Unsupported all_reduce op: {reduce_op}")
             kwargs["op"] = VariableTracker.build(tx, REDUCE_OP_TO_STR[reduce_op])
         return self.replacement_var.call_function(tx, args, kwargs)
-
-
-class FunctoolsWrapsVariable(UserFunctionVariable):
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not kwargs and len(args) == 1:
-
-            def wraps(fn: Any) -> VariableTracker:
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wrapped_fn=args[0])
-                unimplemented(
-                    gb_type="functools.wraps",
-                    context=f"{fn}",
-                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
-                    hints=[
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            return variables.LambdaVariable(wraps)
-
-        return super().call_function(tx, args, kwargs)
 
 
 class CollectionsNamedTupleFunction(UserFunctionVariable):
