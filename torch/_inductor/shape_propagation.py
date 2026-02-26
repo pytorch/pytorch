@@ -1,6 +1,6 @@
 import functools
 from collections.abc import Callable, Sequence
-from typing import Protocol
+from typing import Optional, Protocol, Union
 
 import sympy
 
@@ -9,7 +9,7 @@ import torch
 from .virtualized import OpsValue, V
 
 
-BlockShapeType = Sequence[int | str] | None
+BlockShapeType = Optional[Sequence[Union[int, str]]]
 
 
 class ShapeVar(Protocol):
@@ -17,7 +17,7 @@ class ShapeVar(Protocol):
     def shape(self) -> BlockShapeType: ...
 
 
-ShapeArg = ShapeVar | torch.types.Number | str | OpsValue | torch.dtype
+ShapeArg = Union[ShapeVar, torch.types.Number, str, OpsValue, torch.dtype]
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
 # So first decompose CSEVars -> tuple before calling this
@@ -34,7 +34,9 @@ def get_broadcasted_shape(a: BlockShapeType, b: BlockShapeType) -> BlockShapeTyp
         return get_broadcasted_shape(a, (*[1] * (len(a) - len(b)), *b))
     else:
 
-        def _get_broadcasted_dim(d1: int | str, d2: int | str) -> int | str:
+        def _get_broadcasted_dim(
+            d1: Union[int, str], d2: Union[int, str]
+        ) -> Union[int, str]:
             if str(d1) == "1":
                 return d2
             elif str(d2) == "1":
@@ -98,19 +100,21 @@ class ShapePropagationOpsHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: str,
-        value: ShapeArg | tuple[ShapeArg, ...],
-    ) -> BlockShapeType | tuple[BlockShapeType, ...]:
+        value: Union[ShapeArg, tuple[ShapeArg, ...]],
+    ) -> Union[BlockShapeType, tuple[BlockShapeType, ...]]:
         raise NotImplementedError
 
     @staticmethod
-    def store(name: str, index: int, value: ShapeArg, mode: str | None = None) -> None:
+    def store(
+        name: str, index: int, value: ShapeArg, mode: Optional[str] = None
+    ) -> None:
         return None
 
     @staticmethod
     def to_dtype(
         value: ShapeVar,
         dtype: torch.dtype,
-        src_dtype: torch.dtype | None = None,
+        src_dtype: Optional[torch.dtype] = None,
         use_compute_types: bool = True,
     ) -> BlockShapeType:
         return value.shape
@@ -134,7 +138,7 @@ class ShapePropagationOpsHandler:
     @staticmethod
     def indirect_indexing(
         var: ShapeArg,
-        size: sympy.Expr | int,
+        size: Union[sympy.Expr, int],
         check: bool = True,
         wrap_neg: bool = True,
     ) -> None:

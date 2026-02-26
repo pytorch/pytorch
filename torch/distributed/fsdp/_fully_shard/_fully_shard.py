@@ -384,8 +384,7 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 state._auto_reshard_after_forward = False
                 if fsdp_param_group := state._fsdp_param_group:
-                    if not isinstance(fsdp_param_group.mesh_info, FSDPMeshInfo):
-                        raise AssertionError
+                    assert isinstance(fsdp_param_group.mesh_info, FSDPMeshInfo)
                     fsdp_param_group.post_forward_mesh_info = (
                         _get_post_forward_mesh_info(
                             reshard_after_forward,

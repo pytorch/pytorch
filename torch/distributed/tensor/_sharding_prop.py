@@ -101,13 +101,12 @@ def _validate_tensor_meta_count(
     else:
         actual_outputs = len(tensor_meta)
 
-    if actual_outputs != expected_outputs:
-        raise AssertionError(
-            f"Tensor meta count mismatch for {op_schema.op}: "
-            f"expected {expected_outputs} tensor output(s) based on op schema, "
-            f"but _propagate_tensor_meta returned {actual_outputs}. "
-            f"This usually indicates a bug in fake tensor propagation for this op."
-        )
+    assert actual_outputs == expected_outputs, (
+        f"Tensor meta count mismatch for {op_schema.op}: "
+        f"expected {expected_outputs} tensor output(s) based on op schema, "
+        f"but _propagate_tensor_meta returned {actual_outputs}. "
+        f"This usually indicates a bug in fake tensor propagation for this op."
+    )
 
 
 class LocalLRUCache(threading.local):
@@ -247,8 +246,9 @@ def _select_min_cost_strategy(
     negative_cost_index: int = -1
     zero_cost_index: int = -1
     for strategy_idx, op_spec in enumerate(strategy.strategies):
-        if op_spec.redistribute_cost is None:
-            raise AssertionError("must set redistribute cost each OpSpec!")
+        assert op_spec.redistribute_cost is not None, (
+            "must set redistribute cost each OpSpec!"
+        )
         redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
         op_spec_costs.append(redistribute_cost)
 
@@ -554,8 +554,7 @@ class ShardingPropagator:
                             and i in (0, 1, 2)
                             and output_tensor_meta_i is None
                         ):
-                            if not isinstance(output_specs, list):
-                                raise AssertionError
+                            assert isinstance(output_specs, list)
                             new_specs.append(None)
                             continue
                         else:
@@ -572,8 +571,7 @@ class ShardingPropagator:
 
             return tuple(new_specs)
         else:
-            if output_specs is not None:
-                raise AssertionError
+            assert output_specs is None
             return output_specs
 
     def _wrap_with_op_strategy(self, op_schema: OpSchema) -> OpSchema:
@@ -620,11 +618,10 @@ class ShardingPropagator:
 
         # NOTE: schema should always be populated when calling this function,
         # as it's only called after unwrap_to_op_info (create_schema=True).
-        if op_info.schema is None:
-            raise AssertionError(
-                "op_info.schema should not be None in propagate. "
-                "This function should only be called after unwrap_to_op_info."
-            )
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in propagate. "
+            "This function should only be called after unwrap_to_op_info."
+        )
 
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
@@ -676,8 +673,7 @@ class ShardingPropagator:
 
             if single_dim_strategy_info is not None:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
-                if not isinstance(mesh, DeviceMesh):
-                    raise AssertionError("Expected to find a valid mesh")
+                assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
@@ -687,8 +683,7 @@ class ShardingPropagator:
                     op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
                 )
             else:
-                if op_strategy_func is None:
-                    raise AssertionError
+                assert op_strategy_func is not None
                 op_strategy = op_strategy_func(strategy_schema)
 
         else:
@@ -720,8 +715,7 @@ class ShardingPropagator:
                 # is a DTensorSpec, we use output_specs as the spec for each DTensor
                 # input arg.
                 if output_strategy.input_specs is None:
-                    if not isinstance(output_strategy.output_specs, DTensorSpec):
-                        raise AssertionError
+                    assert isinstance(output_strategy.output_specs, DTensorSpec)
 
                 for idx, input_spec in enumerate(op_schema.args_spec):
                     desired_spec = (
@@ -747,8 +741,7 @@ class ShardingPropagator:
                 # shape and stride args need to be modified for
                 # view ops and new factory ops, potentially
                 if op_schema.op in self.op_to_shape_and_stride_idx:
-                    if not isinstance(output_strategy.output_spec, DTensorSpec):
-                        raise AssertionError
+                    assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
                     if any(
@@ -756,8 +749,7 @@ class ShardingPropagator:
                         for p in output_strategy.output_spec.placements
                     ):
                         schema = suggestion_schema or op_schema
-                        if not isinstance(out_tensor_meta, TensorMeta):
-                            raise AssertionError
+                        assert isinstance(out_tensor_meta, TensorMeta)
                         suggestion_schema = self._adjust_shape_and_stride_args(
                             out_tensor_meta, schema, output_strategy.output_spec
                         )
@@ -801,8 +793,7 @@ class ShardingPropagator:
                 selected_strategies: list[OpSpec] = []
                 out_spec_list: list[DTensorSpec] = []
                 for strategy in op_strategy.children:
-                    if not isinstance(strategy, OpStrategy):
-                        raise AssertionError
+                    assert isinstance(strategy, OpStrategy)
                     selected_strategy = _select_min_cost_strategy(strategy)
                     selected_strategies.append(selected_strategy)
                     out_spec_list.append(selected_strategy.output_spec)
