@@ -2731,6 +2731,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         x = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
         self.common(fn, [x])
 
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
