@@ -317,9 +317,9 @@ jobs:
       - get-label-type
       - job-filter
     with:
-      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm120
+      build-environment: linux-jammy-cuda13.0-py3.12-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
-      cuda-arch-list: '12.0'
+      cuda-arch-list: '8.0'
     secrets: inherit
 
   # Test cross-compiled models with Windows libs extracted from wheel
