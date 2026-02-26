@@ -230,9 +230,11 @@ std::pair<
 }
 #endif // __ARM_FEATURE_BF16
 
-// SVE has no Half specialization, so provide generic convert_half_float /
-// convert_float_half that work with the generic Vectorized<Half> from vec_base.h
-// and the SVE Vectorized<float>.
+// SVE128 has no Half specialization and vec256_half.h skips its
+// CONVERT_NON_VECTORIZED_INIT on aarch64 without SVE256, so provide generic
+// convert_half_float / convert_float_half here for the SVE128 path only.
+// SVE256 gets these from vec256_half.h's CONVERT_NON_VECTORIZED_INIT macro.
+#if !defined(CPU_CAPABILITY_SVE256)
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(
     const Vectorized<Half>& a) {
   constexpr int64_t K = Vectorized<Half>::size();
@@ -260,6 +262,7 @@ inline Vectorized<Half> convert_float_half(
   }
   return Vectorized<Half>::loadu(arr2);
 }
+#endif // !defined(CPU_CAPABILITY_SVE256)
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
