@@ -23,7 +23,7 @@ optimizer-specific optimizations and safety guarantees.
 import logging
 import weakref
 from collections.abc import Iterable
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.variables.tensor import TensorVariable
@@ -94,9 +94,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def __init__(
         self,
         value: torch.optim.Optimizer,
-        grad_to_source: Optional[dict[Any, GradSource]] = None,
-        static_tensor_names: Optional[set[str]] = None,
-        tensor_to_source: Optional[dict[torch.Tensor, Source]] = None,
+        grad_to_source: dict[Any, GradSource] | None = None,
+        static_tensor_names: set[str] | None = None,
+        tensor_to_source: dict[torch.Tensor, Source] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
