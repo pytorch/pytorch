@@ -121,6 +121,7 @@ from .exc import (
     UncapturedHigherOrderOpError,
     unimplemented,
     Unsupported,
+    UserError,
 )
 from .graph_bytecode_inputs import reset_user_object_tracking
 from .guards import (
@@ -1300,7 +1301,7 @@ def _fullgraph_capture_frame(
             restart_reasons=set(),
         )
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
-    except (Unsupported, UncapturedHigherOrderOpError) as e:
+    except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
         augment_exc_message(e)
         if config.verbose:
             raise
@@ -1888,6 +1889,7 @@ def _compile(
                 e,
                 (
                     Unsupported,
+                    UserError,
                     TorchRuntimeError,
                     BackendCompilerFailed,
                     AssertionError,
@@ -2104,7 +2106,7 @@ class ConvertFrame:
             if isinstance(e, UncapturedHigherOrderOpError):
                 raise
 
-            soft_fail = isinstance(e, Unsupported)
+            soft_fail = isinstance(e, (Unsupported, UserError))
             code = frame.f_code
             # Log soft failure that was not already logged by symbolic_convert.
             # This happens e.g. for graph breaks that are raised in convert_frame.py

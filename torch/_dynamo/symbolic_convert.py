@@ -100,6 +100,7 @@ from .exc import (
     StepUnsupported,
     unimplemented,
     Unsupported,
+    UserError,
 )
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder, install_guard
@@ -710,7 +711,7 @@ def generic_jump(
         exc = None
         try:
             raise_jump_graph_break(value)
-        except Unsupported as e:
+        except (Unsupported, UserError) as e:
             exc = e
 
         assert exc is not None
@@ -997,7 +998,7 @@ def break_graph_if_unsupported(
                 return handle_graph_break(self, inst, speculation.reason)
             try:
                 return inner_fn(self, inst)
-            except Unsupported as excp:
+            except (Unsupported, UserError) as excp:
                 if self.active_generic_context_managers:
                     # raise original graph break if fullgraph/error_on_graph_break=True
                     if self.one_graph or self.error_on_graph_break:
@@ -1005,7 +1006,8 @@ def break_graph_if_unsupported(
 
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
-                    excp.remove_from_stats()
+                    if isinstance(excp, Unsupported):
+                        excp.remove_from_stats()
                     unimplemented(
                         gb_type="Graph break under GenericContextWrappingVariable",
                         context=f"Active generic context managers: {self.active_generic_context_managers}",
@@ -1017,7 +1019,7 @@ def break_graph_if_unsupported(
                         from_exc=excp,
                     )
 
-                if excp.skip_frame:
+                if getattr(excp, "skip_frame", False):
                     raise
 
                 if not self.should_compile_partial_graph():
@@ -1032,9 +1034,13 @@ def break_graph_if_unsupported(
                     exc=excp,
                 )
 
-                excp.remove_from_stats()
-                excp.add_to_stats("graph_break")
-                speculation.reason = GraphCompileReason(excp.msg, excp.real_stack)
+                if isinstance(excp, Unsupported):
+                    excp.remove_from_stats()
+                    excp.add_to_stats("graph_break")
+                speculation.reason = GraphCompileReason(
+                    getattr(excp, "msg", str(excp)),
+                    getattr(excp, "real_stack", [self.frame_summary()]),
+                )
             finally:
                 self.current_instruction_push = prev_push
             speculation.fail_and_restart_analysis(self.error_on_graph_break)
@@ -1462,7 +1468,7 @@ class InstructionTranslatorBase(
             return True
         except (ReturnValueOp, YieldValueOp):
             return False
-        except (Unsupported, StepUnsupported) as e:
+        except (Unsupported, UserError, StepUnsupported) as e:
             # More restrictive condition than should_compile_partial_graph:
             # if this condition is true, then we SHOULD NOT attempt to find
             # a previous checkpoint to resume from and try to resume - we should
@@ -1474,7 +1480,7 @@ class InstructionTranslatorBase(
                 self.one_graph
                 or self.error_on_graph_break
                 or self.is_tracing_resume_prologue
-                or (isinstance(e, Unsupported) and e.skip_frame)
+                or getattr(e, "skip_frame", False)
             ):
                 if isinstance(e, StepUnsupported):
                     unimplemented(
@@ -1505,7 +1511,6 @@ class InstructionTranslatorBase(
                         ],
                         skip_frame=True,
                     )
-                assert isinstance(e, Unsupported)
                 e.skip_frame = True
                 raise
             reason = (
@@ -1808,7 +1813,7 @@ class InstructionTranslatorBase(
                 # This code path happens e.g. for bytecodes we don't support
                 # or when we are unable to resume from a graph break.
                 if (
-                    isinstance(e, Unsupported)
+                    isinstance(e, (Unsupported, UserError))
                     and isinstance(self, InstructionTranslator)
                     and not self.error_on_graph_break
                     and not self.one_graph
@@ -5048,7 +5053,7 @@ class InstructionTranslatorBase(
         self,
         code_options: dict[str, Any],
         reason: str,
-        exc: Unsupported | StepUnsupported,
+        exc: Unsupported | UserError | StepUnsupported,
     ) -> None:
         if exc.logged:
             return
@@ -5155,7 +5160,9 @@ class InstructionTranslatorBase(
         exc.logged = True
 
     @staticmethod
-    def raise_loop_graph_break(code: types.CodeType, exc: Unsupported) -> NoReturn:
+    def raise_loop_graph_break(
+        code: types.CodeType, exc: Unsupported | UserError
+    ) -> NoReturn:
         unimplemented(
             gb_type="graph break in loop",
             context=f"frame skipped: {format_frame_info(code)}",
@@ -5899,7 +5906,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug(msg)
             # bubble up the exception to the parent frame.
             raise
-        except Unsupported as e:
+        except (Unsupported, UserError) as e:
             # If this graph break has skip_frame set, unset it
             # since it refers to the current frame and not the parent.
             e.skip_frame = False
