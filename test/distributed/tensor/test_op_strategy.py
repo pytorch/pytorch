@@ -594,9 +594,8 @@ class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
 
             op_spec_costs: list[float] = []
             for op_spec in strategy.strategies:
-                assert op_spec.redistribute_cost is not None, (
-                    "must set redistribute cost each OpSpec!"
-                )
+                if op_spec.redistribute_cost is None:
+                    raise AssertionError("must set redistribute cost each OpSpec!")
                 costs_from__select_strategy.append(op_spec.redistribute_cost)
                 redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
                 op_spec_costs.append(redistribute_cost)
