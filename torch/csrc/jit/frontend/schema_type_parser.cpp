@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 
@@ -43,12 +44,18 @@ using c10::VarType;
 
 namespace torch::jit {
 
+static std::mutex& getOpaqueTypesMutex() {
+  static std::mutex opaque_types_mutex;
+  return opaque_types_mutex;
+}
+
 static std::unordered_set<std::string>& getOpaqueTypes() {
   static std::unordered_set<std::string> global_opaque_types;
   return global_opaque_types;
 }
 
 void registerOpaqueType(const std::string& type_name) {
+  std::lock_guard<std::mutex> lock(getOpaqueTypesMutex());
   auto& global_opaque_types = getOpaqueTypes();
   auto [_, inserted] = global_opaque_types.insert(type_name);
   if (!inserted) {
@@ -58,11 +65,13 @@ void registerOpaqueType(const std::string& type_name) {
 }
 
 void unregisterOpaqueType(const std::string& type_name) {
+  std::lock_guard<std::mutex> lock(getOpaqueTypesMutex());
   auto& global_opaque_types = getOpaqueTypes();
   global_opaque_types.erase(type_name);
 }
 
 bool isRegisteredOpaqueType(const std::string& type_name) {
+  std::lock_guard<std::mutex> lock(getOpaqueTypesMutex());
   auto& global_opaque_types = getOpaqueTypes();
   return global_opaque_types.find(type_name) != global_opaque_types.end();
 }
