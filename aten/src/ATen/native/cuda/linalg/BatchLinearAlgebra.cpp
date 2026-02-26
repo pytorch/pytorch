@@ -821,7 +821,7 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
     return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
   } else {
     // TODO: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
-    // TODO: Non-batched potrs is too slow in the bached setting compared to two triangular solves.
+    // TODO: Non-batched potrs is too slow in the batched setting compared to two triangular solves.
     // Non-batched input -> non-batched potrs.
     // Batched input -> two triangular solves.
     if (batchCount(self) == 1) {
