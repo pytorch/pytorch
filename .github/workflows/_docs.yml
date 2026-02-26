@@ -212,6 +212,14 @@ jobs:
           echo "C++ docs preview available at:"
           echo "https://docs-preview.pytorch.org/pytorch/pytorch/nightly-${{ github.sha }}/cppdocs/index.html"
 
+      - name: Upload Python Docs artifact for linkcheck
+        uses: actions/upload-artifact@v4
+        if: ${{ matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
+        with:
+          name: python-docs-html
+          path: pytorch_docs/main/
+          retention-days: 1
+
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

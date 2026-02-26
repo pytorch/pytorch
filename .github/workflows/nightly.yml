@@ -86,12 +86,11 @@ jobs:
       - name: Install linkchecker
         run: pip install linkchecker
 
-      - name: Download built docs from nightly
-        run: |
-          pip install awscli==1.36.26
-          mkdir -p docs/build/html
-          aws s3 cp s3://pytorch.org/docs/main/ docs/build/html/ --recursive --no-sign-request || \
-            echo "Could not download docs, checking if they were just pushed..."
+      - name: Download Python docs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-docs-html
+          path: docs/build/html
 
       - name: Check internal links and anchors
         id: linkcheck
