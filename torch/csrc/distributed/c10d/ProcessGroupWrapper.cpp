@@ -558,6 +558,18 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
   return backend_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
 }
 
+c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter_tensor_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const ReduceScatterOptions& opts) {
+  // NOTE: We don't enforce shape checking for reduce_scatter_tensor_coalesced
+  // because the implementation itself does not enforce it we have tests that
+  // use inconsistent shapes, see python implementation in distributed_c10d for
+  // details.
+  runCollectiveChecks(OpType::REDUCE_SCATTER_TENSOR_COALESCED, {});
+  return backend_->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
+}
+
 void ProcessGroupWrapper::startCoalescing() {
   return backend_->startCoalescing();
 }
