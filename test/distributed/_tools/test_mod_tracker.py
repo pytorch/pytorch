@@ -376,5 +376,212 @@ linear2""",
         )
 
 
+class TestCompileSafeHooksDTensor(TestCase):
+    """Tests for compile_safe_hooks with DTensor inputs."""
+
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+        import torch.distributed as dist
+
+        if not dist.is_initialized():
+            dist.init_process_group("fake", rank=0, world_size=1)
+
+    def tearDown(self):
+        torch._dynamo.reset()
+        import torch.distributed as dist
+
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        super().tearDown()
+
+    def _make_dtensor_model(self):
+        from torch.distributed.tensor import (
+            distribute_tensor,
+            init_device_mesh,
+            Replicate,
+        )
+
+        mesh = init_device_mesh("cpu", (1,))
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 2),
+        )
+        for name, param in model.named_parameters():
+            dt = distribute_tensor(param.data, mesh, [Replicate()])
+            parts = name.rsplit(".", 1)
+            parent = dict(model.named_modules())[parts[0]]
+            setattr(parent, parts[1], torch.nn.Parameter(dt))
+        return model, mesh
+
+    @staticmethod
+    def _fmt(t):
+        if t is None:
+            return "None"
+        from torch.utils._debug_mode._utils import _tensor_debug_string
+
+        return _tensor_debug_string(t, [])
+
+    @staticmethod
+    def _fmts(ts):
+        return ", ".join(TestCompileSafeHooksDTensor._fmt(t) for t in ts)
+
+    def _make_logging_hooks(self, log):
+        """Return (pre_fw, post_fw, pre_bw, post_bw) hooks that log tensor metadata."""
+        fmts = self._fmts
+        return dict(
+            pre_fw_hook=lambda fqn, t: log.append(f"pre_fw {fqn}: [{fmts(t)}]"),
+            post_fw_hook=lambda fqn, inp, out: log.append(
+                f"post_fw {fqn}: [{fmts(inp)}] -> [{fmts(out)}]"
+            ),
+            pre_bw_hook=lambda fqn, t: log.append(f"pre_bw {fqn}: [{fmts(t)}]"),
+            post_bw_hook=lambda fqn, t: log.append(f"post_bw {fqn}: [{fmts(t)}]"),
+        )
+
+    def test_dtensor_eager(self):
+        from torch.distributed.tensor import distribute_tensor, Replicate
+
+        model, mesh = self._make_dtensor_model()
+        x = distribute_tensor(
+            torch.randn(3, 4, requires_grad=True), mesh, [Replicate()]
+        )
+        log = []
+
+        with ModTracker.compile_safe_hooks(model, **self._make_logging_hooks(log)):
+            model(x).sum().backward()
+
+        self.assertExpectedInline(
+            "\n".join(log),
+            """\
+pre_fw 0: [dt: f32[3, 4]| R]
+post_fw 0: [dt: f32[3, 4]| R] -> [dt: f32[3, 8]| R]
+pre_fw 1: [dt: f32[3, 8]| R]
+post_fw 1: [dt: f32[3, 8]| R] -> [dt: f32[3, 8]| R]
+pre_fw 2: [dt: f32[3, 8]| R]
+post_fw 2: [dt: f32[3, 8]| R] -> [dt: f32[3, 2]| R]
+pre_bw 2: [dt: f32[3, 2]| R]
+post_bw 2: [dt: f32[3, 8]| R]
+pre_bw 1: [dt: f32[3, 8]| R]
+post_bw 1: [dt: f32[3, 8]| R]
+pre_bw 0: [dt: f32[3, 8]| R]
+post_bw 0: [dt: f32[3, 4]| R]""",
+        )
+
+    def _test_dtensor_compiled_backend(self, backend):
+        from torch.distributed.tensor import distribute_tensor, Replicate
+
+        model, mesh = self._make_dtensor_model()
+        x = distribute_tensor(
+            torch.randn(3, 4, requires_grad=True), mesh, [Replicate()]
+        )
+        log = []
+
+        with ModTracker.compile_safe_hooks(model, **self._make_logging_hooks(log)):
+            compiled = torch.compile(model, backend=backend, fullgraph=True)
+            # First call includes tracing; clear and run again for pure runtime.
+            compiled(x).sum().backward()
+            log.clear()
+            x2 = distribute_tensor(
+                torch.randn(3, 4, requires_grad=True), mesh, [Replicate()]
+            )
+            compiled(x2).sum().backward()
+
+        return "\n".join(log)
+
+    def test_dtensor_compiled_aot_eager(self):
+        # aot_eager goes through aot_autograd: all tensors are plain.
+        result = self._test_dtensor_compiled_backend("aot_eager")
+        self.assertExpectedInline(
+            result,
+            """\
+pre_fw 0: [t: f32[3, 4]]
+post_fw 0: [t: f32[3, 4]] -> [t: f32[3, 8]]
+pre_fw 1: [t: f32[3, 8]]
+post_fw 1: [t: f32[3, 8]] -> [t: f32[3, 8]]
+pre_fw 2: [t: f32[3, 8]]
+post_fw 2: [t: f32[3, 8]] -> [t: f32[3, 2]]
+pre_bw 2: [t: f32[3, 2]]
+post_bw 2: [t: f32[3, 8]]
+pre_bw 1: [t: f32[3, 8]]
+post_bw 1: [t: f32[3, 8]]
+pre_bw 0: [t: f32[3, 8]]
+post_bw 0: [t: f32[3, 4]]""",
+        )
+
+    def test_dtensor_compiled_eager(self):
+        # eager backend skips aot_autograd: forward gets plain tensors
+        # (DTensor unwrapped during tracing), but backward gradients
+        # flow through normal autograd and arrive as DTensors.
+        result = self._test_dtensor_compiled_backend("eager")
+        self.assertExpectedInline(
+            result,
+            """\
+pre_fw 0: [t: f32[3, 4]]
+post_fw 0: [t: f32[3, 4]] -> [t: f32[3, 8]]
+pre_fw 1: [t: f32[3, 8]]
+post_fw 1: [t: f32[3, 8]] -> [t: f32[3, 8]]
+pre_fw 2: [t: f32[3, 8]]
+post_fw 2: [t: f32[3, 8]] -> [t: f32[3, 2]]
+pre_bw 2: [dt: f32[3, 2]| R]
+post_bw 2: [dt: f32[3, 8]| R]
+pre_bw 1: [dt: f32[3, 8]| R]
+post_bw 1: [dt: f32[3, 8]| R]
+pre_bw 0: [dt: f32[3, 8]| R]
+post_bw 0: [dt: f32[3, 4]| R]""",
+        )
+
+    def test_dtensor_aot_export(self):
+        """aot_export_joint preserves invoke_leaf_function nodes in the joint
+        graph; running it via Interpreter fires hooks."""
+        import contextlib
+        import copy
+
+        from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
+        from torch.distributed.tensor import distribute_tensor, Replicate
+
+        model, mesh = self._make_dtensor_model()
+        x = distribute_tensor(
+            torch.randn(3, 4, requires_grad=True), mesh, [Replicate()]
+        )
+        log = []
+        fmts = self._fmts
+
+        def post_fw(fqn, inputs, outputs):
+            log.append(f"{fqn}: [{fmts(inputs)}] -> [{fmts(outputs)}]")
+
+        with ModTracker.compile_safe_hooks(model, post_fw_hook=post_fw):
+            with contextlib.ExitStack() as stack:
+                result = aot_export_joint_with_descriptors(stack, model, (x,))
+                gm = copy.deepcopy(result.graph_module)
+
+            # No hooks during export tracing.
+            self.assertEqual(len(log), 0)
+
+            # Run the joint graph with real tensors; hooks fire with
+            # plain tensors (DTensor is unwrapped during export).
+            log.clear()
+            local_params = [
+                p._local_tensor.detach().requires_grad_(True)
+                for p in model.parameters()
+            ]
+            local_x = x._local_tensor.detach().requires_grad_(True)
+            tangent = torch.randn(3, 2)
+            token = torch.tensor([])
+
+            # Flat arg order: effects_token, params..., input, tangent, tangent_token
+            torch.fx.Interpreter(gm).run(
+                token, *local_params, local_x, tangent, torch.tensor([])
+            )
+
+        self.assertExpectedInline(
+            "\n".join(log),
+            """\
+0: [t: f32[3, 4]] -> [t: f32[3, 8]]
+1: [t: f32[3, 8]] -> [t: f32[3, 8]]
+2: [t: f32[3, 8]] -> [t: f32[3, 2]]""",
+        )
+
+
 if __name__ == "__main__":
     run_tests()

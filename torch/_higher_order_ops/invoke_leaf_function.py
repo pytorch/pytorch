@@ -881,3 +881,83 @@ def invoke_leaf_function_dense(
             _validate_outputs_match(fake_output, real_output)
 
     return real_output
+
+
+def _invoke_leaf_function_dtensor(
+    real_fn_spec,
+    fake_fn_spec,
+    input_spec,
+    mutated_arg_indices,
+    *flat_args,
+    requires_grad_indices=(),
+):
+    """DTensor dispatch for invoke_leaf_function.
+
+    In eager mode, calls the real function directly so hooks receive DTensor
+    objects.  Under torch.compile, unwraps DTensors to local tensors and
+    re-dispatches so mode handlers create graph nodes; outputs are rewrapped
+    as DTensors using input specs (valid for identity-like leaf functions).
+    """
+    from torch._guards import detect_fake_mode
+    from torch.distributed.tensor import DTensor
+
+    if not (
+        torch._dynamo.eval_frame._is_in_optimized_module()
+        or detect_fake_mode() is not None
+    ):
+        # Eager: call real function directly so hooks receive DTensors.
+        real_fn = unwrap_fn_spec(real_fn_spec)
+        with unflatten_args_with_modules(flat_args, input_spec) as (args, kwargs):
+            return real_fn(*args, **kwargs)
+
+    # Compile path: unwrap DTensors and re-dispatch with local tensors so
+    # mode handlers (ProxyTorchDispatchMode) create graph nodes.
+    dtensor_specs = {}
+    local_flat_args = []
+    for i, arg in enumerate(flat_args):
+        if isinstance(arg, DTensor):
+            dtensor_specs[i] = arg._spec
+            local_flat_args.append(arg._local_tensor)
+        else:
+            local_flat_args.append(arg)
+
+    local_result = invoke_leaf_function(
+        real_fn_spec,
+        fake_fn_spec,
+        input_spec,
+        mutated_arg_indices,
+        *local_flat_args,
+        requires_grad_indices=requires_grad_indices,
+    )
+
+    # Rewrap outputs as DTensors using input specs (valid for identity fns).
+    def _wrap(t: torch.Tensor, spec: object) -> "DTensor":
+        return DTensor(t, spec, requires_grad=t.requires_grad)  # pyrefly: ignore
+
+    if isinstance(local_result, (tuple, list)):
+        specs_iter = iter(dtensor_specs.values())
+        rewrapped: list[object] = []
+        for r in local_result:
+            if isinstance(r, torch.Tensor) and not isinstance(r, DTensor):
+                spec = next(specs_iter, None)
+                if spec is not None:
+                    rewrapped.append(_wrap(r, spec))
+                else:
+                    rewrapped.append(r)
+            else:
+                rewrapped.append(r)
+        return type(local_result)(rewrapped)
+
+    if isinstance(local_result, torch.Tensor) and not isinstance(local_result, DTensor):
+        for spec in dtensor_specs.values():
+            return _wrap(local_result, spec)
+
+    return local_result
+
+
+def _register_dtensor_dispatch() -> None:
+    from torch.distributed.tensor import DTensor
+
+    invoke_leaf_function.py_impl(DTensor)(  # pyrefly: ignore
+        _invoke_leaf_function_dtensor
+    )
