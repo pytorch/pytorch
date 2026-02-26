@@ -71,8 +71,8 @@ def _get_expected_num_tensor_outputs(op: OpOverload) -> int:
         # Could be single tensor or tuple of tensors
         return len(return_types)
     elif isinstance(first_return.type, torch.ListType):
-        # List[Tensor] - we don't know the length at schema time, treat as 1
-        return 1
+        # List[Tensor] - we don't know the length at schema time, skip validation
+        return -1
     else:
         # Not a tensor return type
         return 0
@@ -88,6 +88,10 @@ def _validate_tensor_meta_count(
     Raises AssertionError if the count doesn't match, providing a helpful error message.
     """
     expected_outputs = _get_expected_num_tensor_outputs(op_schema.op)
+
+    # Skip validation for List[Tensor] returns (length not known at schema time)
+    if expected_outputs == -1:
+        return
 
     # Compute actual count:
     # - None means 0 outputs

@@ -950,6 +950,102 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
         self.assertEqual(d_self.full_tensor(), expected)
 
+    @with_comms
+    def test_foreach_add_list_partial_propagation(self):
+        # _foreach_add.List with P(sum)+P(sum) -> P(sum), zero communication
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        local_val = 2.0
+
+        list1 = [
+            DTensor.from_local(
+                torch.full((8, 8), local_val, device=self.device_type),
+                device_mesh,
+                [Partial("sum")],
+            )
+            for _ in range(3)
+        ]
+        list2 = [
+            DTensor.from_local(
+                torch.full((8, 8), local_val, device=self.device_type),
+                device_mesh,
+                [Partial("sum")],
+            )
+            for _ in range(3)
+        ]
+
+        with comm_mode:
+            result = torch._foreach_add(list1, list2)
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for dt in result:
+            self.assertEqual(dt.placements, (Partial("sum"),))
+            expected = torch.full(
+                (8, 8),
+                local_val * 2 * self.world_size,
+                device=self.device_type,
+            )
+            self.assertEqual(dt.full_tensor(), expected)
+
+    @with_comms
+    def test_foreach_mul_scalar_partial_propagation(self):
+        # _foreach_mul.Scalar with P(sum)*scalar -> P(sum), zero communication
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        local_val = 3.0
+        scalar = 2.0
+
+        tensors = [
+            DTensor.from_local(
+                torch.full((8, 8), local_val, device=self.device_type),
+                device_mesh,
+                [Partial("sum")],
+            )
+            for _ in range(3)
+        ]
+
+        with comm_mode:
+            result = torch._foreach_mul(tensors, scalar)
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for dt in result:
+            self.assertEqual(dt.placements, (Partial("sum"),))
+            expected = torch.full(
+                (8, 8),
+                local_val * scalar * self.world_size,
+                device=self.device_type,
+            )
+            self.assertEqual(dt.full_tensor(), expected)
+
+    @with_comms
+    def test_foreach_neg_partial_propagation(self):
+        # _foreach_neg with P(sum) -> P(sum) (linear), zero communication
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        local_val = 5.0
+
+        tensors = [
+            DTensor.from_local(
+                torch.full((8, 8), local_val, device=self.device_type),
+                device_mesh,
+                [Partial("sum")],
+            )
+            for _ in range(3)
+        ]
+
+        with comm_mode:
+            result = torch._foreach_neg(tensors)
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        for dt in result:
+            self.assertEqual(dt.placements, (Partial("sum"),))
+            expected = torch.full(
+                (8, 8),
+                -local_val * self.world_size,
+                device=self.device_type,
+            )
+            self.assertEqual(dt.full_tensor(), expected)
+
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)
 
