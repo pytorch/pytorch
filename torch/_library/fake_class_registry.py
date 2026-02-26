@@ -18,19 +18,27 @@ class FakeScriptObject:
         # Use object.__setattr__ to bypass our custom __setattr__ during initialization
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
-        try:
-            with _disable_current_modes():
-                real_obj = copy.deepcopy(x)
-        except (RuntimeError, TypeError) as e:
-            log.warning(  # noqa: G200
-                "Unable to deepcopy the custom object %s due to %s. "
-                "Defaulting to the user given object. This might be "
-                "dangerous as side effects may be directly applied "
-                "to the object.",
-                script_class_name,
-                str(e),
-            )
-            real_obj = x
+
+        from torch._library.opaque_object import is_opaque_type
+
+        # We dont want to deepcopy when tracing with opaque objects because
+        # if a mutation happens intentionally (Ex. caching in device mesh)
+        # then we want it to be recorded on the real object
+        real_obj = x
+        if not is_opaque_type(type(x)):
+            try:
+                with _disable_current_modes():
+                    real_obj = copy.deepcopy(x)
+            except (RuntimeError, TypeError) as e:
+                log.warning(  # noqa: G200
+                    "Unable to deepcopy the custom object %s due to %s. "
+                    "Defaulting to the user given object. This might be "
+                    "dangerous as side effects may be directly applied "
+                    "to the object.",
+                    script_class_name,
+                    str(e),
+                )
+
         object.__setattr__(self, "real_obj", real_obj)
 
     def __getattribute__(self, name):
@@ -188,7 +196,6 @@ def maybe_to_fake_obj(
     x: Any,
 ) -> Union[FakeScriptObject, torch.ScriptObject]:
     import torch.utils._pytree as pytree
-    from torch.utils._python_dispatch import _disable_current_modes
 
     # When tracing with real mode, people should implement meta kernels that can
     # handle the case of real script object + fake tensor inputs.

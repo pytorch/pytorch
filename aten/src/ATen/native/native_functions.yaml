@@ -9818,8 +9818,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lgamma_out
-    MPS: lgamma_out_mps
+    CPU, CUDA, MPS: lgamma_out
   tags: pointwise
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
@@ -9839,8 +9838,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: digamma_out
-    MPS: digamma_out_mps
+    CPU, CUDA, MPS: digamma_out
   tags: pointwise
 
 - func: digamma(Tensor self) -> Tensor
@@ -9854,8 +9852,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: polygamma_out
-    MPS: polygamma_out_mps
+    CPU, CUDA, MPS: polygamma_out
   tags: pointwise
 
 - func: polygamma(int n, Tensor self) -> Tensor
