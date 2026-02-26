@@ -280,7 +280,14 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name, *, cacheable=False):
+    def __init__(
+        self,
+        name,
+        *,
+        cacheable=False,
+        supports_training_input_mutation=False,
+        no_overloaded_args=False,
+    ):
         super().__init__()
         if type(self) is HigherOrderOperator:
             raise RuntimeError(
@@ -294,6 +301,11 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         self._ns = "higher_order"
         self.__module__ = "torch.ops.higher_order"
         self._cacheable = cacheable
+        # When True, allows mutating inputs that don't require grad during
+        # training. Mutations must be handled by auto_functionalize before
+        # reaching autograd.
+        self._supports_training_input_mutation = supports_training_input_mutation
+        self._no_overloaded_args = no_overloaded_args
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -331,7 +343,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             from torch._higher_order_ops.utils import _has_gen_schema
 
-            if _has_gen_schema(self):
+            if not self._supports_training_input_mutation and _has_gen_schema(self):
                 schema = self.gen_schema(*args, **kwargs)
                 if any(arg.is_write for arg in schema.arguments):
                     raise RuntimeError(
@@ -386,22 +398,25 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             # Keep the following 1:1 with handle_torch_function_no_python_arg_parser
             # in torch/csrc/utils/python_arg_parser.cpp
 
-            overloaded_args_list = []
+            if self._no_overloaded_args:
+                overloaded_args = ()
+            else:
+                overloaded_args_list = []
 
-            def has_python_key(tensor):
-                return torch._C._dispatch_keys(tensor).has("Python")
+                def has_python_key(tensor):
+                    return torch._C._dispatch_keys(tensor).has("Python")
 
-            def check_overloaded(arg):
-                if isinstance(arg, torch.Tensor) and has_python_key(arg):
-                    overloaded_args_list.append(arg)
+                def check_overloaded(arg):
+                    if isinstance(arg, torch.Tensor) and has_python_key(arg):
+                        overloaded_args_list.append(arg)
 
-            for arg in (*args, *kwargs.values()):
-                check_overloaded(arg)
-                if isinstance(arg, (list, tuple)):
-                    for a in arg:
-                        check_overloaded(a)
+                for arg in (*args, *kwargs.values()):
+                    check_overloaded(arg)
+                    if isinstance(arg, (list, tuple)):
+                        for a in arg:
+                            check_overloaded(a)
 
-            overloaded_args = tuple(overloaded_args_list)
+                overloaded_args = tuple(overloaded_args_list)
 
             # Step 1: dispatch on any user TorchDispatchModes
             from torch.utils._python_dispatch import _pop_mode_temporarily
@@ -528,6 +543,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return torch.overrides.handle_torch_function(
                 self, flat_args, *args, **kwargs
             )
+        del flat_args
 
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
