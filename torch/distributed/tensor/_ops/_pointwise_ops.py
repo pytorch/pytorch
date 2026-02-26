@@ -512,6 +512,7 @@ pointwise_ops = [
     aten.pow.Tensor_Tensor_out,
     aten.pow_.Scalar,
     aten.pow_.Tensor,
+    aten.rad2deg.out,
     aten.reciprocal.default,
     aten.reciprocal.out,
     aten.reciprocal_.default,
