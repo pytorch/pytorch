@@ -1157,16 +1157,7 @@ def forward(self, x_1, output_1):
             else f"empty_strided_{GPU_TYPE}((10, ), (1, ), torch.float32)"
         )
         num_bufs_allocated = code.count(code_string)
-        if (
-            inductor_config.cpp_wrapper
-            and inductor_config.triton.autotune_at_compile_time is False
-            and has_triton_tensor_descriptor_host_tma()
-        ):
-            # Lazy kernel compilation may conditionally construct tensordescriptor
-            # using aoti_torch_empty_strided
-            self.assertEqual(num_bufs_allocated, 6)
-        else:
-            self.assertEqual(num_bufs_allocated, 2)
+        self.assertEqual(num_bufs_allocated, 2)
 
         # Check we're reusing buffers if not allocating.
         num_bufs_reused = code.count(

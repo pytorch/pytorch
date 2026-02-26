@@ -551,22 +551,23 @@ class DeferredTritonCallWrapper:
         for scratch_name in ("global_scratch", "profile_scratch"):
             size_expr = f"{kernel_name}_result.{scratch_name}"
             var = f"{scratch_name}_ptr"
-            prefix.splice(
-                f"""\
-                CUdeviceptr {var} = 0;
-                RAIIAtenTensorHandle {var}_tensor;
-                if ({size_expr} > 0) {{
-                    int64_t {var}_size[] = {{{size_expr}}};
-                    int64_t {var}_stride[] = {{1}};
-                    AtenTensorHandle {var}_handle;
-                    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
-                        1, {var}_size, {var}_stride, {dtype_str},
-                        {device_type}, device_idx_, &{var}_handle));
-                    {var}_tensor = RAIIAtenTensorHandle({var}_handle);
-                    {var} = reinterpret_cast<CUdeviceptr>({var}_tensor.data_ptr());
-                }}
+            prefix.splice(f"CUdeviceptr {var} = 0;")
+            if tma_arg_names:
+                prefix.splice(
+                    f"""\
+                    RAIIAtenTensorHandle {var}_tensor;
+                    if ({size_expr} > 0) {{
+                        int64_t {var}_size[] = {{{size_expr}}};
+                        int64_t {var}_stride[] = {{1}};
+                        AtenTensorHandle {var}_handle;
+                        AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided(
+                            1, {var}_size, {var}_stride, {dtype_str},
+                            {device_type}, device_idx_, &{var}_handle));
+                        {var}_tensor = RAIIAtenTensorHandle({var}_handle);
+                        {var} = reinterpret_cast<CUdeviceptr>({var}_tensor.data_ptr());
+                    }}
                 """
-            )
+                )
             call_args_str += f", &{var}"
 
         prefix.splice(
