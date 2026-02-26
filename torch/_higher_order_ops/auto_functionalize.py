@@ -3,7 +3,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, get_args, Optional, Union
+from typing import Any, get_args
 
 import torch
 import torch._library.utils as library_utils
@@ -71,8 +71,8 @@ class ViewInfo(ABC):
 
 @dataclass
 class AsStridedViewInfo(ViewInfo):
-    size: Sequence[Union[int, torch.SymInt]]
-    stride: Sequence[Union[int, torch.SymInt]]
+    size: Sequence[int | torch.SymInt]
+    stride: Sequence[int | torch.SymInt]
     storage_offset: int
 
     def __init__(self, base_index, size, stride, storage_offset):
@@ -92,9 +92,9 @@ class AsStridedViewInfo(ViewInfo):
 
 @dataclass
 class SliceViewInfo(ViewInfo):
-    dim: Union[int, torch.SymInt]
-    start: Union[int, torch.SymInt]
-    end: Union[int, torch.SymInt]
+    dim: int | torch.SymInt
+    start: int | torch.SymInt
+    end: int | torch.SymInt
 
     def __init__(self, base_index, dim, start, end):
         super().__init__(base_index)
@@ -377,7 +377,7 @@ auto_functionalized.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
 
 
-_MutableOpType = Union[OpOverload, HigherOrderOperator]
+_MutableOpType = OpOverload | HigherOrderOperator
 
 
 class AutoFunctionalizedV2(HigherOrderOperator):
@@ -397,7 +397,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         _mutable_op: _MutableOpType,
         **kwargs: Any,
     ) -> tuple[Any, tuple[Tensor, ...]]:
-        _op_to_check: Optional[Union[OpOverload, HopInstance]] = None
+        _op_to_check: OpOverload | HopInstance | None = None
         if isinstance(_mutable_op, HigherOrderOperator):
             _op_to_check = HopInstance(
                 _mutable_op,
@@ -424,7 +424,7 @@ auto_functionalized_v2.fallthrough(DispatchKey.AutogradCUDA)
 
 
 def can_auto_functionalize(
-    op: Union[OperatorBase, HopInstance],
+    op: OperatorBase | HopInstance,
 ) -> bool:
     if isinstance(op, HopInstance):
         # HOPs that implement gen_schema and schema is not functional are auto_functionalizable.
@@ -545,9 +545,7 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, _ = get_mutable_args(op)
 
-    unwrapped_actual_out: Union[Any, tuple[Any]] = unwrapped_outs[
-        : -len(mutable_args_names)
-    ]
+    unwrapped_actual_out: Any | tuple[Any] = unwrapped_outs[: -len(mutable_args_names)]
     unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
 
     if len(op._schema.returns) == 0:
@@ -628,7 +626,7 @@ class FunctionalCallableWithEpilogue:
 
 def do_auto_functionalize_v2(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
-    op: Union[OpOverload, HopInstance],
+    op: OpOverload | HopInstance,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
@@ -758,7 +756,7 @@ def do_auto_functionalize_v2(
             **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
-    unwrapped_actual_out: Union[Any, tuple[Any]] = (
+    unwrapped_actual_out: Any | tuple[Any] = (
         unwrapped_outs if len(all_bases) == 0 else unwrapped_outs[: -len(all_bases)]
     )
 
@@ -828,7 +826,7 @@ def do_auto_functionalize_v2(
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
-    _only_clone_these_tensors: Optional[tuple[str, ...]] = None,
+    _only_clone_these_tensors: tuple[str, ...] | None = None,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
@@ -905,7 +903,7 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
 @auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_v2_dense(
     _mutable_op: _MutableOpType,
-    _only_clone_these_bases: Optional[tuple[int, ...]] = None,
+    _only_clone_these_bases: tuple[int, ...] | None = None,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     _all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
@@ -918,7 +916,7 @@ def auto_functionalized_v2_dense(
         schema = pytree.tree_unflatten([], kwargs.pop("_op_schema")).schema
 
     if isinstance(_mutable_op, OpOverload):
-        _callable_op: Union[HopInstance, OpOverload] = _mutable_op
+        _callable_op: HopInstance | OpOverload = _mutable_op
     else:
         if not isinstance(schema, HopSchema):
             raise AssertionError(f"Expected HopSchema, got {type(schema)}")
