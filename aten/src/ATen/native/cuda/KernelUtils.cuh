@@ -254,7 +254,7 @@ __device__ inline void cmtdStore(void* address, T value) {
       else if constexpr (num_char_per_val*sizeof(char) == sizeof(value))
         for (int i=0; i<num_char_per_val; i++)
           __hip_atomic_store(reinterpret_cast<char *>(address)+i, _pnr.c[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      if(wait_for_commit)
+      if constexpr (wait_for_commit)
       {
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #ifdef __gfx1250__
