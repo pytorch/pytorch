@@ -1400,6 +1400,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
                         dim = int(modulus) * dim
                     if remainder != 0:
                         dim = dim + int(remainder)
+                    # pyrefly: ignore [unsupported-operation]
                     derived_dim_cache[str(fix)] = dim
                     return dim
             else:

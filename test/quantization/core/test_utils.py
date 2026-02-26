@@ -12,10 +12,14 @@ class TestUtils(TestCase):
         m = M().eval()
         fqn_to_example_inputs = get_fqn_to_example_inputs(m, example_inputs)
         for fqn, expected_dims in expected_fqn_to_dim.items():
-            assert fqn in expected_fqn_to_dim
+            if fqn not in expected_fqn_to_dim:
+                raise AssertionError(f"Expected fqn {fqn} in expected_fqn_to_dim")
             example_inputs = fqn_to_example_inputs[fqn]
             for example_input, expected_dim in zip(example_inputs, expected_dims):
-                assert example_input.dim() == expected_dim
+                if example_input.dim() != expected_dim:
+                    raise AssertionError(
+                        f"Expected dim {expected_dim}, got {example_input.dim()}"
+                    )
 
     def test_get_fqn_to_example_inputs_simple(self):
         class Sub(torch.nn.Module):
@@ -124,10 +128,14 @@ class TestUtils(TestCase):
         example_inputs = (torch.rand(1, 5),)
         m = M().eval()
         fqn_to_example_inputs = get_fqn_to_example_inputs(m, example_inputs)
-        assert "sub" in fqn_to_example_inputs
-        assert isinstance(fqn_to_example_inputs["sub"][1], list)
-        assert isinstance(fqn_to_example_inputs["sub"][2], dict) and \
-            "3" in fqn_to_example_inputs["sub"][2]
+        if "sub" not in fqn_to_example_inputs:
+            raise AssertionError("Expected 'sub' in fqn_to_example_inputs")
+        if not isinstance(fqn_to_example_inputs["sub"][1], list):
+            raise AssertionError("Expected fqn_to_example_inputs['sub'][1] to be list")
+        if not isinstance(fqn_to_example_inputs["sub"][2], dict):
+            raise AssertionError("Expected fqn_to_example_inputs['sub'][2] to be dict")
+        if "3" not in fqn_to_example_inputs["sub"][2]:
+            raise AssertionError("Expected '3' in fqn_to_example_inputs['sub'][2]")
 
     def test_quantize_weight_clamping_per_tensor(self):
         """ Test quant_{min, max} from per tensor observer is honored by `_quantize_weight` method
@@ -146,19 +154,33 @@ class TestUtils(TestCase):
         )
 
         observer(float_tensor)
-        assert observer.min_val == fp_min
-        assert observer.max_val == fp_max
+        if observer.min_val != fp_min:
+            raise AssertionError(f"Expected min_val {fp_min}, got {observer.min_val}")
+        if observer.max_val != fp_max:
+            raise AssertionError(f"Expected max_val {fp_max}, got {observer.max_val}")
 
         quantized_tensor = _quantize_weight(float_tensor, observer)
-        assert quantized_tensor.int_repr().max().item() == q8_max
-        assert quantized_tensor.int_repr().min().item() == q8_min
+        if quantized_tensor.int_repr().max().item() != q8_max:
+            raise AssertionError(
+                f"Expected max {q8_max}, got {quantized_tensor.int_repr().max().item()}"
+            )
+        if quantized_tensor.int_repr().min().item() != q8_min:
+            raise AssertionError(
+                f"Expected min {q8_min}, got {quantized_tensor.int_repr().min().item()}"
+            )
 
         # Actual weight values can be outside than observer [min_val, max_val] for the moving average observer
         float_tensor *= 1.2
 
         quantized_tensor = _quantize_weight(float_tensor, observer)
-        assert quantized_tensor.int_repr().max().item() == q8_max
-        assert quantized_tensor.int_repr().min().item() == q8_min
+        if quantized_tensor.int_repr().max().item() != q8_max:
+            raise AssertionError(
+                f"Expected max {q8_max}, got {quantized_tensor.int_repr().max().item()}"
+            )
+        if quantized_tensor.int_repr().min().item() != q8_min:
+            raise AssertionError(
+                f"Expected min {q8_min}, got {quantized_tensor.int_repr().min().item()}"
+            )
 
     def test_quantize_weight_clamping_per_channel(self):
         """ Test quant_{min, max} from per channel observer is honored by `_quantize_weight` method
@@ -178,19 +200,33 @@ class TestUtils(TestCase):
         )
 
         observer(float_tensor)
-        assert observer.min_val == fp_min
-        assert observer.max_val == fp_max
+        if observer.min_val != fp_min:
+            raise AssertionError(f"Expected min_val {fp_min}, got {observer.min_val}")
+        if observer.max_val != fp_max:
+            raise AssertionError(f"Expected max_val {fp_max}, got {observer.max_val}")
 
         quantized_tensor = _quantize_weight(float_tensor, observer)
-        assert quantized_tensor.int_repr().max().item() == q8_max
-        assert quantized_tensor.int_repr().min().item() == q8_min
+        if quantized_tensor.int_repr().max().item() != q8_max:
+            raise AssertionError(
+                f"Expected max {q8_max}, got {quantized_tensor.int_repr().max().item()}"
+            )
+        if quantized_tensor.int_repr().min().item() != q8_min:
+            raise AssertionError(
+                f"Expected min {q8_min}, got {quantized_tensor.int_repr().min().item()}"
+            )
 
         # Actual weight values can be outside than observer [min_val, max_val] for the moving average observer
         float_tensor *= 1.2
 
         quantized_tensor = _quantize_weight(float_tensor, observer)
-        assert quantized_tensor.int_repr().max().item() == q8_max
-        assert quantized_tensor.int_repr().min().item() == q8_min
+        if quantized_tensor.int_repr().max().item() != q8_max:
+            raise AssertionError(
+                f"Expected max {q8_max}, got {quantized_tensor.int_repr().max().item()}"
+            )
+        if quantized_tensor.int_repr().min().item() != q8_min:
+            raise AssertionError(
+                f"Expected min {q8_min}, got {quantized_tensor.int_repr().min().item()}"
+            )
 
     def test_uint4_int4_dtype(self):
 
@@ -201,8 +237,10 @@ class TestUtils(TestCase):
             class UInt4OrInt4Tensor(torch.Tensor):
                 @staticmethod
                 def __new__(cls, elem, **kwargs):
-                    assert elem.dtype is torch.uint8
-                    assert not kwargs.get("requires_grad", False)
+                    if elem.dtype is not torch.uint8:
+                        raise AssertionError(f"Expected dtype uint8, got {elem.dtype}")
+                    if kwargs.get("requires_grad", False):
+                        raise AssertionError("Expected requires_grad to be False")
                     kwargs["requires_grad"] = False
                     return torch.Tensor._make_wrapper_subclass(cls, up_size(elem.shape), dtype=dtype, **kwargs)
 
@@ -219,7 +257,8 @@ class TestUtils(TestCase):
                 [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
                 [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF],
             ], dtype=torch.uint8))
-            assert x.dtype == dtype
+            if x.dtype != dtype:
+                raise AssertionError(f"Expected dtype {dtype}, got {x.dtype}")
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")
