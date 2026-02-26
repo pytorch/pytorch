@@ -247,8 +247,15 @@ class TestCustomOpAutoTune(TestCase):
         """
         # Ensure k is divisible by all k_splits values: [2, 32, 64, 128, 256]
         k = ((k + 255) // 256) * 256  # Round up to nearest multiple of 256
-        a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
-        b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
+        sd = k**0.25
+        a = (
+            torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
+            / sd
+        )
+        b = (
+            torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
+            / sd
+        )
         bias = (
             torch.randn(n, device=self.device, dtype=self.dtype, requires_grad=False)
             * 0.1
@@ -371,9 +378,9 @@ class TestCustomOpAutoTune(TestCase):
             torch.testing.assert_close(
                 compiled_result,
                 expected,
-                rtol=2e-1,
-                atol=5e-1,
-                msg=f"Failed for shape ({m}, {k}, {n})",
+                rtol=2e-3,
+                atol=5e-3,
+                # msg=f"Failed for shape ({m}, {k}, {n})",
             )
 
     @skipIfXpu
