@@ -95,6 +95,19 @@ CONSTANT_NUMEL_LIMIT = 1
 RECURSION_COUNT = 0
 
 
+# Check if device type supports device index
+@functools.cache
+def _is_indexed_device_type(device_type: str) -> bool:
+    return device_type in [
+        "cuda",
+        "hpu",
+        "xpu",
+        "mps",
+        "mtia",
+        torch._C._get_privateuse1_backend_name(),
+    ]
+
+
 # Small helper that increments recursion count, and
 # resets it when the object goes out of scope.  Useful
 # if you don't want to increase indentation which is
@@ -663,7 +676,7 @@ class FakeTensor(Tensor):
     which tracks devices that would have been used.
     """
 
-    fake_device: torch.device
+    _fake_device: torch.device
     fake_mode: FakeTensorMode
     constant: Optional[Tensor]
     real_tensor: Optional[Tensor]
@@ -705,6 +718,14 @@ class FakeTensor(Tensor):
     def device(self, _: torch.device) -> None:
         raise NotImplementedError
 
+    @property
+    def fake_device(self) -> torch.device:
+        return self._fake_device
+
+    @fake_device.setter
+    def fake_device(self, device: torch.device) -> None:
+        self._fake_device = self._normalize_fake_device(device)
+
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
     # and autograd logic, we update the dispatch keys of FakeTensors
@@ -731,6 +752,21 @@ class FakeTensor(Tensor):
     @names.setter
     def names(self, _: list[str]) -> None:
         raise NotImplementedError
+
+    @staticmethod
+    def _normalize_fake_device(device: torch.device) -> torch.device:
+        """Normalize device by initializing GPU context and setting device index."""
+        if device.type in ("cuda", "xpu"):
+            init_gpu_context(device)
+
+        if _is_indexed_device_type(device.type) and device.index is None:
+            if device.type != "mps" and getattr(torch, device.type).is_initialized():
+                device = torch.device(
+                    f"{device.type}:{getattr(torch, device.type).current_device()}"
+                )
+            else:
+                device = torch.device(f"{device.type}:0")
+        return device
 
     @staticmethod
     def __new__(
@@ -772,29 +808,6 @@ class FakeTensor(Tensor):
                 raise AssertionError(
                     "device.type must not be 'meta' when allow_meta is False"
                 )
-        # normalize device.
-        if device.type in ["cuda", "xpu"]:
-            init_gpu_context(device)
-
-        if (
-            device.type
-            in [
-                "cuda",
-                "hpu",
-                "xpu",
-                "mps",
-                "mtia",
-                torch._C._get_privateuse1_backend_name(),
-            ]
-            and device.index is None
-        ):
-            if device.type != "mps" and getattr(torch, device.type).is_initialized():
-                device = torch.device(
-                    f"{device.type}:{getattr(torch, device.type).current_device()}"
-                )
-            else:
-                device = torch.device(f"{device.type}:0")
-        # pyrefly: ignore [read-only]
         self.fake_device = device
         self.fake_mode = fake_mode
         self.constant = constant
