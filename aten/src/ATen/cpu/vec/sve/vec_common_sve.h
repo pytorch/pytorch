@@ -230,6 +230,37 @@ std::pair<
 }
 #endif // __ARM_FEATURE_BF16
 
+// SVE has no Half specialization, so provide generic convert_half_float /
+// convert_float_half that work with the generic Vectorized<Half> from vec_base.h
+// and the SVE Vectorized<float>.
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(
+    const Vectorized<Half>& a) {
+  constexpr int64_t K = Vectorized<Half>::size();
+  __at_align__ float arr[K];
+  __at_align__ Half arr2[K];
+  a.store(arr2);
+  for (int64_t i = 0; i < K; i++) {
+    arr[i] = static_cast<float>(arr2[i]);
+  }
+  return std::make_tuple(
+      Vectorized<float>::loadu(arr),
+      Vectorized<float>::loadu(arr + Vectorized<float>::size()));
+}
+
+inline Vectorized<Half> convert_float_half(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
+  constexpr int64_t K = Vectorized<Half>::size();
+  __at_align__ float arr[K];
+  __at_align__ Half arr2[K];
+  a.store(arr);
+  b.store(arr + Vectorized<float>::size());
+  for (int64_t i = 0; i < K; i++) {
+    arr2[i] = static_cast<Half>(arr[i]);
+  }
+  return Vectorized<Half>::loadu(arr2);
+}
+
 #endif // defined(CPU_CAPABILITY_SVE)
 
 } // namespace CPU_CAPABILITY

@@ -915,7 +915,7 @@ Vectorized<c10::quint8> inline maximum(
   return a.maximum(b);
 }
 
-#elif !defined(CPU_CAPABILITY_SVE256)
+#elif !defined(CPU_CAPABILITY_SVE)
 
 // NOTE: These are low-performance implementations that we fall back on
 // if we are not building with AVX2. This may not be an issue, because
@@ -1374,7 +1374,7 @@ Vectorized<c10::quint8> inline maximum(
 
 #endif // if defined(CPU_CAPABILITY_AVX2)
 
-#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256))
+#if (defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE))
 std::pair<Vectorized<float>, Vectorized<float>> inline convert_int8_to_float(
     at::vec::Vectorized<int8_t> src) {
   auto s8x8 = vget_low_s8(src);

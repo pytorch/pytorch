@@ -318,6 +318,9 @@ inline void convert(const c10::BFloat16* src, bool* dst, int64_t n) {
 
 #endif
 
+// NEON-specific VecConvert specializations (excluded for SVE paths which use
+// different Vectorized types)
+#if !defined(CPU_CAPABILITY_SVE)
 template <typename src_t>
 struct VecConvert<
     float,
@@ -372,6 +375,7 @@ struct VecConvert<float, 1, BFloat16, 1> {
     return result;
   }
 };
+#endif // !defined(CPU_CAPABILITY_SVE)
 
 #endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
 } // namespace CPU_CAPABILITY
