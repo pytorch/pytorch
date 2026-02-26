@@ -4,7 +4,7 @@ import functools
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Optional, overload, TypeVar, Union
+from typing import Any, overload, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -157,19 +157,19 @@ def _maybe_reenter_make_fx(fn, subgraph_decomp_table=None):
 
 
 def check_meta_consistency(
-    lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
-    rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_list: list[torch.Tensor | torch.SymInt | int],
+    rhs_list: list[torch.Tensor | torch.SymInt | int],
     lhs_name: str,
     rhs_name: str,
     include_contiguity: bool = True,
 ) -> None:
     def diff_meta_pairs(
-        lhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
-        rhs_list: list[Union[torch.Tensor, torch.SymInt, int]],
+        lhs_list: list[torch.Tensor | torch.SymInt | int],
+        rhs_list: list[torch.Tensor | torch.SymInt | int],
     ) -> list[str]:
         def diff_meta(
-            lhs: Union[torch.Tensor, torch.SymInt, int],
-            rhs: Union[torch.Tensor, torch.SymInt, int],
+            lhs: torch.Tensor | torch.SymInt | int,
+            rhs: torch.Tensor | torch.SymInt | int,
         ) -> str:
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 return ", ".join(
@@ -202,8 +202,8 @@ def check_meta_consistency(
 
         # Manually check the device of lhs and rhs as this field is currently not part of TensorMetadata
         def diff_device(
-            lhs: Union[torch.Tensor, torch.SymInt, int],
-            rhs: Union[torch.Tensor, torch.SymInt, int],
+            lhs: torch.Tensor | torch.SymInt | int,
+            rhs: torch.Tensor | torch.SymInt | int,
         ) -> str:
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 if (
@@ -419,7 +419,7 @@ def _collect_fake_inputs(inputs):
     from torch._subclasses.fake_tensor import FakeTensor
 
     # Get the example values of the inputs.
-    inputs_fake: list[Union[FakeTensor, torch.Tensor, int]] = []
+    inputs_fake: list[FakeTensor | torch.Tensor | int] = []
     for inp in inputs:
         if isinstance(inp, (torch.fx.proxy.Proxy, torch.fx.node.Node)):
             inp = inp.node if isinstance(inp, torch.fx.proxy.Proxy) else inp
@@ -928,7 +928,7 @@ def get_tensor_mask(tensor_list: Iterable[Any]) -> list[bool]:
 
 
 def mask_list(
-    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
+    mask: list[bool], inp: list[Any], other: list[Any] | None = None
 ) -> list[Any]:
     # Masks elements on an `inp` list.
     # If other is None, then the elements of the `inp` list where the mask is False are removed
@@ -988,7 +988,7 @@ def diff_tensor_meta(
 #      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
 #      hops may receive int inputs from the shape of outer tensor inputs.
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
-def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]]):
+def validate_subgraph_args_types(lifted_args: tuple[Any, ...] | list[Any]):
     allowed_types = (torch.Tensor, int, torch.SymInt)
     if not all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
@@ -1025,7 +1025,7 @@ def check_input_alias_and_mutation_return_outputs(
     dict[int, int],
     dict[int, int],
     list[int],
-    Union[tuple[Any, ...], list[Any]],
+    tuple[Any, ...] | list[Any],
 ]:
     def _get_example_value(n):
         if not isinstance(n, torch.fx.Node):
@@ -1198,7 +1198,7 @@ class HopInstance:
 # This call_op can be used to call a HopInstance with
 # flat args and kwargs. We need to make use of the hop's schema's tree_spec
 # to unflatten the args and kwargs before calling the hop.
-def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
+def call_op(op: OpOverload | HopInstance, args, kwargs):
     if isinstance(op, OpOverload):
         return op(*args, **kwargs)
 
@@ -1236,10 +1236,10 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
 def materialize_as_graph(
     fn: Callable,
     args: tuple[Any, ...],
-    include_key_set: Optional[torch._C.DispatchKeySet] = None,
-    exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
+    include_key_set: torch._C.DispatchKeySet | None = None,
+    exclude_key_set: torch._C.DispatchKeySet | None = None,
     force_enable_grad=False,
-    subgraph_decomp_table: Optional[Mapping[OpOverload, Callable]] = None,
+    subgraph_decomp_table: Mapping[OpOverload, Callable] | None = None,
 ) -> torch.fx.GraphModule:
     if include_key_set is None:
         include_key_set = torch._C._dispatch_tls_local_include_set()
@@ -1356,7 +1356,7 @@ def _has_gen_schema(op: HigherOrderOperator):
     )
 
 
-def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+def filter_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     if len(data) != len(masks):
         raise AssertionError(
             f"data length ({len(data)}) != masks length ({len(masks)})"
@@ -1364,6 +1364,6 @@ def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
     return [item for item, keep in zip(data, masks) if keep]
 
 
-def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+def fill_none_with_masks(data: list[torch.Tensor | None], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
