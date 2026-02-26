@@ -116,15 +116,6 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks)
-    CUDA_VERSION=12.8.1
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    VISION=yes
-    KATEX=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
