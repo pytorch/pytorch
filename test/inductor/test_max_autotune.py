@@ -70,9 +70,11 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
+    skipIfRocmArch,
     skipIfRocm,
     TEST_WITH_ROCM,
     TEST_XPU,
+    MI350_ARCH,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
@@ -4713,6 +4715,8 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         cache_entries_after_second = len(AsyncAutotuner.choice_hash_to_future)
         self.assertEqual(cache_entries_after_second, 0)
 
+    # Fails on MI355 with triton 3.7
+    @skipIfRocmArch(MI350_ARCH)
     @config.patch(max_autotune_gemm=True)
     def test_triton_error_precompilation_and_autotuning(self):
         """
