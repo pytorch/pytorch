@@ -132,6 +132,10 @@ class PendingUnbackedSymbolNotFound(RuntimeError):
     pass
 
 
+class _ShapeEnvGuardError(RuntimeError):
+    """Raised when a guard is attempted while the ShapeEnv is in error-on-guard mode."""
+
+
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
@@ -3945,6 +3949,7 @@ class ShapeEnv:
         self.log = log
         self.log.info("create_env")
         self.frozen = False
+        self._error_on_new_guards = False
         self.runtime_asserts_frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
         self.counter: Counter[str] = collections.Counter()
@@ -3981,6 +3986,9 @@ class ShapeEnv:
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
+        # Separate counter tracking only replacement changes, used by
+        # SymNode.expr
+        self._replacements_version_counter = 0
 
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
@@ -4152,6 +4160,7 @@ class ShapeEnv:
             # source locations are OK to diverge
             "var_to_range_sloc",
             "replacements_slocs",
+            "_replacements_version_counter",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
@@ -4498,8 +4507,26 @@ class ShapeEnv:
         TLS.suppress_guards = old
 
     def suppress_guards(self) -> _GeneratorContextManager[None]:
-        """Context manager to ignore all guards generated inside"""
+        """Context manager to ignore all guards generated inside."""
         return _suppress_guards(self)
+
+    @contextmanager
+    def error_on_new_guards(self) -> Iterator[None]:
+        """Context manager that raises _ShapeEnvGuardError if a guard is attempted.
+
+        Temporarily freezes the ShapeEnv and makes _check_frozen raise
+        instead of warn, so that guard-installing code paths produce an
+        exception that is not cached by the _inner_evaluate_expr LRU cache.
+        """
+        old_frozen = self.frozen
+        old_error = self._error_on_new_guards
+        self.frozen = True
+        self._error_on_new_guards = True
+        try:
+            yield
+        finally:
+            self.frozen = old_frozen
+            self._error_on_new_guards = old_error
 
     def _get_key(self) -> tuple[int, int, int, int]:
         """
@@ -6707,6 +6734,12 @@ class ShapeEnv:
     def replace(self, expr: _SympyT) -> _SympyT:
         """
         Apply symbol replacements to any symbols in the given expression.
+
+        IMPORTANT: The output of this method MUST depend only on
+        self.replacements and the input expr. Do not add dependencies on other
+        mutable state. SymNode.expr uses _replacements_version_counter (which
+        tracks only replacement changes) to cache calls to this method, so
+        depending on other state would cause stale cache results.
         """
         replacements = {}
         # pyrefly: ignore [missing-attribute]
@@ -7147,6 +7180,7 @@ class ShapeEnv:
         # them)
         if a not in self.replacements_slocs:
             self.replacements_slocs[a] = self._get_sloc()
+        self._replacements_version_counter += 1
         self._update_version_counter()
 
         # When specializing 'a == tgt', the equality should be also conveyed to
@@ -7166,6 +7200,15 @@ class ShapeEnv:
 
         a: b + c
         c: d
+
+        IMPORTANT: The output of this method MUST depend only on
+        self.replacements and the input symbol. Do not add dependencies on other
+        mutable state. SymNode.expr uses _replacements_version_counter (which
+        tracks only replacement changes) to cache calls to replace() (and
+        transitively this method), so depending on other state would cause
+        stale cache results. (Note: _set_replacement,  may read other fields
+        like var_to_range, but those are side effects that do not affect the
+        returned value.)
         """
         if a not in self.replacements:
             return a
@@ -7332,8 +7375,12 @@ class ShapeEnv:
         return self.simplify(expr)
 
     # We're about to add a guard/runtime assert, check if the ShapeEnv is frozen
-    # and if so issue a warning
+    # and if so issue a warning (or raise if error_on_new_guards is set)
     def _check_frozen(self, expr: sympy.Basic, concrete_val: sympy.Basic) -> None:
+        if self._error_on_new_guards:
+            raise _ShapeEnvGuardError(
+                f"Guard attempted while ShapeEnv guards are frozen: {expr} == {concrete_val}"
+            )
         if self.frozen:
             self.counter["ignored_backward_guard"] += 1
             signpost_event(
