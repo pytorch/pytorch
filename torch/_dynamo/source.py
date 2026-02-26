@@ -1085,6 +1085,13 @@ class SubclassAttrListSource(ChainedSource):
         return "{0}.__tensor_flatten__()[0]"
 
 
+@dataclass_with_cached_hash(frozen=True)
+class SubclassMetadataSource(ChainedSource):
+    @property
+    def _name_template(self) -> str:
+        return "{0}.__tensor_flatten__()[1]"
+
+
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
 @dataclass_with_cached_hash(frozen=True)
