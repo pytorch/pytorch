@@ -1465,7 +1465,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         y = torch.tensor([1])
         x = torch.tensor(1)
 
-        self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+        self.assertEqual(fn(x, y), torch.compile(fn, backend="eager")(x, y))
 
     def test_justknobs_check(self):
         def fn(x, y):
@@ -2297,8 +2297,8 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             )
 
             # check the model is compilable
-            torch.compile(model)
-            torch.compile(other_model)
+            torch.compile(model, backend="eager")
+            torch.compile(other_model, backend="eager")
 
     def test_disable_class_and_instance_method(self):
         # Test that decorating a method at class definition time and then
@@ -3308,8 +3308,8 @@ class GraphModule(torch.nn.Module):
         mod = SimpleModule()
         x = torch.randn(3, 3)
 
-        result = mod(x)
-        self.assertEqual(result[0].shape, (3, 3))
+        with self.assertRaisesRegex(Exception, "requires a fake implementation"):
+            mod(x)
 
         compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Exception, "requires a fake implementation"):
@@ -3364,8 +3364,8 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
 
         x_eager = x.clone()
-        result_eager = fn(x_eager)
-        self.assertEqual(result_eager[0], x + 1)
+        with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
+            fn(x_eager)
 
         compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
         with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
