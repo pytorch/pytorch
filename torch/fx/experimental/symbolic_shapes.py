@@ -7780,10 +7780,17 @@ class ShapeEnv:
                 # boolean expressions and int for integer expressions;
                 # sympify converts them to the proper sympy types
                 # (True -> sympy.true, 5 -> Integer(5)).
-                r = self.guarding_hint_or_throw(orig_expr)
-                if r is None:
-                    raise AssertionError("r must not be None")
-                return sympy.sympify(r)
+                try:
+                    return sympy.sympify(self.guarding_hint_or_throw(orig_expr))
+                except GuardOnDataDependentSymNode:
+                    # guarding_hint_or_throw only does backed-symbol replacement.
+                    # For expressions with unbacked symbols resolvable via axioms
+                    # (e.g. Eq(x, 0) when torch._check(Ne(x, 0)) was previously
+                    # asserted), fall back to static evaluation with compute_hint.
+                    r = self._maybe_evaluate_static(orig_expr, compute_hint=True)
+                    if r is not None:
+                        return r
+                    raise
             else:
                 return sympy.sympify(hint)
 

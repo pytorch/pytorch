@@ -152,6 +152,9 @@ def _guarding_hint_or_throw_base(
     expr = expr.expand(identity=True)
 
     if has_free_unbacked_symbols(expr):
+        # Note: we could do better here and call
+        # _maybe_evaluate_static(orig_expr, compute_hint=True)
+        # but is it worth the overhead? probably not.
         raise GuardOnDataDependentSymNode(expr)
 
     result = _maybe_realize_expr(expr, None)
