@@ -347,7 +347,8 @@ void initPythonBindings(PyObject* module) {
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
       .value(
           "KINETO_PRIVATEUSE1_FALLBACK",
-          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK);
+          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK)
+      .value("KINETO_PRIVATEUSE1", ProfilerState::KINETO_PRIVATEUSE1);
 
   py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
       .value("NONE", ActiveProfilerType::NONE)
