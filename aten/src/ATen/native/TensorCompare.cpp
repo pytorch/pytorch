@@ -387,16 +387,7 @@ Tensor isclose(
       if (self.sizes() == other.sizes()) {
         close.__ior__(self.isnan().__iand__(other.isnan()));
       } else {
-        auto self_nan = self.isnan();
-        auto other_nan = other.isnan();
-        auto expected = at::infer_size(self_nan.sizes(), other_nan.sizes());
-        if (other_nan.sizes().equals(expected)) {
-          close.__ior__(other_nan.__iand__(self_nan));
-        } else if (self_nan.sizes().equals(expected)) {
-          close.__ior__(self_nan.__iand__(other_nan));
-        } else {
-          close.__ior__(self_nan.bitwise_and(other_nan));
-        }
+        close.__ior__(self.isnan().bitwise_and(other.isnan()));
       }
     }
   }
