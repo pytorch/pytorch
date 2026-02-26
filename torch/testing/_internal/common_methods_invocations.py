@@ -19404,15 +19404,6 @@ op_db: list[OpInfo] = [
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-                       # AssertionError: Tensor-likes are not close!
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                           device_type='mps', dtypes=(torch.float32, torch.int64)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestCommon', 'test_out',
-                           device_type='mps', dtypes=(torch.float32,)
-                       ),
                    ),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0}),
                    # polygamma functions have multiple singularities at x having non-positive integer value
@@ -21495,8 +21486,6 @@ op_db: list[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    skips=(
                        # AssertionError: Tensor-likes are not close!
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=3.1e-6)}),
                                     'TestConsistency', 'test_output_grad_match', device_type='mps'),
                    ),
@@ -21612,9 +21601,6 @@ op_db: list[OpInfo] = [
                                     dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
-                       # AssertionError: Tensor-likes are not close!
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                    ),
                    # lgamma have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
@@ -24078,22 +24064,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.digamma",
         torch_opinfo_name="digamma",
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16, torch.float16, torch.bool, torch.bfloat16,
-                )
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16, torch.float16, torch.bool, torch.bfloat16,
-                )
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erf",
@@ -24243,20 +24213,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
                          dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16, torch.float16, torch.bool, torch.bfloat16,
-                )
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
-                    torch.uint8, torch.int8, torch.int64, torch.int32,
-                    torch.int16, torch.float16, torch.bool, torch.bfloat16,
-                )
-            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(

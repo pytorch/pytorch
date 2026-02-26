@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 from collections.abc import Callable
-from typing import Union
 from typing_extensions import TypeVarTuple
 
 import torch
@@ -47,7 +46,7 @@ map_impl = MapImpl()
 
 def map(
     f: Callable[[pytree.PyTree, tuple[pytree.PyTree, ...]], pytree.PyTree],
-    xs: Union[pytree.PyTree, torch.Tensor],
+    xs: pytree.PyTree | torch.Tensor,
     *args: TypeVarTuple,
 ):
     r"""
