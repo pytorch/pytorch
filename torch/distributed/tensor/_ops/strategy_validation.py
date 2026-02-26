@@ -314,8 +314,34 @@ def extract_tensors_from_sample(
     return tensors
 
 
+def _checkerboard_mask(
+    tensor: torch.Tensor, tensor_idx: int = 0, mask_shift: int = 0
+) -> torch.Tensor:
+    """Checkerboard mask that alternates in every dimension.
+
+    Unlike flat-index % 2, which can be uniform along even-stride dimensions
+    (causing all elements in a reduction group to get the same offset), the
+    checkerboard uses sum-of-coordinates mod 2 so adjacent elements differ
+    along every axis.
+
+    Returns a flat bool tensor of shape (numel,).
+    """
+    if tensor.ndim == 0:
+        return torch.tensor([(tensor_idx + mask_shift) % 2 == 0], device=tensor.device)
+    coords = [torch.arange(s, device=tensor.device) for s in tensor.shape]
+    grids = torch.meshgrid(*coords, indexing="ij")
+    coord_sum = grids[0].clone()
+    for g in grids[1:]:
+        coord_sum += g
+    return ((coord_sum + tensor_idx + mask_shift) % 2 == 0).flatten()
+
+
 def _create_partial_input(
-    tensor: torch.Tensor, placement: Partial, world_size: int, tensor_idx: int = 0
+    tensor: torch.Tensor,
+    placement: Partial,
+    world_size: int,
+    tensor_idx: int = 0,
+    mask_shift: int = 0,
 ) -> LocalTensor:
     """
     Create a LocalTensor with values that reduce to the original tensor.
@@ -345,14 +371,21 @@ def _create_partial_input(
     to falsely validate P(sum)->P(sum).
 
     Distinct magnitudes for P(min) vs P(max): P(min) offsets non-holding
-    ranks by +0.7 while P(max) offsets by -1.3. Using different
-    magnitudes prevents accidental cancellation when min and max
-    placements appear in the same combination.
+    ranks by +(range*2+1) while P(max) offsets by -(range*2+1), where
+    range is the tensor's value range. Using adaptive offsets that exceed
+    the value range ensures that index-returning ops (argmin/argmax)
+    produce different results on different ranks, correctly rejecting
+    P(min)/P(max) inputs for those ops. Using different signs for min vs
+    max prevents accidental cancellation when both appear in the same
+    combination.
 
-    Alternating rank ownership for P(min)/P(max): a mask alternating by
-    element (shifted by tensor index) controls which rank holds the true
-    value vs the offset value. This prevents the degenerate case where
-    one rank always holds all true values.
+    Alternating rank ownership for P(min)/P(max): a multi-dimensional
+    checkerboard mask (sum of coordinates mod 2) controls which rank holds
+    the true value vs the offset value. Unlike a flat-index mask which can
+    have uniform parity along an even-stride dimension, the checkerboard
+    guarantees alternation along EVERY dimension. The mask_shift parameter
+    allows re-validation with the complementary mask to catch ops where
+    the result coincidentally matches.
 
     """
     reduce_op = placement.reduce_op
@@ -365,9 +398,9 @@ def _create_partial_input(
         flat = tensor.flatten()
         offset_mag = flat.abs() + 1.0
         signs = torch.ones_like(flat)
-        signs[
-            (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
-        ] = -1.0
+        # Use checkerboard mask so offset sign alternates in every dimension,
+        # not just along flat index (which can be uniform along even-stride dims).
+        signs[_checkerboard_mask(tensor, tensor_idx, mask_shift)] = -1.0
         offset = (offset_mag * signs).reshape(tensor.shape)
 
         scale = world_size if reduce_op == "avg" else 1
@@ -382,30 +415,36 @@ def _create_partial_input(
     elif reduce_op == "min":
         # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        # Offset must exceed the tensor's value range so that the mask pattern
+        # determines argmin/argmax, not the original values.
+        value_range = (flat.max() - flat.min()).item()
+        min_offset = value_range * 2 + 1
+        mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
                 r_offset = torch.where(
-                    mask, torch.zeros_like(flat), torch.full_like(flat, 0.7)
+                    mask, torch.zeros_like(flat), torch.full_like(flat, min_offset)
                 )
             else:
                 r_offset = torch.where(
-                    mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
+                    mask, torch.full_like(flat, min_offset), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
     elif reduce_op == "max":
         # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        value_range = (flat.max() - flat.min()).item()
+        max_offset = -(value_range * 2 + 1)
+        mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
                 r_offset = torch.where(
-                    mask, torch.zeros_like(flat), torch.full_like(flat, -1.3)
+                    mask, torch.zeros_like(flat), torch.full_like(flat, max_offset)
                 )
             else:
                 r_offset = torch.where(
-                    mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
+                    mask, torch.full_like(flat, max_offset), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
@@ -425,6 +464,7 @@ def validate_combination(
     ground_truth: torch.Tensor | list[torch.Tensor],
     world_size: int = 2,
     mesh: DeviceMesh | None = None,
+    mask_shift: int = 0,
 ) -> tuple[bool, str]:
     """
     Validate a single placement combination against ground truth.
@@ -460,7 +500,7 @@ def validate_combination(
         ):
             if isinstance(placement, Partial):
                 local_tensor = _create_partial_input(
-                    tensor, placement, world_size, tensor_idx
+                    tensor, placement, world_size, tensor_idx, mask_shift
                 )
             elif isinstance(placement, Replicate):
                 _tmp = {r: tensor.clone() for r in range(world_size)}
@@ -1060,6 +1100,25 @@ def _validate_with_mitigations(
     is_valid, _ = validate_combination(
         op, sample, tensors, combo, ground_truth, world_size, mesh
     )
+
+    # Flipped-mask mitigation: the checkerboard mask that controls offset
+    # signs (for P(sum)/P(avg)) or rank ownership (for P(min)/P(max)) is
+    # deterministic per tensor_idx. Re-validate with the complementary mask
+    # to catch index-returning ops (argmin/argmax) where the result
+    # coincidentally matches because the dominant value happens to land on
+    # a position where both mask orientations preserve argmin/argmax.
+    if is_valid and has_any_partial(input_placements, output_placement):
+        flipped_valid, _ = validate_combination(
+            op,
+            sample,
+            tensors,
+            combo,
+            ground_truth,
+            world_size,
+            mesh,
+            mask_shift=1,
+        )
+        is_valid = is_valid and flipped_valid
 
     if (
         is_valid
