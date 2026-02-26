@@ -2018,6 +2018,7 @@ class DunderDictVariable(ConstDictVariable):
     # - __contains__
     # - getitem_const
     # - maybe_getitem_const
+    # - getitem_const_raise_exception_if_absent
     # because the default implementation in ConstDictVariable will directly look
     # up the name in self.items, which might add undesired guards.
     def __contains__(self, vt: VariableTracker) -> bool:
@@ -2037,3 +2038,9 @@ class DunderDictVariable(ConstDictVariable):
         if self.contains(name):
             return self.getitem(name)
         return None
+
+    def getitem_const_raise_exception_if_absent(self, tx, arg):
+        name = arg.as_python_constant()
+        if self.contains(name):
+            return self.getitem(name)
+        return super().getitem_const_raise_exception_if_absent(tx, arg)
