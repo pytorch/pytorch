@@ -673,6 +673,7 @@ print(t.is_pinned())
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally
+    @serialTest()
     def test_cublas_workspace_explicit_allocation(self):
         torch.backends.cuda.preferred_blas_library("cublas")
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
@@ -688,8 +689,8 @@ print(t.is_pinned())
             default_workspace_size = (
                 4096 * 2 * 1024 + 16 * 8 * 1024
             )  # :4096:2:16:8  8MiB
-            # different size (32 MiB) expected on Hopper GPU
-            if torch.cuda.get_device_capability() == (9, 0):
+            # different size (32 MiB) expected on Hopper/Blackwell GPU
+            if torch.cuda.get_device_capability()[0] in (9, 10, 12):
                 default_workspace_size = 4096 * 8 * 1024
 
         def check_workspace_size(inp):
