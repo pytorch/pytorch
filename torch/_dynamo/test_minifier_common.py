@@ -24,7 +24,7 @@ import sys
 import tempfile
 import traceback
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 import torch
@@ -47,7 +47,7 @@ class MinifierTestResult:
         r = re.sub(r"\n{3,}", "\n\n", r)
         return r.strip()
 
-    def get_exported_program_path(self) -> Optional[str]:
+    def get_exported_program_path(self) -> str | None:
         # Extract the exported program file path from AOTI minifier's repro.py
         # Regular expression pattern to match the file path
         pattern = r'torch\.export\.load\(\s*["\'](.*?)["\']\s*\)'
@@ -109,7 +109,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
 """
 
     def _maybe_subprocess_run(
-        self, args: Sequence[Any], *, isolate: bool, cwd: Optional[str] = None
+        self, args: Sequence[Any], *, isolate: bool, cwd: str | None = None
     ) -> subprocess.CompletedProcess[bytes]:
         from torch._inductor.cpp_builder import normalize_path_separator
 
@@ -180,7 +180,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # minifier launcher script, if `code` outputted it.
     def _run_test_code(
         self, code: str, *, isolate: bool
-    ) -> tuple[subprocess.CompletedProcess[bytes], Union[str, Any]]:
+    ) -> tuple[subprocess.CompletedProcess[bytes], str | Any]:
         proc = self._maybe_subprocess_run(
             ["python3", "-c", code], isolate=isolate, cwd=self.DEBUG_DIR
         )
@@ -201,7 +201,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         isolate: bool,
         *,
         minifier_args: Sequence[Any] = (),
-        repro_after: Optional[str] = None,
+        repro_after: str | None = None,
     ) -> tuple[subprocess.CompletedProcess[bytes], str]:
         self.assertIsNotNone(repro_dir)
         launch_file = _as_posix_path(os.path.join(repro_dir, "minifier_launcher.py"))
@@ -282,11 +282,11 @@ torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
         self,
         run_code: str,
         repro_after: str,
-        expected_error: Optional[str],
+        expected_error: str | None,
         *,
         isolate: bool,
         minifier_args: Sequence[Any] = (),
-    ) -> Optional[MinifierTestResult]:
+    ) -> MinifierTestResult | None:
         if isolate:
             repro_level = 3
         elif expected_error is None or expected_error == "AccuracyError":
