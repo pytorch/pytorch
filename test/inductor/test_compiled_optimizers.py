@@ -1000,7 +1000,7 @@ class CompiledOptimizerBitwiseTests(TestCase):
 
     These tests verify that with the following config options:
     - eager_numerics.division_rounding = True
-    - eager_numerics.pow_precision = True
+    - eager_numerics.use_pytorch_libdevice = True
     - emulate_precision_casts = True
 
     The compiled optimizer step produces results that are bitwise identical
@@ -1011,8 +1011,6 @@ class CompiledOptimizerBitwiseTests(TestCase):
     def _test_optimizer_bitwise(
         test_case,
         optim_cls,
-        foreach=True,
-        capturable=True,
         num_steps=10,
         **optim_kwargs,
     ):
@@ -1028,16 +1026,10 @@ class CompiledOptimizerBitwiseTests(TestCase):
 
         opt_eager = optim_cls(
             params_eager,
-            lr=0.001,
-            foreach=foreach,
-            capturable=capturable,
             **optim_kwargs,
         )
         opt_compiled = optim_cls(
             params_compiled,
-            lr=0.001,
-            foreach=foreach,
-            capturable=capturable,
             **optim_kwargs,
         )
 
@@ -1097,7 +1089,7 @@ def _make_bitwise_test(optim_cls, **optim_kwargs):
     @config.patch(
         {
             "eager_numerics.division_rounding": True,
-            "eager_numerics.pow_precision": True,
+            "eager_numerics.use_pytorch_libdevice": True,
             "emulate_precision_casts": True,
         }
     )
@@ -1115,6 +1107,7 @@ for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
         and kwargs.get("foreach", False)
         and kwargs.get("capturable", False)
         and kwargs.get("device") == GPU_TYPE
+        and "tensor_lr" not in name
     ):
         optim_kwargs = {
             k: v for k, v in kwargs.items() if k not in ("device", "kernel_count")

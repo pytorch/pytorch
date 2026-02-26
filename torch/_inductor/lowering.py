@@ -626,6 +626,31 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
     return out
 
 
+def _add_with_alpha_fma(a, b, alpha):
+    """Compute a + alpha * b using FMA for CUDA floating-point precision."""
+    dtype = get_promoted_dtype(
+        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+    a_loader = a.make_loader()
+    b_loader = b.make_loader()
+
+    def inner_fn(idx):
+        a_val = a_loader(idx)
+        b_val = b_loader(idx)
+        if isinstance(alpha, sympy.Basic):
+            alpha_expr = ops.index_expr(alpha, dtype)
+        else:
+            alpha_expr = ops.constant(alpha, dtype)
+        return ops.fma(b_val, alpha_expr, a_val)
+
+    return Pointwise.create(
+        device=a.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=a.get_size(),
+    )
+
+
 def make_pointwise(
     fn,
     override_return_dtype=None,
@@ -644,6 +669,23 @@ def make_pointwise(
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
+                # Use FMA for add-with-alpha on CUDA floating-point.
+                # Eager CUDA computes a + alpha * b as fma(b, alpha, a).
+                device = None
+                for i in inputs:
+                    if isinstance(i, IRNode) and is_gpu(i.get_device().type):
+                        device = i.get_device()
+                        break
+                inp_dtype = inputs[0].get_dtype() if isinstance(inputs[0], IRNode) else None
+                if (
+                    inp_dtype is not None
+                    and inp_dtype.is_floating_point
+                    and not torch.version.hip
+                    and device is not None
+                    and device.type == "cuda"
+                ):
+                    return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
+
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
                 # pyrefly: ignore [unsupported-operation]
@@ -2308,15 +2350,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    # When emulate_precision_casts is enabled, we skip decomposing addcmul ops
-    # to use the inductor lowering which preserves FMA semantics.
-    # For _foreach_addcdiv, we use the native CUDA kernel.
-    skip_decomp_for_precision = config.emulate_precision_casts and op in {
+    # addcmul/addcdiv decompositions are removed in select_decomp_table() so the
+    # inductor FMA lowering is used instead. They should not be in decompositions
+    # by the time make_fallback runs, but guard just in case.
+    skip_decomp_for_fma = op in {
         aten.addcmul,
         aten._foreach_addcmul.Scalar,
         aten._foreach_addcdiv.Scalar,
     }
-    assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
+    assert op not in decompositions or override_decomp or skip_decomp_for_fma, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
@@ -7347,6 +7389,11 @@ register_foreach_inplace(
 )
 register_foreach_inplace(
     aten._foreach_copy_.default, aten._foreach_copy.default, foreach_copy
+)
+register_foreach_inplace(
+    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcmul.Scalar,
+    _foreach_addcmul_scalar,
 )
 
 
