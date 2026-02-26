@@ -37,7 +37,6 @@ import torch._export.serde.schema as export_schema
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
-import torch.fx.experimental._config as _fx_config
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
