@@ -25,6 +25,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/native/IndexKernel.h>
 #include <ATen/ops/count_nonzero.h>
 #include <ATen/ops/count_nonzero_native.h>
 #include <ATen/ops/embedding_dense_backward_native.h>
@@ -32,7 +33,6 @@
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
 #include <ATen/ops/index_copy_native.h>
-#include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
@@ -887,37 +887,33 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
       self, *std::get<1>(mask_self_expanded), final_indices, source.flatten().narrow(0, 0, indices[0].numel()));
 }
 
-Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
-  TORCH_CHECK(source.dim() == 0,
-              "index_fill_ only supports a 0-dimensional value tensor, but got tensor with ",
-              source.dim(),
-              " dimension(s).");
-  return self.index_fill_(dim, index, source.item());
-}
-
-Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Scalar& source) {
+static void index_fill_mps_kernel(TensorIterator& iter,
+                                  int64_t dim,
+                                  int64_t self_dim_size,
+                                  int64_t self_dim_stride,
+                                  const Scalar& source) {
+  if (iter.numel() == 0) {
+    return;
+  }
   using namespace mps;
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_fill_(): Index is supposed to be a vector");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-              "index_fill_(): Expected dtype int32 or int64 for index");
-  TORCH_CHECK(self.is_complex() || !source.isComplex(),
-              "index_fill_(): Converting complex Scalar to non-complex type is not supported");
 
-  if (index.numel() == 0 || self.numel() == 0) {
-    return self;
-  }
+  // Reconstruct original self from the restrided iterator output.
+  // iter.tensor(0) has stride[dim]=0 and size[dim]=index_numel; restore originals.
+  const Tensor& self_rs = iter.tensor(0);
+  auto self_sizes = self_rs.sizes().vec();
+  auto self_strides = self_rs.strides().vec();
+  self_sizes[dim] = self_dim_size;
+  self_strides[dim] = self_dim_stride;
+  Tensor self = self_rs.as_strided(self_sizes, self_strides, self_rs.storage_offset());
 
-  if (self.dim() == 0) {
-    return self.fill_(source);
-  }
+  // Reconstruct original 1D index from the restrided iterator input.
+  // iter.tensor(1) has shape [..., index_numel, ...] with stride[dim]=original stride.
+  const Tensor& idx_rs = iter.tensor(1);
+  Tensor index = idx_rs.as_strided({idx_rs.size(dim)}, {idx_rs.stride(dim)}, idx_rs.storage_offset());
 
-  dim = maybe_wrap_dim(dim, self.dim());
-
-  auto stream = getCurrentMPSStream();
   const bool is_dense = self.is_contiguous() && index.is_contiguous();
-  const auto long_or_int = (index.scalar_type() == ScalarType::Long) ? "long" : "int";
   const auto type_str = scalarToMetalTypeString(self);
-  const int64_t dim_size = self.size(dim);
+  const int64_t dim_size = self_dim_size;
   const int64_t indices_numel = index.numel();
 
   // For large index counts, use a two-pass mask approach: mark which dim-positions
@@ -928,6 +924,7 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
   // conflict overhead.
   const bool use_mask = (indices_numel * 16 >= dim_size);
 
+  auto stream = getCurrentMPSStream();
   if (use_mask) {
     // Use at::empty (not at::zeros) to avoid a blit encoder fill that would
     // force a blit→compute encoder switch, adding latency per call.
@@ -935,7 +932,7 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
     // TODO: Remove me after https://github.com/pytorch/pytorch/issues/175859 is fixed
     auto mask = at::empty({dim_size}, at::TensorOptions().dtype(at::kBool).device(self.device()));
     auto zeroMaskPSO = lib.getPipelineStateForFunc("index_fill_zero_mask");
-    auto setMaskPSO = lib.getPipelineStateForFunc(fmt::format("index_fill_set_mask_{}", long_or_int));
+    auto setMaskPSO = lib.getPipelineStateForFunc("index_fill_set_mask");
     auto fillMaskPSO = lib.getPipelineStateForFunc(
         fmt::format("index_fill_{}_from_mask_{}", is_dense ? "dense" : "strided", type_str));
 
@@ -951,7 +948,7 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
         auto mpsScalar = getMPSScalar(source, self.scalar_type());
-        long indices_stride = index.dim() > 0 ? index.stride(0) : 1;
+        long indices_stride = index.stride(0);
 
         // Pass 0: zero the mask entirely within the compute encoder.
         [computeEncoder setComputePipelineState:zeroMaskPSO];
@@ -997,8 +994,8 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
   } else {
     // Scatter: one thread per (index, slice-element) pair.
     const int64_t slice_numel = self.numel() / dim_size;
-    auto indexFillPSO = lib.getPipelineStateForFunc(
-        fmt::format("index_fill_{}_{}_{}", is_dense ? "dense" : "strided", type_str, long_or_int));
+    auto indexFillPSO =
+        lib.getPipelineStateForFunc(fmt::format("index_fill_{}_{}", is_dense ? "dense" : "strided", type_str));
 
     c10::SmallVector<int64_t> slice_sizes, slice_out_strides;
     if (!is_dense) {
@@ -1022,7 +1019,7 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
           mtl_setArgs<3>(computeEncoder, dim_size, dim_stride, slice_numel);
         } else {
           long dim_out_stride = self.stride(dim);
-          long indices_stride = index.dim() > 0 ? index.stride(0) : 1;
+          long indices_stride = index.stride(0);
           uint32_t slice_ndim = static_cast<uint32_t>(self.dim() - 1);
           mtl_setArgs<3>(computeEncoder,
                          dim_size,
@@ -1037,10 +1034,9 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
       }
     });
   }
-
-  return self;
 }
 
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_mps_kernel)
 REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps)
 } // namespace at::native

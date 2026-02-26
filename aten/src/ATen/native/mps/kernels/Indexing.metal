@@ -446,11 +446,11 @@ kernel void index_copy_strided(
 // Launches indices_numel * slice_numel threads, where
 // slice_numel = numel / self.size(dim).
 
-// Dense (contiguous output, contiguous index): offset computed analytically.
-template <typename T, typename index_t>
+// Dense (contiguous output): offset computed analytically.
+template <typename T>
 kernel void index_fill_dense(
     device T* output,
-    constant index_t* indices,
+    constant long* indices,
     constant T& fill_val,
     constant long& dim_size,
     constant long&
@@ -471,10 +471,10 @@ kernel void index_fill_dense(
 }
 
 // Strided (non-contiguous output or index): offset computed via slice strides.
-template <typename T, typename index_t>
+template <typename T>
 kernel void index_fill_strided(
     device T* output,
-    constant index_t* indices,
+    constant long* indices,
     constant T& fill_val,
     constant long& dim_size,
     constant long& dim_out_stride, // output.stride(dim)
@@ -512,10 +512,9 @@ kernel void index_fill_zero_mask(
   mask[i] = false;
 }
 
-template <typename index_t>
 kernel void index_fill_set_mask(
     device bool* mask,
-    constant index_t* indices,
+    constant long* indices,
     constant long& dim_size,
     constant long& indices_stride,
     uint thread_index [[thread_position_in_grid]]) {
@@ -567,28 +566,28 @@ kernel void index_fill_strided_from_mask(
   }
 }
 
-#define INSTANTIATE_INDEX_FILL(T, index_t)                      \
-  template [[host_name("index_fill_dense_" #T "_" #index_t)]]   \
-  kernel void index_fill_dense<T, index_t>(                     \
-      device T*,                                                \
-      constant index_t*,                                        \
-      constant T&,                                              \
-      constant long&,                                           \
-      constant long&,                                           \
-      constant long&,                                           \
-      uint);                                                    \
-  template [[host_name("index_fill_strided_" #T "_" #index_t)]] \
-  kernel void index_fill_strided<T, index_t>(                   \
-      device T*,                                                \
-      constant index_t*,                                        \
-      constant T&,                                              \
-      constant long&,                                           \
-      constant long&,                                           \
-      constant long*,                                           \
-      constant long*,                                           \
-      constant uint&,                                           \
-      constant long&,                                           \
-      constant long&,                                           \
+#define INSTANTIATE_INDEX_FILL(T)                  \
+  template [[host_name("index_fill_dense_" #T)]]   \
+  kernel void index_fill_dense<T>(                 \
+      device T*,                                   \
+      constant long*,                              \
+      constant T&,                                 \
+      constant long&,                              \
+      constant long&,                              \
+      constant long&,                              \
+      uint);                                       \
+  template [[host_name("index_fill_strided_" #T)]] \
+  kernel void index_fill_strided<T>(               \
+      device T*,                                   \
+      constant long*,                              \
+      constant T&,                                 \
+      constant long&,                              \
+      constant long&,                              \
+      constant long*,                              \
+      constant long*,                              \
+      constant uint&,                              \
+      constant long&,                              \
+      constant long&,                              \
       uint);
 
 #define INSTANTIATE_INDEX_COPY(T, index_t)                      \
@@ -666,33 +665,25 @@ INSTANTIATE_INDEX_COPY(float2, long);
 INSTANTIATE_INDEX_COPY(half2, int);
 INSTANTIATE_INDEX_COPY(half2, long);
 
-INSTANTIATE_INDEX_FILL(float, int);
-INSTANTIATE_INDEX_FILL(float, long);
-INSTANTIATE_INDEX_FILL(bool, int);
-INSTANTIATE_INDEX_FILL(bool, long);
-INSTANTIATE_INDEX_FILL(half, int);
-INSTANTIATE_INDEX_FILL(half, long);
-INSTANTIATE_INDEX_FILL(bfloat, int);
-INSTANTIATE_INDEX_FILL(bfloat, long);
-INSTANTIATE_INDEX_FILL(int, int);
-INSTANTIATE_INDEX_FILL(int, long);
-INSTANTIATE_INDEX_FILL(long, int);
-INSTANTIATE_INDEX_FILL(long, long);
-INSTANTIATE_INDEX_FILL(short, int);
-INSTANTIATE_INDEX_FILL(short, long);
-INSTANTIATE_INDEX_FILL(char, int);
-INSTANTIATE_INDEX_FILL(char, long);
-INSTANTIATE_INDEX_FILL(uchar, int);
-INSTANTIATE_INDEX_FILL(uchar, long);
-INSTANTIATE_INDEX_FILL(float2, int);
-INSTANTIATE_INDEX_FILL(float2, long);
-INSTANTIATE_INDEX_FILL(half2, int);
-INSTANTIATE_INDEX_FILL(half2, long);
+INSTANTIATE_INDEX_FILL(float);
+INSTANTIATE_INDEX_FILL(bool);
+INSTANTIATE_INDEX_FILL(half);
+INSTANTIATE_INDEX_FILL(bfloat);
+INSTANTIATE_INDEX_FILL(int);
+INSTANTIATE_INDEX_FILL(long);
+INSTANTIATE_INDEX_FILL(short);
+INSTANTIATE_INDEX_FILL(char);
+INSTANTIATE_INDEX_FILL(uchar);
+INSTANTIATE_INDEX_FILL(float2);
+INSTANTIATE_INDEX_FILL(half2);
 
-#define INSTANTIATE_INDEX_FILL_SET_MASK(index_t)          \
-  template [[host_name("index_fill_set_mask_" #index_t)]] \
-  kernel void index_fill_set_mask<index_t>(               \
-      device bool*, constant index_t*, constant long&, constant long&, uint);
+[[host_name("index_fill_set_mask")]]
+kernel void index_fill_set_mask(
+    device bool*,
+    constant long*,
+    constant long&,
+    constant long&,
+    uint);
 
 #define INSTANTIATE_INDEX_FILL_FROM_MASK(T)                  \
   template [[host_name("index_fill_dense_from_mask_" #T)]]   \
@@ -714,8 +705,6 @@ INSTANTIATE_INDEX_FILL(half2, long);
       constant uint&,                                        \
       uint);
 
-INSTANTIATE_INDEX_FILL_SET_MASK(int)
-INSTANTIATE_INDEX_FILL_SET_MASK(long)
 INSTANTIATE_INDEX_FILL_FROM_MASK(float)
 INSTANTIATE_INDEX_FILL_FROM_MASK(half)
 INSTANTIATE_INDEX_FILL_FROM_MASK(bfloat)
