@@ -3181,35 +3181,40 @@ class TestLinalg(TestCase):
         b = torch.randn(*b_dims, dtype=dtype, device=device)
         A = random_hermitian_pd_matrix(*A_dims, dtype=dtype, device=device)
         L = torch.cholesky(A, upper=upper)
-        return b, A, L
 
-    @skipCUDAIfNoMagma
+        # L should be col-major
+        self.assertTrue(L.mT.is_contiguous())
+
+        yield b, A, L  # L is col-major
+        yield b, A, L.contiguous()  # L is row-major
+
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_cholesky_solve(self, device, dtype):
         for (k, n), upper in itertools.product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
-            b, A, L = self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype)
-            x = torch.cholesky_solve(b, L, upper=upper)
-            self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
+            for b, A, L in self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype):
+                x = torch.cholesky_solve(b, L, upper=upper)
+                self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_cholesky_solve_batched(self, device, dtype):
         def cholesky_solve_batch_helper(A_dims, b_dims, upper):
-            b, A, L = self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype)
-            x_exp_list = []
-            for i in range(b_dims[0]):
-                x_exp_list.append(torch.cholesky_solve(b[i], L[i], upper=upper))
-            x_exp = torch.stack(x_exp_list)  # Stacked output
-            x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
-            self.assertEqual(x_act, x_exp)  # Equality check
-            Ax = np.matmul(A.cpu(), x_act.cpu())
-            self.assertEqual(b, Ax)  # Correctness check
+            for b, A, L in self.cholesky_solve_test_helper(A_dims, b_dims, upper, device, dtype):
+                x_exp_list = []
+                for i in range(b_dims[0]):
+                    x_exp_list.append(torch.cholesky_solve(b[i], L[i], upper=upper))
+                x_exp = torch.stack(x_exp_list)  # Stacked output
+                x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
+                self.assertEqual(x_act, x_exp)  # Equality check
+                Ax = np.matmul(A.cpu(), x_act.cpu())
+                self.assertEqual(b, Ax)  # Correctness check
 
         for upper, batchsize in itertools.product([True, False], [1, 3, 4]):
             cholesky_solve_batch_helper((5, batchsize), (batchsize, 5, 10), upper)

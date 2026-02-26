@@ -924,31 +924,31 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
       return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
     } else {
       // Dispatch to two triangular solves.
+      const auto trans = A.is_complex() ? TransposeType::ConjTranspose : TransposeType::Transpose;
+      constexpr auto no_trans = TransposeType::NoTranspose;
+
       // Copy of `self` is modified by the triangular_solve_kernel in-place.
       auto B = cloneBatchedColumnMajor(self);
-      // Reuse A if it is col-major or row-major with flipped upper
-      const auto& [A_maybe_copy, upper_maybe_flipped] = [&]() -> auto {
+      const auto& [A_maybe_copy, upper_maybe_flipped, first_system_trans] = [&]() -> auto {
         using MaybeOwnedTensor = c10::MaybeOwned<Tensor>;
         if (A.is_contiguous()) {
           // A is row-major -> use as col-major with upper=!upper
-          return std::make_tuple(MaybeOwnedTensor::owned(A.mH()), !upper);
+          return std::make_tuple(MaybeOwnedTensor::owned(A.mH()), !upper, init_trans == trans ? no_trans : trans);
         } else if (A.mT().is_contiguous()) {
           // A is col-major -> reuse as is with upper=upper
-          return std::make_tuple(MaybeOwnedTensor::borrowed(A), upper);
+          return std::make_tuple(MaybeOwnedTensor::borrowed(A), upper, init_trans);
         } else {
           // Otherwise make a col-major copy with upper=upper
-          return std::make_tuple(MaybeOwnedTensor::owned(cloneBatchedColumnMajor(A)), upper);
+          return std::make_tuple(MaybeOwnedTensor::owned(cloneBatchedColumnMajor(A)), upper, init_trans);
         }
       }();
-      const auto trans = A.is_complex() ? TransposeType::ConjTranspose : TransposeType::Transpose;
-      constexpr auto no_trans = TransposeType::NoTranspose;
       // First we solve for Y: L Y = B or U^H Y = B.
       triangular_solve_kernel(
         *A_maybe_copy,
         B,
         /*left=*/true,
         /*upper=*/upper_maybe_flipped,
-        upper ? trans : no_trans,
+        first_system_trans,
         /*unitriangular=*/false
       );
       // Then we solve for X: L^H X = Y or U X = Y.
@@ -957,7 +957,7 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
         B,
         /*left=*/true,
         /*upper=*/upper_maybe_flipped,
-        upper ? no_trans : trans,
+        first_system_trans == trans ? no_trans : trans,
         /*unitriangular=*/false
       );
       return B;
@@ -988,7 +988,7 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
     case at::LinalgBackend::Magma:
       return _cholesky_solve_helper_cuda_magma(self, A, upper);
     default:
-      if (batchCount(self) == 1 || !use_magma_) {
+      if (!use_magma_) {
         return _cholesky_solve_helper_cuda_cusolver_dispatcher(self, A, upper);
       } else {
         return _cholesky_solve_helper_cuda_magma(self, A, upper);
