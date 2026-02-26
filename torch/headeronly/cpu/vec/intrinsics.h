@@ -8,6 +8,7 @@
 #if defined(__ARM_FEATURE_SVE)
 /* CLANG-compatible compiler, targeting ARM with SVE */
 #include <arm_sve.h>
+#include <arm_neon_sve_bridge.h>
 #endif
 #elif defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
@@ -28,6 +29,7 @@
 #if defined(__ARM_FEATURE_SVE)
 /* GCC-compatible compiler, targeting ARM with SVE */
 #include <arm_sve.h>
+#include <arm_neon_sve_bridge.h>
 #endif
 #elif defined(__GNUC__) && defined(__IWMMXT__)
 /* GCC-compatible compiler, targeting ARM with WMMX */
