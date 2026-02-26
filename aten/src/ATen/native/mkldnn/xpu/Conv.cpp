@@ -596,13 +596,15 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   input_ = input_.contiguous(mfmt);
 
   auto opt = grad_output_.options();
-  Tensor grad_input = at::empty(input_.sizes(), opt, mfmt);
-  Tensor grad_weight = at::empty(weight_.sizes(), opt, mfmt);
+  Tensor grad_input;
+  Tensor grad_weight;
   Tensor grad_bias;
-  if (output_mask[2])
+  if (output_mask[2]) {
     grad_bias = at::empty({grad_output_.size(1)}, opt);
+  }
 
   if (output_mask[0]) {
+    grad_input = at::empty(input_.sizes(), opt, mfmt);
     TensorArg grad_output_t{grad_output, "grad_output", 1},
         input_t{input, "input", 2};
     checkAllSameType(c, {grad_output_t, input_t});
@@ -634,6 +636,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     }
   }
   if (output_mask[1] || output_mask[2]) {
+    grad_weight = at::empty(weight_.sizes(), opt, mfmt);
     TensorArg grad_output_t{grad_output, "grad_output", 1},
         weight_t{weight, "weight", 2};
     checkAllSameType(c, {grad_output_t, weight_t});
@@ -664,12 +667,16 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             groups_);
       }
     }
+    if (!output_mask[1]) {
+      grad_weight = at::Tensor();
+    }
   }
 
   if (3 == ndim) {
     if (output_mask[0])
       grad_input = view3d(grad_input);
-    grad_weight = view3d(grad_weight);
+    if (output_mask[1])
+      grad_weight = view3d(grad_weight);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }

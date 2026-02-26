@@ -3,9 +3,10 @@ import dataclasses
 import hashlib
 import inspect
 import re
+import types
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, ForwardRef, Optional, Union
+from typing import Annotated, Any, ForwardRef, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -52,9 +53,12 @@ def _staged_schema():
             elif t in _CPP_TYPE_MAP:
                 return (t.__name__, _CPP_TYPE_MAP[t], _THRIFT_TYPE_MAP[t])
             elif isinstance(t, str):
-                assert t in defs
-                assert t not in cpp_enum_defs
-                assert "[" not in t
+                if t not in defs:
+                    raise AssertionError(f"type {t} not in defs")
+                if t in cpp_enum_defs:
+                    raise AssertionError(f"type {t} unexpectedly in cpp_enum_defs")
+                if "[" in t:
+                    raise AssertionError(f"type {t} contains '[' which is not allowed")
                 return t, f"ForwardRef<{t}>", t
             elif isinstance(t, ForwardRef):
                 return (
@@ -78,10 +82,16 @@ def _staged_schema():
                         "map<",
                         ">",
                     )
-                elif o == Union:
-                    assert level == 0, "Optional is only supported at the top level."
+                elif o is Union or o is types.UnionType:
+                    if level != 0:
+                        raise AssertionError(
+                            f"Optional is only supported at the top level, got level={level}"
+                        )
                     args = typing.get_args(t)
-                    assert len(args) == 2 and args[1] is type(None)
+                    if len(args) != 2 or args[1] is not type(None):
+                        raise AssertionError(
+                            f"expected Optional type with 2 args ending in None, got {args}"
+                        )
                     yaml_type, cpp_type, thrift_type = dump_type(args[0], level + 1)
                     return (
                         f"Optional[{yaml_type}]",
@@ -125,17 +135,19 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> tuple[dict[str, Any], str, Optional[str], str, int]:
+        def dump_field(f) -> tuple[dict[str, Any], str, str | None, str, int]:
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
-            cpp_default: Optional[str] = None
-            assert typing.get_origin(f.type) is Annotated, (
-                f"Field {f.name} must be annotated with an integer id."
-            )
+            cpp_default: str | None = None
+            if typing.get_origin(f.type) is not Annotated:
+                raise AssertionError(
+                    f"Field {f.name} must be annotated with an integer id."
+                )
             thrift_id = f.type.__metadata__[0]
-            assert type(thrift_id) is int, (
-                f"Field {f.name} must be annotated with an integer id."
-            )
+            if type(thrift_id) is not int:
+                raise AssertionError(
+                    f"Field {f.name} must be annotated with an integer id, got {type(thrift_id)}"
+                )
 
             value = dataclasses.MISSING
             if f.default is not dataclasses.MISSING:
@@ -379,14 +391,26 @@ union {name} {{
             else:
                 raise AssertionError(f"Unknown schema type {name}: {value}")
         elif isinstance(value, (int, tuple)):
-            assert name in ("SCHEMA_VERSION", "TREESPEC_VERSION")
+            if name not in ("SCHEMA_VERSION", "TREESPEC_VERSION"):
+                raise AssertionError(
+                    f"expected SCHEMA_VERSION or TREESPEC_VERSION, got {name}"
+                )
+        elif isinstance(value, dict):
+            # Skip mapping dictionaries used for codegen
+            pass
         else:
             raise AssertionError(f"Unknown variable {name}: {value}")
 
     yaml_ret["SCHEMA_VERSION"] = list(defs["SCHEMA_VERSION"])
-    assert all(x > 0 for x in yaml_ret["SCHEMA_VERSION"])
+    if not all(x > 0 for x in yaml_ret["SCHEMA_VERSION"]):
+        raise AssertionError(
+            f"all SCHEMA_VERSION values must be > 0, got {yaml_ret['SCHEMA_VERSION']}"
+        )
     yaml_ret["TREESPEC_VERSION"] = defs["TREESPEC_VERSION"]
-    assert yaml_ret["TREESPEC_VERSION"] > 0
+    if yaml_ret["TREESPEC_VERSION"] <= 0:
+        raise AssertionError(
+            f"TREESPEC_VERSION must be > 0, got {yaml_ret['TREESPEC_VERSION']}"
+        )
 
     cpp_header = f"""
 #pragma once
@@ -551,7 +575,10 @@ def _diff_schema(dst, src):
             src_kind == dst_kind,
             f"Type {key} changed kind from {dst_kind} to {src_kind}",
         )
-        assert isinstance(src_fields, dict) and isinstance(dst_fields, dict)
+        if not isinstance(src_fields, dict) or not isinstance(dst_fields, dict):
+            raise AssertionError(
+                f"expected dict fields, got src={type(src_fields)}, dst={type(dst_fields)}"
+            )
         added_fields = {
             key: src_fields[key] for key in src_fields.keys() - dst_fields.keys()
         }
@@ -587,11 +614,13 @@ def _diff_schema(dst, src):
             else:
                 raise AssertionError(f"Unknown kind {src_kind}: {key}")
         if len(added_fields) > 0:
-            assert key not in additions
+            if key in additions:
+                raise AssertionError(f"key {key} already in additions")
             additions[key] = {}
             additions[key]["fields"] = added_fields
         if len(subtracted_fields) > 0:
-            assert key not in subtractions
+            if key in subtractions:
+                raise AssertionError(f"key {key} already in subtractions")
             subtractions[key] = {}
             subtractions[key]["fields"] = subtracted_fields
 
@@ -602,6 +631,120 @@ def _hash_content(s: str):
     return hashlib.sha256(s.strip().encode("utf-8")).hexdigest()
 
 
+def _generate_enum_converters() -> str:
+    """Generate C++ converter functions from serialized enum values to c10 enums."""
+
+    def validate_mapping(
+        enum_class: type[IntEnum],
+        mapping: dict[int, str],
+        enum_name: str,
+        skip_values: set[int],
+    ) -> None:
+        """Validate that all enum values have corresponding c10 mappings."""
+        for member in enum_class:
+            if member.value in skip_values:
+                continue
+            if member.value not in mapping:
+                raise SchemaUpdateError(
+                    f"{enum_name}.{member.name} (value={member.value}) is missing "
+                    f"from {enum_name.upper()}_TO_C10 mapping in schema.py. "
+                    f"Please add the mapping to the c10 enum name."
+                )
+
+    # Validate that all enum values have mappings (except UNKNOWN values)
+    validate_mapping(
+        schema.ScalarType,
+        schema.SCALAR_TYPE_TO_C10,
+        "ScalarType",
+        {schema.ScalarType.UNKNOWN},
+    )
+    validate_mapping(
+        schema.Layout,
+        schema.LAYOUT_TO_C10,
+        "Layout",
+        {schema.Layout.Unknown},
+    )
+    validate_mapping(
+        schema.MemoryFormat,
+        schema.MEMORY_FORMAT_TO_C10,
+        "MemoryFormat",
+        {schema.MemoryFormat.Unknown},
+    )
+
+    def generate_converter(
+        name: str,
+        c10_type: str,
+        mapping: dict[int, str],
+        max_value: int,
+    ) -> str:
+        lines: list[str] = []
+        for i in range(max_value + 1):
+            if i in mapping:
+                lines.append(
+                    f"      static_cast<int>(c10::{c10_type}::{mapping[i]}), // {i}"
+                )
+            else:
+                lines.append(f"      kInvalid, // {i}")
+
+        return f"""
+inline c10::{c10_type} convertSerialized{name}(int serialized_value) {{
+  constexpr int kInvalid = -1;
+  constexpr int k{name}Map[] = {{
+{chr(10).join(lines)}
+  }};
+  constexpr int kMapSize = sizeof(k{name}Map) / sizeof(k{name}Map[0]);
+
+  TORCH_CHECK(
+      serialized_value >= 0 && serialized_value < kMapSize,
+      "Serialized {name} value out of range: ",
+      serialized_value);
+  int result = k{name}Map[serialized_value];
+  TORCH_CHECK(
+      result != kInvalid,
+      "Invalid serialized {name} value: ",
+      serialized_value);
+  return static_cast<c10::{c10_type}>(result);
+}}
+"""
+
+    scalar_type_converter = generate_converter(
+        "ScalarType",
+        "ScalarType",
+        schema.SCALAR_TYPE_TO_C10,
+        max(schema.SCALAR_TYPE_TO_C10.keys()),
+    )
+    layout_converter = generate_converter(
+        "Layout",
+        "Layout",
+        schema.LAYOUT_TO_C10,
+        max(schema.LAYOUT_TO_C10.keys()),
+    )
+    memory_format_converter = generate_converter(
+        "MemoryFormat",
+        "MemoryFormat",
+        schema.MEMORY_FORMAT_TO_C10,
+        max(schema.MEMORY_FORMAT_TO_C10.keys()),
+    )
+
+    return f"""
+#pragma once
+
+#include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
+
+// Converter functions from serialized enum values (torch._export.serde.schema)
+// to c10 enums. The serialized format has different enum values than c10.
+
+namespace torch::aot_inductor {{
+{scalar_type_converter}
+{layout_converter}
+{memory_format_converter}
+}} // namespace torch::aot_inductor
+"""
+
+
 @dataclasses.dataclass
 class _Commit:
     result: dict[str, Any]
@@ -610,11 +753,13 @@ class _Commit:
     additions: dict[str, Any]
     subtractions: dict[str, Any]
     base: dict[str, Any]
-    checksum_head: Optional[str]
+    checksum_head: str | None
     cpp_header: str
     cpp_header_path: str
-    thrift_checksum_head: Optional[str]
-    thrift_checksum_real: Optional[str]
+    enum_converter_header: str
+    enum_converter_header_path: str
+    thrift_checksum_head: str | None
+    thrift_checksum_real: str | None
     thrift_checksum_next: str
     thrift_schema: str
     thrift_schema_path: str
@@ -629,7 +774,8 @@ def update_schema():
         content = importlib.resources.read_text(__package__, "schema.yaml")
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", content)
         _check(match is not None, "checksum not found in schema.yaml")
-        assert match is not None
+        if match is None:
+            raise AssertionError("checksum not found in schema.yaml")
         checksum_head = match.group(1)
 
         thrift_content = importlib.resources.read_text(
@@ -639,17 +785,25 @@ def update_schema():
         )
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", thrift_content)
         _check(match is not None, "checksum not found in export_schema.thrift")
-        assert match is not None
+        if match is None:
+            raise AssertionError("checksum not found in export_schema.thrift")
         thrift_checksum_head = match.group(1)
         thrift_content = thrift_content.splitlines()
-        assert thrift_content[0].startswith("// @" + "generated")
-        assert thrift_content[1].startswith("// checksum<<")
+        if not thrift_content[0].startswith("// @" + "generated"):
+            raise AssertionError(
+                f"expected first line to start with '// @generated', got {thrift_content[0]!r}"
+            )
+        if not thrift_content[1].startswith("// checksum<<"):
+            raise AssertionError(
+                f"expected second line to start with '// checksum<<', got {thrift_content[1]!r}"
+            )
         thrift_checksum_real = _hash_content("\n".join(thrift_content[2:]))
 
         from yaml import load, Loader
 
         dst = load(content, Loader=Loader)
-        assert isinstance(dst, dict)
+        if not isinstance(dst, dict):
+            raise AssertionError(f"expected dict from yaml, got {type(dst)}")
     else:
         checksum_head = None
         thrift_checksum_head = None
@@ -657,14 +811,21 @@ def update_schema():
         dst = {"SCHEMA_VERSION": None, "TREESPEC_VERSION": None}
 
     src, cpp_header, thrift_schema = _staged_schema()
+    enum_converter_header = _generate_enum_converters()
     additions, subtractions = _diff_schema(dst, src)
     # pyrefly: ignore [missing-attribute]
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
     # pyrefly: ignore [missing-attribute]
     thrift_schema_path = __package__.replace(".", "/") + "/export_schema.thrift"
     torch_prefix = "torch/"
-    assert yaml_path.startswith(torch_prefix)  # sanity check
-    assert thrift_schema_path.startswith(torch_prefix)  # sanity check
+    if not yaml_path.startswith(torch_prefix):
+        raise AssertionError(
+            f"yaml_path must start with {torch_prefix}, got {yaml_path}"
+        )
+    if not thrift_schema_path.startswith(torch_prefix):
+        raise AssertionError(
+            f"thrift_schema_path must start with {torch_prefix}, got {thrift_schema_path}"
+        )
 
     return _Commit(
         result=src,
@@ -676,6 +837,9 @@ def update_schema():
         checksum_head=checksum_head,
         cpp_header=cpp_header,
         cpp_header_path=torch_prefix + "csrc/utils/generated_serialization_types.h",
+        enum_converter_header=enum_converter_header,
+        enum_converter_header_path=torch_prefix
+        + "csrc/inductor/aoti_torch/generated_enum_converters.h",
         thrift_checksum_head=thrift_checksum_head,
         thrift_checksum_real=thrift_checksum_real,
         thrift_checksum_next=_hash_content(thrift_schema),

@@ -30,7 +30,7 @@ class MixedMMH100(LearnedHeuristicDecision):
     def get_confidence_threshold(self) -> float:
         return 0.0
 
-    def get_choice(self, idx: int) -> Optional[str]:
+    def get_choice(self, idx: int) -> str | None:
         if idx < len(self.choices):
             return self.choices[idx]
         return None
@@ -61,7 +61,7 @@ class MixedMMH100(LearnedHeuristicDecision):
     def get_name(self) -> str:
         return 'mixed_mm'
 
-    def get_best_choices(self, context: AHContext) -> Optional[list[tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> list[tuple[float, int]] | None:
         if context.get_value('arith_intensity') <= 15.988086223602295:
             if context.get_value('n') <= 25280.0:
                 if context.get_value('n') <= 1344.0:

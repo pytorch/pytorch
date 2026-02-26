@@ -34,9 +34,23 @@ There're many recent works that working on tensor level parallelism to provide c
 ## Value Proposition
 
 PyTorch DTensor primarily:
--   Offers a uniform way to save/load `state_dict` during checkpointing, even when there’re complex tensor storage distribution strategies such as combining tensor parallelism with parameter sharding in FSDP.
+-   Offers a uniform way to save/load `state_dict` during checkpointing, even when there're complex tensor storage distribution strategies such as combining tensor parallelism with parameter sharding in FSDP.
 -   Enables Tensor Parallelism in eager mode. Compared to ShardedTensor, DistributedTensor allows additional flexibility to mix sharding and replication.
 -   Serves as the entry point of an SPMD programming model and the foundational building block for compiler-based distributed training.
+
+## Placement Restrictions
+
+DTensor supports three types of placements: `Shard`, `Replicate`, and `Partial`. While these can generally be combined freely, there is one important restriction:
+
+**Mixed Partial Reduce Types**: A DTensor cannot have placements that mix different `Partial` reduce types (e.g., `Partial("sum")` and `Partial("max")` together). This restriction exists because nonlinear reductions like `max` don't commute with linear reductions like `sum`, making the relative ordering semantically critical during redistribution. All `Partial` placements in a single DTensor must use the same reduce operation.
+
+```python
+# Valid: same partial type
+placements = [Partial("sum"), Partial("sum"), Shard(0)]  # OK
+
+# Invalid: mixed partial types - will raise ValueError
+placements = [Partial("sum"), Partial("max"), Shard(0)]  # Error!
+```
 
 ## PyTorch DTensor
 

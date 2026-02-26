@@ -78,7 +78,8 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
         if node.op == "call_function":
             view_type = _get_view_type(node.target)
             if view_type == _ViewType.SingleOutputView:
-                assert isinstance(node.args[0], Node)
+                if not isinstance(node.args[0], Node):
+                    raise AssertionError(f"Expected Node, got {type(node.args[0])}")
                 node.meta["view_of"] = node.args[0]
             elif view_type == _ViewType.MultiOutputView:
                 self.multi_output_view_nodes[node] = node.args[0]
@@ -100,19 +101,25 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
                 if maybe_base_of_view is not None:
                     # Note: we could also track indexing info here for multi-output views.
                     # I don't think this metadata is strictly needed for de-functionalization.
-                    assert isinstance(maybe_base_of_view, Node)
+                    if not isinstance(maybe_base_of_view, Node):
+                        raise AssertionError(
+                            f"Expected Node, got {type(maybe_base_of_view)}"
+                        )
                     node.meta["view_of"] = maybe_base_of_view
 
         if "view_of" in node.meta:
             # We're linking the current node with its first argument as views.
             # Assert here that this is actually the case, and their storages are the same.
-            assert isinstance(node.meta["fake_result"], FakeTensor)
-            assert isinstance(node.meta["view_of"].meta["fake_result"], FakeTensor)
+            if not isinstance(node.meta["fake_result"], FakeTensor):
+                raise AssertionError("Expected FakeTensor in fake_result")
+            if not isinstance(node.meta["view_of"].meta["fake_result"], FakeTensor):
+                raise AssertionError("Expected FakeTensor in view_of fake_result")
             view_storage = StorageWeakRef(node.meta["fake_result"]._typed_storage())
             base_storage = StorageWeakRef(
                 node.meta["view_of"].meta["fake_result"]._typed_storage()
             )
-            assert view_storage == base_storage
+            if view_storage != base_storage:
+                raise AssertionError("view_storage != base_storage")
         return result
 
     def propagate(self, *args):
@@ -138,12 +145,14 @@ def _schemas_match(functional_schema, inplace_schema):
         for a1, a2 in zip(functional_schema.arguments, inplace_schema.arguments)
     )
     # for the inplace op, its first argument should be mutable
-    assert (
+    if not (
         inplace_schema.arguments[0].alias_info is not None
         and inplace_schema.arguments[0].alias_info.is_write
-    )
+    ):
+        raise AssertionError("First argument of inplace op must be mutable")
     # and its remaining arguments shouldn't be.
-    assert all(a.alias_info is None for a in inplace_schema.arguments[1:])
+    if not all(a.alias_info is None for a in inplace_schema.arguments[1:]):
+        raise AssertionError("Remaining arguments of inplace op must not be mutable")
     return names_match and arg_types_match
 
 
@@ -184,7 +193,11 @@ def _maybe_get_inplace_op(op):
     # Even though several overloads of pow_ exist.
     if len(inplace_overloads_with_matching_schemas) == 0:
         return None
-    assert len(inplace_overloads_with_matching_schemas) == 1
+    if len(inplace_overloads_with_matching_schemas) != 1:
+        raise AssertionError(
+            f"Expected exactly 1 matching inplace overload, got "
+            f"{len(inplace_overloads_with_matching_schemas)}"
+        )
     inplace_op = inplace_overloads_with_matching_schemas[0]
     return inplace_op
 
@@ -250,11 +263,20 @@ def _get_view_inverse_node_usages(
             continue
         base = n.args[0]
         mutated_view = n.args[1]
-        assert isinstance(base, Node)
-        assert isinstance(base.meta["fake_result"], FakeTensor)
-        assert isinstance(mutated_view, Node)
-        assert isinstance(mutated_view.meta["fake_result"], FakeTensor)
-        assert not isinstance(n.target, str)
+        if not isinstance(base, Node):
+            raise AssertionError(f"Expected Node for base, got {type(base)}")
+        if not isinstance(base.meta["fake_result"], FakeTensor):
+            raise AssertionError("Expected FakeTensor in base.meta['fake_result']")
+        if not isinstance(mutated_view, Node):
+            raise AssertionError(
+                f"Expected Node for mutated_view, got {type(mutated_view)}"
+            )
+        if not isinstance(mutated_view.meta["fake_result"], FakeTensor):
+            raise AssertionError(
+                "Expected FakeTensor in mutated_view.meta['fake_result']"
+            )
+        if isinstance(n.target, str):
+            raise AssertionError("n.target should not be a string")
         # Check that this view_inverse op actually corresponds to taking doing the inverse
         # of one of our existing self_alias nodes.
         original_view = _VIEW_INVERSE_MAP[n.target]
@@ -735,7 +757,10 @@ def reinplace(gm, *sample_args):
                             for x in new_flattened_res
                             if isinstance(x, FakeTensor)
                         }
-                        assert len(new_res_storage) == 1
+                        if len(new_res_storage) != 1:
+                            raise AssertionError(
+                                f"Expected 1 storage, got {len(new_res_storage)}"
+                            )
                         (new_ref,) = new_res_storage
                         (node_ref,) = node_res_storage
                         # Technically, "old_ref" and all its aliases will remain

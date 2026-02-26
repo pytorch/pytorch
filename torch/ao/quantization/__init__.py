@@ -35,6 +35,7 @@ __all__ = [
     "FixedQParamsObserver",
     "FusedMovingAvgObsFakeQuantize",
     "HistogramObserver",
+    # pyrefly: ignore [bad-dunder-all]
     "MatchAllNode",
     "MinMaxObserver",
     "MovingAverageMinMaxObserver",
@@ -42,6 +43,7 @@ __all__ = [
     "NoopObserver",
     "ObserverBase",
     "ObserverOrFakeQuantize",
+    # pyrefly: ignore [bad-dunder-all]
     "Pattern",
     "PerChannelMinMaxObserver",
     "PlaceholderObserver",
@@ -101,6 +103,7 @@ __all__ = [
     "fuse_modules_qat",
     "fused_per_channel_wt_fake_quant_range_neg_127_to_127",
     "fused_wt_fake_quant_range_neg_127_to_127",
+    # pyrefly: ignore [bad-dunder-all]
     "get_combined_dict",
     "get_default_compare_output_module_list",
     "get_default_custom_config_dict",

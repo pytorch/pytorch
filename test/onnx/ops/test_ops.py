@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
+import onnx_ir as ir
 import onnx_ir.passes.common as common_passes
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -424,7 +424,6 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             args,
             kwargs=kwargs,
             dynamo=True,
-            fallback=False,
             verbose=False,
             **options,
         )

@@ -203,6 +203,9 @@ at::Tensor wrapper_randint_like_generator(
       layout_opt,
       device_opt,
       pin_memory_opt);
+
+bool wrapper_has_compatible_shallow_copy_type(const at::Tensor& self, const at::Tensor& other) {
+  return true;
 }
 
 // LITERALINCLUDE START: FALLBACK WRAPPER
@@ -225,6 +228,9 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("_copy_from", wrapper__copy_from);
   m.impl("_copy_from_and_resize", wrapper__copy_from_and_resize);
   m.impl("_local_scalar_dense", wrapper__local_scalar_densor);
+  m.impl(
+      "_has_compatible_shallow_copy_type",
+      wrapper_has_compatible_shallow_copy_type);
   m.impl("set_.source_Tensor", wrapper_set_source_Tensor_);
   m.impl("set_.source_Storage", wrapper_set_source_Storage_);
   m.impl(

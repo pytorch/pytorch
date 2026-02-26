@@ -34,8 +34,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
+    MI200_ARCH,
     parametrize,
-    skipIfRocm,
+    skipIfRocmArch,
     slowTest,
     TEST_MKL,
     xfailIfS390X,
@@ -143,7 +144,8 @@ class CPUReproTests(TestCase):
         self.assertEqual(len(actual), 1)
         torch.testing.assert_close(actual[0], expected[0])
 
-    @skipIfRocm
+    @torch._inductor.config.patch({"layout_optimization": True})
+    @patch("torch.cuda.is_available", lambda: False)
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
@@ -163,6 +165,8 @@ class CPUReproTests(TestCase):
             test_self = self
             conv_seen = False
 
+            from torch._higher_order_ops.wrap import inductor_compiled_code
+
             class RecordFunctions(TorchDispatchMode):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
@@ -180,6 +184,11 @@ class CPUReproTests(TestCase):
                         conv_seen = True
 
                     return func(*args, **kwargs)
+
+            @inductor_compiled_code.py_impl(RecordFunctions)
+            def _(mode, func, inputs):
+                with mode:
+                    return func(inputs)
 
             with RecordFunctions():
                 fn_compiled(inps)
@@ -5124,6 +5133,52 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+    def test_masked_handle_scalar_var(self):
+        def fn():
+            # Simplified reproducer of https://github.com/pytorch/pytorch/issues/173626
+            window_size = 7
+            shift_size = 3
+            height, width = 14, 14
+            img_mask = torch.zeros((1, height, width, 1), dtype=torch.float32)
+            h_slices = (
+                slice(0, -window_size),
+                slice(-window_size, -shift_size),
+                slice(-shift_size, None),
+            )
+            w_slices = (
+                slice(0, -window_size),
+                slice(-window_size, -shift_size),
+                slice(-shift_size, None),
+            )
+            count = 0
+            for h in h_slices:
+                for w in w_slices:
+                    img_mask[:, h, w, :] = count
+                    count += 1
+
+            masked_window = img_mask.view(
+                1,
+                height // window_size,
+                window_size,
+                width // window_size,
+                window_size,
+                1,
+            )
+            masked_window = (
+                masked_window.permute(0, 1, 3, 2, 4, 5)
+                .contiguous()
+                .view(-1, window_size * window_size)
+            )
+            attn_mask = masked_window.unsqueeze(1) - masked_window.unsqueeze(2)
+            res = attn_mask.masked_fill(attn_mask != 0, -100.0).masked_fill(
+                attn_mask == 0, 0.0
+            )
+            return res
+
+        metrics.reset()
+        self.common(fn, ())
+        check_metrics_vec_kernel_count(1)
+
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
         input = torch.randn(5, 128, dtype=torch.float32)
@@ -5718,6 +5773,38 @@ class CPUReproTests(TestCase):
             code
         )
 
+    @config.patch(freezing=True)
+    def test_add_layernorm(self):
+        """
+        Original PR: https://github.com/pytorch/pytorch/pull/141766
+        """
+        from torch.testing._internal.common_quantization import (
+            _static_reference_quantized_linear_module,
+        )
+
+        class Model(torch.nn.Module):
+            def __init__(self, example_input):
+                super().__init__()
+                self.dense = _static_reference_quantized_linear_module(
+                    N=768, K=768, bias=True, example_input=example_input
+                )
+                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
+
+            def forward(self, context_layer, hidden_states):
+                attention_output = self.dense(context_layer)
+                hidden_states = attention_output + hidden_states
+                layer_output = self.layernorm(hidden_states)
+                return layer_output
+
+        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
+        model = Model(example_batch[0]).eval()
+        model = torch.export.export(model, example_batch, strict=True).module()
+
+        with torch.no_grad():
+            metrics.reset()
+            torch.compile(model)(*example_batch)
+            check_metrics_vec_kernel_count(3)
+
     def test_dropout(self):
         class Model(nn.Module):
             def __init__(self, dim):
@@ -5833,6 +5920,108 @@ class CPUReproTests(TestCase):
             return F.pdist(x)
 
         torch.compile(fn)(torch.randn(2, 2))
+
+    @skipIfRocmArch(MI200_ARCH)
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @requires_vectorization
+    @config.patch(freezing=True)
+    def test_upsample_layout(self):
+        class UpsampleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+                self.upsample = nn.Upsample(
+                    scale_factor=2, mode="bilinear", align_corners=True
+                )
+                self.conv2 = nn.Conv2d(64, 16, kernel_size=3, padding=1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.upsample(x)
+                x = self.conv2(x)
+                x = torch.relu(x)
+                return x
+
+        mod = UpsampleModel()
+        cmod = torch.compile(mod)
+        for dtype in [torch.float32, torch.bfloat16]:
+            x = torch.randn(4, 64, 64, 64, dtype=dtype)
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(
+                    device_type="cpu", dtype=dtype, enabled=dtype == torch.bfloat16
+                ),
+            ):
+                ref_res = mod(x)
+                res, code = run_and_get_cpp_code(cmod, x)
+                # The 2 transpose_mxns are unrelated to upsample.
+                # They are generated by the input of first conv and
+                # the final output.
+
+                # HIP: Some architectures (e.g. MI200) do not use the MKLDNN backend for bfloat16
+                # and instead use extern_kernels.convolution that does not need a call to transpose_mxn.
+                # We check for this by looking for the string "extern_kernels.convolution" in the code.
+                if (
+                    torch.version.hip
+                    and dtype == torch.bfloat16
+                    and "torch.ops.mkldnn._convolution" not in code
+                ):
+                    FileCheck().check_count(
+                        "extern_kernels.convolution",
+                        2,
+                        exactly=True,
+                    ).run(code)
+                else:
+                    FileCheck().check_count(
+                        "transpose_mxn",
+                        2,
+                        exactly=True,
+                    ).run(code)
+                atol = 1e-2 if dtype == torch.bfloat16 else 1e-5
+                rtol = 1e-2 if dtype == torch.bfloat16 else 1e-5
+                torch.testing.assert_close(ref_res, res, atol=atol, rtol=rtol)
+
+    # https://github.com/pytorch/pytorch/issues/136640
+    def test_inductor_dynamic_shapes_broadcasting(self) -> None:
+        def fn(x, y):
+            x_view = x.view(-1, 4)
+            y_view = y.view(-1, 4)
+            return x_view * y_view
+
+        x = torch.randn(4)
+        y = torch.randn(8)
+        out_ref = fn(x, y)
+        out_test = torch.compile(fn, dynamic=True, backend="inductor")(x, y)
+        self.assertEqual(out_ref, out_test)
+
+    # https://github.com/pytorch/pytorch/issues/119162
+    def test_inductor_rng_default_dtype(self) -> None:
+        @torch.compile
+        def fn():
+            tmp = torch.randn(4, 4, dtype=torch.bfloat16)
+            return tmp
+
+        try:
+            old = torch.get_default_dtype()
+            torch.set_default_dtype(torch.bfloat16)
+            out = fn()
+        finally:
+            torch.set_default_dtype(old)
+        # output dtype should be float32
+        self.assertEqual(out.dtype, torch.bfloat16)
+
+    def test_inductor_no_recursionerror_on_for_loops(self):
+        def forward(x):
+            for _ in range(10000):
+                x = 1.0 * x
+            return x
+
+        self.assertTrue(
+            same(
+                torch.compile(forward, backend="inductor")(torch.tensor([1.0])),
+                torch.tensor([1.0]),
+            )
+        )
 
 
 if __name__ == "__main__":
