@@ -82,6 +82,7 @@ if torch.backends.mps.is_available():
             "imag",
             "index_add",
             "index_copy",
+            "index_fill",
             "index_select",
             "index_put",
             "isfinite",

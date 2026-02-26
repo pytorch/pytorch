@@ -442,6 +442,87 @@ kernel void index_copy_strided(
   }
 }
 
+template <typename T, typename index_t>
+kernel void index_fill_dense(
+    device T* output,
+    constant index_t* indices,
+    constant T& fill_val,
+    constant uint& dim,
+    constant long* sizes,
+    constant uint& ndim,
+    constant uint& indices_numel,
+    uint thread_index [[thread_position_in_grid]]) {
+  long pos[max_ndim];
+  long linear_idx = thread_index;
+  for (int i = static_cast<int>(ndim) - 1; i >= 0; --i) {
+    pos[i] = linear_idx % sizes[i];
+    linear_idx /= sizes[i];
+  }
+  long dim_pos = pos[dim];
+  for (uint i = 0; i < indices_numel; i++) {
+    long idx = indices[i];
+    if (idx < 0) {
+      idx += sizes[dim];
+    }
+    if (idx == dim_pos) {
+      output[thread_index] = fill_val;
+      break;
+    }
+  }
+}
+
+template <typename T, typename index_t>
+kernel void index_fill_strided(
+    device T* output,
+    constant index_t* indices,
+    constant T& fill_val,
+    constant uint& dim,
+    constant long* sizes,
+    constant uint& ndim,
+    constant uint& indices_numel,
+    constant long* output_strides,
+    constant long& indices_stride,
+    uint thread_index [[thread_position_in_grid]]) {
+  int pos[max_ndim];
+  pos_from_thread_index(int(thread_index), pos, sizes, ndim);
+  long output_offset = offset_from_coord(pos, output_strides, ndim);
+  int orig_dim = pos[dim];
+  for (uint i = 0; i < indices_numel; i++) {
+    long idx = indices[i * indices_stride];
+    if (idx < 0) {
+      idx += sizes[dim];
+    }
+    if (idx == orig_dim) {
+      output[output_offset] = fill_val;
+      break;
+    }
+  }
+}
+
+#define INSTANTIATE_INDEX_FILL(T, index_t)                      \
+  template [[host_name("index_fill_dense_" #T "_" #index_t)]]   \
+  kernel void index_fill_dense<T, index_t>(                     \
+      device T*,                                                \
+      constant index_t*,                                        \
+      constant T&,                                              \
+      constant uint&,                                           \
+      constant long*,                                           \
+      constant uint&,                                           \
+      constant uint&,                                           \
+      uint);                                                    \
+  template [[host_name("index_fill_strided_" #T "_" #index_t)]] \
+  kernel void index_fill_strided<T, index_t>(                   \
+      device T*,                                                \
+      constant index_t*,                                        \
+      constant T&,                                              \
+      constant uint&,                                           \
+      constant long*,                                           \
+      constant uint&,                                           \
+      constant uint&,                                           \
+      constant long*,                                           \
+      constant long&,                                           \
+      uint);
+
 #define INSTANTIATE_INDEX_COPY(T, index_t)                      \
   template [[host_name("index_copy_dense_" #T "_" #index_t)]]   \
   kernel void index_copy_dense<T, index_t>(                     \
@@ -516,3 +597,26 @@ INSTANTIATE_INDEX_COPY(float2, int);
 INSTANTIATE_INDEX_COPY(float2, long);
 INSTANTIATE_INDEX_COPY(half2, int);
 INSTANTIATE_INDEX_COPY(half2, long);
+
+INSTANTIATE_INDEX_FILL(float, int);
+INSTANTIATE_INDEX_FILL(float, long);
+INSTANTIATE_INDEX_FILL(bool, int);
+INSTANTIATE_INDEX_FILL(bool, long);
+INSTANTIATE_INDEX_FILL(half, int);
+INSTANTIATE_INDEX_FILL(half, long);
+INSTANTIATE_INDEX_FILL(bfloat, int);
+INSTANTIATE_INDEX_FILL(bfloat, long);
+INSTANTIATE_INDEX_FILL(int, int);
+INSTANTIATE_INDEX_FILL(int, long);
+INSTANTIATE_INDEX_FILL(long, int);
+INSTANTIATE_INDEX_FILL(long, long);
+INSTANTIATE_INDEX_FILL(short, int);
+INSTANTIATE_INDEX_FILL(short, long);
+INSTANTIATE_INDEX_FILL(char, int);
+INSTANTIATE_INDEX_FILL(char, long);
+INSTANTIATE_INDEX_FILL(uchar, int);
+INSTANTIATE_INDEX_FILL(uchar, long);
+INSTANTIATE_INDEX_FILL(float2, int);
+INSTANTIATE_INDEX_FILL(float2, long);
+INSTANTIATE_INDEX_FILL(half2, int);
+INSTANTIATE_INDEX_FILL(half2, long);

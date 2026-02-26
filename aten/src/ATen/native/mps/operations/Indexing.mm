@@ -888,98 +888,59 @@ Tensor& masked_scatter__mps(Tensor& self, const Tensor& mask, const Tensor& sour
 }
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
-  using namespace mps;
-  MPSStream* stream = getCurrentMPSStream();
-  auto num_indices = index.numel();
-  dim = maybe_wrap_dim(dim, self.dim());
-
-  // Checks
-  TORCH_CHECK_INDEX(index.dim() <= 1, "index_fill_(): Index is supposed to be a vector");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-              "index_fill_(): Expected dtype int32 or int64 for index");
-  TORCH_CHECK(dim == 0 || dim < self.dim(), "index_fill_(): Indexing dim ", dim, " is out of bounds of tensor");
-  TORCH_CHECK(self.is_complex() || !source.is_complex(),
-              "index_fill_(): Converting complex Scalar to non-complex type is not supported");
-  // MPS.scatter crashes if used with complex dtypes
-  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "index_fill_(): Complex types are yet not supported");
-
-  // Empty index
-  if (num_indices == 0) {
-    return self;
-  }
-
-  // Scalar input
-  if (self.dim() == 0 && self.numel() == 1) {
-    return self.copy_(source);
-  }
-
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* indexTensor_ = nil;
-    MPSGraphTensor* updateTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  auto inputType = getMPSDataType(self);
-  auto sourceType = getMPSDataType(source);
-  if (inputType == MPSDataTypeUInt8 || inputType == MPSDataTypeBool) {
-    inputType = MPSDataTypeInt8;
-  }
-
-  std::vector<int64_t> source_shape(self.sizes().begin(), self.sizes().end());
-  source_shape[dim] = index.numel();
-  auto expanded_source = source.expand(source_shape);
-
-  @autoreleasepool {
-    std::string key =
-        "index_fill_mps_" + getTensorsStringKey({self, index, expanded_source}) + ":" + std::to_string(dim);
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self));
-      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
-      MPSGraphTensor* updateTensor = mpsGraphRankedPlaceHolder(mpsGraph, expanded_source);
-      MPSGraphTensor* castedUpdateTensor = updateTensor;
-      if (inputType != sourceType) {
-        castedUpdateTensor = castMPSTensor(mpsGraph, updateTensor, inputType);
-      }
-      MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:inputTensor
-                                                       updatesTensor:castedUpdateTensor
-                                                       indicesTensor:indexTensor
-                                                                axis:(NSInteger)dim
-                                                                mode:MPSGraphScatterModeSet
-                                                                name:nil];
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->indexTensor_ = indexTensor;
-      newCachedGraph->updateTensor_ = updateTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_,
-                                              self,
-                                              /*mpsShape=*/nullptr,
-                                              /*gatherTensorData=*/true,
-                                              /*dataType=*/inputType);
-    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
-    Placeholder updatePlaceholder = Placeholder(cachedGraph->updateTensor_,
-                                                expanded_source,
-                                                /*mpsShape=*/nullptr,
-                                                /*gatherTensorData=*/true,
-                                                /*dataType=*/sourceType);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
-                                                self,
-                                                /*mpsShape=*/nullptr,
-                                                /*gatherTensorData=*/false,
-                                                /*dataType=*/inputType);
-
-    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder, updatePlaceholder);
-    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-  return self;
+  TORCH_CHECK(source.dim() == 0,
+              "index_fill_ only supports a 0-dimensional value tensor, but got tensor with ",
+              source.dim(),
+              " dimension(s).");
+  return self.index_fill_(dim, index, source.item());
 }
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Scalar& source) {
-  return self.index_fill_(dim, index, mps::wrapped_scalar_tensor_mps(source, self.device()));
+  using namespace mps;
+  TORCH_CHECK_INDEX(index.dim() <= 1, "index_fill_(): Index is supposed to be a vector");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+              "index_fill_(): Expected dtype int32 or int64 for index");
+  TORCH_CHECK(self.is_complex() || !source.isComplex(),
+              "index_fill_(): Converting complex Scalar to non-complex type is not supported");
+
+  if (index.numel() == 0 || self.numel() == 0) {
+    return self;
+  }
+
+  // Handle 0-dim self by filling directly
+  if (self.dim() == 0) {
+    return self.fill_(source);
+  }
+
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  auto stream = getCurrentMPSStream();
+  const bool is_dense = self.is_contiguous() && index.is_contiguous();
+  const auto long_or_int = (index.scalar_type() == ScalarType::Long) ? "long" : "int";
+  const auto dense_or_strided = is_dense ? "dense" : "strided";
+  auto indexFillPSO = lib.getPipelineStateForFunc(
+      fmt::format("index_fill_{}_{}_{}", dense_or_strided, scalarToMetalTypeString(self), long_or_int));
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto mpsScalar = getMPSScalar(source, self.scalar_type());
+      uint32_t dim_arg = static_cast<uint32_t>(dim);
+      uint32_t ndim = static_cast<uint32_t>(self.dim());
+      uint32_t indices_numel = static_cast<uint32_t>(index.numel());
+      [computeEncoder setComputePipelineState:indexFillPSO];
+      mtl_setArgs(computeEncoder, self, index);
+      mtl_setBytes(computeEncoder, mpsScalar, 2);
+      mtl_setArgs<3>(computeEncoder, dim_arg, self.sizes(), ndim, indices_numel);
+      if (!is_dense) {
+        long indices_stride = index.dim() > 0 ? index.stride(0) : 1;
+        mtl_setArgs<7>(computeEncoder, self.strides(), indices_stride);
+      }
+      mtl_dispatch1DJob(computeEncoder, indexFillPSO, self.numel());
+    }
+  });
+
+  return self;
 }
 
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
