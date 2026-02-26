@@ -322,10 +322,6 @@ if torch.backends.mps.is_available():
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
-            "index_reduceprod": None,
-            "index_reducemean": None,
-            "index_reduceamax": None,
-            "index_reduceamin": None,
             # "kthvalue": None,
             "lcm": None,
             "linalg.cond": None,

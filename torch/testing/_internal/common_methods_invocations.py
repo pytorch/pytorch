@@ -19692,11 +19692,13 @@ op_db: list[OpInfo] = [
     *(OpInfo('index_reduce',
              variant_test_name=reduction_type,
              dtypes=all_types_and(torch.float16, torch.bfloat16),
+             dtypesIfMPS=custom_types(
+                 torch.float32, torch.bfloat16, torch.float16, torch.int32,
+                 torch.int16, torch.int8, torch.uint8,
+             ),
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
-                 # Error: The operator 'aten::index_reduce.out' is not currently implemented for the MPS device
-                 DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
