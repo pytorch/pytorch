@@ -110,20 +110,25 @@ class TestVmapAPI(TestCase):
     def test_non_tensor_output_numeric(self):
         # Numeric non-tensor outputs are expanded across the batch
         result = vmap(lambda x: 3.14)(torch.ones(3))
-        self.assertEqual(result, torch.tensor(3.14).expand(3))
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertEqual(result.shape, torch.Size([3]))
+        self.assertTrue((result == 3.14).all())
 
         result = vmap(lambda x: 42)(torch.ones(4))
-        self.assertEqual(result, torch.tensor(42).expand(4))
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertEqual(result, torch.full((4,), 42, dtype=torch.int64))
 
         result = vmap(lambda x: True)(torch.ones(2))
-        self.assertEqual(result, torch.tensor(True).expand(2))
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertEqual(result.dtype, torch.bool)
+        self.assertTrue(result.all())
 
         def multiple_outputs(x):
             return x, 3
 
         tensor_out, int_out = vmap(multiple_outputs)(torch.ones(3))
         self.assertEqual(tensor_out, torch.ones(3))
-        self.assertEqual(int_out, torch.tensor(3).expand(3))
+        self.assertEqual(int_out, torch.full((3,), 3, dtype=torch.int64))
 
     def test_non_tensor_output_none(self):
         # None outputs pass through unchanged
@@ -145,7 +150,7 @@ class TestVmapAPI(TestCase):
 
         result = vmap(f)(torch.randn(4, 3))
         self.assertEqual(result["tensor"].shape, (4, 3))
-        self.assertEqual(result["count"], torch.tensor(42).expand(4))
+        self.assertEqual(result["count"], torch.full((4,), 42, dtype=torch.int64))
 
     def test_non_tensor_output_out_dims_none(self):
         # out_dims=None passes non-tensors through unchanged

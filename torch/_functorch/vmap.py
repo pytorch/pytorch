@@ -200,7 +200,8 @@ def _maybe_remove_batch_dim(
         return None
 
     if isinstance(batched_output, (int, float, bool, complex)):
-        return torch.tensor(batched_output).expand(batch_size)
+        dtype = torch.tensor(batched_output).dtype
+        return torch.full((batch_size,), batched_output, dtype=dtype)
 
     raise ValueError(
         f"vmap({name}, ...): `{name}` must only return "

@@ -30,14 +30,16 @@ class TestVmapAPILegacy(TestCase):
     def test_non_tensor_output_numeric(self):
         # Numeric non-tensor outputs are expanded across the batch
         result = vmap(lambda x: 3.14)(torch.ones(3))
-        self.assertEqual(result, torch.tensor(3.14).expand(3))
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertEqual(result.shape, torch.Size([3]))
+        self.assertTrue((result == 3.14).all())
 
         def multiple_outputs(x):
             return x, 3
 
         tensor_out, int_out = vmap(multiple_outputs)(torch.ones(3))
         self.assertEqual(tensor_out, torch.ones(3))
-        self.assertEqual(int_out, torch.tensor(3).expand(3))
+        self.assertEqual(int_out, torch.full((3,), 3, dtype=torch.int64))
 
     def test_non_tensor_output_none(self):
         result = vmap(lambda x: (x, None))(torch.ones(3))
