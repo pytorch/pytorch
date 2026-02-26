@@ -217,6 +217,131 @@ class TestExpandPlaceholder(TestCase):
             linearity=1,
         )
 
+    def test_fused_ops_cross_mesh(self):
+        """Test that fused adam/adamw ops handle cross-mesh state_steps correctly.
+
+        state_steps (input 5) can be on a different mesh than the other inputs.
+        cross_mesh_indices=[5] tells the expansion to preserve the input's own
+        mesh and assert Replicate placements.
+        """
+        main_mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+        cross_mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+
+        t = torch.empty((8, 8))
+        step_t = torch.empty(())  # scalar step counter
+        shard0 = (Shard(0), Replicate())
+        replicate_main = (Replicate(), Replicate())
+        replicate_cross = (Replicate(),)
+
+        def _make_list_spec(mesh, placements, tensor):
+            spec = DTensorSpec(
+                mesh, placements, TensorMeta(tensor.shape, tensor.stride(), tensor.dtype)
+            )
+            return TupleStrategy((OpStrategy([OpSpec(spec)]),))
+
+        # Build args: 6 list inputs (params, grads, exp_avgs, exp_avg_sqs,
+        # max_exp_avg_sqs, state_steps) + scalar kwargs
+        specs = [
+            _make_list_spec(main_mesh, shard0, t),       # params
+            _make_list_spec(main_mesh, shard0, t),       # grads
+            _make_list_spec(main_mesh, replicate_main, t),  # exp_avgs
+            _make_list_spec(main_mesh, replicate_main, t),  # exp_avg_sqs
+            _make_list_spec(main_mesh, replicate_main, t),  # max_exp_avg_sqs
+            _make_list_spec(cross_mesh, replicate_cross, step_t),  # state_steps (cross-mesh)
+            0.001,  # lr
+            0.9,    # beta1
+            0.999,  # beta2
+            1e-8,   # eps
+            0.0,    # weight_decay
+            True,   # amsgrad
+            False,  # maximize
+            None,   # grad_scale
+            None,   # found_inf
+        ]
+
+        output_meta = [
+            TensorMeta(t.shape, t.stride(), t.dtype),  # output for params[0]
+        ]
+
+        op = torch.ops.aten._fused_adam_.default
+        op_schema = OpSchema(op=op, args_schema=tuple(specs), kwargs_schema={})
+        strategy_fn = _common_pointwise_single_dim_strategy()
+        expanded = _expand_single_dim_strategy_to_mesh(
+            main_mesh,
+            op_schema,
+            _SingleDimStrategyInfo(strategy_fn, cross_mesh_indices=[5]),
+            output_meta,
+        )
+        strategy = expanded(op, op_schema.args_meta, op_schema.kwargs_meta)
+
+        self.assertIsInstance(strategy, TupleStrategy)
+        # Inplace op: only 1 strategy (must match input placement)
+        self.assertEqual(len(strategy.children), 1)
+        child = strategy.children[0]
+        self.assertIsInstance(child, OpStrategy)
+        self.assertEqual(len(child.strategies), 1)
+
+        # Verify cross-mesh input uses its own mesh
+        op_spec = child.strategies[0]
+        # Input 5 (state_steps) should be on cross_mesh, not main_mesh
+        state_steps_spec = op_spec.input_specs[5]
+        self.assertEqual(state_steps_spec.mesh, cross_mesh)
+        self.assertTrue(
+            all(p == Replicate() for p in state_steps_spec.placements),
+            f"state_steps should be Replicate, got {state_steps_spec.placements}",
+        )
+
+    def test_fused_ops_same_mesh(self):
+        """Test that fused ops work when all inputs are on the same mesh."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
+
+        t = torch.empty((8, 8))
+        step_t = torch.empty(())
+        shard0 = (Shard(0), Replicate())
+        replicate = (Replicate(), Replicate())
+
+        def _make_list_spec(placements, tensor):
+            spec = DTensorSpec(
+                mesh, placements, TensorMeta(tensor.shape, tensor.stride(), tensor.dtype)
+            )
+            return TupleStrategy((OpStrategy([OpSpec(spec)]),))
+
+        specs = [
+            _make_list_spec(shard0, t),       # params
+            _make_list_spec(shard0, t),       # grads
+            _make_list_spec(replicate, t),    # exp_avgs
+            _make_list_spec(replicate, t),    # exp_avg_sqs
+            _make_list_spec(replicate, t),    # max_exp_avg_sqs
+            _make_list_spec(replicate, step_t),  # state_steps (same mesh)
+            0.001, 0.9, 0.999, 1e-8, 0.0, True, False, None, None,
+        ]
+
+        output_meta = [TensorMeta(t.shape, t.stride(), t.dtype)]
+
+        op = torch.ops.aten._fused_adam_.default
+        op_schema = OpSchema(op=op, args_schema=tuple(specs), kwargs_schema={})
+        strategy_fn = _common_pointwise_single_dim_strategy()
+        expanded = _expand_single_dim_strategy_to_mesh(
+            mesh,
+            op_schema,
+            _SingleDimStrategyInfo(strategy_fn, cross_mesh_indices=[5]),
+            output_meta,
+        )
+        strategy = expanded(op, op_schema.args_meta, op_schema.kwargs_meta)
+
+        self.assertIsInstance(strategy, TupleStrategy)
+        self.assertEqual(len(strategy.children), 1)
+        child = strategy.children[0]
+        self.assertIsInstance(child, OpStrategy)
+        # Inplace op with Shard(0) input: should have exactly 1 valid strategy
+        self.assertEqual(len(child.strategies), 1)
+
+        # state_steps should still be on the same mesh with Replicate
+        op_spec = child.strategies[0]
+        state_steps_spec = op_spec.input_specs[5]
+        self.assertEqual(state_steps_spec.mesh, mesh)
+        self.assertTrue(all(p == Replicate() for p in state_steps_spec.placements))
+
     def test_expand_foreach_add_to_3d_mesh(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
 

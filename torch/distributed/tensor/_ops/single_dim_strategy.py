@@ -61,6 +61,9 @@ _ExpandedSingleDimStrategyFunc: TypeAlias = Callable[
 class _SingleDimStrategyInfo:
     func: _SingleDimStrategyFunc
     allow_unbacked_sharding: bool | None = field(default=None)
+    # Input indices (0-based) that may live on a different mesh and must be Replicate.
+    # Used for fused adam/adamw where state_steps (input 5) can be cross-mesh.
+    cross_mesh_indices: list[int] | None = field(default=None)
 
     # Delegate to func so this can be used interchangeably with a raw
     # _SingleDimStrategyFunc (e.g. in tests that call strategy functions directly).
@@ -270,6 +273,7 @@ def _expand_single_dim_strategy_to_mesh(
                 inplace_op=is_inplace,
                 input_index=num_outputs,
                 allow_unbacked_sharding=strategy_info.allow_unbacked_sharding,
+                cross_mesh_indices=strategy_info.cross_mesh_indices,
             )
 
         return expanded_strategy
@@ -291,7 +295,7 @@ def _expand_single_dim_strategy_to_mesh(
             # Unhashable types (SymInts), skip caching
             return _create_expanded_strategy_impl(op_schema, output_tensor_meta)
 
-    def _translate_foreach_op_schema(
+    def _translate_list_op_schema(
         op_schema: OpSchema,
         output_tensor_meta: Sequence[TensorMeta | None] | None,
         index: int,
@@ -322,27 +326,38 @@ def _expand_single_dim_strategy_to_mesh(
                 first_input.tensor_meta if hasattr(first_input, "tensor_meta") else None
             )
 
-        # figure out target op variant
-        variant_map = {
-            "List": "Tensor",
-            "ScalarList": "Scalar",
-            "Scalar": "Scalar",
-            "Tensor": "Tensor",
-            "default": "default",
-        }
-        target_variant = (
-            "default"
-            if len(target_args) == 1
-            else variant_map.get(foreach_variant, "default")
-        )
+        # For foreach ops, translate to per-element op name
+        if "_foreach_" in str(op_schema.op):
+            op_parts = str(op_schema.op).split(".")
+            base_op_name = op_parts[-2].replace("_foreach_", "")
+            # For inplace foreach ops (e.g., _foreach_maximum_), strip trailing
+            # underscore to get the base op name (e.g., maximum)
+            if base_op_name.endswith("_"):
+                base_op_name = base_op_name[:-1]
+            foreach_variant = op_parts[-1]
 
-        # this seems a bit messy
-        base_op = getattr(torch.ops.aten, base_op_name)
-        target_op = (
-            getattr(base_op, target_variant)
-            if target_variant in base_op.overloads()
-            else base_op.default
-        )
+            variant_map = {
+                "List": "Tensor",
+                "ScalarList": "Scalar",
+                "Scalar": "Scalar",
+                "Tensor": "Tensor",
+                "default": "default",
+            }
+            target_variant = (
+                "default"
+                if len(target_args) == 1
+                else variant_map.get(foreach_variant, "default")
+            )
+
+            # this seems a bit messy
+            base_op = getattr(torch.ops.aten, base_op_name)
+            target_op = (
+                getattr(base_op, target_variant)
+                if target_variant in base_op.overloads()
+                else base_op.default
+            )
+        else:
+            target_op = op_schema.op
 
         op_schema = OpSchema(
             target_op,  # type: ignore[arg-type]
@@ -369,7 +384,7 @@ def _expand_single_dim_strategy_to_mesh(
 
         child_strategies: list[StrategyType] = []
         for tensorlist_i in range(tensorlist_len):
-            per_index_schema, per_index_output_meta = _translate_foreach_op_schema(
+            per_index_schema, per_index_output_meta = _translate_list_op_schema(
                 op_schema,
                 output_tensor_meta,
                 tensorlist_i,
@@ -385,8 +400,11 @@ def _expand_single_dim_strategy_to_mesh(
 
         return TupleStrategy(children=child_strategies)
 
-    # TODO maybe this could be helped by adding a new 'tag' to the OpOverload?
-    if op_schema.op.name().startswith("aten::_foreach_"):
+    # Use per-element list unwrapping for foreach and fused ops, where each list
+    # element is processed independently. Other ops with TupleStrategy (e.g., cat)
+    # handle the list as a whole and use the normal expansion path.
+    op_name = op_schema.op.name()
+    if op_name.startswith("aten::_foreach_") or op_name.startswith("aten::_fused_"):
         return expanded_foreach_strategy
 
     return _create_expanded_strategy(op_schema, output_tensor_meta)
@@ -396,6 +414,7 @@ def register_single_dim_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
     allow_unbacked_sharding: bool | None = None,
+    cross_mesh_indices: list[int] | None = None,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -443,6 +462,7 @@ def register_single_dim_strategy(
         info = _SingleDimStrategyInfo(
             func=impl,
             allow_unbacked_sharding=allow_unbacked_sharding,
+            cross_mesh_indices=cross_mesh_indices,
         )
         registration_wrapper(info)
         return impl

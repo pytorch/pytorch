@@ -362,6 +362,7 @@ def expand_to_full_mesh_op_strategy(
         [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
+    cross_mesh_indices: list[int] | None = None,
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
@@ -436,13 +437,9 @@ def expand_to_full_mesh_op_strategy(
         input_strategy_counter = 0
         for position, specs in enumerate(zip(*strategy_comb, strict=True)):
             if specs[0] is not None:
-                # Populate tensor_meta field for both output and input specs,
-                # including for tuple output cases
-                tensor_meta = None
-                # Use position to determine output vs input territory
-                # (position includes None entries, unlike the old spec_index)
                 if position < input_index:
-                    # This is an output position
+                    # Output position
+                    tensor_meta = None
                     if output_tensor_meta is not None:
                         if isinstance(output_tensor_meta, TensorMeta):
                             tensor_meta = output_tensor_meta
@@ -450,17 +447,37 @@ def expand_to_full_mesh_op_strategy(
                             if output_spec_count < len(output_tensor_meta):
                                 tensor_meta = output_tensor_meta[output_spec_count]
                     output_spec_count += 1
+                    # pyrefly: ignore [bad-argument-type]
+                    spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
+                elif (
+                    cross_mesh_indices is not None
+                    and input_strategy_counter in cross_mesh_indices
+                ):
+                    # Cross-mesh input: preserve original mesh and Replicate placements
+                    original_strategy = input_args_strategy[input_strategy_counter]
+                    original_spec = original_strategy.strategies[0].output_spec
+                    assert all(p == Replicate() for p in original_spec.placements), (
+                        f"Cross-mesh input at index {input_strategy_counter} must be "
+                        f"Replicate, got {original_spec.placements}"
+                    )
+                    spec_list.append(
+                        DTensorSpec(
+                            mesh=original_strategy.mesh,
+                            placements=original_spec.placements,
+                            tensor_meta=original_spec.tensor_meta,
+                        )
+                    )
+                    input_strategy_counter += 1
                 else:
-                    # This is an input position
-                    # Only get tensor_meta if we have a corresponding input_args_strategy entry
+                    # Normal input position
+                    tensor_meta = None
                     if input_strategy_counter < len(input_args_strategy):
                         tensor_meta = input_args_strategy[
                             input_strategy_counter
                         ].tensor_meta
                         input_strategy_counter += 1
-
-                # pyrefly: ignore [bad-argument-type]
-                spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
+                    # pyrefly: ignore [bad-argument-type]
+                    spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
             else:
                 spec_list.append(None)
 
