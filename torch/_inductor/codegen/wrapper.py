@@ -1088,6 +1088,7 @@ class PythonWrapperCodegen(CodeGen):
             str, Union[None, ir.TensorBox, ir.Buffer, ir.TorchBindObject]
         ] = {}
         self.imports = IndentedBuffer()
+        self._bucketing_import_written = False
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -1377,6 +1378,14 @@ class PythonWrapperCodegen(CodeGen):
     def write_get_raw_stream_header_once(self) -> None:
         self.write_get_raw_stream_header()
 
+    def write_bucketing_import_once(self) -> None:
+        """Write bucketing import when bucketing ops are used."""
+        if not self._bucketing_import_written:
+            self._bucketing_import_written = True
+            self.imports.writeline(
+                "from torch._inductor.fx_passes import bucketing as _bucketing  # noqa: F401"
+            )
+
     def add_meta_once(self, meta: TritonMetaParams) -> str:
         # pyrefly: ignore [bad-assignment]
         meta = repr(meta)
@@ -1618,11 +1627,15 @@ class PythonWrapperCodegen(CodeGen):
     def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
         # Check if this op has a custom codegen implementation
         op_name = node.python_kernel_name
-        if op_name is not None and op_name in CUSTOM_EXTERN_KERNEL_CODEGEN:
-            custom_codegen = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name].python
-            if custom_codegen is not None:
-                custom_codegen(node, self.writeline)
-                return
+        if op_name is not None:
+            if op_name in CUSTOM_EXTERN_KERNEL_CODEGEN:
+                custom_codegen = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name].python
+                if custom_codegen is not None:
+                    custom_codegen(node, self.writeline)
+                    return
+            # Ensure bucketing import when bucketing ops are used
+            if "torch.ops.bucketing" in op_name:
+                self.write_bucketing_import_once()
         self.writeline(ExternKernelAllocLine(self, node))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
