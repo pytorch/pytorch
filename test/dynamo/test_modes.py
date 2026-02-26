@@ -778,6 +778,41 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
+    def test_guard_sanity_check_skipped_with_torch_function_mode(self):
+        """Test that stateful TorchFunctionMode does not cause guard failures.
+
+        Regression test for #172088.
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        class CounterMode(TorchFunctionMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                self.count += 1
+                return func(*args, **kwargs)
+
+        counter = CompileCounterWithBackend("eager")
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def f(x):
+            return x.sin()
+
+        with CounterMode():
+            x = torch.tensor([1.0])
+            result = f(x)
+            self.assertEqual(counter.frame_count, 1)
+
+            result2 = f(x)
+            self.assertEqual(counter.frame_count, 1)
+
+        expected = torch.sin(torch.tensor([1.0]))
+        self.assertEqual(result, expected)
+        self.assertEqual(result2, expected)
+
     @requires_gpu
     @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop_eager(self):
