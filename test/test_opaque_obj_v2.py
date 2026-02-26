@@ -3,6 +3,7 @@
 import contextlib
 import gc
 import random
+import unittest
 from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Optional
@@ -807,6 +808,26 @@ class TestOpaqueObject(TestCase):
             setup_context=setup_context,
             lib=self.lib,
         )
+
+        counter_type = get_opaque_type_name(Counter)
+        torch.library.define(
+            "_TestOpaqueObject::counter_start",
+            f"({counter_type} a) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::counter_start",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def counter_start_impl(a: Counter) -> torch.Tensor:
+            return torch.scalar_tensor(a.start, dtype=torch.int64)
+
+        @torch.library.register_fake("_TestOpaqueObject::counter_start", lib=self.lib)
+        def counter_start_fake(a: Counter) -> torch.Tensor:
+            return torch.scalar_tensor(0, dtype=torch.int64)
 
         super().setUp()
 
@@ -1847,6 +1868,412 @@ class GraphModule(torch.nn.Module):
 
         # Recompile since SizeStore has changed
         self.assertEqual(cnt.frame_count, 3)
+
+    def test_tensor_subclass_with_opaque_attr_backward(self):
+        """Test opaque objects in tensor subclass are correctly remapped through backward."""
+
+        def fn(x):
+            return x * 2 + 1
+
+        a = torch.rand(4, 4, requires_grad=True)
+        b = torch.rand(4, 4, requires_grad=True)
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt_fn(x)
+
+        # Output should be TensorWithCounter with same opaque objects
+        self.assertTrue(isinstance(out, TensorWithCounter))
+        self.assertIs(out._counter, counter)
+        self.assertIs(out._size_store, size)
+
+        # Run backward
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(isinstance(x.grad, TensorWithCounter))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Call again with different instances that are __eq__ equal.
+        # Metadata guard uses ==, so equal values pass the guard.
+        # But they're different objects, so assertIs tests the fix.
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        counter2 = Counter(start=3, end=10)  # Same values, different instance
+        size2 = SizeStore(4)  # Same value, different instance
+        self.assertEqual(counter, counter2)  # Verify they're equal
+        self.assertIsNot(counter, counter2)  # But not the same object
+        x2 = TensorWithCounter(a2, b2, counter2, size2)
+
+        out2 = opt_fn(x2)
+        self.assertEqual(cnt.frame_count, 1)  # No recompilation
+
+        self.assertTrue(isinstance(out2, TensorWithCounter))
+        # Key checks: should use runtime instances, not traced instances
+        self.assertIs(out2._counter, counter2)
+        self.assertIs(out2._size_store, size2)
+
+        out2.sum().backward()
+        self.assertIsNotNone(x2.grad)
+        self.assertTrue(isinstance(x2.grad, TensorWithCounter))
+        self.assertIs(x2.grad._counter, counter2)
+        self.assertIs(x2.grad._size_store, size2)
+
+    def test_tensor_subclass_opaque_backward_compiled_autograd(self):
+        """Test opaque objects work with compiled autograd backward."""
+        import torch._dynamo.compiled_autograd
+
+        def fn(x):
+            return x * 2
+
+        a = torch.rand(4, 4, requires_grad=True)
+        b = torch.rand(4, 4, requires_grad=True)
+        counter = Counter(start=5, end=10)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = opt_fn(x)
+
+        self.assertTrue(isinstance(out, TensorWithCounter))
+        self.assertIs(out._counter, counter)
+        self.assertIs(out._size_store, size)
+
+        with torch._dynamo.compiled_autograd._enable(torch.compile(backend="eager")):
+            out.sum().backward()
+
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(isinstance(x.grad, TensorWithCounter))
+
+        # Second invocation with different-but-equal opaques
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        counter2 = Counter(start=5, end=10)
+        size2 = SizeStore(4)
+        x2 = TensorWithCounter(a2, b2, counter2, size2)
+
+        out2 = opt_fn(x2)
+        self.assertTrue(isinstance(out2, TensorWithCounter))
+        self.assertIs(out2._counter, counter2)
+        self.assertIs(out2._size_store, size2)
+
+        with torch._dynamo.compiled_autograd._enable(torch.compile(backend="eager")):
+            out2.sum().backward()
+
+        self.assertIsNotNone(x2.grad)
+        self.assertTrue(isinstance(x2.grad, TensorWithCounter))
+        # TODO: compiled autograd doesn't yet remap backward opaques because
+        # the prologue/epilogue are dynamo-traced and opaques can't flow
+        # through the graph. Fix when compiled autograd supports non-tensor
+        # metadata.
+        self.assertIsNot(x2.grad._counter, counter2)
+        self.assertIsNot(x2.grad._size_store, size2)
+
+    def test_tensor_subclass_shared_opaque_remapping(self):
+        """Test that shared opaques across inputs are correctly handled."""
+
+        def fn(x, y):
+            return x + y
+
+        counter = Counter(start=3, end=10)  # Shared opaque
+        size = SizeStore(4)
+
+        a1 = torch.rand(4, 4, requires_grad=True)
+        b1 = torch.rand(4, 4, requires_grad=True)
+        x = TensorWithCounter(a1, b1, counter, size)
+
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        y = TensorWithCounter(a2, b2, counter, size)  # Same counter
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = opt_fn(x, y)
+
+        self.assertTrue(isinstance(out, TensorWithCounter))
+        self.assertIs(out._counter, counter)
+
+        # Second invocation with different-but-equal shared opaques
+        counter2 = Counter(start=3, end=10)
+        size2 = SizeStore(4)
+
+        a3 = torch.rand(4, 4, requires_grad=True)
+        b3 = torch.rand(4, 4, requires_grad=True)
+        x2 = TensorWithCounter(a3, b3, counter2, size2)
+
+        a4 = torch.rand(4, 4, requires_grad=True)
+        b4 = torch.rand(4, 4, requires_grad=True)
+        y2 = TensorWithCounter(a4, b4, counter2, size2)
+
+        out2 = opt_fn(x2, y2)
+        self.assertTrue(isinstance(out2, TensorWithCounter))
+        self.assertIs(out2._counter, counter2)
+        self.assertIs(out2._size_store, size2)
+
+    @unittest.expectedFailure
+    def test_shared_opaque_identity_guard(self):
+        """When inputs share an opaque at trace time, breaking that sharing
+        should trigger recompilation.
+
+        Uses y + x so __torch_dispatch__ picks y's opaque (input 1), but
+        first-occurrence-wins remapping points to x's position (input 0).
+        With broken sharing, the output silently gets the wrong opaque.
+        """
+
+        def fn(x, y):
+            return y + x
+
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+
+        x = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter, size)
+        y = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter, size)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt_fn(x, y)
+        self.assertEqual(cnt.frame_count, 1)
+        # Shared opaques: output should have the shared counter
+        self.assertIs(out._counter, counter)
+
+        # Same sharing pattern → no recompile
+        counter2 = Counter(start=3, end=10)
+        size2 = SizeStore(4)
+        x2 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter2, size2)
+        y2 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter2, size2)
+        out2 = opt_fn(x2, y2)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIs(out2._counter, counter2)
+
+        # Sharing broken → should recompile.
+        # __torch_dispatch__ picks y's opaque, so the output should have
+        # counter3b. Without the guard, the remapping uses x's position
+        # and the output silently gets counter3a.
+        counter3a = Counter(start=3, end=10)
+        counter3b = Counter(start=3, end=10)
+        size3 = SizeStore(4)
+        x3 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter3a, size3)
+        y3 = TensorWithCounter(torch.rand(4, 4), torch.rand(4, 4), counter3b, size3)
+        out3 = opt_fn(x3, y3)
+        self.assertIs(out3._counter, counter3b)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_shared_direct_opaque_identity_guard(self):
+        """When the same opaque is passed as multiple direct function
+        arguments, breaking the sharing should trigger recompilation.
+
+        Unlike test_shared_opaque_identity_guard where opaques are inside
+        tensor subclass metadata, here opaques are direct function arguments.
+        The tracer may conflate them when they're the same object, causing
+        counter_start(counter_b) to return counter_a's start instead.
+        """
+        get_start = torch.ops._TestOpaqueObject.counter_start
+
+        def fn(counter_a, counter_b, x):
+            return get_start(counter_a) + x, get_start(counter_b) + x
+
+        counter = Counter(start=3, end=10)
+        x = torch.rand(4, 4)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out_a, out_b = opt_fn(counter, counter, x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(out_a, 3 + x)
+        self.assertEqual(out_b, 3 + x)
+
+        # Same sharing → no recompile
+        counter2 = Counter(start=3, end=10)
+        out_a2, out_b2 = opt_fn(counter2, counter2, x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(out_a2, 3 + x)
+        self.assertEqual(out_b2, 3 + x)
+
+        # Broken sharing → should recompile.
+        # Both counters have start=3 so the existing guard_fn doesn't catch
+        # the difference — only an identity guard would.
+        counter3a = Counter(start=3, end=10)
+        counter3b = Counter(start=3, end=10)
+        out_a3, out_b3 = opt_fn(counter3a, counter3b, x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(out_a3, 3 + x)
+        self.assertEqual(out_b3, 3 + x)
+
+    def test_tensor_subclass_shared_opaque_backward(self):
+        """Test backward with multiple subclass inputs sharing the same opaque.
+
+        This tests the case where grad_inputs share an opaque object.
+        The bug was that create_subclass_meta(grad_inputs) would incorrectly
+        build opaque_remappings between grad_inputs, causing an assertion
+        failure in wrap_tensor_subclasses.
+        """
+
+        def fn(x, y):
+            return x + y
+
+        # Create two TensorWithCounter inputs sharing the SAME opaque objects
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+
+        a1 = torch.rand(4, 4, requires_grad=True)
+        b1 = torch.rand(4, 4, requires_grad=True)
+        x = TensorWithCounter(a1, b1, counter, size)
+
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        y = TensorWithCounter(a2, b2, counter, size)  # Same counter and size
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        out = opt_fn(x, y)
+
+        self.assertTrue(isinstance(out, TensorWithCounter))
+        self.assertIs(out._counter, counter)
+
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(y.grad)
+
+        # Second invocation with different-but-equal shared opaques
+        counter2 = Counter(start=3, end=10)
+        size2 = SizeStore(4)
+
+        a3 = torch.rand(4, 4, requires_grad=True)
+        b3 = torch.rand(4, 4, requires_grad=True)
+        x2 = TensorWithCounter(a3, b3, counter2, size2)
+
+        a4 = torch.rand(4, 4, requires_grad=True)
+        b4 = torch.rand(4, 4, requires_grad=True)
+        y2 = TensorWithCounter(a4, b4, counter2, size2)
+
+        out2 = opt_fn(x2, y2)
+        self.assertTrue(isinstance(out2, TensorWithCounter))
+        self.assertIs(out2._counter, counter2)
+        self.assertIs(out2._size_store, size2)
+
+        out2.sum().backward()
+        self.assertIsNotNone(x2.grad)
+        self.assertIsNotNone(y2.grad)
+        self.assertTrue(isinstance(x2.grad, TensorWithCounter))
+        self.assertIs(x2.grad._counter, counter2)
+        self.assertIs(x2.grad._size_store, size2)
+
+    def test_deeply_nested_tensor_subclass_with_opaque(self):
+        """Test opaque objects in nested tensor subclasses are correctly remapped."""
+
+        # Outer subclass that wraps TensorWithCounter
+        class NestedSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, inner, scale):
+                # inner is a TensorWithCounter
+                kwargs = {
+                    "strides": inner.stride(),
+                    "storage_offset": inner.storage_offset(),
+                    "device": inner.device,
+                    "layout": inner.layout,
+                    "requires_grad": inner.requires_grad,
+                    "dtype": inner.dtype,
+                }
+                return torch.Tensor._make_wrapper_subclass(cls, inner.size(), **kwargs)
+
+            def __init__(self, inner, scale):
+                self._inner = inner
+                self._scale = scale
+
+            def __repr__(self):
+                return f"NestedSubclass({self._inner}, scale={self._scale})"
+
+            def __tensor_flatten__(self):
+                return ["_inner"], (self._scale,)
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+                (scale,) = ctx
+                return NestedSubclass(inner_tensors["_inner"], scale)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x._inner if isinstance(x, NestedSubclass) else x
+
+                def get_scale(x):
+                    if isinstance(x, NestedSubclass):
+                        return x._scale
+                    return None
+
+                scale = None
+                for arg in torch.utils._pytree.tree_leaves(args):
+                    scale = get_scale(arg)
+                    if scale is not None:
+                        break
+
+                unwrapped_args = torch.utils._pytree.tree_map(unwrap, args)
+                unwrapped_kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
+                out = func(*unwrapped_args, **unwrapped_kwargs)
+
+                def wrap(x):
+                    if isinstance(x, TensorWithCounter):
+                        return NestedSubclass(x, scale)
+                    return x
+
+                return torch.utils._pytree.tree_map(wrap, out)
+
+        def fn(x):
+            return x * 2 + 1
+
+        # Create nested structure: NestedSubclass -> TensorWithCounter -> tensors
+        a = torch.rand(4, 4, requires_grad=True)
+        b = torch.rand(4, 4, requires_grad=True)
+        counter = Counter(start=3, end=10)
+        size = SizeStore(4)
+        inner = TensorWithCounter(a, b, counter, size)
+        x = NestedSubclass(inner, scale=2.0)
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        out = opt_fn(x)
+
+        # Output should preserve nested structure with same opaque objects
+        self.assertTrue(isinstance(out, NestedSubclass))
+        self.assertTrue(isinstance(out._inner, TensorWithCounter))
+        self.assertIs(out._inner._counter, counter)
+        self.assertIs(out._inner._size_store, size)
+        self.assertEqual(out._scale, 2.0)
+
+        # Test backward
+        out.sum().backward()
+        self.assertIsNotNone(x.grad)
+        self.assertTrue(isinstance(x.grad, NestedSubclass))
+
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Call again with different instances that are __eq__ equal.
+        a2 = torch.rand(4, 4, requires_grad=True)
+        b2 = torch.rand(4, 4, requires_grad=True)
+        counter2 = Counter(start=3, end=10)  # Same values, different instance
+        size2 = SizeStore(4)  # Same value, different instance
+        inner2 = TensorWithCounter(a2, b2, counter2, size2)
+        x2 = NestedSubclass(inner2, scale=2.0)
+
+        out2 = opt_fn(x2)
+        self.assertEqual(cnt.frame_count, 1)  # No recompilation
+
+        self.assertTrue(isinstance(out2, NestedSubclass))
+        # Key checks: should use runtime instances, not traced instances
+        self.assertIs(out2._inner._counter, counter2)
+        self.assertIs(out2._inner._size_store, size2)
+        self.assertEqual(out2._scale, 2.0)
+
+        out2.sum().backward()
+        self.assertIsNotNone(x2.grad)
+        self.assertTrue(isinstance(x2.grad, NestedSubclass))
+        self.assertTrue(isinstance(x2.grad._inner, TensorWithCounter))
+        self.assertIs(x2.grad._inner._counter, counter2)
+        self.assertIs(x2.grad._inner._size_store, size2)
 
     def test_opaque_obj_saved_for_backward(self):
         """Test that opaque objects are correctly saved and passed to backward."""

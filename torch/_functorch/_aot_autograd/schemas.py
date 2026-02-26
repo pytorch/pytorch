@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
     from .descriptors import AOTInput, AOTOutput
     from .graph_capture_wrappers import JointFnHandle
+    from .subclass_utils import OpaqueObjectRemapping
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -261,6 +262,7 @@ class SubclassCreationMeta:
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: type | None = None
     memory_format: MemoryFormatMeta | None = None
+    opaque_remappings: Sequence[OpaqueObjectRemapping] = ()
 
     def compute_outer_size_and_stride(
         self,
@@ -299,7 +301,15 @@ class SubclassCreationMeta:
         all_args: Sequence[torch.Tensor | IntLikeType],
         *,
         is_runtime: bool,
+        input_meta_opaques: dict[tuple[int, ...], OpaqueType] | None = None,
     ) -> torch.Tensor:
+        # At runtime, substitute opaque objects if we have runtime_opaques
+        meta = self.meta
+        if is_runtime and self.opaque_remappings and input_meta_opaques is not None:
+            meta = list(meta)
+            for source in self.opaque_remappings:
+                meta[source.dst] = input_meta_opaques[source.src]
+
         inner_tensors = {}
 
         curr_start_idx = self.flat_tensor_start_idx
@@ -311,6 +321,7 @@ class SubclassCreationMeta:
                 subclass = creation_meta.creation_fn(
                     all_args,
                     is_runtime=is_runtime,
+                    input_meta_opaques=input_meta_opaques,
                 )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
@@ -333,7 +344,7 @@ class SubclassCreationMeta:
             outer_size, outer_stride = self.outer_size, self.outer_stride
 
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
-            inner_tensors, self.meta, outer_size, outer_stride
+            inner_tensors, meta, outer_size, outer_stride
         )
 
         if not is_runtime:
@@ -451,7 +462,7 @@ class ViewAndMutationMeta:
     # At runtime, we don't keep the traced_tangents around since they're not serializable.
     # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
     # This list is generated after calling make_runtime_safe().
-    traced_tangent_metas: list[Any] | None = None
+    traced_tangent_metas: list[tuple[Sequence[str], object] | None] | None = None
 
     num_symints_saved_for_bw: int | None = None
 
@@ -1354,7 +1365,7 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     updated_flat_args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]]
 
     # Metadata about subclass inputs/outputs in the graph trace.
-    maybe_subclass_meta: Any
+    maybe_subclass_meta: SubclassMeta | None
 
 
 FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
