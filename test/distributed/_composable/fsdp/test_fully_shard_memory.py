@@ -59,9 +59,10 @@ class TestFullyShardMemory(FSDPTest):
             )
         ):
             return  # skip since not a common use case
-        assert self.world_size == 2, (
-            f"Requires world size of 2 since some values are hard coded: {self.world_size}"
-        )
+        if self.world_size != 2:
+            raise AssertionError(
+                f"Requires world size of 2 since some values are hard coded: {self.world_size}"
+            )
         torch.manual_seed(42)
         # Pre-run a linear forward (gemm and bias) and backward (gemm) to
         # allocate the cuBLAS workspaces before measuring the memory usage
@@ -154,7 +155,8 @@ class TestFullyShardMemory(FSDPTest):
                 # Sharded parameters
                 expected_mem_mb += model_sharded_numel * 4 / 1e6
         else:
-            assert not use_cpu_offload
+            if use_cpu_offload:
+                raise AssertionError("Expected use_cpu_offload to be False")
             # Sharded parameters, unsharded parameters, 1x max unsharded block parameters
             # (copy-out) and other (peak at end of forward)
             expected_mem_mb = (
@@ -184,7 +186,8 @@ class TestFullyShardMemory(FSDPTest):
                     # 2x sharded parameters/gradients
                     expected_mem_mb += 2 * model_sharded_numel * 4 / 1e6
         else:
-            assert not use_cpu_offload
+            if use_cpu_offload:
+                raise AssertionError("Expected use_cpu_offload to be False")
             # Sharded parameters, unsharded parameters, 1.5x max unsharded
             # block parameters (reduce-scatter input/output), and other (peak
             # at beginning of backward)

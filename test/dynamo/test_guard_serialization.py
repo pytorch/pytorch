@@ -154,7 +154,7 @@ class SubclassWithMeta(torch.Tensor):
         kwargs_a = pytree.tree_map_only(SubclassWithMeta, lambda x: x.a, kwargs)
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithMeta)
+            assert isinstance(args[0], SubclassWithMeta)  # noqa: S101
             return SubclassWithMeta(out_a, extra=args[0].extra)
         return out_a
 
@@ -164,13 +164,13 @@ class SubclassWithMeta(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert isinstance(meta, dict)
+        assert isinstance(meta, dict)  # noqa: S101
         a = inner_tensors["a"]
         # pull out extra from meta
         extra = meta["extra"]
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithMeta(a, extra, outer_size, outer_stride)
 
 
@@ -208,7 +208,7 @@ class SubclassWithCustomMetadataGuard(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithCustomMetadataGuard)
+            assert isinstance(args[0], SubclassWithCustomMetadataGuard)  # noqa: S101
             return SubclassWithCustomMetadataGuard(out_a, extra=args[0].extra)
         return out_a
 
@@ -225,13 +225,13 @@ class SubclassWithCustomMetadataGuard(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert isinstance(meta, dict)
+        assert isinstance(meta, dict)  # noqa: S101
         a = inner_tensors["a"]
         # pull out extra from meta
         extra = meta["extra"]
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithCustomMetadataGuard(a, extra, outer_size, outer_stride)
 
 
@@ -269,7 +269,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithSubclassInnerTensor)
+            assert isinstance(args[0], SubclassWithSubclassInnerTensor)  # noqa: S101
             return SubclassWithSubclassInnerTensor(out_a, extra=args[0].inner_sub.extra)
         return out_a
 
@@ -278,12 +278,12 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
+        assert meta is None  # noqa: S101
         a = inner_tensors["a"]
         extra = inner_tensors["inner_sub"].extra
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithSubclassInnerTensor(a, extra, outer_size, outer_stride)
 
 
@@ -364,7 +364,8 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         finally:
             sys.settrace(None)
 
-        assert self._frame_state is not None
+        if self._frame_state is None:
+            raise AssertionError("Expected _frame_state to be set after tracing")
 
         # Set f_locals from regenerated kwargs to handle exhausted input iterators
         # NB: This is super janky and might cause unforeseen problems
@@ -623,11 +624,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
+                assert meta is None  # noqa: S101
                 a = inner_tensors["a"]
                 if type(a) is torch.Tensor:
-                    assert outer_size is not None
-                    assert outer_stride is not None
+                    assert outer_size is not None  # noqa: S101
+                    assert outer_stride is not None  # noqa: S101
                 return LocalSubclass(a, outer_size, outer_stride)
 
         def fn(x):
@@ -1481,7 +1482,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 return x + 1
 
         def foo(x: torch.Tensor, y: list[MyClass]):
-            assert len(y) == 1
+            assert len(y) == 1  # noqa: S101
             return x + 1
 
         ref, loaded = self._test_serialization(
@@ -1493,7 +1494,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_bound_methods_empty(self):
         def foo(x, y):
-            assert callable(y[0])
+            assert callable(y[0])  # noqa: S101
             return x + 1
 
         ref, loaded = self._test_serialization(
@@ -1732,7 +1733,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         m.forward = forward
 
         def foo(f, x):
-            assert callable(f)
+            assert callable(f)  # noqa: S101
             return f(x)
 
         x = torch.randn(3, 2)

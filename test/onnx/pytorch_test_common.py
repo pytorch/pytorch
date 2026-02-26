@@ -291,9 +291,10 @@ def xfail(error_message: str, reason: Optional[str] = None):
             try:
                 func(self, *args, **kwargs)
             except Exception as e:
-                assert error_message in str(e), (
-                    f"Expected error message: {error_message} NOT in {str(e)}"
-                )
+                if error_message not in str(e):
+                    raise AssertionError(
+                        f"Expected error message: {error_message} NOT in {str(e)}"
+                    ) from None
                 pytest.xfail(reason if reason else f"Expected failure: {error_message}")
             else:
                 pytest.fail("Unexpected success!")

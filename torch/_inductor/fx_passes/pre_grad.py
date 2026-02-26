@@ -5,6 +5,7 @@ import itertools
 import logging
 import types
 from collections.abc import Sequence
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -170,7 +171,7 @@ def use_matmul_fuse_lce_replace_first_LCE(graph):
 
 
 @init_once_fakemode
-def lazy_init():
+def lazy_init(input_device: Optional[torch.device] = None):
     from . import (  # noqa: F401  # noqa: F401
         apply_gumbel_max_trick,
         efficient_conv_bn_eval,

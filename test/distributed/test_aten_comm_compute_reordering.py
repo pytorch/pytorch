@@ -57,6 +57,7 @@ def apply_reordering_and_get_graph(graph, out_li) -> None:
         "insert_overlap_deps",
         "collective_estimator",
         "bucket_exposed_first",
+        "bucket_only_internode_comms",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key)) is not None:
@@ -281,7 +282,10 @@ graph():
         schedulable = {"wait_tensor_default", "wait_tensor_default_1"}
         for node in list(graph.nodes):
             expected = node.name in schedulable
-            assert _schedulable_wait_node(node) is expected
+            if _schedulable_wait_node(node) is not expected:
+                raise AssertionError(
+                    f"Expected _schedulable_wait_node({node.name}) is {expected}"
+                )
 
     @torch._inductor.config.patch(get_patches())
     def test_reorder_compute_for_overlap_mul(self):
@@ -510,6 +514,7 @@ def get_bucket_patches(compute_multiplier=1.0):
         "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime_part,
         "aten_distributed_optimizations.collective_bucketing": True,
         "aten_distributed_optimizations.bucket_exposed_first": False,
+        "aten_distributed_optimizations.bucket_only_internode_comms": False,
         "reorder_for_locality": False,
         "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
@@ -942,7 +947,8 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             with FakeTensorMode():
                 nonlocal estimation_calls
                 estimation_calls += 1
-                assert isinstance(torch.rand([20]), torch._subclasses.FakeTensor)
+                if not isinstance(torch.rand([20]), torch._subclasses.FakeTensor):
+                    raise AssertionError("Expected FakeTensor")
 
             return 1.0
 

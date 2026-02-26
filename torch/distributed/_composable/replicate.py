@@ -66,7 +66,8 @@ class _ReplicateState(_State):
     def lazy_init(self) -> None:
         @torch._disable_dynamo(recursive=True)
         def _lazy_init():
-            assert self._init_args is not None
+            if self._init_args is None:
+                raise AssertionError
             self.init(*self._init_args, **self._init_kwargs)
             self.register_comm_hook()
             self._init_args = ()
@@ -131,6 +132,7 @@ class _ReplicateState(_State):
         if self._init_args or self._init_kwargs:
             self.lazy_init()
         self._ddp.require_backward_grad_sync = not self._no_sync
+        DistributedDataParallel._active_ddp_module = self._ddp
         return self._ddp._pre_forward(*args, **kwargs)
 
     def forward_post_hook(
@@ -139,6 +141,7 @@ class _ReplicateState(_State):
         input: tuple[torch.Tensor],
         output: torch.Tensor,
     ) -> torch.Tensor:
+        DistributedDataParallel._active_ddp_module = None
         return self._ddp._post_forward(output)
 
 

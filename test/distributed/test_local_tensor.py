@@ -12,6 +12,8 @@ from torch.distributed._local_tensor import (
     LocalTensor,
     LocalTensorMode,
     maybe_disable_local_tensor_mode,
+    rank_map,
+    tensor_map,
 )
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -31,7 +33,8 @@ class LocalTensorTestBase(TestCase):
         mode = local_tensor_mode()
         with nullcontext() if mode is None else mode.disable():
             if isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor):
-                assert isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)
+                if not (isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)):
+                    raise AssertionError("Expected both lhs and rhs to be LocalTensor")
                 super().assertEqual(lhs._ranks, rhs._ranks)
                 for r in lhs._ranks:
                     super().assertEqual(
@@ -85,7 +88,8 @@ class LocalTensorRankTest(LocalTensorTestBase):
 
     @property
     def rank(self):
-        assert dist.is_initialized(), "Process group is not initialized!"
+        if not dist.is_initialized():
+            raise AssertionError("Process group is not initialized!")
         return dist.get_rank()
 
 
@@ -229,6 +233,21 @@ class TestLocalTensorWorld2(LocalTensorWorldTest):
         result = node1.le(node2)
         self.assertTrue(bool(result))
 
+    def test_data_ptr_raises(self):
+        """data_ptr() on a LocalTensor should raise instead of returning 0."""
+        local_tensors = {
+            0: torch.randn(4),
+            1: torch.randn(4),
+        }
+        lt = LocalTensor(local_tensors)
+        with self.assertRaises(RuntimeError):
+            lt.data_ptr()
+
+        # Native ops still work (dispatched per-rank via __torch_dispatch__)
+        with LocalTensorMode(lt._ranks):
+            result = lt + lt
+            self.assertIsInstance(result, LocalTensor)
+
     def test_sym_and_sym_or(self):
         node1 = LocalIntNode({0: 3, 1: 4})
         node2 = LocalIntNode({0: 10, 1: 10})
@@ -237,9 +256,25 @@ class TestLocalTensorWorld2(LocalTensorWorldTest):
         self.assertFalse(bool(sym_true & False))
         self.assertTrue(bool(sym_true | False))
 
+    def test_standalone_rank_map_and_tensor_map(self):
+        with LocalTensorMode(self.world_size):
+            lt = rank_map(lambda r: torch.full((2, 3), float(r)))
+            scaled = tensor_map(lt, lambda r, t: t * 2)
+        for r in range(self.world_size):
+            self.assertEqual(lt._local_tensors[r], torch.full((2, 3), float(r)))
+            self.assertEqual(scaled._local_tensors[r], torch.full((2, 3), float(r) * 2))
+
 
 class TestLocalTensorRankWorld2(LocalTensorRankTest):
     world_size = 2
+
+    def test_standalone_rank_map_and_tensor_map(self):
+        # Real-dist path: rank_map should call cb with dist.get_rank()
+        t = rank_map(lambda r: torch.full((2, 3), float(r)))
+        self.assertNotIsInstance(t, LocalTensor)
+        self.assertEqual(t, torch.full((2, 3), float(self.rank)))
+        t2 = tensor_map(t, lambda r, t: t + 1)
+        self.assertEqual(t2, torch.full((2, 3), float(self.rank) + 1))
 
     def test_flatten_unflatten(self):
         """Test that LocalTensor can be flattened and unflattened correctly."""
@@ -302,9 +337,39 @@ class TestLocalTensorRankWorld2(LocalTensorRankTest):
         expected = identical_local_tensors[self.rank] * 2.0
         self.assertEqual(result_mul._local_tensors[self.rank], expected)
 
-    # TODO: consider an op-info test; we don't actually need to cover all ops
-    # but it will help make sure views and more exotic things are done
-    # correctly (in standard subclass style)
+    def test_view_ops(self):
+        """Test that view operations work correctly on LocalTensor (standard subclass style)."""
+        device = torch.device("cpu")
+        base_tensor = torch.arange(8, device=device).reshape(2, 4).float()
+        local_tensors = {
+            0: base_tensor.clone(),
+            1: base_tensor.clone(),
+        }
+        lt = LocalTensor(local_tensors)
+
+        test_cases = [
+            (torch.flip, (lt,), {"dims": [1]}),
+            (torch.fliplr, (lt,), {}),
+            (torch.flipud, (lt,), {}),
+            (torch.flatten, (lt,), {}),
+            (torch.ravel, (lt,), {}),
+            (torch.reshape, (lt, (8,)), {}),
+            (torch.transpose, (lt, 0, 1), {}),
+            (torch.t, (lt,), {}),
+            (torch.squeeze, (lt,), {}),
+            (torch.unsqueeze, (lt, 0), {}),
+        ]
+
+        for op_func, args, kwargs in test_cases:
+            with self.subTest(op=op_func.__name__):
+                result = op_func(*args, **kwargs)
+                self.assertIsInstance(result, LocalTensor)
+
+                ref_args = tuple(
+                    local_tensors[self.rank] if a is lt else a for a in args
+                )
+                expected = op_func(*ref_args, **kwargs)
+                self.assertEqual(result._local_tensors[self.rank], expected)
 
     def test_mixed_operations_with_regular_tensors(self):
         """Test operations between LocalTensors and regular tensors."""

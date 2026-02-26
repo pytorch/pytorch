@@ -166,12 +166,12 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
 
         def fn(obj):
             class_fields = dataclasses.fields(obj)
-            assert len(class_fields)
-            assert all(field.default is None for field in class_fields[1:])
+            assert len(class_fields)  # noqa: S101
+            assert all(field.default is None for field in class_fields[1:])  # noqa: S101
             other_fields_are_none = all(
                 getattr(obj, field.name) is None for field in class_fields[1:]
             )
-            assert not other_fields_are_none
+            assert not other_fields_are_none  # noqa: S101
 
             total = getattr(obj, class_fields[0].name)
             for field in class_fields[1:]:

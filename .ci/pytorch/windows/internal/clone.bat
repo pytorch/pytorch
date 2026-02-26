@@ -1,6 +1,8 @@
 @echo off
 
 :: The conda and wheels jobs are separated on Windows, so we don't need to clone again.
+:: Normalize path by replacing forward slashes with backslashes for cmd.exe compatibility
+set "NIGHTLIES_PYTORCH_ROOT=%NIGHTLIES_PYTORCH_ROOT:/=\%"
 if not exist "%NIGHTLIES_PYTORCH_ROOT%" goto clone_pytorch
 echo "Changing to NIGHTLIES_PYTORCH_ROOT"
 cd "%NIGHTLIES_PYTORCH_ROOT%"

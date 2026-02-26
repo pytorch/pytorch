@@ -327,6 +327,11 @@ def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> 
 
 def _preload_cuda_deps(err: OSError | None = None) -> None:
     cuda_libs: list[tuple[str, str]] = [
+        # NOTE: Order matters! We must preload libcublasLt BEFORE libcublas to prevent
+        # libcublas from loading a mismatched system-wide libcublasLt via its RUNPATH.
+        # Without this, if a different CUDA Toolkit version exists in the system PATH,
+        # libcublas may load the wrong libcublasLt, causing symbol errors or runtime failures.
+        ("cublas", "libcublasLt.so.*[0-9]"),
         ("cublas", "libcublas.so.*[0-9]"),
         ("cudnn", "libcudnn.so.*[0-9]"),
         ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
@@ -949,11 +954,17 @@ def sym_min(a, b):
         return builtins.min(a, b)  # type: ignore[call-overload]
 
 
-def sym_sum(args):
+def sym_sum(*args):
     """
     N-ary add which is faster to compute for long lists than iterated binary
     addition.  Only does something special for integers.
+
+    Accepts both ``sym_sum([a, b, c])`` and ``sym_sum(a, b, c)``.
     """
+    # Normalise: accept both sym_sum([a, b, c]) and sym_sum(a, b, c).
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        args = args[0]
+
     if overrides.has_torch_function(args):
         return overrides.handle_torch_function(sym_sum, args, args)
 

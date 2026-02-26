@@ -28,11 +28,12 @@ def subprocess_init_fn(name: str, parent_pid: int) -> None:
 
     This is similar to the subprocess_init_routine in checkpointing_test.py.
     """
-    assert name == "test-checkpointer", f"Unexpected subprocess name: {name}"
-    assert os.getpid() != parent_pid, "This was supposed to run in a different process"
-    assert os.getppid() == parent_pid, (
-        "This was supposed to run as a child to main process"
-    )
+    if name != "test-checkpointer":
+        raise AssertionError(f"Unexpected subprocess name: {name}")
+    if os.getpid() == parent_pid:
+        raise AssertionError("This was supposed to run in a different process")
+    if os.getppid() != parent_pid:
+        raise AssertionError("This was supposed to run as a child to main process")
 
 
 def failing_subprocess_init_fn(name: str, parent_pid: int) -> None:
@@ -90,17 +91,19 @@ def shared_tensor_verifier_init_fn(**kwargs: Any) -> CheckpointWriter:
             if "shared_tensor" in state_dict:
                 shared_tensor = state_dict["shared_tensor"]
                 # Critical assertion: shared tensor should remain in shared memory in subprocess
-                assert shared_tensor.is_shared(), (
-                    "Shared tensor should be in shared memory in subprocess"
-                )
+                if not shared_tensor.is_shared():
+                    raise AssertionError(
+                        "Shared tensor should be in shared memory in subprocess"
+                    )
 
                 shared_tensor[0] = 42.0
 
             if "regular_tensor" in state_dict:
                 # Note: ForkingPickler moves regular tensors to shared memory during IPC - this is acceptable
-                assert state_dict["regular_tensor"].is_shared(), (
-                    "Regular tensor should also be in shared memory in subprocess"
-                )
+                if not state_dict["regular_tensor"].is_shared():
+                    raise AssertionError(
+                        "Regular tensor should also be in shared memory in subprocess"
+                    )
 
             return None
 

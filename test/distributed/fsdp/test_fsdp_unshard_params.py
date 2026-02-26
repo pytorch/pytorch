@@ -24,7 +24,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
@@ -46,7 +46,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestUnshardParamsBase(FSDPTest):
+class TestUnshardParamsBase(FSDPTestContinuous):
     """
     This contains any methods common to both the sharded and non-sharded cases.
     """
@@ -513,11 +513,13 @@ class TestUnshardParams(TestUnshardParamsBase):
                     fsdp_model.named_parameters(),
                 ):
                     self.assertEqual(n1, clean_tensor_name(n2))
-                    assert p1.grad is not None
+                    if p1.grad is None:
+                        raise AssertionError("Expected p1.grad to not be None")
                     torch.testing.assert_close(p1.grad, p2.grad)
                     # Ensure that the tensor is not all zeros, which would
                     # mean that the multiplication is vacuous
-                    assert torch.count_nonzero(p2.grad) > 0
+                    if not (torch.count_nonzero(p2.grad) > 0):
+                        raise AssertionError("Expected nonzero gradient")
                     p2.grad *= WRITEBACK_FACTOR
             new_fsdp_grads = [
                 param.grad
@@ -574,7 +576,8 @@ class TestUnshardParams(TestUnshardParamsBase):
         )
         with FSDP.summon_full_params(fsdp_model):
             for p1, p2 in zip(ddp_model.module.parameters(), fsdp_model.parameters()):
-                assert torch.all(torch.isclose(p1, p2))
+                if not torch.all(torch.isclose(p1, p2)):
+                    raise AssertionError("Expected all parameters to be close")
 
         # Check calling after backward
         inp = fsdp_model.get_input(torch.device(device_type))
@@ -625,7 +628,8 @@ class TestUnshardParams(TestUnshardParamsBase):
         )
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
             if fsdp_module._handle:
-                assert fsdp_module._handle.flat_param.grad is None
+                if fsdp_module._handle.flat_param.grad is not None:
+                    raise AssertionError("Expected flat_param.grad to be None")
         with FSDP.summon_full_params(fsdp_model, with_grads=True):
             for param in fsdp_model.parameters():
                 self.assertTrue(param.grad is None)

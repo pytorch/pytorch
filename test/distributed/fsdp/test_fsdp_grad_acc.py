@@ -17,7 +17,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -78,7 +78,7 @@ class _GradAccConfigs:
         return "[" + ",".join(config.__repr__() for config in self.configs) + "]"
 
 
-class TestGradAcc(FSDPTest):
+class TestGradAcc(FSDPTestContinuous):
     """Tests ``FullyShardedDataParallel``'s gradient accumulation via both its
     ``no_sync()`` context manager and without the context manager."""
 
@@ -152,9 +152,10 @@ class TestGradAcc(FSDPTest):
             batches.append(tuple(permute_tensor(t) for t in batch))
         for batch1, batch2 in itertools.combinations(batches, r=2):
             for t1, t2 in zip(batch1, batch2):
-                assert not torch.all(t1 == t2), (
-                    "Check the test to make sure that batches are distinct"
-                )
+                if torch.all(t1 == t2):
+                    raise AssertionError(
+                        "Check the test to make sure that batches are distinct"
+                    )
 
         # Concatenate the batches along the given batch dimension
         concat_batch: tuple[torch.Tensor, ...] = tuple(

@@ -234,7 +234,6 @@ class FSDPParam:
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
-        # pyrefly: ignore [read-only]
         self.device = device
         self.mp_policy = mp_policy
         self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
@@ -593,7 +592,6 @@ class FSDPParam:
                 f"world size ({shard_world_size})"
             )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
-        # pyrefly: ignore [unbound-name]
         sharded_numel = numel // shard_world_size
         self._sharded_post_forward_param_data = (
             self.all_gather_outputs[0].narrow(
@@ -840,23 +838,13 @@ class FSDPParam:
         mesh = self.mesh_info.mesh
         if mesh.ndim == 1:
             return mesh
-        elif mesh.ndim == 2:
-            if mesh.mesh_dim_names is None:
-                raise AssertionError("Expected mesh_dim_names to not be None")
-            return mesh[mesh.mesh_dim_names[-1]]
-        raise ValueError(f"Invalid mesh: {mesh}")
+        if mesh.mesh_dim_names is None:
+            raise AssertionError("Expected mesh_dim_names to not be None")
+        return mesh[mesh.mesh_dim_names[-1]]
 
     @property
     def shard_mesh_from_root(self):
-        mesh = self.mesh_info.mesh
-
-        if mesh.ndim == 1:
-            return mesh
-        else:
-            if mesh.mesh_dim_names is None:
-                raise AssertionError("Expected mesh_dim_names to not be None")
-            shard_dim_name = mesh.mesh_dim_names[-1]
-            return mesh[shard_dim_name]
+        return self.shard_mesh
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:
