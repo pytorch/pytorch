@@ -7,7 +7,7 @@ import itertools
 import logging
 import math
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -32,8 +32,6 @@ from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from typing import Union
-
     from ..ops_handler import ReductionType, StoreMode
     from ..scheduler import Scheduler, SchedulerNode
     from .common import OpVarT
@@ -53,7 +51,7 @@ DTYPE_TO_METAL = {
 }
 
 
-def value_to_metal(val: Union[float, int, bool, str, CSEVariable]) -> str:
+def value_to_metal(val: float | int | bool | str | CSEVariable) -> str:
     if isinstance(val, float):
         if val == torch.inf:
             return "HUGE_VALF"
@@ -80,6 +78,9 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
+        # Workaround for Metal compiler bug with fused (x / A) % B, see PR 175481
+        use_safe_mod = div == 65536 and (mod & (mod - 1)) != 0
+
         x = self.doprint(x)
         if div != 1:
             div = self.doprint(div)
@@ -88,11 +89,14 @@ class MetalExprPrinter(ExprPrinter_):
             else:
                 x = f"metal::floor({x}) / ({div})"
         mod = self.doprint(mod)
+        if use_safe_mod:
+            return f"c10::metal::safe_mod({x}, {mod})"
         return f"({x}) % ({mod})"
 
     def _print_Min(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::min only supported for 2 args")
+        # pyrefly: ignore [missing-attribute]
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -101,6 +105,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_Max(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 2:
             raise RuntimeError("metal::max only supported for 2 args")
+        # pyrefly: ignore [missing-attribute]
         a, b = map(self._print, expr.args)
         typecast_a = f"static_cast<decltype({a}+{b})>({a})"
         typecast_b = f"static_cast<decltype({a}+{b})>({b})"
@@ -108,10 +113,12 @@ class MetalExprPrinter(ExprPrinter_):
 
     def _print_Abs(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"metal::abs({self._print(expr.args[0])})"
 
     def _print_RoundToInt(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [missing-attribute]
         return f"static_cast<long>(metal::rint({self._print(expr.args[0])}))"
 
     def _print_RoundDecimal(self, expr: sympy.Expr) -> str:
@@ -129,6 +136,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
         # TODO: This is only accurate up to 2**23
+        # pyrefly: ignore [missing-attribute]
         return f"static_cast<float>({self._print(lhs)}) / static_cast<float>({self._print(rhs)})"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
@@ -181,7 +189,7 @@ class MetalOverrides(OpOverrides):
     def to_dtype(
         x: CSEVariable,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> str:
         if dtype == torch.double:
@@ -198,7 +206,7 @@ class MetalOverrides(OpOverrides):
         return f"as_type<{DTYPE_TO_METAL[dtype]}>(static_cast<{DTYPE_TO_METAL[src_dtype]}>({x}))"
 
     @staticmethod
-    def constant(val: Union[bool, float, int], dtype: torch.dtype) -> str:
+    def constant(val: bool | float | int, dtype: torch.dtype) -> str:
         return value_to_metal(val)
 
     @staticmethod
@@ -559,9 +567,9 @@ class MetalKernel(SIMDKernel):
 
     def _new_idxvar(
         self,
-        dtype: Union[str | torch.dtype],
-        elem_count: Optional[int] = None,
-        default_value: Optional[Any] = None,
+        dtype: str | torch.dtype,
+        elem_count: int | None = None,
+        default_value: Any | None = None,
         is_threadgroup: bool = True,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
     ) -> CSEVariable:
@@ -584,8 +592,8 @@ class MetalKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         "Caching wrapper around _reduction_nocache"
         cache_key = (src_dtype, reduction_type, value)
         # Return cached reduction
@@ -600,8 +608,8 @@ class MetalKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         """Codegen a reduction operation.
         Only sum and prod operations are somewhat reasonable optimized"""
         assert self.inside_reduction
@@ -887,7 +895,7 @@ class MetalKernel(SIMDKernel):
         self.compute.clear()
         self.stores.clear()
 
-    def codegen_kernel(self, name: Optional[str] = None) -> str:
+    def codegen_kernel(self, name: str | None = None) -> str:
         """Called at the end to generate a final kernel string"""
         self.codegen_body()
         code = IndentedBuffer()
@@ -1125,7 +1133,7 @@ class MetalKernel(SIMDKernel):
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
 
-    def __init__(self, scheduler: Optional[Scheduler]) -> None:
+    def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
         wrapper = V.graph.wrapper_code
         if wrapper is not None:

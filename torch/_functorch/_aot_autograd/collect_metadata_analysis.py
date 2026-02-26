@@ -13,7 +13,7 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -171,7 +171,7 @@ def run_functionalized_fw_and_collect_metadata(
     # TODO: refactor to kill this flag
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
-    static_input_indices: Optional[list[int]] = None,
+    static_input_indices: list[int] | None = None,
     pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
@@ -191,10 +191,11 @@ def run_functionalized_fw_and_collect_metadata(
     @simple_wraps(f)
     def inner(*flat_args: Any) -> ViewAndMutationMeta:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(
+        if not all(
             isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
             for a in flat_args
-        )
+        ):
+            raise AssertionError("all flat_args must be KNOWN_TYPES or opaque types")
 
         input_info: list[InputAliasInfo] = []
         output_info: list[OutputAliasInfo] = []
@@ -223,12 +224,11 @@ def run_functionalized_fw_and_collect_metadata(
             # Assert that f does NOT have an AOTOutputs in it, easy mistake to
             # make!  You need to drop the second output before calling this
             # function
-            assert not pytree.tree_any(
-                lambda x: isinstance(x, AOTOutput), flat_f_outs
-            ), (
-                f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
-                "function with without_output_descs before passing it here?"
-            )
+            if pytree.tree_any(lambda x: isinstance(x, AOTOutput), flat_f_outs):
+                raise AssertionError(
+                    f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
+                    "function with without_output_descs before passing it here?"
+                )
 
             # NB: this is just to setup the input descriptors, we will
             # recreate these descriptors (with the same convention!) when we
@@ -325,7 +325,7 @@ def run_functionalized_fw_and_collect_metadata(
         ] = collections.defaultdict(int)
 
         out_storage_to_metadata_key_to_tensors: collections.defaultdict[
-            Optional[StorageWeakRef],
+            StorageWeakRef | None,
             collections.defaultdict[MetadataKey, set[torch.Tensor]],
         ] = collections.defaultdict(lambda: collections.defaultdict(set))
 
@@ -543,7 +543,8 @@ alias each other from a multi-output view call"
             elif functional_tensor_storage_changed and id(o) in inp_tensor_ids:
                 # When there is a set_() on an input, we cannot rely on checking storages
                 # to detect if we are returning an input (since the inputs storage is different)
-                assert curr_storage is not None
+                if curr_storage is None:
+                    raise AssertionError("curr_storage must not be None")
                 base_idx = inp_storage_refs[curr_storage]
                 output_type = OutputType.is_input
 
@@ -689,12 +690,18 @@ from a multi-output view call"
                 if isinstance(o, FunctionalTensor):
                     view_meta_sequence = ViewMetaSequence(o)
 
+            requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
-                requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
+                requires_grad=requires_grad,
+                # A view created under no_grad() inherits requires_grad from
+                # its base but has no grad_fn and does not participate in
+                # differentiation.
+                requires_grad_for_backward=requires_grad
+                and (o._base is None or grad_fn is not None),
                 view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
@@ -783,7 +790,7 @@ from a multi-output view call"
                 OutputType.custom_function_view,
             ]
             and issubclass(info.raw_type, torch.Tensor)
-            and info.requires_grad
+            and info.requires_grad_for_backward
         ]
         f_output_tangents, f_output_tangents_descs = (
             [x[0] for x in f_output_tangents_pairs],

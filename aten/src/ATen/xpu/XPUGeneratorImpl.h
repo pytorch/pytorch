@@ -55,6 +55,9 @@ struct TORCH_XPU_API XPUGeneratorImpl : public GeneratorImpl {
   uint64_t seed() override;
   void set_state(const c10::TensorImpl& new_state) override;
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
+  void graphsafe_set_state(
+      const c10::intrusive_ptr<GeneratorImpl>& state) override;
+  c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const override;
 
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;

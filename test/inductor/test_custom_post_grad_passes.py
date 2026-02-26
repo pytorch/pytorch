@@ -12,6 +12,7 @@ from torch._inductor.codegen.common import get_custom_backend_pass_for_device
 from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
+    CustomInferenceAwareGraphPass,
     get_hash_for_files,
 )
 from torch._inductor.lowering import lowerings as L
@@ -274,9 +275,11 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             ]
 
             f(W, nested_seqs)
-            assert saved_graph[0] is not None
+            if saved_graph[0] is None:
+                raise AssertionError("saved_graph[0] is None")
             matmuls = [n for n in saved_graph[0].nodes if n.target == torch.mm]
-            assert len(matmuls) == 1
+            if len(matmuls) != 1:
+                raise AssertionError(f"Expected 1 matmul, got {len(matmuls)}")
 
         inner_test()
 
@@ -308,6 +311,31 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
 
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_pass_inference_flag(self):
+        class CustomPass(CustomInferenceAwareGraphPass):
+            def __init__(self):
+                super().__init__()
+                self.is_infer = False
+
+            def __call__(self, g: torch.fx.graph.Graph, is_inference: bool):
+                self.is_infer = is_inference
+
+            def uuid(self) -> bytes:
+                return get_hash_for_files((__file__,))
+
+        custom_pass = CustomPass()
+        with config.patch(post_grad_custom_post_pass=custom_pass):
+
+            def f(x):
+                return x.abs()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), f(x))
+            self.assertTrue(custom_pass.is_infer)
+            x.requires_grad_()
+            torch.testing.assert_close(torch.compile(f)(x), f(x))
+            self.assertFalse(custom_pass.is_infer)
 
 
 if __name__ == "__main__":

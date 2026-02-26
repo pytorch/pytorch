@@ -7,12 +7,6 @@ from typing import Optional, TYPE_CHECKING
 import torch
 
 
-if TYPE_CHECKING:
-    from torch.utils.data._utils.worker import WorkerInfo
-
-from torch._C import default_generator
-
-
 __all__ = [
     "set_rng_state",
     "get_rng_state",
@@ -22,6 +16,12 @@ __all__ = [
     "fork_rng",
     "thread_safe_generator",
 ]
+
+
+if TYPE_CHECKING:
+    from torch.utils.data._utils.worker import WorkerInfo
+
+from torch._C import default_generator
 
 
 def set_rng_state(new_state: torch.Tensor) -> None:
@@ -261,6 +261,10 @@ def thread_safe_generator() -> Optional[torch.Generator]:
     from torch.utils.data import get_worker_info
 
     worker_info: WorkerInfo | None = get_worker_info()
-    if worker_info is not None and worker_info.worker_method == "thread":
+    if (
+        worker_info is not None
+        and worker_info.worker_method == "thread"
+        and worker_info.rng is not None
+    ):
         return worker_info.rng.torch_generator
     return None

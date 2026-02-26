@@ -24,7 +24,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.precompile_context import BackendCacheArtifact
@@ -137,7 +137,7 @@ CompiledFxGraphLoadable: type[BundledOutputCodeLoadable[CompiledFxGraph]] = (
 @dataclass
 class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
     fx_graph_cache_info: tuple[str, list[str]]
-    fx_graph_guard_expr: Optional[str]
+    fx_graph_guard_expr: str | None
 
     def pre_save(self) -> None:
         return
@@ -302,7 +302,8 @@ class SerializedGraphModule:
 
     def deserialize(self) -> torch.fx.GraphModule:
         gm = self.fn(*self.args)
-        assert isinstance(gm, torch.fx.GraphModule)
+        if not isinstance(gm, torch.fx.GraphModule):
+            raise AssertionError(f"expected fx.GraphModule, got {type(gm)}")
         return gm
 
 
@@ -310,6 +311,7 @@ def serialize_graph_module(gm: torch.fx.GraphModule) -> SerializedGraphModule:
     # NOTE: mutates the graph module
     gm.meta = {}
     for node in gm.graph.nodes:
+        # pyrefly: ignore [implicit-any]
         node.meta = {}
     return SerializedGraphModule(gm)
 
@@ -335,13 +337,13 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
     # Forward and Backward info
     compiled_fw: TForward
-    compiled_bw: Optional[TBackward]
+    compiled_bw: TBackward | None
 
     # Code of the joint graph using print_readable()
     # Used for logging purposes
-    aot_joint_graph_str: Optional[str]
-    aot_forward_graph_str: Optional[str]
-    aot_backward_graph_str: Optional[str]
+    aot_joint_graph_str: str | None
+    aot_forward_graph_str: str | None
+    aot_backward_graph_str: str | None
 
     # Runtime_metadata saved right before compilation
     runtime_metadata: ViewAndMutationMeta
@@ -350,8 +352,8 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     dispatch_wrappers: list[CompilerWrapper]
 
     # Used by AOTSubclassWrapper
-    maybe_subclass_meta: Optional[SubclassMeta]
-    num_fw_outs_saved_for_bw: Optional[int]
+    maybe_subclass_meta: SubclassMeta | None
+    num_fw_outs_saved_for_bw: int | None
 
     # Used by RuntimeWrapper
     indices_of_inps_to_detach: list[int]
@@ -365,10 +367,10 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     # Used by standalone_compile
     sanitized_aot_config: AOTConfig
 
-    guards_expr: Optional[str]
+    guards_expr: str | None
 
     # Used by Compiled Autograd
-    serialized_bw_module: Optional[SerializedGraphModule]
+    serialized_bw_module: SerializedGraphModule | None
 
     def pre_save(self) -> None:
         """
@@ -384,6 +386,7 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         args: list[torch.Tensor],
         aot_config: AOTConfig,
         fx_config: _CompileFxKwargs,
+        # pyrefly: ignore [implicit-any]
     ) -> Callable:
         """
         This function takes a result and carefully reconstructs the original callable
@@ -515,7 +518,8 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         disable_amp = torch._C._is_any_autocast_enabled()
 
         if needs_autograd:
-            assert self.compiled_bw is not None
+            if self.compiled_bw is None:
+                raise AssertionError("compiled_bw must not be None when needs_autograd")
 
             cached_lazy_backward = None
             if self.serialized_bw_module is not None:
@@ -565,7 +569,8 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
             symints = AOTAutogradCache._filter_backed_symints(args)
             check = bool(AOTAutogradCache.evaluate_guards(self.guards_expr, symints))
-            assert check is True
+            if check is not True:
+                raise AssertionError(f"guards check failed: {check}")
 
         return compiled_function
 
@@ -666,13 +671,16 @@ def deserialize_bundled_cache_entry(
     def forward(*runtime_args: Any) -> Any:
         return compiled_fn(list(runtime_args))
 
-    assert hasattr(compiled_fn, "serialize")
+    if not hasattr(compiled_fn, "serialize"):
+        raise AssertionError("compiled_fn must have serialize attribute")
     forward.serialize = compiled_fn.serialize  # type: ignore[attr-defined]
 
     return forward
 
 
 @dataclass
+# pyrefly: ignore [implicit-any]
 class BundledAOTAutogradCacheArtifact(BackendCacheArtifact[Callable]):
+    # pyrefly: ignore [implicit-any]
     def after_deserialization(self) -> Callable:
         return deserialize_bundled_cache_entry(self.content)

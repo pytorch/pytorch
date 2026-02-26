@@ -47,6 +47,8 @@ namespace torch::_export::archive_spec {
   DO(SAMPLE_INPUTS_DIR, "data/sample_inputs/")                                 \
   DO(SAMPLE_INPUTS_FILENAME_FORMAT,                                            \
      "data/sample_inputs/{}.pt") /* {model_name} */                            \
+  DO(TS_SAMPLE_INPUTS_FILENAME_FORMAT,                                         \
+     "extra/{}.forward.sample_input.pt") /* {model_name} */                    \
   /* ExecuTorch artifacts, including PTE files */                              \
   DO(EXECUTORCH_DIR, "data/executorch/")                                       \
   /* extra folder */                                                           \
