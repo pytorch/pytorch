@@ -628,6 +628,141 @@ class DTensorFuzzPlacementsTemplate(DTensorFuzzTemplate):
         return code_lines
 
 
+class DistributedOverlapTemplate(FuzzTemplate):
+    """Template for testing distributed compiler overlap and bucketing passes.
+
+    This template generates graphs that mix compute operations with collective
+    communication operations (all_gather, reduce_scatter, all_reduce), which
+    allows testing the overlap scheduling and bucketing optimization passes
+    in torch._inductor.fx_passes.
+
+    The generated code uses FakeStore for process group setup, allowing
+    single-process testing of the compilation passes.
+
+    Note: Uses static shapes (dynamic=False) because the overlap scheduling
+    pass has known issues with SymInt in its logging code.
+    """
+
+    def __init__(self):
+        from torchfuzz.checks import EagerVsFullGraphStaticCompileCheck
+
+        super().__init__(
+            supported_ops=[
+                # Compute operations that can overlap with collectives
+                "torch.mm",
+                "torch.bmm",
+                "torch.matmul",
+                "torch.addmm",
+                "torch.add",
+                "torch.mul",
+                "torch.sub",
+                "torch.div",
+                # Shape operations (common in distributed workloads)
+                "torch.Tensor.view",
+                "torch.reshape",
+                "torch.cat",
+                "torch.split",
+                "torch.chunk",
+                # Neural network operations
+                "torch.nn.functional.linear",
+                "torch.nn.functional.relu",
+                "torch.nn.functional.gelu",
+                "torch.nn.functional.silu",
+                "torch.nn.functional.layer_norm",
+                "torch.nn.functional.dropout",
+                "torch.sigmoid",
+                "torch.tanh",
+                "torch.nn.functional.softmax",
+                # Collective operations
+                "torch.ops._c10d_functional.all_gather_into_tensor",
+                "torch.ops._c10d_functional.reduce_scatter_tensor",
+                "torch.ops._c10d_functional.all_reduce",
+            ],
+            check=EagerVsFullGraphStaticCompileCheck(),
+        )
+
+    def supported_dtypes(self):
+        """Collectives work best with float types."""
+        return [
+            torch.float32,
+            torch.float16,
+            torch.bfloat16,
+        ]
+
+    def spec_distribution(self):
+        """Distributed template: tensor-only."""
+        return {
+            "tensor_prob": 1.0,
+            "scalar_prob": 0.0,
+            "allow_tensors": True,
+            "allow_scalars": False,
+        }
+
+    def imports_codegen(self):
+        return [
+            "import torch",
+            "import torch.distributed as dist",
+            "from torch.testing._internal.distributed.fake_pg import FakeStore",
+        ]
+
+    def flags_codegen(self):
+        return [
+            "torch.set_default_device('cuda')",
+            "torch._dynamo.config.capture_scalar_outputs = True",
+            "# Enable distributed overlap and bucketing passes",
+            "torch._inductor.config.aten_distributed_optimizations.enable_overlap_scheduling = True",
+            "torch._inductor.config.aten_distributed_optimizations.collective_bucketing = True",
+            "torch._inductor.config.aten_distributed_optimizations.enable_fusion_regions = True",
+            "torch._inductor.config.aten_distributed_optimizations.compute_estimator = 'analytical'",
+        ]
+
+    def args_codegen(self, arg_operations):
+        """Generate argument creation code with process group setup."""
+        code_lines = []
+
+        # Process group setup using FakeStore
+        code_lines.extend(
+            [
+                "# Setup fake distributed environment for testing",
+                "world_size = 8",
+                "group_size = world_size",
+                "fake_store = FakeStore()",
+                "dist.init_process_group(",
+                '    "fake", store=fake_store, rank=0, world_size=world_size',
+                ")",
+                'group_name = dist.group.WORLD.group_name if hasattr(dist.group.WORLD, "group_name") else "default"',
+                "",
+                "# Sentinel tensor to ensure gradient computation",
+                "sentinel = torch.tensor(1.0, requires_grad=True)",
+                "",
+            ]
+        )
+
+        if arg_operations:
+            for i, (node_id, spec) in enumerate(arg_operations):
+                arg_name = f"arg_{i}"
+
+                if isinstance(spec, ScalarSpec):
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+                    code_lines.append(
+                        f"{arg_name} = float(torch.randn((), dtype={dtype_str}).item())"
+                    )
+
+                elif isinstance(spec, TensorSpec):
+                    size_str = str(spec.size)
+                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
+
+                    # For distributed ops, we want contiguous tensors
+                    code_lines.append(
+                        f"{arg_name} = torch.randn({size_str}, dtype={dtype_str}, requires_grad=True)"
+                    )
+
+        return code_lines
+
+    def epilogue_codegen(self):
+        return ["dist.destroy_process_group()"]
+
+
 def convert_graph_to_python_code(
     operation_graph: OperationGraph,
     seed: int | None = None,
@@ -656,6 +791,8 @@ def convert_graph_to_python_code(
         fuzz_template = DTensorFuzzPlacementsTemplate()
     elif template == "unbacked":
         fuzz_template = UnbackedFuzzTemplate()
+    elif template == "distributed_overlap":
+        fuzz_template = DistributedOverlapTemplate()
     else:
         fuzz_template = DefaultFuzzTemplate()
 

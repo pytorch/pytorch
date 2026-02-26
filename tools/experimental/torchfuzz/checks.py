@@ -25,6 +25,24 @@ class EagerVsFullGraphDynamicCompileCheck(Check):
         ]
 
 
+class EagerVsFullGraphStaticCompileCheck(Check):
+    """Check that runs eager then fullgraph compilation with static shapes.
+
+    This is useful for distributed overlap fuzzing where dynamic shapes
+    can trigger bugs in the overlap scheduling pass's logging code.
+    """
+
+    def codegen(self, args_tuple: str) -> list[str]:
+        return [
+            f"args = {args_tuple}",
+            "result_original = fuzzed_program(*args)",
+            "print('✅ eager success')",
+            "compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=False)",
+            "result_compiled = compiled_program(*args)",
+            "print('✅ compile success')",
+        ]
+
+
 class EagerVsFullGraphDynamicCompileWithNumericsCheck(Check):
     """Check that runs eager and compiled, compares forward numerics."""
 
