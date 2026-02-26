@@ -132,10 +132,6 @@ class TestMonitorTensorboard(TestCase):
         for temp_dir in self.temp_dirs:
             temp_dir.cleanup()
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 13),
-        "numpy failure, likely caused by old tensorboard version",
-    )
     def test_event_handler(self):
         with self.create_summary_writer() as w:
             handle = register_event_handler(TensorboardEventHandler(w))
