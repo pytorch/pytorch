@@ -688,8 +688,6 @@ class CPFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    # Skipped on rocm due to regression in triton 3.7
-    @skipIfRocm
     def test_cp_flex_attention_document_mask(self) -> None:
         random.seed(10)
 
