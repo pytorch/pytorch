@@ -33,9 +33,10 @@ import types
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
-from typing_extensions import Never
+from typing import TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast
 from weakref import WeakKeyDictionary
+
+from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
@@ -45,17 +46,17 @@ from torch.utils._pytree import is_namedtuple_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
-    format_frame_info,
-    get_dynamo_observed_exception,
-    handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
-    raise_observed_exception,
     StepUnsupported,
-    unimplemented,
     Unsupported,
+    format_frame_info,
+    get_dynamo_observed_exception,
+    handle_observed_exception,
+    raise_observed_exception,
+    unimplemented,
 )
 from ..guards import GuardBuilder, install_guard
 from ..source import (
@@ -82,9 +83,9 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttributeMutationNew,
-    raise_type_error_exc,
     ValueMutationNew,
     VariableTracker,
+    raise_type_error_exc,
 )
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
@@ -92,7 +93,6 @@ from .constant import (
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
 )
-
 
 try:
     from torch.distributed.fsdp._fully_shard import _fsdp_param_group
@@ -2143,7 +2143,7 @@ class SkipFunctionVariable(VariableTracker):
                 )
                 # pyrefly: ignore [implicit-any]
                 hints = []
-            reason = self.reason if self.reason else "<missing reason>"
+            reason = self.reason or "<missing reason>"
             unimplemented(
                 gb_type="Attempted to call function marked as skipped",
                 context=f"module: {module_name}, qualname: {qualname}, skip reason: {reason}",
@@ -2673,12 +2673,17 @@ class PolyfilledFunctionVariable(VariableTracker):
         if self.can_constant_fold_through() and check_unspec_or_constant_args(
             args, kwargs
         ):
-            result = (
-                self.fn(  # use the original function which is faster than the polyfill
+            try:
+                result = self.fn(  # use the original function which is faster than the polyfill
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 )
-            )
+            except (TypeError, ValueError) as exc:
+                raise_observed_exception(
+                    type(exc),
+                    tx,
+                    args=[VariableTracker.build(tx, a) for a in exc.args],
+                )
             return VariableTracker.build(tx, result)
 
         # Special case for sum on tuple/list of ints
@@ -2775,10 +2780,10 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
-    create_tma_experimental_metadata,
-    create_tma_stable_metadata,
     TMADescriptorMetadata,
     TritonHOPifier,
+    create_tma_experimental_metadata,
+    create_tma_stable_metadata,
 )
 
 

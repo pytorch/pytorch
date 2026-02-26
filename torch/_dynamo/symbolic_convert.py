@@ -4091,6 +4091,8 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [implicit-any]
             kwargs = {}
 
+        if inst.arg == 3:
+            breakpoint()
         try:
             # if call_function fails, need to set kw_names to None, otherwise
             # a subsequent call may have self.kw_names set to an old value

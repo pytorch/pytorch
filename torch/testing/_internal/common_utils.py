@@ -3483,7 +3483,7 @@ class TestCase(expecttest.TestCase):
                     subdir = "test/dynamo_expected_failures"
                     from .dynamo_test_failures import dynamo_expected_failures as expected_failures
 
-                if key in expected_failures:
+                if False and key in expected_failures:
                     method = getattr(self, self._testMethodName)
                     file_name = os.path.join(subdir, key)
                     setattr(self, self._testMethodName, expect_failure(method, file_name))
