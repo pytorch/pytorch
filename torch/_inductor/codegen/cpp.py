@@ -1736,7 +1736,8 @@ class CppVecOverrides(CppOverrides):
                 V.kernel.compute,
                 code,
             )
-            result.is_vec = True
+            assert isinstance(csevar, CppCSEVariable)
+            csevar.is_vec = True
         elif result.is_vec:
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {body_code_vec} : {other_code_vec}"

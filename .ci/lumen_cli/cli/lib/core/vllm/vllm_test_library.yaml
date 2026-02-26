@@ -20,7 +20,8 @@ vllm_basic_models_test:
     - pytest -v -s models/test_registry.py
     - pytest -v -s models/test_utils.py
     - pytest -v -s models/test_vision.py
-    - pytest -v -s models/test_initialization.py
+    - pytest -v -s models/test_initialization.py -k 'not voxtral'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/test_initialization.py -k voxtral
 
 vllm_entrypoints_test:
   title: Entrypoints Test
@@ -85,8 +86,7 @@ vllm_multi_model_test_28_failure_test:
   package_install:
     - git+https://github.com/TIGER-AI-Lab/Mantis.git
   steps:
-    - pytest -v -s models/multimodal/generation/test_voxtral.py -k 'not 5-128-half'
-    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/generation/test_voxtral.py -k 5-128-half
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/generation/test_voxtral.py
     - pytest -v -s models/multimodal/pooling
 
 vllm_pytorch_compilation_unit_tests:
@@ -104,10 +104,10 @@ vllm_pytorch_compilation_unit_tests:
 
 vllm_language_model_test_extended_generation_28_failure_test:
   title: Language Models Test (Extended Generation) 2.8 release failure
-  id: vllm_languagde_model_test_extended_generation_28_failure_test
+  id: vllm_language_model_test_extended_generation_28_failure_test
   package_install:
     - --no-build-isolation
-    - git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8
+    - git+https://github.com/Dao-AILab/causal-conv1d@v1.6.0
   steps:
     - pytest -v -s models/language/generation/test_mistral.py
 
