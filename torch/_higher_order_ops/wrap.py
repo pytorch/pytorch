@@ -3,7 +3,7 @@ import inspect
 import itertools
 import logging
 import weakref
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -69,7 +69,7 @@ class InductorCompiledCode(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("inductor_compiled_code")
+        super().__init__("inductor_compiled_code", no_overloaded_args=True)
 
     def __call__(self, func, *args, **kwargs):
         # pyrefly: ignore [missing-attribute]
@@ -79,6 +79,8 @@ class InductorCompiledCode(HigherOrderOperator):
 inductor_compiled_code = InductorCompiledCode()
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
+inductor_compiled_code.fallthrough(DispatchKey.Negative)
+inductor_compiled_code.fallthrough(DispatchKey.Conjugate)
 
 
 _inductor_compiled_callable_id = itertools.count()
@@ -267,9 +269,9 @@ class WrapWithAutocast(HigherOrderOperator):
     def __call__(
         self,
         device_type: str,
-        dtype: Optional[_dtype],
+        dtype: _dtype | None,
         enabled: bool,
-        cache_enabled: Optional[bool],
+        cache_enabled: bool | None,
         wrapped_func,
         *args,
         **kwargs,

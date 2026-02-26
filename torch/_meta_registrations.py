@@ -4587,12 +4587,14 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
     return output
 
 
-@register_meta(aten.bmm.default)
+@register_meta([aten.bmm.default, aten.bmm.out])
+@out_wrapper(exact_dtype=True)
 def meta_bmm(self, mat2):
     return common_meta_baddbmm_bmm(self, mat2, True)
 
 
-@register_meta(aten.bmm.dtype)
+@register_meta([aten.bmm.dtype, aten.bmm.dtype_out])
+@out_wrapper(exact_dtype=True)
 def meta_bmm_dtype(self, mat2, out_dtype):
     return common_meta_baddbmm_bmm(self, mat2, True, out_dtype=out_dtype)
 
