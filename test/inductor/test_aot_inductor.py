@@ -1866,6 +1866,41 @@ class AOTInductorTestsTemplate:
         self.check_model(model, example_inputs, dynamic_shapes=spec)
         torch.cuda.caching_allocator_enable(True)
 
+    @skipIfMPS
+    @config.patch({"triton.autotune_at_compile_time": None})
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_slice_independent_backed_symints_no_unbacked(self):
+        # x[0:s1] where x.size(0) = s0-1 should produce Min(s1, s0-1),
+        # not an unbacked symint with a bad fallback value.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires triton")
+
+        INNER_DIM = 4224
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                x_trimmed = x[:-1]
+                sliced = x_trimmed[: y.size(0)]
+                reshaped = sliced.reshape(-1, 128, 33)
+                expanded = reshaped.unsqueeze(3).expand(-1, 128, 33, 8)
+                shifts = torch.arange(0, 64, 8, device=x.device, dtype=torch.int64)
+                return (expanded >> shifts) & 255
+
+        torch.cuda.caching_allocator_enable(False)
+        model = Repro()
+        example_inputs = (
+            torch.randint(
+                0, 256, (200, INNER_DIM), device=self.device, dtype=torch.int64
+            ),
+            torch.randn(50, 8, device=self.device),
+        )
+        spec = {
+            "x": (Dim.DYNAMIC, Dim.STATIC),
+            "y": (Dim.DYNAMIC, Dim.STATIC),
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=spec)
+        torch.cuda.caching_allocator_enable(True)
+
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
         class Repro(torch.nn.Module):
