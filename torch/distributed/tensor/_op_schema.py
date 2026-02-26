@@ -71,7 +71,8 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
     """
     This is used to propagate tensor metadata, must be under fake mode
     """
-    assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
+    if arg.tensor_meta is None:
+        raise AssertionError("DTensorSpec does not contain tensor_meta.")
     return torch.empty_strided(
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
@@ -160,13 +161,15 @@ class OpSpec:
             return self.output_specs.mesh
         elif isinstance(self.output_specs, tuple):
             out_spec = self.output_specs[0]
-            assert isinstance(out_spec, DTensorSpec)
+            if not isinstance(out_spec, DTensorSpec):
+                raise AssertionError
             return out_spec.mesh
         elif self.output_specs is None:
             # For no-output ops, get mesh from input_specs
-            assert self.input_specs is not None and len(self.input_specs) > 0, (
-                "Cannot determine mesh: output_specs is None and input_specs is empty"
-            )
+            if self.input_specs is None or len(self.input_specs) <= 0:
+                raise AssertionError(
+                    "Cannot determine mesh: output_specs is None and input_specs is empty"
+                )
             return self.input_specs[0].mesh
         else:
             raise ValueError(
@@ -174,11 +177,13 @@ class OpSpec:
             )
 
     def input_spec(self, index: int = 0) -> DTensorSpec:
-        assert self.input_specs is not None, "input_specs of OpSpec is None!"
-        assert len(self.input_specs) > index, (
-            f"Invalid index {index} for input_specs of length "
-            f"{len(self.input_specs)}: {self.input_specs}"
-        )
+        if self.input_specs is None:
+            raise AssertionError("input_specs of OpSpec is None!")
+        if len(self.input_specs) <= index:
+            raise AssertionError(
+                f"Invalid index {index} for input_specs of length "
+                f"{len(self.input_specs)}: {self.input_specs}"
+            )
         return self.input_specs[index]
 
     def __str__(self) -> str:
@@ -257,7 +262,8 @@ class OpStrategy(StrategyType):
     @property
     def tensor_meta(self) -> TensorMeta:
         # TODO upstream this assert to DTensorSpec itself and fill any missing TensorMetas
-        assert self.strategies[0].output_spec.tensor_meta is not None
+        if self.strategies[0].output_spec.tensor_meta is None:
+            raise AssertionError
         return self.strategies[0].output_spec.tensor_meta
 
     def __hash__(self) -> int:
@@ -303,7 +309,8 @@ class TupleStrategy(StrategyType):
 
     def child_mesh(self, index: int) -> DeviceMesh:
         op_strategy = self.children[index]
-        assert isinstance(op_strategy, OpStrategy)
+        if not isinstance(op_strategy, OpStrategy):
+            raise AssertionError
         return op_strategy.mesh
 
     def __str__(self) -> str:
@@ -467,12 +474,14 @@ class OpSchema:
                 args_schema.append(str(arg))
                 device_mesh = arg.mesh
             elif isinstance(arg, OpStrategy):
-                assert len(arg.strategies) == 1
+                if len(arg.strategies) != 1:
+                    raise AssertionError
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 device_mesh = arg.mesh
             elif isinstance(arg, TupleStrategy):
                 first_op_strategy = arg.children[0]
-                assert isinstance(first_op_strategy, OpStrategy)
+                if not isinstance(first_op_strategy, OpStrategy):
+                    raise AssertionError
                 device_mesh = first_op_strategy.mesh
                 args_schema.append(str(arg))
             else:

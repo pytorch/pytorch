@@ -355,9 +355,10 @@ class DTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
-        assert flatten_spec is not None, (
-            "Expecting spec to be not None from `__tensor_flatten__` return value!"
-        )
+        if flatten_spec is None:
+            raise AssertionError(
+                "Expecting spec to be not None from `__tensor_flatten__` return value!"
+            )
         local_tensor = inner_tensors["_local_tensor"]
         spec, requires_grad = flatten_spec
         unflatten_tensor_meta = TensorMeta(
@@ -926,7 +927,8 @@ def distribute_tensor(
             )
     placements = tuple(placements)
 
-    assert local_tensor is not None, "distributing a tensor should not be None"
+    if local_tensor is None:
+        raise AssertionError("distributing a tensor should not be None")
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     spec = DTensorSpec(
@@ -1159,11 +1161,11 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     placements = placements or tuple(Replicate() for _ in range(device_mesh.ndim))
 
     # check device_mesh against placements
-    assert device_mesh.ndim == len(placements), (
-        "mesh dimension does not match the length of placements"
-    )
+    if device_mesh.ndim != len(placements):
+        raise AssertionError("mesh dimension does not match the length of placements")
 
-    assert kwargs["layout"] == torch.strided, "layout value not supported!"
+    if kwargs["layout"] != torch.strided:
+        raise AssertionError("layout value not supported!")
     torch_stride = torch._prims_common.make_contiguous_strides_for(size)
 
     # get local tensor shape
@@ -1185,7 +1187,8 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
             random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh)
 
-        assert random._rng_tracker is not None
+        if random._rng_tracker is None:
+            raise AssertionError
         with random._rng_tracker._distribute_region(spec):
             local_tensor = init_op(local_shape, **kwargs)
     else:

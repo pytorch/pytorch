@@ -1720,27 +1720,38 @@ from torch.distributed.distributed_c10d import (
 # fn.__name__ as a module attribute — a def's __name__ matches its variable name
 # automatically, whereas a closure's would not.
 def _remapped_allgather(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_allgather should only be called during tracing")
     all_gather_tensor_inplace(*args, **kwargs)
 
 
 def _remapped_reducescatter(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_reducescatter should only be called during tracing"
+        )
     reduce_scatter_tensor_inplace(*args, **kwargs)
 
 
 def _remapped_allreduce(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_allreduce should only be called during tracing")
     all_reduce_inplace(*args, **kwargs)
 
 
 def _remapped_all_to_all_single(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_all_to_all_single should only be called during tracing"
+        )
     all_to_all_inplace(*args, **kwargs)
 
 
 def _remapped_all_gather(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_all_gather should only be called during tracing"
+        )
     all_gather_inplace(*args, **kwargs)
 
 
