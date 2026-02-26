@@ -31,7 +31,7 @@ import inspect
 import operator
 from collections.abc import Generator, Iterable, Sequence
 from types import TracebackType
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -57,7 +57,7 @@ from ..utils import (
     set_torch_function_mode_stack,
 )
 from .base import VariableTracker
-from .constant import ConstantVariable
+from .constant import CONSTANT_VARIABLE_NONE
 from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserMethodVariable
 from .lazy import LazyVariableTracker
@@ -157,8 +157,8 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
 
     def __init__(
         self,
-        value: Optional[TorchFunctionMode],
-        source: Optional[Source] = None,
+        value: TorchFunctionMode | None,
+        source: Source | None = None,
         **kwargs: Any,
     ) -> None:
         if value is not None:
@@ -203,12 +203,12 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         from .torch import TorchInGraphFunctionVariable
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
-            return ConstantVariable.create(None)
+            return CONSTANT_VARIABLE_NONE
 
         TorchInGraphFunctionVariable(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def exit(self, tx: "InstructionTranslator", *args: Any) -> VariableTracker:
         from .torch import TorchInGraphFunctionVariable
@@ -216,7 +216,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
             tx, [], {}
         )
-        return ConstantVariable.create(None)
+        return CONSTANT_VARIABLE_NONE
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
         ty = NoEnterTorchFunctionMode
@@ -245,9 +245,9 @@ class TorchFunctionModeStackStateManager:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         set_torch_function_mode_stack(self.stack)
         self.stack = []
@@ -504,10 +504,9 @@ def get_torch_function_fn(
     # The underlying function could be a classmethod, staticmethod, regular
     # function or a function with C-implementation. It doesn't matter as long as
     # they satisfy the calling convention in `call_torch_function`.
-    from .builtin import BuiltinVariable
 
-    args = [vt, ConstantVariable("__torch_function__")]
-    func_vt = BuiltinVariable(getattr).call_function(tx, args, {})
+    args = [vt, VariableTracker.build(tx, "__torch_function__")]
+    func_vt = VariableTracker.build(tx, getattr).call_function(tx, args, {})
     return func_vt
 
 
@@ -679,7 +678,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 elif isinstance(attr, property):
                     getter_source = AttrSource(attr_source, "fget")
                     getter = attr.fget
-                    getter_var = VariableTracker.build(tx, getter, source=getter_source)
+                    getter_var = VariableTracker.build(
+                        tx, getter, source=getter_source, realize=True
+                    )
                     return getter_var.call_function(tx, [self], {})
 
                 elif isinstance(attr, classmethod):
