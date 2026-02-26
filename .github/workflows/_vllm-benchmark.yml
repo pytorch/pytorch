@@ -208,7 +208,8 @@ jobs:
 
           # Fail when there is no result or if the metrics are all zero
           python3 pytorch/pytorch-integration-testing/.github/scripts/check_benchmark_results.py \
-            --benchmark-results "${BENCHMARK_RESULTS}"
+            --benchmark-results "${BENCHMARK_RESULTS}" \
+            --strict
 
       - name: Authenticate with AWS
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
