@@ -1,5 +1,6 @@
 import contextlib
 import logging
+import os
 from collections.abc import Callable
 from typing import Any, cast, TypeVar
 from unittest.mock import patch
@@ -46,7 +47,12 @@ extern "C" {{export_declaration}}
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
 {%- if num_threads > 1 %}
+    {%- set use_dynamic_threads = ((config.cpp.threads < 1) and (num_threads == cpu_count)) or config.cpp.dynamic_threads %}
+    {%- if use_dynamic_threads %}
+    #pragma omp parallel
+    {%- else %}
     #pragma omp parallel num_threads({{num_threads}})
+    {%- endif %}
     {
         {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
@@ -506,6 +512,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             Y_list={"Y" + str(idx): Y for idx, Y in enumerate(Y_list)},
             Y_2d_list=Y_2d_list,
             multi_output_buffers=multi_output_buffers,
+            cpu_count=os.cpu_count(),
         )
         with contextlib.ExitStack() as stack:
             stack.enter_context(
