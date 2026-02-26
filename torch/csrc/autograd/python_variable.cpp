@@ -2258,6 +2258,10 @@ static bool dtensor_spec_has_symints(py::handle spec) {
   return contains_any_symint(shape);
 }
 
+// set to false to bail out of the C++ fast path for ops that need pytree
+// flattening (e.g. future pytree custom ops)
+static constexpr bool kRunPytreeWithFastPath = true;
+
 static std::optional<std::pair<NativeOpSchema, /*ComputeMesh*/ py::object>>
 create_native_op_schema(
     const c10::OperatorHandle& op,
@@ -2267,6 +2271,14 @@ create_native_op_schema(
   // operating on IValues instead of Python stuff.
 
   py::object runtime_schema_info = get_runtime_schema_info_for_op(py_op);
+  if (!kRunPytreeWithFastPath && runtime_schema_info &&
+      checked_istrue(py::handle(runtime_schema_info)
+                         .attr(dtensor_interned_strings.needs_pytree)
+                         .ptr())) {
+    // Punting on pytree flattening in the fast path on IValues for
+    // now since only a minority of ops need it.
+    return std::nullopt;
+  }
   OperatorArgsKwargsView args_kwargs(op, *stack);
   auto native_info = unpack_runtime_schema_info(
       py::handle(runtime_schema_info), args_kwargs.num_positional_args());
