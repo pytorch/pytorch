@@ -55,6 +55,7 @@ def _varlen_attn(
     scale: float | None = None,
     window_size: list[int] | None = None,
     seqused_k: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -76,6 +77,10 @@ def _varlen_attn(
             # TODO: cuDNN supports per-sequence KV lengths via SEQ_LEN_KV + padding_mask,
             # but _cudnn_attention_forward doesn't expose it yet.
             raise RuntimeError("seqused_k is not yet supported with the cuDNN backend.")
+        if page_table is not None:
+            raise RuntimeError(
+                "page_table is not yet supported with the cuDNN backend."
+            )
         result = torch.ops.aten._cudnn_attention_forward(
             query,
             key,
@@ -110,6 +115,7 @@ def _varlen_attn(
             window_size_left=window_size[0],
             window_size_right=window_size[1],
             seqused_k=seqused_k,
+            page_table=page_table,
         )
 
     rng_state_ = torch.zeros(
@@ -131,6 +137,7 @@ def _varlen_attn_fake(
     scale: float | None = None,
     window_size: list[int] | None = None,
     seqused_k: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -176,6 +183,7 @@ def varlen_attn(
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
     seqused_k: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     r"""Compute variable-length attention using Flash Attention.
 
@@ -255,6 +263,7 @@ def varlen_attn(
         scale,
         list(window_size),
         seqused_k,
+        page_table,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -274,11 +283,14 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         scale,
         window_size,
         seqused_k,
+        page_table,
     ) = inputs
     out, lse, rng_state = output
 
     if seqused_k is not None:
         raise RuntimeError("seqused_k is an inference-only parameter.")
+    if page_table is not None:
+        raise RuntimeError("page_table is an inference-only parameter.")
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
@@ -414,9 +426,7 @@ def _backward(
         scale,
         window_size,
     )
-    num_params = (
-        8  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k
-    )
+    num_params = 9  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k, page_table
     return (dq, dk, dv, *((None,) * num_params))
 
 

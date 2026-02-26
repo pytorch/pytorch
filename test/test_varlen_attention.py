@@ -1,16 +1,45 @@
 # Owner(s): ["module: sdpa"]
+import importlib
 import unittest
 from collections import namedtuple
+from contextlib import contextmanager
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    restore_flash_attention_impl,
+)
 from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+def _fa3_available() -> bool:
+    if not torch.cuda.is_available():
+        return False
+    major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
+    if major != 9:
+        return False
+    try:
+        importlib.import_module("flash_attn_interface")
+    except ModuleNotFoundError:
+        return False
+    return True
+
+
+@contextmanager
+def flash_attention_impl(impl: str):
+    """Activate a flash attention implementation for the duration of the block."""
+    activate_flash_attention_impl(impl)
+    try:
+        yield
+    finally:
+        restore_flash_attention_impl()
 
 
 VarlenShape = namedtuple(
@@ -725,6 +754,107 @@ class TestVarlenAttention(NNTestCase):
             )
 
         self.assertEqual(output_cached, output_reference)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipUnless(_fa3_available(), "FA3 backend unavailable")
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("page_size", [32, 64, 128])
+    @parametrize(
+        "actual_kv_lens",
+        [
+            [32, 64, 96, 48],
+            [1, 1, 1, 1],
+            [128, 128, 128, 128],
+            [1, 128, 1, 128],
+            [127, 63, 33, 17],
+        ],
+    )
+    def test_page_table_kv_cache(self, device, dtype, page_size, actual_kv_lens):
+        """Test paged KV cache via page_table + seqused_k with FA3."""
+        torch.manual_seed(42)
+
+        batch_size = 4
+        num_heads = 8
+        head_dim = 64
+        max_kv = max(actual_kv_lens)
+        max_pages_per_seq = (max_kv + page_size - 1) // page_size
+        cache_size = max_pages_per_seq * page_size
+
+        # Build real KV sequences for the reference path
+        q_seqs = [
+            torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(batch_size)
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        k_seqs = [
+            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
+            for kv_len in actual_kv_lens
+        ]
+        v_seqs = [
+            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
+            for kv_len in actual_kv_lens
+        ]
+
+        # Build a paged KV cache.
+        # Total number of physical pages across all sequences.
+        total_pages = batch_size * max_pages_per_seq
+        k_pages = torch.randn(
+            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        v_pages = torch.randn(
+            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+
+        # page_table maps (batch, logical_page) -> physical page index.
+        page_table = torch.zeros(
+            batch_size, max_pages_per_seq, device=device, dtype=torch.int32
+        )
+        for i in range(batch_size):
+            for p in range(max_pages_per_seq):
+                phys = i * max_pages_per_seq + p
+                page_table[i, p] = phys
+                # Fill physical page with real data where applicable
+                token_start = p * page_size
+                token_end = min(token_start + page_size, actual_kv_lens[i])
+                if token_start < actual_kv_lens[i]:
+                    fill_len = token_end - token_start
+                    k_pages[phys, :fill_len] = k_seqs[i][token_start:token_end]
+                    v_pages[phys, :fill_len] = v_seqs[i][token_start:token_end]
+
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+
+        with flash_attention_impl("FA3"), torch.no_grad():
+            output_paged = varlen_attn(
+                q_packed,
+                k_pages,
+                v_pages,
+                cu_seq_q,
+                None,  # cu_seq_k not used with page_table
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+                page_table=page_table,
+            )
+
+        # run w/ packed sequences (non-paged)
+        k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
+        v_real_packed = torch.cat(v_seqs, dim=0)
+
+        with flash_attention_impl("FA3"), torch.no_grad():
+            output_reference = varlen_attn(
+                q_packed,
+                k_real_packed,
+                v_real_packed,
+                cu_seq_q,
+                cu_seq_k_real,
+                max_q,
+                max_k_real,
+            )
+
+        self.assertEqual(output_paged, output_reference)
 
 
 device_types = ("cuda",)
