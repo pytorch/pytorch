@@ -1115,18 +1115,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if len(args) == 3 and "value" in kwargs and len(kwargs) == 1:
-                # decompose addcdiv into constituent ops, prevents a graph break due to converting
-                # value to a scalar
-                result = TorchInGraphFunctionVariable(torch.div).call_function(
-                    tx, [*args[1:]], {}
-                )
-                result = TorchInGraphFunctionVariable(torch.mul).call_function(
-                    tx, [result, kwargs["value"]], {}
-                )
-                return TorchInGraphFunctionVariable(torch.add).call_function(
-                    tx, [args[0], result], {}
-                )
+            # Skip decomposition - we have an FMA-based lowering that matches eager CUDA behavior
             return None
 
         @register(torch.full)
@@ -1154,9 +1143,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if not config.enable_dynamo_decompositions:
-                return None
-
+            # Decompose via addcmul_ so tensor weights (e.g. 0-dim tensor
+            # from tensor betas in Adam) stay in tensor arguments instead of
+            # hitting float() in the native lerp_scalar lowering.
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
