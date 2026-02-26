@@ -1,0 +1,47 @@
+name: torchtitan-test
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      - ciflow/torchtitan/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    name: torchtitan-x-pytorch-build
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-cuda12.8-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '8.0 8.9 9.0 10.0'
+      runner: linux.24xlarge
+      test-matrix: |
+        { include: [
+          { config: "torchtitan_unit_tests", shard: 1, num_shards: 1, runner: "linux.24xlarge" },
+          { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" },
+          { config: "torchtitan_models_integration", shard: 1, num_shards: 1, runner: "linux.g5.48xlarge.nvidia.gpu" },
+          { config: "torchtitan_h100_integration", shard: 1, num_shards: 1, runner: "linux.aws.h100.8" }
+        ]}
+    secrets: inherit
+
+  test:
+    name: torchtitan-x-pytorch-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: build
+    with:
+      build-environment: linux-jammy-cuda12.8-py3-gcc11
+      docker-image: ${{ needs.build.outputs.docker-image }}
+      test-matrix: ${{ needs.build.outputs.test-matrix }}
+    secrets: inherit
