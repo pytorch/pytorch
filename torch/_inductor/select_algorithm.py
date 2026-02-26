@@ -4828,7 +4828,7 @@ def autotune_select_algorithm(*args, **kwargs):
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
-            or use_pipelined_autotuning()
+            or torch._inductor.config.pipeline_max_autotune_gemm
         )
 
     if "precompilation_timeout_seconds" not in kwargs:
