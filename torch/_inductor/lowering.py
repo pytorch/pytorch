@@ -1335,6 +1335,10 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
             return size
         elif fn(sympy.Lt(index, -size)):
             return 0
+        # Fallback: sign of index is known but relationship to size isn't.
+        if fn(sympy.Ge(index, 0)):
+            # If index >= 0, the resolved index is at most min(index, size).
+            return sympy.Min(index, size)
         return None
 
     start_index, end_index = None, None

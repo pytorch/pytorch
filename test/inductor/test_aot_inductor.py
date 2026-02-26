@@ -1866,6 +1866,48 @@ class AOTInductorTestsTemplate:
         self.check_model(model, example_inputs, dynamic_shapes=spec)
         torch.cuda.caching_allocator_enable(True)
 
+    @skipIfMPS
+    @config.patch({"triton.autotune_at_compile_time": None})
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_slice_independent_backed_symints_no_unbacked(self):
+        # Regression test: slicing x[0:s1] where x.size(0) = s0-1 (a backed
+        # expression) and s1 is an independent backed symint should NOT produce
+        # an unbacked symint. Previously _compute_slice_index returned None for
+        # backed-vs-backed cases with no known relationship, creating an
+        # unbacked symint that got a bad fallback value (8192) during
+        # autotune_at_compile_time → GPU OOB memory access.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires triton")
+
+        INNER_DIM = 4224  # 128 * 33, mirrors production jagged_to_padded_dense
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, y):
+                # Simulate jagged_to_padded_dense output: shape [s0 - 1, 4224]
+                x_trimmed = x[:-1]
+                # Slice by independent backed symint s1
+                sliced = x_trimmed[: y.size(0)]
+                # Downstream ops that fuse with the slice into a single triton
+                # kernel reading from x_trimmed. With unbacked u0=8192, the
+                # fused kernel's xnumel far exceeds the input buffer size → IMA.
+                reshaped = sliced.reshape(-1, 128, 33)
+                expanded = reshaped.unsqueeze(3).expand(-1, 128, 33, 8)
+                shifts = torch.arange(0, 64, 8, device=x.device, dtype=torch.int64)
+                return (expanded >> shifts) & 255
+
+        torch.cuda.caching_allocator_enable(False)
+        model = Repro()
+        example_inputs = (
+            torch.randint(0, 256, (200, INNER_DIM), device=self.device, dtype=torch.int64),
+            torch.randn(50, 8, device=self.device),
+        )
+        spec = {
+            "x": (Dim.DYNAMIC, Dim.STATIC),
+            "y": (Dim.DYNAMIC, Dim.STATIC),
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=spec)
+        torch.cuda.caching_allocator_enable(True)
+
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
         class Repro(torch.nn.Module):
