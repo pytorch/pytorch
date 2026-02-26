@@ -43,20 +43,20 @@ def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str]:
     return (group_name,)
 
 
-def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:  # type: ignore[name-defined]
+def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, str, torch.dtype]:  # type: ignore[name-defined]
     _, reduce_op, group_size, group_name = node.args
     dtype = node.meta["val"].dtype
     assert isinstance(group_name, str)
     assert isinstance(reduce_op, str)
-    return (group_name, reduce_op, dtype)
+    return ("rs", group_name, reduce_op, dtype)
 
 
-def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
+def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, str, torch.dtype]:
     _, reduce_op, group_name = node.args
     dtype = node.meta["val"].dtype
     assert isinstance(group_name, str)
     assert isinstance(reduce_op, str)
-    return (group_name, reduce_op, dtype)
+    return ("ar", group_name, reduce_op, dtype)
 
 
 def _compute_foreach_groups(
