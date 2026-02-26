@@ -926,15 +926,13 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
       // Dispatch to two triangular solves.
       // NOTE: A is column-major, self is anything.
       // Copy of `self` is modified by the triangular_solve_kernel in-place.
-      //auto B = cloneBatchedColumnMajor(self);
-      //triangular_solve_kernel(
-      //  A,
-      //  B,
-      //  /*left=*/true,
-      //  /*upper=*/upper,
-      //  TransposeType::NoTranspose,
-      //  /*unitriangular=*/false
-      //);
+      auto B = cloneBatchedColumnMajor(self);
+      std::cout << "A.strides(): " << A.strides() << std::endl;
+      if (!upper) {
+      B = at::linalg_solve_triangular(A, self, false, true);
+      } else {
+      B = at::linalg_solve_triangular(A.mH(), self, false, true);
+      }
       //triangular_solve_kernel(
       //  A,
       //  B,
@@ -947,7 +945,9 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
         ? c10::MaybeOwned<Tensor>::owned(A.mH())
         : c10::MaybeOwned<Tensor>::borrowed(A);
       auto y = at::linalg_solve_triangular(*L, self, /*upper=*/false, /*left=*/true);
+      std::cout << "diff: " << B.sub(y).abs().max().item() << std::endl;
       auto x = at::linalg_solve_triangular(L->mH(), y, /*upper=*/true, /*left=*/true);
+      std::cout << std::endl;
       return x;
       //return B;
     }
