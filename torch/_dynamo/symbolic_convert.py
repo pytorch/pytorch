@@ -127,7 +127,10 @@ from .source import (
     SkipGuardSource,
     Source,
 )
-from .synthetic_function_graph_break import maybe_setup_comprehension_speculation
+from .synthetic_function_graph_break import (
+    maybe_setup_comprehension_speculation,
+    maybe_setup_for_loop_speculation,
+)
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
@@ -614,7 +617,9 @@ def generic_jump(
 
         # compile a partial subgraph prefix then skip the rest of user code
         if self.maybe_has_backedge():
-            self.raise_loop_graph_break(self.f_code, exc)
+            if self._for_loop_depth == 0:
+                self.raise_loop_graph_break(self.f_code, exc)
+            raise exc
 
         self.log_graph_break(
             self.code_options,
@@ -921,7 +926,9 @@ def break_graph_if_unsupported(
                     raise
 
                 if self.maybe_has_backedge():
-                    self.raise_loop_graph_break(self.f_code, excp)
+                    if self._for_loop_depth == 0:
+                        self.raise_loop_graph_break(self.f_code, excp)
+                    raise
 
                 self.log_graph_break(
                     self.code_options,
@@ -1316,6 +1323,11 @@ class InstructionTranslatorBase(
             return False
         self.current_instruction = inst = self.instructions[ip]
         self.instruction_pointer = ip + 1
+
+        # For 3.10-3.11 (no END_FOR), decrement for loop depth at exit IP
+        if sys.version_info < (3, 12) and ip in self._for_loop_end_ips:
+            self._for_loop_end_ips.discard(ip)
+            self._for_loop_depth -= 1
 
         if inst.starts_line:
             self.starts_line(inst.starts_line)
@@ -2120,6 +2132,8 @@ class InstructionTranslatorBase(
         self.push(None)
 
     def FOR_ITER(self, inst: Instruction) -> None:
+        if maybe_setup_for_loop_speculation(self, inst):
+            return
         it = self.pop().realize()
         self.push(it)
         try:
@@ -3335,6 +3349,9 @@ class InstructionTranslatorBase(
         """
         return False
 
+    def _can_speculate_for_loop_nested(self) -> bool:
+        return False
+
     def BUILD_LIST(self, inst: Instruction) -> None:
         if maybe_setup_comprehension_speculation(self, inst):
             return
@@ -4077,12 +4094,15 @@ class InstructionTranslatorBase(
         else:
             self.popn(2)
 
-        # Decrement comprehension depth if exiting a comprehension layer
+        # Decrement comprehension/for loop depth if exiting a tracked layer
         if sys.version_info >= (3, 12):
             current_ip = self.indexof[inst]
             if current_ip in self._comprehension_end_for_ips:
                 self._comprehension_end_for_ips.discard(current_ip)
                 self._comprehension_depth -= 1
+            elif current_ip in self._for_loop_end_ips:
+                self._for_loop_end_ips.discard(current_ip)
+                self._for_loop_depth -= 1
 
     def LOAD_FAST_CHECK(self, inst: Instruction) -> None:
         if istype(self.symbolic_locals.get(inst.argval, None), NullVariable):
@@ -4554,6 +4574,8 @@ class InstructionTranslatorBase(
         self.latest_bytecode_queue = deque(maxlen=20)
         self._comprehension_depth = 0
         self._comprehension_end_for_ips: set[int] = set()
+        self._for_loop_depth = 0
+        self._for_loop_end_ips: set[int] = set()
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -5368,6 +5390,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         Unlike should_compile_partial_graph(), this skips the exception table entry check.
         """
+        if not config.nested_graph_breaks:
+            return False
+        if not self.funcvar.should_allow_nested_graph_breaks():
+            return False
+        if not self.parent.should_compile_partial_graph():
+            return False
+        return True
+
+    def _can_speculate_for_loop_nested(self) -> bool:
         if not config.nested_graph_breaks:
             return False
         if not self.funcvar.should_allow_nested_graph_breaks():

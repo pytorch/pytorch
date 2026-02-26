@@ -136,6 +136,120 @@ class ComprehensionAnalysis:
     captured_vars: list[str]
 
 
+@dataclasses.dataclass
+class ForLoopAnalysis:
+    """Metadata about a for loop's bytecode structure.
+
+    Attributes:
+        for_iter_ip: The FOR_ITER instruction pointer
+        end_ip: First instruction after the for/else construct
+        has_break: Whether the loop body contains break
+    """
+
+    for_iter_ip: int
+    end_ip: int
+    has_break: bool
+
+
+@functools.cache
+def _get_for_loop_cleanup_count() -> int:
+    """Count cleanup instructions after END_FOR for the current Python version.
+
+    In Python 3.13+, there is a POP_TOP after END_FOR. In 3.12, there are none.
+    Returns 0 for versions < 3.12.
+    """
+    if sys.version_info < (3, 12):
+        return 0
+
+    def fn() -> None:
+        for i in range(1):  # noqa: B007
+            pass
+
+    insts = list(dis.get_instructions(fn))
+    end_for_idx = next(i for i, inst in enumerate(insts) if inst.opname == "END_FOR")
+
+    # Count non-loop instructions between END_FOR and the next meaningful instruction
+    count = 0
+    for inst in insts[end_for_idx + 1 :]:
+        if inst.opname in ("POP_TOP", "POP_ITER"):
+            count += 1
+        else:
+            break
+    return count
+
+
+def _find_for_loop_end_ip(tx: InstructionTranslatorBase, for_iter_ip: int) -> int:
+    """Find the first instruction after the for loop construct.
+
+    For 3.12+: finds the matching END_FOR by tracking nesting,
+    returns end_for_ip + 1 + cleanup_count.
+    For < 3.12: uses FOR_ITER.target (which points past the loop).
+    """
+    for_iter_inst = tx.instructions[for_iter_ip]
+    assert for_iter_inst.opname == "FOR_ITER"
+
+    if sys.version_info >= (3, 12):
+        nesting_depth = 1
+        for search_ip in range(for_iter_ip + 1, len(tx.instructions)):
+            inst = tx.instructions[search_ip]
+            if inst.opname == "FOR_ITER":
+                nesting_depth += 1
+            elif inst.opname == "END_FOR":
+                nesting_depth -= 1
+                if nesting_depth == 0:
+                    return search_ip + 1 + _get_for_loop_cleanup_count()
+        return -1
+    else:
+        # For < 3.12, FOR_ITER.target points past the loop
+        assert for_iter_inst.target is not None
+        return tx.indexof[for_iter_inst.target]
+
+
+def _analyze_for_loop(
+    tx: InstructionTranslatorBase, for_iter_ip: int
+) -> ForLoopAnalysis:
+    """Analyze for loop bytecode to determine structure."""
+    assert tx.instruction_pointer is not None
+
+    end_ip = _find_for_loop_end_ip(tx, for_iter_ip)
+    assert end_ip > 0, "Could not find end of for loop"
+
+    for_iter_inst = tx.instructions[for_iter_ip]
+
+    # Detect break: look for POP_TOP followed by a forward jump past end
+    has_break = False
+    break_target_ip = end_ip
+    # In 3.12+, FOR_ITER.target points to END_FOR
+    if sys.version_info >= (3, 12):
+        assert for_iter_inst.target is not None
+        end_for_ip = tx.indexof[for_iter_inst.target]
+    else:
+        end_for_ip = end_ip
+
+    for body_ip in range(for_iter_ip + 1, end_for_ip):
+        inst = tx.instructions[body_ip]
+        if inst.opname == "POP_TOP":
+            # Check if the next instruction jumps past the loop end
+            if body_ip + 1 < len(tx.instructions):
+                next_inst = tx.instructions[body_ip + 1]
+                if next_inst.target is not None:
+                    target_ip = tx.indexof[next_inst.target]
+                    if target_ip >= end_ip:
+                        has_break = True
+                        break_target_ip = max(break_target_ip, target_ip)
+
+    # When break exists, extend end_ip to include the else body so
+    # break vs normal exit is handled inside the synthetic function.
+    if has_break:
+        end_ip = break_target_ip
+
+    return ForLoopAnalysis(
+        for_iter_ip=for_iter_ip,
+        end_ip=end_ip,
+        has_break=has_break,
+    )
+
+
 def _is_comprehension_start(tx: InstructionTranslatorBase) -> bool:
     """Detect if we're at the start of a list/dict comprehension in 3.12+.
 
@@ -601,7 +715,7 @@ def _build_comprehension_fn(
                 )
                 nonnull_i -= 1
 
-        comp_insts = _copy_comprehension_bytecode(tx, start_ip, analysis.end_ip)
+        comp_insts = _copy_bytecode_range(tx, start_ip, analysis.end_ip)
 
         # Epilogue: ensure result is on stack, pack walrus vars, return.
         epilogue: list[Instruction] = []
@@ -640,10 +754,10 @@ def _build_comprehension_fn(
     return new_code, fn_name
 
 
-def _copy_comprehension_bytecode(
+def _copy_bytecode_range(
     tx: InstructionTranslatorBase, start_ip: int, end_ip: int
 ) -> list[Instruction]:
-    """Copy comprehension bytecode instructions, updating jump targets."""
+    """Copy bytecode instructions in [start_ip, end_ip), remapping jump targets."""
     inst_map: dict[Instruction, Instruction] = {}
     copied_insts: list[Instruction] = []
 
@@ -696,4 +810,249 @@ def maybe_setup_comprehension_speculation(
     assert end_for_ip >= 0
     tx._comprehension_end_for_ips.add(end_for_ip)
     tx._comprehension_depth += 1
+    return False
+
+
+def _build_for_loop_fn(
+    tx: InstructionTranslatorBase,
+    analysis: ForLoopAnalysis,
+    meta: StackLocalsMetadata,
+) -> tuple[types.CodeType, str]:
+    """Build a synthetic function wrapping for loop bytecode.
+
+    The function receives all locals + the iterator as arguments, runs the
+    loop eagerly, then returns a tuple of ALL locals so the caller can
+    update its frame state.
+    """
+    from .bytecode_transformation import transform_code_object
+    from .eval_frame import skip_code
+    from .resume_execution import CO_VARARGS, CO_VARKEYWORDS
+
+    argnames = tuple(k for k in meta.locals_names if k not in tx.cell_and_freevars())
+    args = (
+        ["__nested_resume_fns", "__nested_frame_values"]
+        + list(argnames)
+        + ["___stack0"]
+    )
+
+    freevars = tuple(
+        sorted(list(tx.f_code.co_cellvars or []) + list(tx.f_code.co_freevars or []))
+    )
+
+    lineno = tx.lineno if tx.lineno is not None else tx.f_code.co_firstlineno
+    fn_name = unique_id(f"__for_loop_{tx.f_code.co_name}_at_{lineno}")
+
+    def update(instructions: list[Instruction], code_options: dict[str, Any]) -> None:
+        code_options["co_name"] = fn_name
+        if sys.version_info >= (3, 11):
+            code_options["co_qualname"] = fn_name
+        code_options["co_firstlineno"] = lineno
+        code_options["co_cellvars"] = ()
+        code_options["co_freevars"] = freevars
+        code_options["co_argcount"] = len(args)
+        code_options["co_posonlyargcount"] = 0
+        code_options["co_kwonlyargcount"] = 0
+
+        extra_vars = [v for v in tx.f_code.co_varnames if v not in args]
+        code_options["co_varnames"] = tuple(args + extra_vars)
+        code_options["co_flags"] = code_options["co_flags"] & ~(
+            CO_VARARGS | CO_VARKEYWORDS
+        )
+
+        prefix: list[Instruction] = []
+        if freevars:
+            prefix.append(create_instruction("COPY_FREE_VARS", arg=len(freevars)))
+        prefix.append(create_instruction("RESUME", arg=0))
+        # Load the iterator onto the operand stack
+        prefix.append(create_instruction("LOAD_FAST", argval="___stack0"))
+
+        loop_insts = _copy_bytecode_range(tx, analysis.for_iter_ip, analysis.end_ip)
+
+        # Epilogue: load ALL locals in order and return as list
+        epilogue: list[Instruction] = []
+        for var_name in argnames:
+            epilogue.append(create_instruction("LOAD_FAST", argval=var_name))
+        epilogue.append(create_instruction("BUILD_LIST", arg=len(argnames)))
+        epilogue.append(create_instruction("RETURN_VALUE"))
+
+        # Redirect jumps targeting outside the copied range to the epilogue.
+        # This handles break statements whose jump targets are past the loop.
+        if epilogue:
+            epilogue_start = epilogue[0]
+            for copied_inst in loop_insts:
+                if (
+                    copied_inst.target is not None
+                    and copied_inst.target not in loop_insts
+                    and copied_inst.target not in epilogue
+                ):
+                    copied_inst.target = epilogue_start
+
+        instructions[:] = prefix + loop_insts + epilogue
+
+    new_code, _ = transform_code_object(tx.f_code, update)
+    skip_code(new_code)
+
+    if new_code.co_freevars:
+        tx.output.install_global_unsafe(fn_name, new_code)
+    else:
+        tx.output.install_global_unsafe(
+            fn_name,
+            types.FunctionType(new_code, tx.f_globals, fn_name),
+        )
+
+    return new_code, fn_name
+
+
+def _handle_for_loop_graph_break(
+    tx: InstructionTranslatorBase, inst: Instruction
+) -> None:
+    """Handle for loop graph break.
+
+    Builds a synthetic function wrapping the for loop bytecode,
+    calls it via codegen_call_resume, then replaces frame_values[0]
+    with the returned locals tuple and chains into the resume function
+    for the post-loop code.
+    """
+    assert tx.instruction_pointer is not None
+
+    for_iter_ip = tx.instruction_pointer - 1
+    analysis = _analyze_for_loop(tx, for_iter_ip)
+    reason = GraphCompileReason("for_loop_graph_break", [tx.frame_summary()])
+    log.debug("for loop triggered compile")
+
+    # --- Step 1: Compile the graph up to the for loop ---
+    # stack_pops=1: the iterator on top of the stack
+    all_stack_locals_metadata = tx.output.compile_subgraph(
+        tx,
+        reason=reason,
+        stack_pops=1,
+    )
+
+    tx.pop()  # pop the iterator
+    meta = all_stack_locals_metadata[0]
+    cg = PyCodegen(tx.output.root_tx)
+
+    # Runtime stack after compile_subgraph:
+    #   cells, [frame_values], *(non-popped items), iterator
+    # frame_values[0] = [frame N locals]
+
+    live_stack_depth = len(tx.stack) - len(meta.stack_null_idxes)
+
+    # --- Step 2: Append iterator to frame_values[0] ---
+    # Get frame_values[0], swap with iterator, LIST_APPEND, pop fv0
+    cg.extend_output(
+        [
+            *create_copy(live_stack_depth + 1 + 1),  # +1 iterator, +1 frame_values
+            cg.create_load_const(0),
+            cg.create_binary_subscr(),
+            # Stack: ..., iterator, fv0
+            *create_swap(2),
+            # Stack: ..., fv0, iterator
+            create_instruction("LIST_APPEND", arg=1),
+            # Stack: ..., fv0 (iterator appended)
+            create_instruction("POP_TOP"),
+        ]
+    )
+
+    # Stack: cells, [frame_values], *(non-popped items)
+
+    # --- Step 3: Build for loop function ---
+    new_code, fn_name = _build_for_loop_fn(tx, analysis, meta)
+
+    # --- Step 4: Extract [cells[0]] and [frame_values[0]] for codegen_call_resume ---
+    cg.extend_output(
+        [
+            *create_copy(live_stack_depth + 2),
+            cg.create_load_const(0),
+            cg.create_binary_subscr(),
+            create_instruction("BUILD_LIST", arg=1),
+            *create_copy(live_stack_depth + 2),
+            cg.create_load_const(0),
+            cg.create_binary_subscr(),
+            create_instruction("BUILD_LIST", arg=1),
+        ]
+    )
+
+    # Stack: ..., *(non-popped), [cells[0]], [frame_values[0]]
+
+    # --- Step 5: Call for loop function via codegen_call_resume ---
+    tx.codegen_call_resume([new_code], [fn_name], cg)
+
+    # Stack: ..., *(non-popped), result_list
+
+    # --- Step 6: Replace frame_values[0] with the returned locals list ---
+    # result_list is on TOS. Store it as frame_values[0].
+    # STORE_SUBSCR does TOS1[TOS] = TOS2, so we need:
+    # Stack: ..., result_list, frame_values, 0
+    frame_values_pos = live_stack_depth + 1 + 1  # +1 result, +1 frame_values
+    cg.extend_output(
+        [
+            *create_copy(frame_values_pos),
+            # Stack: ..., result_list, frame_values
+            cg.create_load_const(0),
+            # Stack: ..., result_list, frame_values, 0
+            create_instruction("STORE_SUBSCR"),
+            # frame_values[0] = result_list
+        ]
+    )
+
+    # --- Step 7: Mark all locals as unknown ---
+    for name in meta.locals_names:
+        tx.symbolic_locals[name] = UnknownVariable()
+
+    # Stack: cells, [frame_values], *(non-popped stack)
+    tx.output.add_output_instructions(cg.get_instructions())
+
+    # --- Step 8: Create resume function chain ---
+    resume_inst = tx.instructions[analysis.end_ip]
+    tx.output.add_output_instructions(
+        tx.create_call_resume_at(resume_inst, all_stack_locals_metadata)
+    )
+
+    tx.instruction_pointer = None
+
+
+def maybe_setup_for_loop_speculation(
+    tx: InstructionTranslatorBase, inst: Instruction
+) -> bool:
+    """Set up for loop speculation at FOR_ITER.
+
+    Returns True if a graph break was triggered and the caller should return early.
+    """
+    # Skip if inside a comprehension
+    if tx._comprehension_depth > 0:
+        return False
+
+    can_speculate = (
+        all(b.can_restore() for b in tx.block_stack)
+        and not tx.one_graph
+        and not tx.error_on_graph_break
+        and not tx.is_tracing_resume_prologue
+        and not tx.active_generic_context_managers
+        and tx.output.current_tracer.parent is None
+    )
+
+    if can_speculate and tx.parent is not None:
+        can_speculate = tx._can_speculate_for_loop_nested()
+
+    if can_speculate and tx._for_loop_depth == 0:
+        speculation = tx.speculate()
+        if speculation.failed(tx):
+            _handle_for_loop_graph_break(tx, inst)
+            return True
+        tx.current_speculation = speculation
+
+    # Track the end IP for depth management
+    assert tx.instruction_pointer is not None
+    for_iter_ip = tx.instruction_pointer - 1
+    end_ip = _find_for_loop_end_ip(tx, for_iter_ip)
+    assert end_ip > 0
+
+    if sys.version_info >= (3, 12):
+        end_for_ip = end_ip - 1 - _get_for_loop_cleanup_count()
+        tx._for_loop_end_ips.add(end_for_ip)
+    else:
+        tx._for_loop_end_ips.add(end_ip)
+
+    tx._for_loop_depth += 1
     return False
