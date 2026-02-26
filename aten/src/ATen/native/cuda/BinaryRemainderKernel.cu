@@ -6,6 +6,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/TypeSafeSignMath.h>
 
+#include <limits>
 #include <type_traits>
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -17,6 +18,11 @@ void remainder_kernel_cuda(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        if constexpr (std::is_same_v<scalar_t, uint8_t>) {
+          if (b == 0) {
+            return std::numeric_limits<uint8_t>::max();
+          }
+        }
         scalar_t r = a % b;
         if (r != 0 && c10::signs_differ(r, b)) {
           r += b;

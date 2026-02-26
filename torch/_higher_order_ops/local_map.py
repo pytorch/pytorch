@@ -9,7 +9,7 @@ import contextlib
 import functools
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, TypeAlias
+from typing import Any, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -49,8 +49,8 @@ def defer_inlining() -> Generator[None, None, None]:
 # Used to unwrap tensors classes like FunctionalTensor and Parameter
 def _new_tensor(
     t: Any,
-    new_shape: Optional[Sequence[int]] = None,
-    new_stride: Optional[Sequence[int]] = None,
+    new_shape: Sequence[int] | None = None,
+    new_stride: Sequence[int] | None = None,
 ) -> Any:
     if isinstance(t, torch.Tensor):
         if type(t) not in (FunctionalTensor, FakeTensor, torch.Tensor):
@@ -113,7 +113,7 @@ def _redistribute(
 
 
 def redistribute_fw_inputs(
-    global_args: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
+    global_args: Any, all_placements: Any, mesh: Any, _: int | None = None
 ) -> GraphArg:
     if len(global_args) != len(all_placements):
         raise AssertionError(
@@ -174,7 +174,7 @@ def redistribute_bw_inputs(
 
 
 def redistribute_bw_outputs(
-    local_outs: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
+    local_outs: Any, all_placements: Any, mesh: Any, _: int | None = None
 ) -> GraphArg:
     if len(local_outs) != len(all_placements):
         raise AssertionError(
@@ -463,7 +463,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
         filtered_grads_idx: set[int],
         *args: Any,
         **kwargs: Any,
-    ) -> tuple[Optional[torch.Tensor], ...]:
+    ) -> tuple[torch.Tensor | None, ...]:
         from torch._functorch._aot_autograd.schemas import MemoryFormatMeta
 
         ctx.bw_gm = bw_gm
@@ -485,7 +485,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
     @staticmethod
     def backward(
         ctx: Any, *_grads: tuple[torch.Tensor]
-    ) -> tuple[Optional[torch.Tensor], ...]:
+    ) -> tuple[torch.Tensor | None, ...]:
         from torch._functorch._aot_autograd.runtime_wrappers import (
             coerce_to_expected_memory_format,
         )

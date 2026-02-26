@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 import contextlib
 import dataclasses
+import functools
 import importlib
 import math
 import unittest
@@ -1055,6 +1056,64 @@ class CommonTemplate:
 
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
+
+    # FIXME: fails for Triton CPU. Tiling does not contain YBLOCK.
+    @test_torchinductor.xfail_if_triton_cpu
+    @xfail_if_use_tensor_descriptor
+    def test_reduction_padded_output_tiling(self):
+        """
+        Test a [Y, X, R0] reduction with tiled output dimensions.
+        The key to elicit this test case is a padded output tensor.
+        """
+        x = torch.randn((9, 11, 2), device=self.device)
+
+        # We expect block pointers for the input and output.
+        result, (code,) = self._run_and_compare(
+            functools.partial(torch.amax, dim=-1),
+            x,
+            expected_num_block_pointers=2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "pad_outputs": True,
+                "padding_alignment_bytes": 32,
+                "padding_stride_threshold": 0,
+                "unroll_reductions_threshold": 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple output dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 1)
+
+    @xfail_if_use_tensor_descriptor
+    @parametrize("unroll", (False, True))
+    def test_reduce_trailing_dims_discontiguous_input(self, unroll: bool):
+        """
+        Test a [Y, X, R0, R1] reduction where the input tensor is discontiguous, but we
+        only reduce over the last two dimensions.
+        """
+        view = self._discontiguous_tensor((7, 5, 3, 2), self.device)
+
+        # We expect block pointers for the inputs and output.
+        # Note there are more inputs if unrolled.
+        result, (code,) = self._run_and_compare(
+            functools.partial(
+                torch.amax,
+                dim=(-1, -2),
+            ),
+            view,
+            expected_num_block_pointers=7 if unroll else 2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "unroll_reductions_threshold": 1e4 if unroll else 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple pointwise dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 0 if unroll else 2)
 
     def test_2d_reduction_with_broadcast(self):
         """
