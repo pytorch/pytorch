@@ -1898,7 +1898,9 @@ class AOTInductorTestsTemplate:
         torch.cuda.caching_allocator_enable(False)
         model = Repro()
         example_inputs = (
-            torch.randint(0, 256, (200, INNER_DIM), device=self.device, dtype=torch.int64),
+            torch.randint(
+                0, 256, (200, INNER_DIM), device=self.device, dtype=torch.int64
+            ),
             torch.randn(50, 8, device=self.device),
         )
         spec = {
