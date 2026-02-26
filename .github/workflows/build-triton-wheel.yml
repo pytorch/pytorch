@@ -16,7 +16,6 @@ on:
       - .github/scripts/windows/install_vs2022.ps1
       - .github/scripts/windows/build_triton.bat
       - .ci/docker/ci_commit_pins/triton.txt
-      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
   workflow_dispatch:
   pull_request:
@@ -27,7 +26,6 @@ on:
       - .github/scripts/windows/install_vs2022.ps1
       - .github/scripts/windows/build_triton.bat
       - .ci/docker/ci_commit_pins/triton.txt
-      - .ci/docker/ci_commit_pins/triton-rocm.txt
       - .ci/docker/ci_commit_pins/triton-xpu.txt
 
 concurrency:
