@@ -211,18 +211,8 @@ void raw_cudnn_batchnorm_forward_out_v8(
 
   if (graph_and_tensors_forward_ptr) {
     // references to avoid unnecessary atomic ref counts increments
-    auto&
-        [graph,
-         X_fe,
-         scale_fe,
-         bias_fe,
-         running_mean_fe,
-         running_var_fe,
-         Y_fe,
-         saved_mean_fe,
-         saved_inv_var_fe,
-         next_running_mean_fe,
-         next_running_var_fe] = *graph_and_tensors_forward_ptr;
+    auto& [graph, X_fe, scale_fe, bias_fe, running_mean_fe, running_var_fe, Y_fe, saved_mean_fe, saved_inv_var_fe, next_running_mean_fe, next_running_var_fe] =
+        *graph_and_tensors_forward_ptr;
 
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
         variant_pack_ = {
@@ -451,16 +441,8 @@ void raw_cudnn_batchnorm_backward_out_v8(
       variant_pack;
 
   if (graph_and_tensors_backward_ptr) {
-    auto&
-        [graph,
-         X_fe,
-         DY_fe,
-         scale_fe,
-         mean_fe,
-         inv_variance_fe,
-         DX_fe,
-         dscale_fe,
-         dbias_fe] = *graph_and_tensors_backward_ptr;
+    auto& [graph, X_fe, DY_fe, scale_fe, mean_fe, inv_variance_fe, DX_fe, dscale_fe, dbias_fe] =
+        *graph_and_tensors_backward_ptr;
 
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
         variant_pack_ = {
@@ -866,7 +848,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward_v8(
       input->suggest_memory_format());
 
   return std::tuple<Tensor, Tensor, Tensor>{
-      std::move(grad_input_t), std::move(grad_weight_t), std::move(grad_bias_t)};
+      std::move(grad_input_t),
+      std::move(grad_weight_t),
+      std::move(grad_bias_t)};
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
