@@ -1317,7 +1317,6 @@ fused_ops = [
     aten._fused_adamw_.tensor_lr,
 ]
 
-
 # The state_steps arg of fused adam / adamw is a Replicate scalar tensor, which will be put on
 # the compute_mesh of an op across all parameter groups, even when not all parameter groups
 # are on the same device mesh. This idx will help avoid hitting exceptions or unnecessary
@@ -1328,3 +1327,13 @@ for op in fused_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
         list_pointwise_strategy
     )
+
+# Fused adam/adamw ops: state_steps (input 5) is a Replicate scalar tensor that may be on
+# a different mesh than the other inputs. cross_mesh_indices=[5] tells the expansion
+# infrastructure to preserve the input's own mesh and assert Replicate placements.
+for op in fused_ops:
+    register_single_dim_strategy(
+        op,
+        schema_info=RuntimeSchemaInfo(needs_pytree=True),
+        cross_mesh_indices=[5],
+    )(_common_pointwise_single_dim_strategy())
