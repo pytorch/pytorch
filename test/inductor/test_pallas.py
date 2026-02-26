@@ -1636,6 +1636,133 @@ class PallasTestsMixin:
         expected = transformer_block(x, w_q, w_k, w_v, w_proj, w_fc, w_out, mask)
         self.assertEqual(result, expected)
 
+    def _run_transformer_layer(self, seq_len, hidden_dim, num_heads, head_dim, ffn_dim, atol=1e-5, rtol=1.3e-6):
+        """Run a Llama-style transformer layer forward pass and verify correctness.
+
+        Architecture: RMSNorm -> Multi-Head Attention -> Residual ->
+                      RMSNorm -> SwiGLU FFN -> Residual
+        """
+        torch._dynamo.reset()
+
+        def transformer_layer(
+            x, rms_w1, rms_w2,
+            w_q, w_k, w_v, w_o,
+            w_gate, w_up, w_down,
+            mask,
+        ):
+            T, C = x.shape
+
+            # Pre-attention RMSNorm
+            variance = x.pow(2).mean(-1, keepdim=True)
+            h = x * torch.rsqrt(variance + 1e-6) * rms_w1
+
+            # Multi-head self-attention
+            q = (h @ w_q).view(T, num_heads, head_dim).permute(1, 0, 2)  # (H, T, D)
+            k = (h @ w_k).view(T, num_heads, head_dim).permute(1, 0, 2)
+            v = (h @ w_v).view(T, num_heads, head_dim).permute(1, 0, 2)
+
+            scale = 1.0 / (head_dim ** 0.5)
+            att = (q @ k.transpose(-2, -1)) * scale  # (H, T, T)
+            att = att + mask  # causal mask broadcasts (T, T) -> (H, T, T)
+            att = torch.softmax(att, dim=-1)
+            attn_out = (att @ v).permute(1, 0, 2).contiguous().view(T, C)  # (T, C)
+
+            x = x + (attn_out @ w_o)
+
+            # Pre-FFN RMSNorm
+            variance = x.pow(2).mean(-1, keepdim=True)
+            h = x * torch.rsqrt(variance + 1e-6) * rms_w2
+
+            # SwiGLU FFN
+            gate = torch.nn.functional.silu(h @ w_gate)
+            up = h @ w_up
+            x = x + ((gate * up) @ w_down)
+
+            return x
+
+        compiled = self._compile(transformer_layer)
+
+        # Initialize weights with small values for numerical stability
+        s = 0.02
+        w_q = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
+        w_k = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
+        w_v = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
+        w_o = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
+        w_gate = torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s
+        w_up = torch.randn(hidden_dim, ffn_dim, device=self.DEVICE) * s
+        w_down = torch.randn(ffn_dim, hidden_dim, device=self.DEVICE) * s
+        rms_w1 = torch.ones(hidden_dim, device=self.DEVICE)
+        rms_w2 = torch.ones(hidden_dim, device=self.DEVICE)
+
+        # Causal mask (T, T) - broadcasts over heads
+        mask = torch.triu(
+            torch.full((seq_len, seq_len), float("-inf"), device=self.DEVICE),
+            diagonal=1,
+        )
+
+        x = torch.randn(seq_len, hidden_dim, device=self.DEVICE) * 0.02
+
+        result = compiled(
+            x, rms_w1, rms_w2, w_q, w_k, w_v, w_o, w_gate, w_up, w_down, mask,
+        )
+        expected = transformer_layer(
+            x, rms_w1, rms_w2, w_q, w_k, w_v, w_o, w_gate, w_up, w_down, mask,
+        )
+        self.assertEqual(result, expected, atol=atol, rtol=rtol)
+
+    def test_transformer_layer_tiny(self):
+        """Test full Llama-style transformer layer at tiny dimensions."""
+        self._run_transformer_layer(
+            seq_len=32, hidden_dim=64, num_heads=2, head_dim=32, ffn_dim=256,
+        )
+
+    def test_transformer_layer_medium(self):
+        """Test full Llama-style transformer layer at Llama-7B dimensions."""
+        self._run_transformer_layer(
+            seq_len=128, hidden_dim=4096, num_heads=32, head_dim=128, ffn_dim=11008,
+            atol=1e-4, rtol=1e-4,
+        )
+
+    def test_transformer_layer_large(self):
+        """Test full Llama-style transformer layer at Llama-405B dimensions."""
+        self._run_transformer_layer(
+            seq_len=32, hidden_dim=16384, num_heads=128, head_dim=128, ffn_dim=53248,
+            atol=2e-3, rtol=1e-3,
+        )
+
+
+    def test_permute_contiguous_3d(self):
+        """Test that permute + contiguous on a 3D tensor produces correct results.
+
+        Minimal repro for the bug where (H, T, D).permute(1, 0, 2).contiguous()
+        gives wrong results in Pallas codegen (the clone/transpose kernel
+        doesn't correctly reorder elements).
+        """
+
+        def fn(x):
+            return x.permute(1, 0, 2).contiguous()
+
+        compiled = self._compile(fn)
+        x = torch.randn(2, 32, 32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_transpose_contiguous_2d(self):
+        """Test that transpose + contiguous on a 2D tensor compiles and runs.
+
+        Minimal repro for a Mosaic crash: 'unsupported shape cast' when the
+        Pallas codegen emits tpu.reshape to transpose a 2D vector.
+        """
+
+        def fn(x):
+            return x.transpose(0, 1).contiguous()
+
+        compiled = self._compile(fn)
+        x = torch.randn(2, 32, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
     def test_warpgroup_size_2d_aligned_32x8(self):
         """Test 2D tensor with 32x8 = 256 elements (2 warpgroups)."""
 

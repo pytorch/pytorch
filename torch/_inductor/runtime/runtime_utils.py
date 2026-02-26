@@ -434,12 +434,12 @@ def pallas_compute_tiling(
         min_dim = min(ref_shape[ax_last], ref_shape[ax_second])
         t = _pallas_tile_size(min_dim, max(_align(ax_last), _align(ax_second)))
 
-        if _can_tile_ax(ref_shape[ax_second], t):
+        if _can_tile_ax(ref_shape[ax_second], t) and t % _align(ax_second) == 0:
             tile[ax_second] = t
             axis_to_grid[ax_second] = len(grid_parts)
             grid_parts.append(ref_shape[ax_second] // t)
 
-        if _can_tile_ax(ref_shape[ax_last], t):
+        if _can_tile_ax(ref_shape[ax_last], t) and t % _align(ax_last) == 0:
             tile[ax_last] = t
             axis_to_grid[ax_last] = len(grid_parts)
             grid_parts.append(ref_shape[ax_last] // t)

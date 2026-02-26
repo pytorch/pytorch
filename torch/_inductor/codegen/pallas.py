@@ -1098,96 +1098,63 @@ class PallasKernel(SIMDKernel):
         # So output shape is [second_var_length, first_var_length, ...]
         return list(reversed(broadcast_vars))
 
-    def _is_transposed_access(self, name: str, index: sympy.Expr) -> bool:
-        """Check if buffer access needs transpose.
+    def _get_load_permutation(
+        self, name: str, index: sympy.Expr
+    ) -> Optional[tuple[int, ...]]:
+        """Return permutation axes if load needs reorder, else None.
 
-        Transpose on load is needed when:
-        1. Non-square buffers: dimensions are swapped relative to iteration vars
-        2. Square buffers: index coefficient pattern indicates transposed access
-           (first iteration var has larger coefficient than second)
+        Detects when a full-array load reads a contiguous buffer whose
+        dimensions are accessed in a different order than the iteration
+        variables.  Returns the permutation tuple for ``jnp.permute_dims``.
+
+        Only triggers when the load coefficients differ from every output
+        buffer's stride pattern.  When they match an output's strides the
+        non-ascending order just reflects the output's iteration layout.
         """
         info = self._get_buffer_info(name)
-        if info is None:
-            return False
-
-        _, buf_size, _, actual_strides, _ = info
-
-        # Only handle 2D buffers
-        if len(buf_size) != 2 or len(actual_strides) != 2:
-            return False
-
-        size0 = self._safe_int(buf_size[0])
-        size1 = self._safe_int(buf_size[1])
-        if size0 is None or size1 is None or size0 <= 1 or size1 <= 1:
-            return False
-
-        s0 = actual_strides[0]
-        s1 = actual_strides[1]
-        if s0 is None or s1 is None:
-            return False
-
-        # Get iteration variable info
-        var_items = list(self.range_tree_nodes.items())
-        if len(var_items) < 2:
-            return False
-
-        # Skip for reduction variables
-
-        if any(entry.is_reduction for _, entry in var_items):
-            return False
-
-        # Extract coefficients from index expression
-        inner_var = var_items[0][0]
-        outer_var = var_items[1][0]
-        index = V.graph.sizevars.simplify(index)
-
-        inner_coeff = self._get_index_coefficient(index, inner_var)
-        outer_coeff = self._get_index_coefficient(index, outer_var)
-
-        if inner_coeff != 0 and outer_coeff != 0:
-            # Only transpose for standard row-major buffers (stride[0] = size[1], stride[1] = 1)
-            is_standard_row_major = s0 == size1 and s1 == 1
-            if not is_standard_row_major:
-                return False
-
-            # Only transpose if output is column-major (indicates actual transpose op)
-            output_is_column_major = self._has_column_major_output()
-            if not output_is_column_major:
-                return False
-
-            # Check if coefficients indicate transposed access
-            inner_matches_s0 = abs(inner_coeff - s0) < abs(inner_coeff - s1)
-            outer_matches_s1 = abs(outer_coeff - s1) < abs(outer_coeff - s0)
-            return inner_matches_s0 and outer_matches_s1
-
-        return False
-
-    def _has_column_major_output(self) -> bool:
-        """Check if any output buffer has column-major stride layout."""
-        output_buffers = getattr(self.args, "output_buffers", {})
-        # Check both explicit output buffers and graph buffers (which may not
-        # be populated during load).
-        buf_names = itertools.chain(output_buffers, V.graph.name_to_buffer)
-        for buf_name in buf_names:
+        if not info:
+            return None
+        _, buf_size, _, _, is_contiguous = info
+        if len(buf_size) < 2 or not is_contiguous:
+            return None
+        used = self._get_used_iter_vars(index)
+        ordered = [s for s, e in self.range_tree_nodes.items()
+                   if s in used and not e.is_reduction]
+        if len(ordered) != len(buf_size):
+            return None
+        coeffs = [self._get_index_coefficient(
+            V.graph.sizevars.simplify(index), v) for v in ordered]
+        if not all(isinstance(c, int) and c > 0 for c in coeffs):
+            return None
+        if coeffs == sorted(coeffs):
+            return None  # already in ascending order
+        # Check if the coefficient pattern matches any output buffer's
+        # strides.  When the output has more dimensions (broadcasting),
+        # compare with its trailing strides since broadcast adds leading
+        # dimensions.
+        n = len(coeffs)
+        for buf_name in V.graph.name_to_buffer:
             out_buf = V.graph.get_buffer(buf_name)
-            if out_buf is None:
-                continue
-            if buf_name not in output_buffers and not isinstance(
-                out_buf, ComputedBuffer
-            ):
+            if out_buf is None or not isinstance(out_buf, ComputedBuffer):
                 continue
             layout = getattr(out_buf, "get_layout", lambda: None)()
             if layout is None:
                 continue
             out_stride = getattr(layout, "stride", None)
-            if out_stride is None or len(out_stride) < 2:
+            if out_stride is None or len(out_stride) < n:
                 continue
-            out_s0 = self._safe_int(out_stride[0])
-            out_s1 = self._safe_int(out_stride[1])
-            if out_s0 is not None and out_s1 is not None and out_s0 < out_s1:
-                return True
-
-        return False
+            # Use trailing strides to handle broadcast dimension mismatch
+            trailing = out_stride[-n:] if len(out_stride) > n else out_stride
+            out_s = [self._safe_int(s) for s in trailing]
+            if any(s is None for s in out_s):
+                continue
+            if list(coeffs) == out_s:
+                return None  # access follows output layout
+        rev = list(reversed(coeffs))  # outermost-first
+        desc = sorted(rev, reverse=True)
+        if len(set(desc)) != len(desc):
+            return None  # duplicate strides, ambiguous
+        return tuple(desc.index(c) for c in rev)
 
     def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
         """Get the index expression string and whether it needs flattening."""
@@ -1618,10 +1585,12 @@ class PallasKernel(SIMDKernel):
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
 
-            # Check for transposed access
-            if index_str == "..." and self._is_transposed_access(name, index):
-                load_expr = f"jnp.transpose({load_expr})"
-                self.has_transposed_load = True
+            # Check for permuted access (covers N-d permute and 2-d transpose)
+            if index_str == "...":
+                perm = self._get_load_permutation(name, index)
+                if perm is not None:
+                    load_expr = f"jnp.permute_dims({load_expr}, {perm})"
+                    self.has_transposed_load = True
 
             return load_expr
 
