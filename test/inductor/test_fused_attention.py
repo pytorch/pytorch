@@ -35,13 +35,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
     use_static_shapes = True
 
     def setUp(self):
-        self.prev_tf32 = torch.backends.cuda.matmul.allow_tf32
-        torch.backends.cuda.matmul.allow_tf32 = True
+        self.prev_tf32 = torch.backends.cuda.matmul.fp32_precision
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
         super().setUp()
 
     def tearDown(self):
         super().tearDown()
-        torch.backends.cuda.matmul.allow_tf32 = self.prev_tf32
+        torch.backends.cuda.matmul.fp32_precision = self.prev_tf32
 
     def _clone_inputs(self, inputs):
         def clone(x):
@@ -1346,8 +1346,8 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         @skipIfXpu(msg="FIXME: ENable for XPU")
         def test_skip_non_tf32(self):
             try:
-                orig = torch.backends.cuda.matmul.allow_tf32
-                torch.backends.cuda.matmul.allow_tf32 = False
+                orig = torch.backends.cuda.matmul.fp32_precision
+                torch.backends.cuda.matmul.fp32_precision = "ieee"
 
                 class Model(torch.nn.Module):
                     def __init__(self):
@@ -1378,7 +1378,7 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                 self.assertEqual(out, func(*test_inputs))
 
             finally:
-                torch.backends.cuda.matmul.allow_tf32 = orig
+                torch.backends.cuda.matmul.fp32_precision = orig
 
     class SDPAPatternRewriterGpuDynamicTests(SDPAPatternRewriterGpuTests):
         use_static_shapes = False

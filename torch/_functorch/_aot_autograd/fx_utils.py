@@ -5,7 +5,7 @@ that are produced by AOTAutograd.  They will NOT work on generic FX graphs.  See
 recommend reading :mod:torch._functorch._aot_autograd.descriptors`.
 """
 
-from typing import NoReturn, Optional, Union
+from typing import NoReturn
 
 import torch.fx as fx
 
@@ -26,7 +26,7 @@ from .descriptors import (
 
 
 def _raise_autograd_subclass_not_implemented(
-    n: fx.Node, desc: Union[AOTInput, AOTOutput]
+    n: fx.Node, desc: AOTInput | AOTOutput
 ) -> NoReturn:
     raise RuntimeError(
         "Subclasses are currently not supported by this function, but a desugared subclass input "
@@ -43,7 +43,7 @@ def _raise_autograd_subclass_not_implemented(
 
 def get_all_input_and_grad_nodes(
     g: fx.Graph,
-) -> dict[DifferentiableAOTInput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[DifferentiableAOTInput, tuple[fx.Node, fx.Node | None]]:
     """
     Given a joint graph with descriptors (meta['desc'] on placeholders and
     output), returns the node for every input and its corresponding grad
@@ -69,7 +69,7 @@ def get_all_input_and_grad_nodes(
         is not supported by API as there is not necessarily a 1-1 correspondence
         between inputs and grads when subclasses are involved.
     """
-    input_index: dict[DifferentiableAOTInput, tuple[fx.Node, Optional[fx.Node]]] = {}
+    input_index: dict[DifferentiableAOTInput, tuple[fx.Node, fx.Node | None]] = {}
     for n in g.nodes:
         if n.op == "placeholder":
             desc = n.meta["desc"]
@@ -99,7 +99,7 @@ def get_all_input_and_grad_nodes(
 
 def get_all_output_and_tangent_nodes(
     g: fx.Graph,
-) -> dict[DifferentiableAOTOutput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[DifferentiableAOTOutput, tuple[fx.Node, fx.Node | None]]:
     """Get all output nodes and their corresponding tangent nodes from a joint graph.
 
     Similar to get_all_input_and_grad_nodes, but returns output nodes paired with
@@ -124,7 +124,7 @@ def get_all_output_and_tangent_nodes(
         is not supported by API as there is not necessarily a 1-1 correspondence
         between outputs and tangents when subclasses are involved.
     """
-    output_index: dict[DifferentiableAOTOutput, tuple[fx.Node, Optional[fx.Node]]] = {}
+    output_index: dict[DifferentiableAOTOutput, tuple[fx.Node, fx.Node | None]] = {}
     for n in g.nodes:
         if n.op == "output":
             desc = n.meta["desc"]
@@ -153,7 +153,7 @@ def get_all_output_and_tangent_nodes(
 
 def get_param_and_grad_nodes(
     graph: fx.Graph,
-) -> dict[ParamAOTInput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[ParamAOTInput, tuple[fx.Node, fx.Node | None]]:
     """Get parameter nodes and their corresponding gradient nodes from a joint graph.
 
     Args:
@@ -173,7 +173,7 @@ def get_param_and_grad_nodes(
 
 def get_plain_input_and_grad_nodes(
     graph: fx.Graph,
-) -> dict[PlainAOTInput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[PlainAOTInput, tuple[fx.Node, fx.Node | None]]:
     """Get plain input nodes and their corresponding gradient nodes from a joint graph.
 
     Args:
@@ -193,7 +193,7 @@ def get_plain_input_and_grad_nodes(
 
 def get_plain_output_and_tangent_nodes(
     graph: fx.Graph,
-) -> dict[PlainAOTOutput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[PlainAOTOutput, tuple[fx.Node, fx.Node | None]]:
     """Get plain output nodes and their corresponding tangent nodes from a joint graph.
 
     Args:
@@ -212,7 +212,7 @@ def get_plain_output_and_tangent_nodes(
 
 
 def _raise_fqn_subclass_not_implemented(
-    n: fx.Node, desc: Union[AOTInput, AOTOutput]
+    n: fx.Node, desc: AOTInput | AOTOutput
 ) -> NoReturn:
     raise RuntimeError(
         "Subclasses are currently not supported by this function, but a desugared subclass input "

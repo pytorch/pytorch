@@ -38,7 +38,7 @@ COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 
 FROM base as python
-ARG ZLIB_VERSION=1.3.1
+ARG ZLIB_VERSION=1.3.2
 ARG FFI_VERSION=3.4.6
 ARG BZ2_VERSION=1.0.8
 ARG XZ_VERSION=5.4.6

@@ -13,9 +13,10 @@ import torch
 
 
 def test_sum() -> None:
-    assert torch.eq(
+    if not torch.eq(
         torch.tensor([[1, 2, 3]]) + torch.tensor([[4, 5, 6]]), torch.tensor([[5, 7, 9]])
-    ).all()
+    ).all():
+        raise AssertionError("sum test failed")
 
 
 def test_simple_compile_eager() -> None:
@@ -26,7 +27,8 @@ def test_simple_compile_eager() -> None:
 
     opt_foo1 = torch.compile(foo, backend="eager")
     # just check that we can run without raising an Exception
-    assert opt_foo1(torch.randn(10, 10), torch.randn(10, 10)) is not None
+    if opt_foo1(torch.randn(10, 10), torch.randn(10, 10)) is None:
+        raise AssertionError("compiled function returned None")
 
 
 test_sum()

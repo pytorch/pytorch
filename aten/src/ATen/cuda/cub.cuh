@@ -13,26 +13,7 @@
 #include <ATen/cuda/cub_definitions.cuh>
 #include <ATen/cuda/CUDAContextLight.h>
 
-#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
-
 #include <cub/cub.cuh>
-
-#else
-
-// include cub in a safe manner, see:
-// https://github.com/pytorch/pytorch/pull/55292
-#undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
-#undef CUB_NS_PREFIX
-#undef CUB_NS_QUALIFIER
-#define CUB_NS_PREFIX namespace at_cuda_detail {
-#define CUB_NS_POSTFIX }
-#define CUB_NS_QUALIFIER ::at_cuda_detail::cub
-#include <cub/cub.cuh>
-#undef CUB_NS_POSTFIX
-#undef CUB_NS_PREFIX
-#undef CUB_NS_QUALIFIER
-
-#endif
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -213,7 +194,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       scan_op,
       num_items,
       at::cuda::getCurrentCUDAStream());
-  C10_HIP_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
@@ -466,7 +447,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
       init_value,
       num_items,
       at::cuda::getCurrentCUDAStream());
-  C10_HIP_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,

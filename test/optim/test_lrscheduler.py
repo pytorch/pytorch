@@ -159,7 +159,8 @@ class TestLRScheduler(TestCase):
         gc.disable()
         ref = run()
 
-        assert ref() is None
+        if ref() is not None:
+            raise AssertionError("Expected scheduler to be garbage collected")
         gc.enable()  # restore
 
     def test_old_pattern_warning(self):
@@ -1622,7 +1623,8 @@ class TestLRScheduler(TestCase):
             return weakref.ref(scheduler)
 
         ref = test()
-        assert ref() is None
+        if ref() is not None:
+            raise AssertionError("Expected scheduler to be garbage collected")
         gc.enable()
 
     def test_cycle_lr_state_dict_picklable(self):
