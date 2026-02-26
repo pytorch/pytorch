@@ -29,7 +29,8 @@ class TestDeviceAnalysis(JitTestCase):
     @staticmethod
     def node_output_device(graph):
         graph_out = list(graph.outputs())
-        assert len(graph_out) == 1
+        if len(graph_out) != 1:
+            raise AssertionError(f"Expected 1 graph output, got {len(graph_out)}")
         return graph_out[0].type().device()
 
     def prop_device_on_graph(self, graph, example_devices, in_shapes=None):

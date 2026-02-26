@@ -286,7 +286,6 @@ keep-runtime-typing = true
 ]
 "test/export/**" = [
     "PGH004",
-    "S101",
 ]
 "test/typing/**" = [
     "PGH004"
@@ -311,14 +310,12 @@ keep-runtime-typing = true
     "PLR0133", # tests require this for JIT
     "PYI",
     "RUF015",
-    "S101",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
 "test/test_jit.py" = [
     "PLR0133", # tests require this for JIT
     "PYI",
     "RUF015",
-    "S101",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
 "test/inductor/s429861_repro.py" = [
