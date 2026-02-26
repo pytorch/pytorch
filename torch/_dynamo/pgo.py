@@ -237,6 +237,7 @@ class FrameStateSizeEntry:
         dataclasses.field(default=auto_unset)
     )
     excluded_sizes: tuple[int | None, ...] | None = None
+    excluded_scalar: int | None = None
 
     def render(self) -> str:
         # Special cases
@@ -383,6 +384,13 @@ class FrameStateSizeEntry:
                 # avoid overwriting with all-Nones when dims are already dynamic.
                 if any(v is not None for v in excluded):
                     self.excluded_sizes = tuple(excluded)
+        # Same idea for scalars: record the static value about to become dynamic.
+        if (
+            type(self.scalar) is int
+            and type(other.scalar) is int
+            and self.scalar != other.scalar
+        ):
+            self.excluded_scalar = self.scalar
         self.scalar = self._merge_atom(self.scalar, other.scalar)
         self.size = self._merge_atom_tup(self.size, other.size)
         self.stride = self._merge_atom_tup(self.stride, other.stride)
