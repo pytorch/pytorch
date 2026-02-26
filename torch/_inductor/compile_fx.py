@@ -2271,11 +2271,11 @@ class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
     forward_device: BoxedDeviceIndex
-    cudagraphs_bwd_override: Optional[bool] = None
+    cudagraphs_bwd_override: bool | None = None
 
 
 def create_compiler_config_extra(
-    config: types.ModuleType, gm_meta: Optional[dict[str, Any]] = None
+    config: types.ModuleType, gm_meta: dict[str, Any] | None = None
 ) -> CompilerConfigExtra:
     # Although cudagraphs may have been enabled via config, various
     # conditions (which are tested within the bowels of Inductor) may
@@ -2283,7 +2283,7 @@ def create_compiler_config_extra(
     # the final determination if cudagraphs actually can be used or not.
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
-    cudagraphs_bwd_override: Optional[bool] = None
+    cudagraphs_bwd_override: bool | None = None
 
     # Override cudagraphs BoxedBool based on override_cudagraphs annotation.
     # Disabling fwd disables bwd (copying activations isn't profitable),
