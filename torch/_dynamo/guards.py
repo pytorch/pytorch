@@ -879,9 +879,14 @@ def get_tensor_guard_code_part(
     dispatch_key = (
         dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
-    dtype = value.dtype
-    device_index = value.device.index
-    requires_grad = value.requires_grad
+
+    # Disable TorchFunction to prevent __torch_function__ from being triggered
+    # when accessing tensor properties during guard creation
+    with torch._C.DisableTorchFunction():
+        dtype = value.dtype
+        device_index = value.device.index
+        requires_grad = value.requires_grad
+
     guard_str = (
         f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
         f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})"
@@ -2738,18 +2743,21 @@ class GuardBuilder(GuardBuilderBase):
                 equalities_inputs = None
 
             def _get_code_parts(langs: tuple[str, ...]) -> list[_ShapeGuardsHelper]:
-                # pyrefly: ignore [missing-attribute]
-                return output_graph.shape_env.produce_guards_verbose(
-                    [a.fake for a in fs],  # type: ignore[misc]
-                    [a.source for a in fs],
-                    input_contexts=input_contexts,  # type: ignore[arg-type]
-                    equalities_inputs=equalities_inputs,
-                    source_ref=self.source_ref,
-                    # Export keeps static.
+                # Disable TorchFunction to prevent __torch_function__ from being triggered
+                # when accessing tensor properties during guard creation
+                with torch._C.DisableTorchFunction():
                     # pyrefly: ignore [missing-attribute]
-                    ignore_static=(not output_graph.export),
-                    langs=langs,
-                )
+                    return output_graph.shape_env.produce_guards_verbose(
+                        [a.fake for a in fs],  # type: ignore[misc]
+                        [a.source for a in fs],
+                        input_contexts=input_contexts,  # type: ignore[arg-type]
+                        equalities_inputs=equalities_inputs,
+                        source_ref=self.source_ref,
+                        # Export keeps static.
+                        # pyrefly: ignore [missing-attribute]
+                        ignore_static=(not output_graph.export),
+                        langs=langs,
+                    )
 
             if config.enable_cpp_symbolic_shape_guards:
                 try:

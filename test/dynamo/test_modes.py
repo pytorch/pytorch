@@ -778,6 +778,41 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
+    def test_guard_sanity_check_skipped_with_torch_function_mode(self):
+        """Test that guard sanity checks are skipped when TorchFunctionMode is active.
+
+        This exercises the behavior where the compile-time guard sanity check
+        does not invoke __torch_function__ while evaluating guards, so that
+        arbitrary user code is not run or state modified during compilation.
+
+        Regression test for issue #172088 where a stateful TorchFunctionMode
+        caused the guard sanity check to fail with "Guard failed on the same
+        frame it was created" error.
+        """
+
+        class CounterMode(TorchFunctionMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                self.count += 1
+                return func(*args, **kwargs)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            # Use an op like sin that was involved in the original regression
+            return x.sin()
+
+        with CounterMode() as mode:
+            x = torch.tensor([1.0])
+            result = f(x)
+            # Ensure compiled call succeeds and produces the correct result
+            self.assertEqual(result, x.sin())
+            # Ensure the mode was actually active during execution (but not during guard checks)
+            self.assertGreater(mode.count, 0)
+
     @requires_gpu
     @skipIfXpu(msg="XPU does not support flex attention")
     def test_hop_eager(self):
