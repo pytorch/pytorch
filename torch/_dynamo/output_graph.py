@@ -377,8 +377,6 @@ class OutputGraphGuardsState:
     guard_on_key_order: set[Source]
     # Map from graph input's `Source` to sizes / strides metadata
     input_source_to_sizes_strides: dict[Source, dict[str, Any]]
-    # Map from scalar graph input's `Source` to its excluded value
-    input_source_to_excluded_scalar: dict[Source, int]
     dual_level: int
     functorch_layers: list[torch._functorch.pyfunctorch.FuncTorchInterpreter]
     current_device: Optional[torch.device]
@@ -413,7 +411,6 @@ class OutputGraphGuardsState:
             torch_function_mode_stack=self.torch_function_mode_stack,
             guard_on_key_order=self.guard_on_key_order,
             input_source_to_sizes_strides=self.input_source_to_sizes_strides,
-            input_source_to_excluded_scalar=self.input_source_to_excluded_scalar,
             dual_level=self.dual_level,
             functorch_layers=self.functorch_layers,
             current_device=self.current_device,
@@ -526,7 +523,6 @@ class OutputGraphCommon(OutputGraphGuardsState):
             output_graph_guards_state.torch_function_mode_stack,
             output_graph_guards_state.guard_on_key_order,
             output_graph_guards_state.input_source_to_sizes_strides,
-            output_graph_guards_state.input_source_to_excluded_scalar,
             output_graph_guards_state.dual_level,
             output_graph_guards_state.functorch_layers,
             output_graph_guards_state.current_device,
@@ -597,7 +593,6 @@ class OutputGraph(OutputGraphCommon):
             torch_function_mode_stack,
             guard_on_key_order=set(),
             input_source_to_sizes_strides={},
-            input_source_to_excluded_scalar={},
             dual_level=torch.autograd.forward_ad._current_level,
             functorch_layers=torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters(),
             current_device=torch.utils._device.CURRENT_DEVICE,

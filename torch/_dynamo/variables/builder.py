@@ -2652,7 +2652,6 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         shape_env = self.tx.output.shape_env
-        frame_state_entry: FrameStateSizeEntry | None = None
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
@@ -2733,18 +2732,6 @@ class VariableBuilder:
 
         assert not isinstance(self.get_source(), RandomValueSource)
         install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
-
-        # When a scalar transitions from static to dynamic, install an
-        # exclusion guard so the dynamic graph doesn't shadow the earlier
-        # static graph for the original value.
-        if (
-            frame_state_entry is not None
-            and frame_state_entry.excluded_scalar is not None
-        ):
-            self.tx.output.input_source_to_excluded_scalar[self.source] = (
-                frame_state_entry.excluded_scalar
-            )
-            install_guard(self.get_source().make_guard(GuardBuilder.SCALAR_EXCLUSION))
 
         options = {"source": self.get_source()}
 

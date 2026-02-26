@@ -237,7 +237,6 @@ class FrameStateSizeEntry:
         AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
     excluded_sizes: Optional[tuple[Optional[int], ...]] = None
-    excluded_scalar: Optional[int] = None
 
     def render(self) -> str:
         # Special cases
@@ -380,15 +379,10 @@ class FrameStateSizeEntry:
                         and si != other.size[i]
                     ):
                         excluded[i] = si
-                self.excluded_sizes = tuple(excluded)
-        # Same idea for scalars: before merging, record the static value
-        # that will be lost so the dynamic graph can exclude it.
-        if (
-            type(self.scalar) is int
-            and type(other.scalar) is int
-            and self.scalar != other.scalar
-        ):
-            self.excluded_scalar = self.scalar
+                # Only update if there's an actual static→dynamic transition;
+                # avoid overwriting with all-Nones when dims are already dynamic.
+                if any(v is not None for v in excluded):
+                    self.excluded_sizes = tuple(excluded)
         self.scalar = self._merge_atom(self.scalar, other.scalar)
         self.size = self._merge_atom_tup(self.size, other.size)
         self.stride = self._merge_atom_tup(self.stride, other.stride)
