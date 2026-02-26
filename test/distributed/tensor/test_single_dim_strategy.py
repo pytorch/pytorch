@@ -1223,9 +1223,7 @@ class TestCommonPointwiseSingleDimStrategy(TestCase):
     def test_unary_2d_shard_rules(self):
         """Unary op with a 2D tensor should produce two Shard rules."""
         fn = _common_pointwise_single_dim_strategy()
-        rules = self._normalize(
-            fn(torch.ops.aten.abs.default, (self._meta(4, 8),), {})
-        )
+        rules = self._normalize(fn(torch.ops.aten.abs.default, (self._meta(4, 8),), {}))
         self.assertEqual(
             rules,
             [(Shard(0), Shard(0)), (Shard(1), Shard(1))],
@@ -1233,10 +1231,10 @@ class TestCommonPointwiseSingleDimStrategy(TestCase):
 
     def test_unary_with_partial_extra_rules(self):
         """Unary op with _UNARY_LINEAR_RULES should append partial rules."""
-        fn = _common_pointwise_single_dim_strategy(partial_extra_rules=_UNARY_LINEAR_RULES)
-        rules = self._normalize(
-            fn(torch.ops.aten.neg.default, (self._meta(4, 8),), {})
+        fn = _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_UNARY_LINEAR_RULES
         )
+        rules = self._normalize(fn(torch.ops.aten.neg.default, (self._meta(4, 8),), {}))
         expected = [
             (Shard(0), Shard(0)),
             (Shard(1), Shard(1)),
@@ -1259,7 +1257,9 @@ class TestCommonPointwiseSingleDimStrategy(TestCase):
 
     def test_partial_extra_rules_filtered_by_arity(self):
         """Binary extra rules are filtered out when only one tensor arg is present."""
-        fn = _common_pointwise_single_dim_strategy(partial_extra_rules=_MUL_RULES + _UNARY_LINEAR_RULES)
+        fn = _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_MUL_RULES + _UNARY_LINEAR_RULES
+        )
         # Scalar promotion: mul.Tensor with one tensor arg
         rules = self._normalize(
             fn(torch.ops.aten.mul.Tensor, (self._meta(4, 8), 2.0), {})
@@ -1275,7 +1275,9 @@ class TestCommonPointwiseSingleDimStrategy(TestCase):
 
     def test_binary_with_additive_rules(self):
         """Binary op with _BINARY_ADDITIVE_RULES appends the right partial rules."""
-        fn = _common_pointwise_single_dim_strategy(partial_extra_rules=_BINARY_ADDITIVE_RULES)
+        fn = _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_BINARY_ADDITIVE_RULES
+        )
         rules = self._normalize(
             fn(torch.ops.aten.add.Tensor, (self._meta(4, 8), self._meta(4, 8)), {})
         )
