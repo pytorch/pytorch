@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Optional
 
 import torch
 from torch._dynamo.utils import counters
@@ -13,7 +14,7 @@ aten = torch.ops.aten
 
 
 @functools.cache
-def _misc_patterns_init(input_device: torch.device | None = None):
+def _misc_patterns_init(input_device: Optional[torch.device] = None):
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
 

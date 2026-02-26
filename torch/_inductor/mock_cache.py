@@ -6,7 +6,7 @@ import contextlib
 import dataclasses
 import sys
 import threading
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import override, Self
 from unittest.mock import patch
 
@@ -137,7 +137,7 @@ class MockBackend(RemoteCacheBackend[Any]):
         return wrapper
 
     @override
-    def _get(self, key: str) -> Any | None:
+    def _get(self, key: str) -> Optional[Any]:
         stat = global_stats.get_stat(self._name)
         if key in stat.cache:
             stat += Stats(num_get_hit=1)
@@ -267,8 +267,8 @@ class PatchCaches(contextlib.AbstractContextManager):
 
     def __exit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
+        exc_type: Optional[type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
     ) -> None:
         self._stack.__exit__(exc_type, exc_value, traceback)

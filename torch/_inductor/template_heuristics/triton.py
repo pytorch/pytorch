@@ -6,7 +6,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -61,7 +61,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: int | None = dataclasses.field(kw_only=True, default=None)
+    hint_override: Optional[int] = dataclasses.field(kw_only=True, default=None)
 
 
 @dataclasses.dataclass
@@ -786,7 +786,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[int | None, ...]] = OrderedSet()
+        used: OrderedSet[tuple[Optional[int], ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -795,7 +795,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key: tuple[int | None, ...] = (
+            key: tuple[Optional[int], ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -857,7 +857,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: float,
         has_int8_tensor: bool,
         exclude: Callable[[sympy.Integer, sympy.Integer, sympy.Integer], bool],
-        hint_override: int | None = None,
+        hint_override: Optional[int] = None,
     ) -> list[BaseConfig]:
         """
         Scales and filters matrix multiplication configs based on input size.
@@ -964,7 +964,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         self,
         has_sm_layout_conversion: bool,
         layout_conversion_byte_size: int,
-    ) -> Callable[[BaseConfig, int], bool] | None:
+    ) -> Optional[Callable[[BaseConfig, int], bool]]:
         """
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
         based on the config's theoretical maximum shared memory used.

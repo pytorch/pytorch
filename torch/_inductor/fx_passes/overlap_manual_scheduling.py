@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import heapq
 from collections import Counter, defaultdict
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
@@ -270,7 +270,7 @@ class ManualOverlapScheduler(OverlapScheduler):
 
         self.scheduled = OrderedSet(reversed(list(self.scheduled)))
         picked_ag: list[fx.Node] = []
-        last_compute: fx.Node | None = None
+        last_compute: Optional[fx.Node] = None
 
         for node in self.scheduled:
             node_type = node.meta.get("manual_bucket_node_type", "")

@@ -5,6 +5,7 @@ Compile LLVM IR to multi-arch bundles that HIP can load automatically.
 
 import os
 import subprocess
+from typing import Optional
 
 import torch
 from torch.utils.cpp_extension import _join_rocm_home, ROCM_HOME
@@ -212,7 +213,7 @@ def create_multiarch_bundle(code_objects: dict, output_bundle_path: str) -> bool
 
 
 def compile_multiarch_bundle_from_llvm_ir(
-    llvm_ir_path: str, output_bundle_path: str, target_archs: list[str] | None = None
+    llvm_ir_path: str, output_bundle_path: str, target_archs: Optional[list[str]] = None
 ) -> bool:
     """
     Complete workflow: LLVM IR → multiple code objects → bundle.

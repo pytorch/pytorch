@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters
@@ -172,7 +172,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     kwarg_overrides = {}
 
     if use_aten_gemm_kernels():
@@ -273,7 +273,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     choices: list[ChoiceCaller] = []
 
     # Collect all templates for unified call
-    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+    templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     if use_aten_gemm_kernels():
         templates_to_use.append(aten_baddbmm)
 

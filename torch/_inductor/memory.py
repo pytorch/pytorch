@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import heapq
 import logging
-from typing import TYPE_CHECKING, TypedDict
+from typing import Optional, TYPE_CHECKING, TypedDict, Union
 
 import torch
 from torch._environment import is_fbcode
@@ -61,8 +61,8 @@ class MemoryPlanningInfoForBuffer:
 class MemoryPlanningInfoForNode:
     index: int = 0
     size: int = 0
-    pred_buffers: OrderedSet[SchedulerBuffer | FreeableInputBuffer] = dataclasses.field(
-        default_factory=OrderedSet
+    pred_buffers: OrderedSet[Union[SchedulerBuffer, FreeableInputBuffer]] = (
+        dataclasses.field(default_factory=OrderedSet)
     )
     pred_nodes: OrderedSet[BaseSchedulerNode] = dataclasses.field(
         default_factory=OrderedSet
@@ -336,7 +336,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
 # map each scheduler buffer to its size, start step, and end step
 @dataclasses.dataclass
 class BufferInfo:
-    buffer: SchedulerBuffer | FreeableInputBuffer
+    buffer: Union[SchedulerBuffer, FreeableInputBuffer]
     size_alloc: int
     size_free: int
     start_step: int
@@ -350,7 +350,7 @@ def compute_memory_timeline(
 ) -> tuple[
     list[BufferInfo],
     dict[BaseSchedulerNode, int],
-    dict[FreeableInputBuffer | SchedulerBuffer, BaseSchedulerNode],
+    dict[Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode],
 ]:
     """
     Compute buffer allocation and deallocation sizes and map their
@@ -366,14 +366,14 @@ def compute_memory_timeline(
     # get buffers' size and liveliness information
     buf_info_list: list[BufferInfo] = []
     buf_to_snode_last_use: dict[
-        FreeableInputBuffer | SchedulerBuffer, BaseSchedulerNode
+        Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode
     ] = {}
 
     def _get_end_step_and_snode(
-        buf: FreeableInputBuffer | SchedulerBuffer,
-    ) -> tuple[int, BaseSchedulerNode | None]:
+        buf: Union[FreeableInputBuffer, SchedulerBuffer],
+    ) -> tuple[int, Optional[BaseSchedulerNode]]:
         max_step: int = -1
-        max_step_snode: BaseSchedulerNode | None = None
+        max_step_snode: Optional[BaseSchedulerNode] = None
         succ_nodes = buf.mpi_buffer.succ_nodes
         if succ_nodes:
             for succ_node in succ_nodes:
@@ -484,7 +484,7 @@ def estimate_peak_memory_allocfree(
     int,
     list[tuple[int, int]],
     dict[BaseSchedulerNode, SNodeMemory],
-    dict[FreeableInputBuffer | SchedulerBuffer, BaseSchedulerNode],
+    dict[Union[FreeableInputBuffer, SchedulerBuffer], BaseSchedulerNode],
 ]:
     """
     Alternative version of estimate_peak_memory, that respects the fact,
@@ -571,7 +571,7 @@ def topological_sort_lpmf(
         outdegree: int
 
     node_info: dict[BaseSchedulerNode, NodeInfo] = dict()
-    buf_info: dict[SchedulerBuffer | FreeableInputBuffer, BufferInfo] = dict()
+    buf_info: dict[Union[SchedulerBuffer, FreeableInputBuffer], BufferInfo] = dict()
 
     # compute nodes' number of unmet dependencies (for schedulability)
     # initialize the list of nodes ready to be scheduled

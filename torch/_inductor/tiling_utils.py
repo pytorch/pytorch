@@ -2,7 +2,7 @@ import dataclasses
 import itertools
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from typing import Literal, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Literal, Optional, overload, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from torch._inductor.scheduler import FusedSchedulerNode, SchedulerNode
 
 
-def solve_for_zero(expr: sympy.Expr) -> sympy.Expr | None:
+def solve_for_zero(expr: sympy.Expr) -> Optional[sympy.Expr]:
     """
     Given an expr with a single free symbol, solve for a constant relation that would make
     this expression 0.
@@ -54,7 +54,7 @@ def solve_for_zero(expr: sympy.Expr) -> sympy.Expr | None:
     return out[1]
 
 
-def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
+def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
     """
     Giving an expr with a single free symbol, try to find a tiling that would
     make the expression coalesced with respect to that symbol.
@@ -71,7 +71,7 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
 
     free_symbol = next(iter(expr.free_symbols))
 
-    def _solve_simple_expr(expr: sympy.Expr) -> sympy.Expr | None:
+    def _solve_simple_expr(expr: sympy.Expr) -> Optional[sympy.Expr]:
         assert not expr.has(ModularIndexing) and not expr.has(FloorDiv)
         if len(expr.free_symbols) != 1:
             return None
@@ -119,7 +119,7 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
     def indexing_div_rep(
         x: sympy.Expr,
         y: sympy.Expr,
-        z: sympy.Expr | None = None,
+        z: Optional[sympy.Expr] = None,
     ) -> sympy.Expr:
         return x / y
 
@@ -146,7 +146,7 @@ def solve_for_tiling(expr: sympy.Expr) -> sympy.Expr | None:
 
 def find_broadcast_var(
     index: sympy.Expr, var_ranges: dict[sympy.Expr, int]
-) -> sympy.Expr | None:
+) -> Optional[sympy.Expr]:
     """
     Try to find the variable that this index is broadcast over.
     A broadcast pattern is one where consecutive values of a variable
@@ -181,7 +181,7 @@ def find_broadcast_var(
 
 def find_coalesced_var(
     index: sympy.Expr, var_ranges: dict[sympy.Expr, int]
-) -> sympy.Expr | None:
+) -> Optional[sympy.Expr]:
     """
     Try to find the symbol which coalesces this index
     """
@@ -243,7 +243,7 @@ def get_pw_red_splits(
     pointwise_numel: sympy.Expr,
     red_numel: sympy.Expr,
     none_if_not_divisible: Literal[True],
-) -> tuple[VarsAndRanges, VarsAndRanges] | None: ...
+) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]: ...
 
 
 @overload
@@ -260,7 +260,7 @@ def get_pw_red_splits(
     pointwise_numel: sympy.Expr,
     red_numel: sympy.Expr,
     none_if_not_divisible: bool = False,
-) -> tuple[VarsAndRanges, VarsAndRanges] | None:
+) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
     if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
         # pyrefly: ignore [bad-return]
         return (
@@ -393,7 +393,7 @@ class NodeSplitGetter:
         # if for whatever reason we couldn't split above, return default split
         return ((self.pointwise_numel,), (self.red_numel,))
 
-    def try_split(self, pw: Split, red: Split) -> tuple[Split, Split] | None:
+    def try_split(self, pw: Split, red: Split) -> Optional[tuple[Split, Split]]:
         """
         See if this split is compatible, and potentially returning a longer split
         than the input.
@@ -498,7 +498,7 @@ def apply_var_mapping(
 
 def extract_normalized_read_writes(
     node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> FusedNormalizedReadsWrites | None:
+) -> Optional[FusedNormalizedReadsWrites]:
     """Extracts index variables, reduce variables, read/write expressions, and variable ranges from a fused node."""
     reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
     writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
@@ -636,14 +636,14 @@ def get_score(
     return V.graph.sizevars.optimization_hint(sympy_product(var_sizes))
 
 
-def try_get_buf_size(buf_name: str) -> int | None:
+def try_get_buf_size(buf_name: str) -> Optional[int]:
     buf = V.graph.try_get_buffer(buf_name)
     if not buf:
         return None
     return V.graph.sizevars.optimization_hint(sympy_product(buf.get_size()))
 
 
-def get_hint(v: sympy.Expr | int) -> int:
+def get_hint(v: Union[sympy.Expr, int]) -> int:
     if isinstance(v, int):
         return v
     else:
@@ -672,12 +672,12 @@ class CoalesceVarAnalysis:
 
     norm_read_writes: FusedNormalizedReadsWrites
 
-    suggested_split: VarTiling | None = None
+    suggested_split: Optional[VarTiling] = None
 
 
 def analyze_memory_coalescing(
     fused_node: Union["FusedSchedulerNode", "SchedulerNode"],
-) -> CoalesceVarAnalysis | None:
+) -> Optional[CoalesceVarAnalysis]:
     """
     Find variables that coalesce the reads and writes and score the total size.
 
@@ -804,7 +804,7 @@ def analyze_memory_coalescing(
             norm_read_writes=norm_read_writes,
         )
 
-    best_tiling: tuple[sympy.Expr, int] | None = None
+    best_tiling: Optional[tuple[sympy.Expr, int]] = None
     best_tiling_score = 0
 
     for var, tiling_counter in tiling_scores.items():
