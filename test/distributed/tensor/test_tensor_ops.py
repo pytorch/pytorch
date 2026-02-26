@@ -978,7 +978,8 @@ class DistTensorOpsTest(DTensorTestBase):
         def to_copy_single_dim_strategy(op, args_schema, kwargs_schema):
             call_count[0] += 1
             self_meta = args_schema[0]
-            assert isinstance(self_meta, TensorMeta)
+            if not isinstance(self_meta, TensorMeta):
+                raise AssertionError(f"Expected TensorMeta, got {type(self_meta)}")
             single_dim_strategies = []
             for dim in range(len(self_meta.shape)):
                 single_dim_strategies.append(
