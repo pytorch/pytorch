@@ -610,7 +610,7 @@ def _private_register_pytree_node(
     """
     from torch._library.opaque_object import is_opaque_type
 
-    if is_opaque_type(cls):
+    if isinstance(cls, type) and is_opaque_type(cls):
         raise ValueError(
             f"{cls} cannot be registered as a pytree as it has been "
             "registered as an opaque object. Opaque objects must be pytree leaves."

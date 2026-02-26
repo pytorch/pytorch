@@ -9586,7 +9586,7 @@ class TorchBindObject(NonTensorObj):
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
 
-        if is_opaque_type(real_script_obj):
+        if is_opaque_type(type(real_script_obj)):
             return 0
 
         assert hasattr(real_script_obj, "__obj_flatten__")

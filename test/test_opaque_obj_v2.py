@@ -2309,6 +2309,15 @@ class GraphModule(torch.nn.Module):
         expected = x * float(Color.RED.value)
         self.assertTrue(torch.allclose(result, expected))
 
+    def test_is_opaque_type_rejects_instances(self):
+        from torch._library.opaque_object import is_opaque_type
+
+        class Foo:
+            pass
+
+        with self.assertRaisesRegex(TypeError, "expected a type, got an instance"):
+            is_opaque_type(Foo())
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 

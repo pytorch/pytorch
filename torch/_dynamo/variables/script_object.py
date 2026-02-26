@@ -96,7 +96,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         return False
 
     def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(self.value)
+        return is_opaque_value_type(self.value)  # pyrefly: ignore[bad-argument-type]
 
     def as_proxy(self) -> Any:
         return self.value

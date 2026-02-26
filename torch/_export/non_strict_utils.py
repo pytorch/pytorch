@@ -984,7 +984,7 @@ def _fakify_script_objects(
         for obj, fqns in constant_attrs.items():
             if torch._library.fake_class_registry._is_script_object(
                 obj
-            ) or is_opaque_type(obj):
+            ) or is_opaque_type(type(obj)):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)

@@ -260,13 +260,16 @@ def has_members(cls: Any) -> bool:
     return len(info.members) > 0
 
 
-def is_opaque_type(cls: Any) -> bool:
+def is_opaque_type(cls: type[Any] | str) -> bool:
     """
     Checks if the given type is an opaque type.
     Also returns True for subclasses of registered opaque types.
     """
     if isinstance(cls, str):
         return torch._C._is_opaque_type_registered(cls)
+
+    if not isinstance(cls, type):
+        return False
 
     info = _resolve_opaque_type_info(cls)
     if info is None:
@@ -275,7 +278,7 @@ def is_opaque_type(cls: Any) -> bool:
     return torch._C._is_opaque_type_registered(info.class_name)
 
 
-def is_opaque_value_type(cls: Any) -> bool:
+def is_opaque_value_type(cls: type[Any] | str) -> bool:
     """
     Checks if the given type is an opaque **value** type.
     See Note [Opaque Objects] for more information.
