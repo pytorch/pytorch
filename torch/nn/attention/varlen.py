@@ -54,6 +54,7 @@ def _varlen_attn(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -70,6 +71,12 @@ def _varlen_attn(
         if window_size[0] != -1 or window_size[1] != -1:
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
+            )
+        if seqused_k is not None:
+            # TODO: cuDNN supports per-sequence KV lengths via SEQ_LEN_KV + padding_mask,
+            # but _cudnn_attention_forward doesn't expose it yet.
+            raise RuntimeError(
+                "seqused_k is not yet supported with the cuDNN backend."
             )
         result = torch.ops.aten._cudnn_attention_forward(
             query,
@@ -104,6 +111,7 @@ def _varlen_attn(
             scale=scale,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
+            seqused_k=seqused_k,
         )
 
     rng_state_ = torch.zeros(
@@ -124,6 +132,7 @@ def _varlen_attn_fake(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -168,6 +177,7 @@ def varlen_attn(
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
+    seqused_k: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     r"""Compute variable-length attention using Flash Attention.
 
@@ -246,6 +256,7 @@ def varlen_attn(
         is_causal,
         scale,
         list(window_size),
+        seqused_k,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -264,8 +275,12 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         is_causal,
         scale,
         window_size,
+        seqused_k,
     ) = inputs
     out, lse, rng_state = output
+
+    if seqused_k is not None:
+        raise RuntimeError("seqused_k is an inference-only parameter.")
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
@@ -401,7 +416,8 @@ def _backward(
         scale,
         window_size,
     )
-    return dq, dk, dv, None, None, None, None, None, None, None
+    num_params = 8  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k
+    return (dq, dk, dv, *((None,) * num_params))
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
