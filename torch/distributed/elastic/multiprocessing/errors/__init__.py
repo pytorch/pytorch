@@ -240,9 +240,9 @@ class ChildFailedError(Exception):
     def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
         self.name = name
         self.failures = failures
-        # does not make sense to create a ChildFaileError with no failures
-        if not self.failures:
-            raise AssertionError
+        assert (
+            self.failures
+        )  # does not make sense to create a ChildFaileError with no failures
         super().__init__(self.format_msg())
 
     def get_first_failure(self) -> tuple[GlobalRank, ProcessFailure]:
@@ -360,8 +360,7 @@ def record(
     def wrap(f: Callable[_P, _R]) -> Callable[_P, _R | None]:
         @wraps(f)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs):
-            if error_handler is None:
-                raise AssertionError  # assertion for mypy type checker
+            assert error_handler is not None  # assertion for mypy type checker
             error_handler.initialize()
             try:
                 return f(*args, **kwargs)

@@ -182,10 +182,8 @@ class ChunkShardingSpec(ShardingSpec):
 
         # each rank should have local_tensor and local_metadata initialized if we build
         # the metadata list in a correct way.
-        if local_tensor is None:
-            raise AssertionError
-        if local_metadata is None:
-            raise AssertionError
+        assert local_tensor is not None
+        assert local_metadata is not None
 
         # Scatter the shards to all ranks in the pg
         # scatter takes the global rank as ``src``
@@ -202,8 +200,7 @@ class ChunkShardingSpec(ShardingSpec):
         if current_rank == src_rank:
             tensors_to_scatter_ = []
             for t in tensors_to_scatter:
-                if not isinstance(t, torch.Tensor):
-                    raise AssertionError
+                assert isinstance(t, torch.Tensor)
                 tensors_to_scatter_.append(t)
 
         dist.scatter(

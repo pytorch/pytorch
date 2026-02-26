@@ -277,8 +277,7 @@ class _Scatter(Function):
     def forward(ctx, src, group, *tensors):
         ctx.src = src
         ctx.group = group
-        if not all(t.size() == tensors[0].size() for t in tensors):
-            raise AssertionError
+        assert all(t.size() == tensors[0].size() for t in tensors)
         output = torch.zeros_like(tensors[0])
         if dist.get_rank(group=group) == src:
             dist.scatter(output, list(tensors), src, group=group)

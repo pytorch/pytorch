@@ -32,8 +32,7 @@ def _get_output_sharding(
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
-    if output_sharding is None:
-        raise AssertionError("output sharding should not be None")
+    assert output_sharding is not None, "output sharding should not be None"
     return output_sharding
 
 
@@ -272,8 +271,7 @@ def minmax_dim_handler(
     )
 
     # Compute local reduction - min/max with dim always requires dim
-    if dim is None:
-        raise AssertionError
+    assert dim is not None
     local_redux, local_idx = op_call(local_tensor, dim=dim, keepdim=True)
 
     if not shard_mesh_dims:

@@ -169,12 +169,10 @@ def _get_shard_size_and_offsets(
     if shard_size == 0:
         return shard_size, torch.arange(zero_global_offset, zero_global_offset + 1)
     if isinstance(placement, Shard) and not isinstance(placement, _StridedShard):
-        if not isinstance(shard_offsets, int):
-            raise AssertionError
+        assert isinstance(shard_offsets, int)
         index = torch.arange(shard_offsets, shard_offsets + shard_size)
     else:
-        if not isinstance(shard_offsets, list):
-            raise AssertionError
+        assert isinstance(shard_offsets, list)
         index = torch.tensor(shard_offsets)
     if previous_offsets is None:
         return shard_size, index
@@ -233,8 +231,7 @@ def _compute_local_shape_and_global_offset(
         def coordinate_lookup(dim: int) -> RankType:
             return _coord[dim]
     else:
-        if my_coordinate is None:
-            raise AssertionError
+        assert my_coordinate is not None
         coordinate_lookup = my_coordinate
 
     local_shape = list(global_shape)
@@ -256,10 +253,9 @@ def _compute_local_shape_and_global_offset(
             continue
         shard_dim = placement.dim
         zero_global_offset = global_shape[shard_dim]
-        if shard_dim >= len(local_shape):
-            raise AssertionError(
-                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
-            )
+        assert shard_dim < len(local_shape), (
+            f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+        )
         previous_offsets = shard_dim_to_global_offsets.get(shard_dim)
         shard_size, shard_offsets = _get_shard_size_and_offsets(
             local_shape[shard_dim],
@@ -322,17 +318,15 @@ def compute_local_tensor_info(
                     f"the user-facing APIs: {shard_placement}"
                 )
             shard_dim = shard_placement.dim
-            if shard_dim >= len(local_shape):
-                raise AssertionError(
-                    f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)} "
-                    f"for placement number {idx}."
-                )
+            assert shard_dim < len(local_shape), (
+                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)} "
+                f"for placement number {idx}."
+            )
 
             global_dim_size = local_shape[shard_dim]
-            if global_dim_size % mesh_dim_size != 0:
-                raise AssertionError(
-                    f"Global dim {global_dim_size} not divisible by mesh size {mesh_dim_size}"
-                )
+            assert global_dim_size % mesh_dim_size == 0, (
+                f"Global dim {global_dim_size} not divisible by mesh size {mesh_dim_size}"
+            )
             local_shape[shard_dim] = global_dim_size // mesh_dim_size
 
             # shrink strides that were scaled up globally
