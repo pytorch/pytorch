@@ -119,8 +119,7 @@ def _remove_or_passthrough_single(out, vmap_level, batch_size, out_dim, func):
     if out is None:
         return None
     if isinstance(out, (int, float, bool, complex)):
-        dtype = torch.tensor(out).dtype
-        return torch.full((batch_size,), out, dtype=dtype)
+        return torch.full((batch_size,), out)
     raise ValueError(
         f"vmap({_get_name(func)}, ...): `{_get_name(func)}` must only return "
         f"Tensors, got type {type(out)}. "
