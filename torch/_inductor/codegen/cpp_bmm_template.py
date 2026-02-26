@@ -2,7 +2,7 @@
 import contextlib
 import itertools
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -83,7 +83,7 @@ class CppBmmTemplate(CppGemmTemplate):
         beta=1,
         alpha=1,
         has_bias=False,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
         should_block_weights: bool = False,
         name="bmm",
     ):
@@ -176,9 +176,9 @@ class CppBmmTemplate(CppGemmTemplate):
     def get_options(
         self,
         kernel: CppTemplateKernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        flag_template_buffer_has_other_users: bool | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> dict[str, Any]:
         options = super().get_options(
@@ -210,9 +210,9 @@ class CppBmmTemplate(CppGemmTemplate):
     def render(  # type: ignore[override, return]
         self,
         kernel: CppTemplateKernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        flag_template_buffer_has_other_users: bool | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
         options = self.get_options(
