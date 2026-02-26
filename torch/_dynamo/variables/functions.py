@@ -2496,32 +2496,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         return self.replacement_var.call_function(tx, args, kwargs)
 
 
-class FunctoolsWrapsVariable(UserFunctionVariable):
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not kwargs and len(args) == 1:
-
-            def wraps(fn: Any) -> VariableTracker:
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wrapped_fn=args[0])
-                unimplemented(
-                    gb_type="functools.wraps",
-                    context=f"{fn}",
-                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
-                    hints=[
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            return variables.LambdaVariable(wraps)
-
-        return super().call_function(tx, args, kwargs)
-
-
 class CollectionsNamedTupleFunction(UserFunctionVariable):
     def as_python_constant(self) -> Any:
         return self.fn
