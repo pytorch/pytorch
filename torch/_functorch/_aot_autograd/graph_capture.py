@@ -40,6 +40,7 @@ from .streams import (
     populate_fw_metadata_with_stream_indices,
     sync_deallocations,
 )
+from .subclass_utils import _source_for_opaque_key
 from .utils import (
     call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
@@ -52,6 +53,34 @@ from .utils import (
 
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+
+
+def _install_shared_opaque_guards(
+    fw_metadata: ViewAndMutationMeta, aot_config: AOTConfig
+) -> None:
+    if not fw_metadata.shared_opaque_guard_keys:
+        return
+    if not aot_config.aot_autograd_arg_pos_to_source:
+        return
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is None:
+        return
+    from torch._guards import DuplicateInputs
+
+    for key_a, key_b in fw_metadata.shared_opaque_guard_keys:
+        source_a = _source_for_opaque_key(
+            key_a,
+            aot_config.aot_autograd_arg_pos_to_source,
+            fw_metadata.subclass_inp_meta,
+        )
+        source_b = _source_for_opaque_key(
+            key_b,
+            aot_config.aot_autograd_arg_pos_to_source,
+            fw_metadata.subclass_inp_meta,
+        )
+        tracing_context.guards_context.aotautograd_guards.append(
+            DuplicateInputs(source_a, source_b)
+        )
 
 
 def _extract_tangent_source_stack_traces(
@@ -245,6 +274,8 @@ def aot_dispatch_base_graph(
         meta=fw_metadata,
         fw_only=flat_fn,
     )
+
+    _install_shared_opaque_guards(fw_metadata, aot_config)
 
     if not aot_config.disable_functionalization:
         (
@@ -476,6 +507,8 @@ def aot_dispatch_autograd_graph(
         meta=fw_metadata,
         fw_only=flat_fn,
     )
+
+    _install_shared_opaque_guards(fw_metadata, aot_config)
 
     joint_fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
     updated_joint_inputs = subclass_tracing_info.plain_tensor_args
