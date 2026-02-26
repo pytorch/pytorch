@@ -6,7 +6,7 @@ import functools
 import warnings
 from collections import deque
 from dataclasses import dataclass
-from typing import cast, overload, Protocol, TYPE_CHECKING
+from typing import cast, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
@@ -450,65 +450,16 @@ class BaseTorchDispatchMode(TorchDispatchMode):
 
 
 # Subtypes which have __tensor_flatten__ and __tensor_unflatten__.
-class TensorWithFlatten(Protocol):
+#
+# It would be really nice to be able to say that the return of
+# is_traceable_wrapper_subclass() is Intersection[torch.Tensor,
+# TensorWithFlatten] - but that doesn't exist - so we have to lie instead.
+class TensorWithFlatten(torch.Tensor):
     def __tensor_flatten__(self) -> tuple[Sequence[str], object]: ...
 
     @staticmethod
     def __tensor_unflatten__(
         inner_tensors: int, flatten_spec: int, outer_size: int, outer_stride: int
-    ) -> torch.Tensor: ...
-
-    # It would be really nice to be able to say that the return of
-    # is_traceable_wrapper_subclass() is Intersection[torch.Tensor,
-    # TensorWithFlatten] - but that doesn't exist.
-
-    shape: torch._C.Size
-
-    @overload
-    def stride(self, dim: None = None) -> tuple[int, ...]: ...
-
-    @overload
-    def stride(self, dim: int) -> int: ...
-
-    @overload
-    def size(self, dim: None = None) -> tuple[int, ...]: ...
-
-    @overload
-    def size(self, dim: int) -> int: ...
-
-    def storage_offset(self) -> int: ...
-
-    def dim(self) -> int: ...
-
-    @overload
-    def to(
-        self,
-        dtype: torch.types._dtype,
-        non_blocking: bool = False,
-        copy: bool = False,
-        *,
-        memory_format: torch.memory_format | None = None,
-    ) -> torch.Tensor: ...
-
-    @overload
-    def to(
-        self,
-        device: torch._prims_common.DeviceLikeType | None = None,
-        dtype: torch.types._dtype | None = None,
-        non_blocking: bool = False,
-        copy: bool = False,
-        *,
-        memory_format: torch.memory_format | None = None,
-    ) -> torch.Tensor: ...
-
-    @overload
-    def to(
-        self,
-        other: torch.Tensor,
-        non_blocking: bool = False,
-        copy: bool = False,
-        *,
-        memory_format: torch.memory_format | None = None,
     ) -> torch.Tensor: ...
 
 

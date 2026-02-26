@@ -7,14 +7,19 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 import collections
 import typing
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
+from dataclasses import dataclass
+from typing import Any, TypeGuard, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
+from torch._library.opaque_object import is_opaque_value, OpaqueType
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.types import IntLikeType
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TensorWithFlatten,
+)
 
 from .descriptors import (
     AOTInput,
@@ -38,13 +43,133 @@ from .schemas import (
 from .utils import strict_zip
 
 
-if TYPE_CHECKING:
-    from torch._library.opaque_object import OpaqueType
-
-
 zip = strict_zip
 
 T = TypeVar("T", bound=torch.Tensor)
+
+
+@dataclass
+class OpaqueObjectRemapping:
+    """Tracks location of an opaque object within subclass metadata."""
+
+    src: tuple[int, ...]  # Where it comes from
+    dst: int  # Target in the metadata tuple
+
+
+def _get_opaque_identity_key(item: Any) -> Any:
+    """Get identity key for opaque matching.
+
+    For reference types: use id() since identity matters.
+    For value types: use the object itself (uses __hash__/__eq__).
+    """
+    from torch._library.opaque_object import is_opaque_value_type
+
+    if is_opaque_value_type(type(item)):
+        return item
+    return id(item)
+
+
+def _build_opaque_remappings(
+    metadata: object,
+    opaque_lookup: dict[Any, tuple[int, ...]],
+) -> Sequence[OpaqueObjectRemapping]:
+    """Build remappings from output opaques to input opaques.
+
+    Args:
+        metadata: The output subclass metadata tuple
+        opaque_lookup: Pre-built lookup mapping opaque identity keys to source tuples
+    """
+    if not isinstance(metadata, (list, tuple)):
+        return ()
+
+    results: list[OpaqueObjectRemapping] = []
+    for meta_idx, item in enumerate(metadata):
+        if is_opaque_value(item) and _get_opaque_identity_key(item) in opaque_lookup:
+            results.append(
+                OpaqueObjectRemapping(
+                    opaque_lookup[_get_opaque_identity_key(item)], meta_idx
+                )
+            )
+    return tuple(results)
+
+
+def _collect_opaques_from_subclass_meta(
+    subclass_meta: "SubclassCreationMeta",
+    arg_idx: int,
+    opaque_lookup: dict[Any, tuple[int, ...]],
+    opaque_values: dict[tuple[int, ...], OpaqueType],
+    path: tuple[int, ...] = (),
+) -> None:
+    """Recursively collect opaques from a subclass and its nested subclasses.
+
+    Args:
+        subclass_meta: The SubclassCreationMeta to collect from
+        arg_idx: The top-level argument index
+        opaque_lookup: Dict to populate with opaque identity -> source key
+        opaque_values: Dict to populate with source key -> opaque value
+        path: Current path within nested structure (for building source keys)
+    """
+    from .schemas import SubclassCreationMeta
+
+    # Collect opaques from this level's metadata
+    if isinstance(subclass_meta.meta, (list, tuple)):
+        for meta_idx, item in enumerate(subclass_meta.meta):
+            if is_opaque_value(item):
+                src_key = (arg_idx,) + path + (meta_idx,)
+                if _get_opaque_identity_key(item) not in opaque_lookup:
+                    opaque_lookup[_get_opaque_identity_key(item)] = src_key
+                opaque_values[src_key] = item
+
+    # Recursively collect from nested subclasses
+    for attr_idx, (attr_name, attr_meta) in enumerate(subclass_meta.attrs.items()):
+        if isinstance(attr_meta, SubclassCreationMeta):
+            _collect_opaques_from_subclass_meta(
+                attr_meta,
+                arg_idx,
+                opaque_lookup,
+                opaque_values,
+                path + (attr_idx,),
+            )
+
+
+def collect_needed_opaques(
+    meta: "SubclassCreationMeta", result: set[tuple[int, ...]]
+) -> None:
+    """Recursively collect opaque source keys from a SubclassCreationMeta."""
+    from .schemas import SubclassCreationMeta
+
+    for remapping in meta.opaque_remappings:
+        result.add(remapping.src)
+    for attr_meta in meta.attrs.values():
+        if isinstance(attr_meta, SubclassCreationMeta):
+            collect_needed_opaques(attr_meta, result)
+
+
+def _extract_runtime_opaques(
+    prefix: tuple[int, ...],
+    tensor: TensorWithFlatten,
+    meta: "SubclassCreationMeta",
+    out: dict[tuple[int, ...], Any],
+) -> None:
+    """Extract opaques from a live runtime subclass tensor.
+
+    Mirrors _collect_opaques_from_subclass_meta but operates on live tensors
+    rather than trace-time metadata. Used to extract opaques from backward
+    tangent subclasses.
+    """
+    from .schemas import SubclassCreationMeta
+
+    attrs, metadata = tensor.__tensor_flatten__()
+    if isinstance(metadata, (list, tuple)):
+        for meta_idx, item in enumerate(metadata):
+            if is_opaque_value(item):
+                out[prefix + (meta_idx,)] = item
+
+    for attr_idx, (attr_name, attr_meta) in enumerate(meta.attrs.items()):
+        if isinstance(attr_meta, SubclassCreationMeta):
+            inner = getattr(tensor, attr_name)
+            if is_traceable_wrapper_subclass(inner):
+                _extract_runtime_opaques(prefix + (attr_idx,), inner, attr_meta, out)
 
 
 def requires_subclass_dispatch(
@@ -100,7 +225,11 @@ def get_subclass_typing_container(
 
 
 def create_subclass_metadata(
-    a: Any, start_idx: int, count_symints: bool, with_memory_format: bool = False
+    a: Any,
+    start_idx: int,
+    count_symints: bool,
+    with_memory_format: bool = False,
+    opaque_lookup: dict[Any, tuple[int, ...]] | None = None,
 ) -> tuple[Any, int]:
     if not is_traceable_wrapper_subclass(a):
         idx = start_idx + 1
@@ -122,6 +251,7 @@ def create_subclass_metadata(
             new_start_idx,
             count_symints=count_symints,
             with_memory_format=with_memory_format,
+            opaque_lookup=opaque_lookup,
         )
         attrs[key] = new_subclass_meta
 
@@ -135,6 +265,10 @@ def create_subclass_metadata(
         + count_symints * len(enumerate_filter_symints(a.stride()))
     )
 
+    opaque_remappings: Sequence[OpaqueObjectRemapping] = ()
+    if opaque_lookup:
+        opaque_remappings = _build_opaque_remappings(metadata, opaque_lookup)
+
     return (
         SubclassCreationMeta(
             flat_tensor_start_idx=start_idx,
@@ -146,6 +280,7 @@ def create_subclass_metadata(
             outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
             memory_format=maybe_suggest_memory_format(a, with_memory_format),
+            opaque_remappings=opaque_remappings,
         ),
         new_start_idx,
     )
@@ -159,10 +294,25 @@ def create_subclass_meta(
     *,
     count_symints: bool = True,
     with_memory_format: bool = False,
-) -> list[PlainTensorMeta | SubclassCreationMeta]:
+    input_opaques: dict[tuple[int, ...], OpaqueType] | None = None,
+) -> tuple[
+    list[PlainTensorMeta | SubclassCreationMeta],
+    dict[tuple[int, ...], OpaqueType],
+]:
+    # Build lookup table mapping opaque identity keys to their source locations.
+    # If input_opaques is provided, use it to build remappings for outputs.
+    # Otherwise, collect opaques from curr_args (for inputs).
+    opaque_lookup: dict[Any, tuple[int, ...]] = {}
+    opaque_values: dict[tuple[int, ...], OpaqueType] = {}
+
+    if input_opaques is not None:
+        # Build reverse lookup from input_opaques for output remapping
+        for src_key, opaque in input_opaques.items():
+            opaque_lookup[_get_opaque_identity_key(opaque)] = src_key
+
     idx = 0
     infos: list[PlainTensorMeta | SubclassCreationMeta] = []
-    for a in curr_args:
+    for arg_idx, a in enumerate(curr_args):
         if is_traceable_wrapper_subclass(a):
             if not isinstance(a, Tensor):
                 raise AssertionError(
@@ -174,9 +324,18 @@ def create_subclass_meta(
                 start_idx,
                 count_symints=count_symints,
                 with_memory_format=with_memory_format,
+                # Only pass opaque_lookup when we have input_opaques to remap to.
+                # When input_opaques is None, we're just collecting opaques, not building remappings.
+                opaque_lookup=opaque_lookup if input_opaques is not None else None,
             )
             infos.append(subclass_meta)
             cnt = subclass_meta.arg_count
+
+            # Recursively collect opaques from this subclass if we're processing inputs
+            if input_opaques is None:
+                _collect_opaques_from_subclass_meta(
+                    subclass_meta, arg_idx, opaque_lookup, opaque_values
+                )
         else:
             infos.append(
                 PlainTensorMeta(
@@ -185,8 +344,16 @@ def create_subclass_meta(
                 )
             )
             cnt = 1
+
+            # Collect direct opaque inputs (for DCE'd tensor subclass case)
+            if input_opaques is None and is_opaque_value(a):
+                src_key = (arg_idx,)
+                if _get_opaque_identity_key(a) not in opaque_lookup:
+                    opaque_lookup[_get_opaque_identity_key(a)] = src_key
+                opaque_values[src_key] = a
+
         idx += cnt
-    return infos
+    return infos, opaque_values
 
 
 def enumerate_filter_symints(lst: Iterable[IntLikeType]) -> list[tuple[int, SymInt]]:
@@ -281,9 +448,16 @@ def runtime_unwrap_tensor_subclasses(
     *,
     append_symints: bool,
     subclass_metas: list[PlainTensorMeta | SubclassCreationMeta] | None = None,
-) -> list[Any]:
+    needed_meta_opaques: set[tuple[int, ...]] | None = None,
+) -> tuple[list[int | Tensor | SymInt | OpaqueType], dict[tuple[int, ...], OpaqueType]]:
+    opaque_sources: dict[tuple[int, ...], OpaqueType] = {}
+
     def flatten_subclass(
-        x: Tensor, meta: SubclassCreationMeta | None, *, out: list[Any]
+        idx: tuple[int, ...],
+        x: Tensor,
+        subclass_meta: PlainTensorMeta | SubclassCreationMeta | None,
+        *,
+        out: list[OpaqueType | SymInt | Tensor | int],
     ) -> list[Any]:
         if not is_traceable_wrapper_subclass(x):
             out.append(x)
@@ -291,21 +465,25 @@ def runtime_unwrap_tensor_subclasses(
 
         if not isinstance(x, Tensor):
             raise AssertionError(f"expected Tensor, got {type(x)}")
+        if not isinstance(subclass_meta, SubclassCreationMeta):
+            raise AssertionError("subclass_meta should be a SubclassCreationMeta")
 
-        attrs, _ = x.__tensor_flatten__()
+        attrs, meta = x.__tensor_flatten__()
+        if needed_meta_opaques and isinstance(meta, (list, tuple)):
+            for i, item in enumerate(meta):
+                name = idx + (i,)
+                if name in needed_meta_opaques and name not in opaque_sources:
+                    opaque_sources[name] = item
 
-        for attr in attrs:
+        for subidx, attr in enumerate(attrs):
             inner_tensor = getattr(x, attr)
-            # pyrefly: ignore [missing-attribute]
-            inner_meta = meta.attrs.get(attr)
-            flatten_subclass(inner_tensor, inner_meta, out=out)
+            inner_meta = subclass_meta.attrs.get(attr)
+            flatten_subclass(idx + (subidx,), inner_tensor, inner_meta, out=out)
 
         if append_symints:
-            if not isinstance(meta, SubclassCreationMeta):
-                raise AssertionError(f"expected SubclassCreationMeta, got {type(meta)}")
             # outer_size
             size = x.size()
-            symint_placeholders = compute_symint_placeholders(meta.outer_size)
+            symint_placeholders = compute_symint_placeholders(subclass_meta.outer_size)
             if len(size) != len(symint_placeholders):
                 raise AssertionError(
                     f"size length mismatch: {len(size)} != {len(symint_placeholders)}"
@@ -316,7 +494,9 @@ def runtime_unwrap_tensor_subclasses(
 
             # outer_stride
             stride = x.stride()
-            symint_placeholders = compute_symint_placeholders(meta.outer_stride)
+            symint_placeholders = compute_symint_placeholders(
+                subclass_meta.outer_stride
+            )
             if len(stride) != len(symint_placeholders):
                 raise AssertionError(
                     f"stride length mismatch: {len(stride)} != {len(symint_placeholders)}"
@@ -345,9 +525,9 @@ def runtime_unwrap_tensor_subclasses(
             meta = subclass_metas[idx]
             if not isinstance(meta, SubclassCreationMeta):
                 raise AssertionError(f"expected SubclassCreationMeta, got {type(meta)}")
-            flatten_subclass(typing.cast(Tensor, x), meta, out=xs_inner)
+            flatten_subclass((idx,), typing.cast(Tensor, x), meta, out=xs_inner)
 
-    return xs_inner
+    return xs_inner, opaque_sources
 
 
 def unwrap_tensor_subclasses_with_indices_to_original(
@@ -400,6 +580,7 @@ def wrap_tensor_subclasses(
     included_subclass_symints: bool = False,
     is_runtime: bool = False,
     make_subclass_override: Callable[..., Any] | None = None,
+    input_meta_opaques: dict[tuple[int, ...], OpaqueType] | None = None,
 ) -> tuple[Any, ...]:
     # pyrefly: ignore [implicit-any]
     wrapped_args = []
@@ -424,7 +605,11 @@ def wrap_tensor_subclasses(
                 )
             else:
                 wrapped_args.append(
-                    subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
+                    subclass_meta.creation_fn(
+                        unwrapped_args,
+                        is_runtime=is_runtime,
+                        input_meta_opaques=input_meta_opaques,
+                    )
                 )
             num_args_tallied += subclass_meta.arg_count
 
