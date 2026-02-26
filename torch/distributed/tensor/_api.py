@@ -171,9 +171,11 @@ class _FromTorchTensor(torch.autograd.Function):
         run_check: bool,
         shape: torch.Size | None = None,
         stride: tuple[int, ...] | None = None,
+        grad_placements: tuple[Placement, ...] | None = None,
     ) -> "DTensor":
         ctx.forward_input_placements = placements
         ctx.forward_input_device_mesh = device_mesh
+        ctx.grad_placements = grad_placements
         ctx.set_materialize_grads(False)
 
         if shape and stride:
@@ -237,9 +239,10 @@ class _FromTorchTensor(torch.autograd.Function):
     def backward(ctx, grad_output: "DTensor | None"):  # type: ignore[override]
         forward_input_placements = ctx.forward_input_placements
         forward_input_device_mesh = ctx.forward_input_device_mesh
+        grad_placements = ctx.grad_placements
 
         if grad_output is None:
-            return None, None, None, None, None, None
+            return None, None, None, None, None, None, None
 
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
@@ -252,9 +255,15 @@ class _FromTorchTensor(torch.autograd.Function):
         # was: Partial(fwd) - Partial(grad_output) - Partial(grad_input)
         # now: Partial(fwd) - Partial(grad_output) - Replicate(grad_input)
         # See DTensor.from_local docstring for gradient placement guarantees
-        normalized_placements: tuple[Placement, ...] = _normalize_placements_for_grad(
-            forward_input_placements
-        )
+
+        # user should provide grad_placements as there's no guarantee on input gradient placement
+        # if grad_placements is None, we provide default placement
+        if grad_placements is not None:
+            normalized_placements = grad_placements
+        else:
+            normalized_placements = _normalize_placements_for_grad(
+                forward_input_placements
+            )
 
         if grad_output.placements != normalized_placements:
             current_spec: DTensorSpec = grad_output._spec
@@ -271,11 +280,11 @@ class _FromTorchTensor(torch.autograd.Function):
             )
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.
-            return output, None, None, None, None, None
+            return output, None, None, None, None, None, None
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.
-        return grad_output.to_local(), None, None, None, None, None
+        return grad_output.to_local(), None, None, None, None, None, None
 
 
 class DTensor(torch.Tensor):
@@ -417,6 +426,7 @@ class DTensor(torch.Tensor):
         run_check: bool = False,
         shape: torch.Size | None = None,
         stride: tuple[int, ...] | None = None,
+        grad_placements: Sequence[Placement] | None = None,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
@@ -445,6 +455,14 @@ class DTensor(torch.Tensor):
             stride (tuple, optional): A List of int which specifies the stride of DTensor.
                 If not provided, ``stride`` will be computed assuming the given distributed
                 tensor is evenly sharded across ranks. default: None
+            grad_placements (List[:class:`Placement`], optional): the placements describes
+                the future layout of any gradient layout of the DTensor created from this
+                function. ``from_local`` converts a local torch.Tensor to DTensor and the
+                gradient of the created DTensor might not follow the default gradient
+                placement semantics. This argument is the hint that user can give to autograd
+                in case the gradient layout of the created DTensor does not match the default
+                gradient placement. If not specified, the gradient placement will follow the
+                default placement guarantees documented below. default: None
 
         Returns:
             A :class:`DTensor` object
@@ -527,6 +545,7 @@ class DTensor(torch.Tensor):
             run_check,
             shape,
             stride,
+            tuple(grad_placements) if grad_placements is not None else None,
         )
 
     def to_local(
