@@ -455,14 +455,10 @@ class DTensor(torch.Tensor):
             stride (tuple, optional): A List of int which specifies the stride of DTensor.
                 If not provided, ``stride`` will be computed assuming the given distributed
                 tensor is evenly sharded across ranks. default: None
-            grad_placements (List[:class:`Placement`], optional): the placements describes
-                the future layout of any gradient layout of the DTensor created from this
-                function. ``from_local`` converts a local torch.Tensor to DTensor and the
-                gradient of the created DTensor might not follow the default gradient
-                placement semantics. This argument is the hint that user can give to autograd
-                in case the gradient layout of the created DTensor does not match the default
-                gradient placement. If not specified, the gradient placement will follow the
-                default placement guarantees documented below. default: None
+            grad_placements (List[:class:`Placement`], optional): specifies the expected
+                input gradient placements. The input gradient (a plain tensor) will be
+                redistributed to this placement before exiting DTensor. If not
+                specified, follows the default placement guarantees below. default: None
 
         Returns:
             A :class:`DTensor` object
