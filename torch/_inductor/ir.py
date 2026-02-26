@@ -56,6 +56,7 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     free_symbols,
     free_unbacked_symbols,
+    GuardOnDataDependentSymNode,
     IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
@@ -3370,9 +3371,6 @@ class View(GenericView):
         """
         Perform a reshape entirely by modifying indexing math
         """
-<<<<<<< HEAD
-        size_hint = V.graph.sizevars.size_hint
-=======
         guard_or_false = V.graph.sizevars.guard_or_false
 
         def compare_sizes(a: Expr, b: Expr) -> int:
@@ -3409,7 +3407,6 @@ class View(GenericView):
 
             raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
 
->>>>>>> dc1e0cb0e2e (Handle u0*12>u0 in _dynamic_reshape_indexer)
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -3439,37 +3436,21 @@ class View(GenericView):
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
-<<<<<<< HEAD
-            elif size_hint(size_new) == size_hint(size_old):
-                view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
-            elif size_hint(size_new) < size_hint(size_old):
-                while size_hint(size_new) < size_hint(size_old):
-=======
             elif compare_sizes(size_new, size_old) == 0:
                 view_expr.append(var)
             elif compare_sizes(size_new, size_old) < 0:
                 while compare_sizes(size_new, size_old) < 0:
->>>>>>> dc1e0cb0e2e (Handle u0*12>u0 in _dynamic_reshape_indexer)
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
                 V.graph.sizevars.check_equals(size_new, size_old)
-<<<<<<< HEAD
-            elif size_hint(size_new) > size_hint(size_old):
-=======
             elif compare_sizes(size_new, size_old) > 0:
->>>>>>> dc1e0cb0e2e (Handle u0*12>u0 in _dynamic_reshape_indexer)
                 divisor = sympy.S.One
                 modulus = size_old
                 view_expr.append(ModularIndexing(var, divisor, modulus))
                 divisor = divisor * modulus
-<<<<<<< HEAD
-                while size_hint(size_new) > size_hint(size_old):
-=======
                 while compare_sizes(size_new, size_old) > 0:
->>>>>>> dc1e0cb0e2e (Handle u0*12>u0 in _dynamic_reshape_indexer)
                     modulus = stack_old.pop()
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
