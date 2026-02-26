@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
 import torch
@@ -1840,7 +1840,7 @@ class AotCodeCompiler:
         *,
         device_type: str,
         additional_files: list[str],
-    ) -> list[Union[str, Weights]] | str:
+    ) -> list[str | Weights] | str:
         """
         Returns the .so path, or returns a list of files that were generated if
         config.aot_inductor.package=True.
@@ -4020,7 +4020,7 @@ class CUTLASSCodeCache:
         src_files: list[str],
         dst_file: str,
         dst_file_ext: str,
-        extra_args: Optional[list[str]] = None,
+        extra_args: list[str] | None = None,
     ) -> str:
         raise NotImplementedError
 
@@ -4237,7 +4237,7 @@ class CUDACodeCache(CUTLASSCodeCache):
         src_files: list[str],
         dst_file: str,
         dst_file_ext: str,
-        extra_args: Optional[list[str]] = None,
+        extra_args: list[str] | None = None,
     ) -> str:
         return cuda_compile_utils.cuda_compile_command(
             src_files, dst_file, dst_file_ext, extra_args=extra_args

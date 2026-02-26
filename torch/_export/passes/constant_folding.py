@@ -2,7 +2,7 @@
 import collections
 from collections import defaultdict
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -206,7 +206,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
 def constant_fold(
     gm: torch.fx.GraphModule,
-    constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    constraint_fn: Callable[[torch.fx.Node], bool] | None = None,
 ):
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
