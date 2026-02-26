@@ -158,6 +158,7 @@ jobs:
         if: inputs.build-environment == 'linux-s390x-binary-manywheel'
         uses: AlekseiNikiforovIBM/pytorch-test-infra/.github/actions/calculate-docker-image@s390x-calculate-docker-image
         with:
+          docker-build-script: ${{ inputs.build-environment != 'linux-s390x-binary-manywheel' && './build.sh' || './manywheel/build.sh' }}
           docker-image-name: ${{ inputs.docker-image }}
           use-aws: ${{ inputs.build-environment != 'linux-s390x-binary-manywheel' }}
 
