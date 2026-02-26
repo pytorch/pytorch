@@ -236,7 +236,7 @@ class FrameStateSizeEntry:
     stride: Union[
         AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
-    excluded_sizes: Optional[tuple[Optional[int], ...]] = None
+    excluded_sizes: tuple[int | None, ...] | None = None
 
     def render(self) -> str:
         # Special cases
@@ -370,7 +370,7 @@ class FrameStateSizeEntry:
         # fall through to the earlier static graph in the cache.
         if isinstance(self.size, tuple) and isinstance(other.size, tuple):
             if len(self.size) == len(other.size):
-                excluded: list[Optional[int]] = [None] * len(self.size)
+                excluded: list[int | None] = [None] * len(self.size)
                 for i in range(len(self.size)):
                     si = self.size[i]
                     if (
