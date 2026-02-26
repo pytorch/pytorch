@@ -188,6 +188,30 @@ class MultiMLP(torch.nn.Module):
         return x
 
 
+class TwoInputOutputOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input: torch.Tensor, weight: torch.Tensor):
+        return input, weight
+
+    @staticmethod
+    def backward(ctx, grad_input, grad_weight):
+        return grad_input, grad_weight
+
+
+# Model with multi-output intermediates
+class MultiInterMediateModel(torch.nn.Module):
+    def __init__(self, weight_shape: list[int]):
+        super().__init__()
+        self.shape = weight_shape
+        self.w = torch.nn.Parameter(torch.randn(*weight_shape))
+
+    def forward(self, x):
+        a, b = torch.split(x, self.shape, dim=1)
+        a, w = TwoInputOutputOp.apply(a, self.w)
+        a = torch.matmul(a, w)
+        return a * b
+
+
 # Multi-MLP with kwargs model
 class MultiMLPKwargs(torch.nn.Module):
     def __init__(self, d_hid: int, n_layers: int = 2):

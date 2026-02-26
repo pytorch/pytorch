@@ -22,7 +22,7 @@ import sys
 import types
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING
 
 from . import config
 from .bytecode_analysis import (
@@ -72,17 +72,17 @@ class Instruction:
 
     opcode: int
     opname: str
-    arg: Optional[int]
+    arg: int | None
     argval: Any
-    offset: Optional[int] = None
-    starts_line: Optional[int] = None
+    offset: int | None = None
+    starts_line: int | None = None
     is_jump_target: bool = False
 
     positions: Optional["dis.Positions"] = None
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
-    exn_tab_entry: Optional[InstructionExnTabEntry] = None
-    argrepr: Optional[str] = None
+    exn_tab_entry: InstructionExnTabEntry | None = None
+    argrepr: str | None = None
 
     def __hash__(self) -> int:
         return id(self)
@@ -165,9 +165,9 @@ else:
 def create_instruction(
     name: str,
     *,
-    arg: Optional[int] = None,
-    argval: Optional[Any] = _NotProvided,
-    target: Optional[Instruction] = None,
+    arg: int | None = None,
+    argval: Any | None = _NotProvided,
+    target: Instruction | None = None,
 ) -> Instruction:
     """
     At most one of `arg`, `argval`, and `target` can be not None/_NotProvided.
@@ -255,7 +255,7 @@ def create_rot_n(n: int) -> list[Instruction]:
 
 
 def add_push_null(
-    inst_or_insts: Union[Instruction, list[Instruction]],
+    inst_or_insts: Instruction | list[Instruction],
 ) -> list[Instruction]:
     """
     Appends or prepends a PUSH_NULL instruction to `inst_or_insts`,
@@ -314,7 +314,7 @@ def add_push_null(
 
 
 def add_push_null_call_function_ex(
-    inst_or_insts: Union[Instruction, list[Instruction]],
+    inst_or_insts: Instruction | list[Instruction],
 ) -> list[Instruction]:
     """Like add_push_null, but the low bit of LOAD_ATTR/LOAD_SUPER_ATTR
     is not set, due to an expected CALL_FUNCTION_EX instruction.
@@ -502,7 +502,7 @@ def create_swap(n: int) -> list[Instruction]:
 
 
 def create_binary_slice(
-    start: Optional[int], end: Optional[int], store: bool = False
+    start: int | None, end: int | None, store: bool = False
 ) -> list[Instruction]:
     """
     BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
@@ -830,7 +830,7 @@ def assemble(instructions: list[Instruction], firstlineno: int) -> tuple[bytes, 
 
 def _get_instruction_by_offset(
     offset_to_inst: dict[int, Instruction], offset: int
-) -> Optional[Instruction]:
+) -> Instruction | None:
     """
     Get the instruction located at a given offset, accounting for EXTENDED_ARGs
     """
@@ -1428,7 +1428,7 @@ def get_const_index(code_options: dict[str, Any], val: Any) -> int:
 def fix_vars(
     instructions: list[Instruction],
     code_options: dict[str, Any],
-    varname_from_oparg: Optional[Callable[..., Any]] = None,
+    varname_from_oparg: Callable[..., Any] | None = None,
 ) -> None:
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
@@ -1751,7 +1751,7 @@ def is_generator(code: types.CodeType) -> bool:
 
 def bytecode_from_template(
     fn: Callable[..., Any],
-    varname_map: Optional[Mapping[Any, Any]] = None,
+    varname_map: Mapping[Any, Any] | None = None,
     noreturn: bool = True,
     noprefix: bool = True,
 ) -> list[Instruction]:
