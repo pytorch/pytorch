@@ -659,7 +659,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     # Collect all templates for unified call
     templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
     if use_aten_gemm_kernels():
-        templates_to_use.extend([aten_bias_addmm, aten_addmm])
+        templates_to_use.append(aten_addmm)
+        if (
+            inp_expanded.get_stride()[0] == 0
+            and inductor_config.triton.autotune_cublasLt
+        ):
+            templates_to_use.append(aten_bias_addmm)
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)

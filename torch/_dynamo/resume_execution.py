@@ -19,7 +19,7 @@ import sys
 import types
 from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 from .bytecode_transformation import (
     add_push_null,
@@ -67,7 +67,7 @@ def _initial_push_null(insts: list[Instruction]) -> None:
 def _bytecode_from_template_with_split(
     template: Callable[..., Any],
     stack_index: int,
-    varname_map: Optional[dict[str, Any]] = None,
+    varname_map: dict[str, Any] | None = None,
 ) -> tuple[list[Instruction], list[Instruction]]:
     template_code = bytecode_from_template(template, varname_map=varname_map)
     template_code.append(create_instruction("POP_TOP"))
@@ -116,7 +116,7 @@ def _try_except_tf_mode_template(dummy: Any, stack_var_name: Any) -> None:
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int
-    target_values: Optional[tuple[Any, ...]] = None
+    target_values: tuple[Any, ...] | None = None
 
     def try_except_torch_function_mode(
         self, code_options: dict[str, Any], cleanup: list[Instruction]
@@ -191,7 +191,7 @@ class ReenterWith:
 
     def __call__(
         self, code_options: dict[str, Any], cleanup: list[Instruction]
-    ) -> tuple[list[Instruction], Optional[Instruction]]:
+    ) -> tuple[list[Instruction], Instruction | None]:
         """
         Codegen based off of:
         with ctx(args):
