@@ -75,9 +75,7 @@ def _varlen_attn(
         if seqused_k is not None:
             # TODO: cuDNN supports per-sequence KV lengths via SEQ_LEN_KV + padding_mask,
             # but _cudnn_attention_forward doesn't expose it yet.
-            raise RuntimeError(
-                "seqused_k is not yet supported with the cuDNN backend."
-            )
+            raise RuntimeError("seqused_k is not yet supported with the cuDNN backend.")
         result = torch.ops.aten._cudnn_attention_forward(
             query,
             key,
@@ -416,7 +414,9 @@ def _backward(
         scale,
         window_size,
     )
-    num_params = 8  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k
+    num_params = (
+        8  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k
+    )
     return (dq, dk, dv, *((None,) * num_params))
 
 

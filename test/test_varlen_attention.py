@@ -635,7 +635,6 @@ class TestVarlenAttention(NNTestCase):
 
                     self.assertEqual(orig_seq_grad, perm_seq_grad)
 
-
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
