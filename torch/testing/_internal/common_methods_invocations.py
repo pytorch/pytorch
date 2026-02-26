@@ -12751,8 +12751,6 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # NotImplementedError: "dot" not implemented for 'Bool'
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency', device_type='mps', dtypes=(torch.bool,)),
            )),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -12770,11 +12768,6 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # UnboundLocalError: cannot access local variable 'cpu_out' where it is not associated with a value
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestConsistency', 'test_output_match',
-                   device_type='mps', dtypes=(torch.bool,),
-               ),
            )),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -13953,8 +13946,6 @@ op_db: list[OpInfo] = [
                                      'test_fn_grad',
                                      dtypes=(torch.float64,),
                                      device_type='cpu'),
-                        # NotImplementedError: "fmod_cpu" not implemented for 'Bool'
-                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', device_type='mps', dtypes=(torch.bool,)),
                     )),
     BinaryUfuncInfo('remainder',
                     ref=np.remainder,
