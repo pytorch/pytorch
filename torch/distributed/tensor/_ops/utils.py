@@ -550,15 +550,15 @@ def expand_to_full_mesh_op_strategy(
             else:
                 raise RuntimeError("output spec is None")
 
-        # check all inputs are shardable. The placement equality short-circuit
+        # check all inputs are shardable. The placement equality fallback
         # is required: is_tensor_shardable rejects shapes smaller than the mesh
         # (e.g. dim=2 on 4 ranks), but if the input is already at that placement
         # no redistribution occurs, so the check is irrelevant.
         if not all(
-            inp.strategies[0].output_spec.placements == s.placements
-            or is_tensor_shardable(
+            is_tensor_shardable(
                 inp.shape, s, allow_unbacked_sharding=allow_unbacked_sharding
             )
+            or inp.strategies[0].output_spec.placements == s.placements
             for inp, s in zip(input_args_strategy, input_specs)
         ):
             continue
