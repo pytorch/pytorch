@@ -233,10 +233,10 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
 
         @torch._dynamo.disable
         def check_disabled(value):
-            assert torch.is_grad_enabled() == value
+            assert torch.is_grad_enabled() == value  # noqa: S101
 
         def check(value):
-            assert torch.is_grad_enabled() == value
+            assert torch.is_grad_enabled() == value  # noqa: S101
 
         def f1(x):
             with torch.no_grad():
@@ -276,7 +276,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         global check, f1, f2, f3
 
         def check(value):
-            assert torch.is_grad_enabled() == value
+            assert torch.is_grad_enabled() == value  # noqa: S101
 
         def f1(x, ctx1):
             x = x + 1
@@ -346,7 +346,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
     def test_ctx_manager_active_in_nested_call(self):
         @torch._dynamo.disable()
         def f1(x):
-            assert not torch.is_grad_enabled()
+            assert not torch.is_grad_enabled()  # noqa: S101
             return x + 1
 
         def f2(x):
@@ -370,7 +370,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
     def test_ctx_manager_active_in_nested_step_graph_break(self):
         def f1(x):
             torch._dynamo.step_unsupported()
-            assert not torch.is_grad_enabled()
+            assert not torch.is_grad_enabled()  # noqa: S101
             return x + 1
 
         def f2(x):
