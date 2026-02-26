@@ -3522,18 +3522,20 @@ class AOTInductorTestsTemplate:
                 torch.export.export(Model(), example_inputs, strict=True)
             )
         )
-        try:
-            torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(context=None)
-            for _ in range(10):
-                optimized(*example_inputs)
-        finally:
-            torch.cuda.memory._record_memory_history(False)
-        segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertTrue(
-            any(seg["requested_size"] == 400 for seg in segments),
-            f"Expected segment with size 400, got: {[s['requested_size'] for s in segments]}",
-        )
+        expected = torch.sin(example_inputs[0])
+
+        # Warm up to trigger any one-time allocations
+        result = optimized(*example_inputs)
+        torch.cuda.synchronize()
+
+        mem_before = torch.cuda.memory_allocated()
+        for _ in range(10):
+            result = optimized(*example_inputs)
+        torch.cuda.synchronize()
+        mem_after = torch.cuda.memory_allocated()
+
+        self.assertEqual(result, expected)
+        self.assertEqual(mem_before, mem_after)
 
     def test_view_outputs(self):
         class Model(torch.nn.Module):
