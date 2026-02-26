@@ -47,6 +47,75 @@ rand_ops = [
 ]
 
 
+def _node_has_tensor_storage(node: fx.Node) -> bool:
+    """Check if a node carries a tensor meta value with accessible storage."""
+    if "val" not in node.meta or not isinstance(node.meta["val"], torch.Tensor):
+        return False
+    try:
+        node.meta["val"].untyped_storage()
+    except NotImplementedError:
+        return False
+    return True
+
+
+def _can_cse_across_mutation_regions(
+    node: fx.Node,
+    prev_node: fx.Node,
+    is_mutation_op_fn: Any,
+) -> bool:
+    """
+    Check if ``node`` can be safely CSE'd with ``prev_node`` despite being in
+    different mutation regions.
+
+    Mutation regions are a coarse-grained mechanism: *any* mutable op anywhere
+    in the graph increments the region counter for all subsequent nodes, even
+    when the mutation is completely unrelated to the op being considered for
+    CSE.  This helper performs a finer-grained check:
+
+    1. The op must be a non-mutable aten ``OpOverload`` (deterministic, no side
+       effects – its result depends only on its explicit inputs).
+    2. No mutation op between ``prev_node`` and ``node`` may write to a tensor
+       whose storage is aliased with any tensor input of ``node``.
+
+    If both conditions hold, the intervening mutations cannot affect the op's
+    result, so deduplication is safe.
+    """
+    # Restrict to non-mutable aten ops – custom / higher-order ops may carry
+    # hidden state that we cannot reason about.
+    if not isinstance(node.target, torch._ops.OpOverload):
+        return False
+    if node.target._schema.is_mutable:
+        return False
+
+    # Collect storage ids (integer weak-ref pointers) for every tensor input.
+    input_storage_ids: set[int] = set()
+    args_flat, _ = tree_flatten(node.args)
+    kwargs_flat, _ = tree_flatten(node.kwargs)
+    for a in args_flat + kwargs_flat:
+        if isinstance(a, fx.Node) and _node_has_tensor_storage(a):
+            input_storage_ids.add(a.meta["val"].untyped_storage()._weak_ref())
+
+    if not input_storage_ids:
+        # No tensor inputs – the op is trivially safe to merge.
+        return True
+
+    # Walk from prev_node to node and check every mutation op in between.
+    # If *any* argument of a mutation op shares storage with one of our
+    # inputs, the mutation could affect our result – bail out.
+    cur = prev_node.next
+    while cur is not node:
+        if cur.op == "call_function" and is_mutation_op_fn(cur):
+            mut_args_flat, _ = tree_flatten(cur.args)
+            mut_kwargs_flat, _ = tree_flatten(cur.kwargs)
+            for a in mut_args_flat + mut_kwargs_flat:
+                if isinstance(a, fx.Node) and _node_has_tensor_storage(a):
+                    if a.meta["val"].untyped_storage()._weak_ref() in input_storage_ids:
+                        return False
+        cur = cur.next
+
+    return True
+
+
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
 def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
     new_graph = fx.Graph()
@@ -57,9 +126,13 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
         tuple[str, int], fx.Node
     ] = {}  # map from hash to a node in the new graph
     token_map: dict[tuple[str, int], dict[str, Any]] = {}  # map from hash to token
+    # Track the corresponding old-graph node for each hash, so we can walk
+    # between two old-graph nodes when checking cross-mutation-region safety.
+    old_node_for_hash: dict[tuple[str, int], fx.Node] = {}
 
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,
+        is_mutation_op,
         same_mutation_regions,
     )
 
@@ -172,6 +245,15 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
                 if same_mutation_regions(n, duplicate_n_prev):
                     env[n] = duplicate_n_prev
                     continue
+                elif _can_cse_across_mutation_regions(
+                    n, old_node_for_hash[hash_val], is_mutation_op
+                ):
+                    # The op is a non-mutable aten op and none of its tensor
+                    # inputs have been mutated between the two calls – safe to
+                    # deduplicate even though unrelated mutations bumped the
+                    # mutation region counter.
+                    env[n] = duplicate_n_prev
+                    continue
                 else:
                     # any futures duplicates should replace with n, not duplicate_n_prev
                     overwrite_due_to_mutation = True
@@ -181,6 +263,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
             if overwrite_due_to_mutation or not hash_val_in_hash_env:
                 hash_env[hash_val] = new_node
                 token_map[hash_val] = token
+                old_node_for_hash[hash_val] = n
 
     return new_graph
 

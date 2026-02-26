@@ -422,5 +422,85 @@ class RandomOpTestCase(TestCase):
             check(fx_g, t, -1, graph_input=True)
 
 
+class CrossMutationRegionCSETestCase(TestCase):
+    """Test that fx_graph_cse can deduplicate pure ops across mutation region
+    boundaries when the mutations do not affect the op's inputs.
+
+    See https://github.com/pytorch/pytorch/issues/174472
+    """
+
+    @staticmethod
+    def _count_target(graph, target):
+        return sum(1 for n in graph.nodes if n.target == target)
+
+    @staticmethod
+    def _build_split_graph_with_mutation(mutate_input):
+        """Build a graph with 3 identical split_with_sizes separated by copy_.
+
+        If ``mutate_input`` is True, the copy_ writes to ``qkv`` (the split
+        input) so merging would be unsafe.  Otherwise it writes to an unrelated
+        buffer so merging should succeed.
+        """
+        import operator
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        aten = torch.ops.aten
+        with FakeTensorMode() as fm:
+            g = fx.Graph()
+            qkv_f = fm.from_tensor(torch.randn(4, 768, dtype=torch.bfloat16))
+            buf_f = fm.from_tensor(torch.empty(1))
+            src_f = fm.from_tensor(torch.tensor(1.0))
+
+            qkv = g.placeholder("qkv")
+            qkv.meta["val"] = qkv_f
+            buf = g.placeholder("buf")
+            buf.meta["val"] = buf_f
+            src = g.placeholder("src")
+            src.meta["val"] = src_f
+
+            outs = []
+            for i in range(3):
+                s = g.call_function(
+                    aten.split_with_sizes.default, (qkv, [512, 128, 128], -1)
+                )
+                s.meta["val"] = aten.split_with_sizes.default(
+                    qkv_f, [512, 128, 128], -1
+                )
+                gi = g.call_function(operator.getitem, (s, i))
+                gi.meta["val"] = s.meta["val"][i]
+                outs.append(gi)
+                if i < 2:
+                    # mutation target: qkv (unsafe) or buf (safe)
+                    dst = qkv if mutate_input else buf
+                    m = g.call_function(aten.copy_.default, (dst, src))
+                    m.meta["val"] = dst.meta["val"]
+
+            g.output(tuple(outs))
+        return g
+
+    def test_cse_dedup_split_across_unrelated_mutation(self):
+        """Unrelated mutation (copy_ to unrelated buffer) must not prevent
+        deduplication of identical split_with_sizes calls."""
+        aten = torch.ops.aten
+        g = self._build_split_graph_with_mutation(mutate_input=False)
+        before = self._count_target(g, aten.split_with_sizes.default)
+        new_g = fx_graph_cse(g)
+        after = self._count_target(new_g, aten.split_with_sizes.default)
+        self.assertEqual(before, 3)
+        self.assertEqual(after, 1, "splits should be deduplicated")
+
+    def test_cse_no_dedup_split_when_input_mutated(self):
+        """When the mutation writes to the split input tensor, CSE must NOT
+        merge the splits."""
+        aten = torch.ops.aten
+        g = self._build_split_graph_with_mutation(mutate_input=True)
+        before = self._count_target(g, aten.split_with_sizes.default)
+        new_g = fx_graph_cse(g)
+        after = self._count_target(new_g, aten.split_with_sizes.default)
+        self.assertEqual(before, 3)
+        self.assertEqual(after, before, "splits must NOT be deduplicated")
+
+
 if __name__ == "__main__":
     run_tests()
