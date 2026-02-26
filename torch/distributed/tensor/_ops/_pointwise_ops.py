@@ -60,6 +60,73 @@ prims = torch.ops.prims
 # Linear pointwise ops, split by linearity type.
 
 
+def _common_pointwise_single_dim_strategy(
+    partial_extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+) -> Callable[
+    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+]:
+    """Factory for single-dim strategies that add partial placement rules."""
+
+    def strategy(
+        op: OpOverload,
+        args_schema: ArgsType,
+        kwargs_schema: KwargsType,
+    ) -> list[list[Placement | _ShardingPlaceholder]]:
+        tensor_arg_metas: list[TensorMeta] = [
+            arg for arg in args_schema if isinstance(arg, TensorMeta)
+        ]
+        common_shape = torch.broadcast_shapes(
+            *[arg.shape for arg in args_schema if isinstance(arg, TensorMeta)]
+        )
+        placements: list[list[Placement | _ShardingPlaceholder]] = []
+        for i in range(len(common_shape)):
+            shard_placements: list[Placement | _ShardingPlaceholder] = [
+                _ShardingPlaceholder(i)
+            ]
+            for arg in tensor_arg_metas:
+                common_dim_to_arg_dim = infer_broadcast_dims_map(
+                    common_shape, arg.shape
+                )
+                # If the output shard dim maps to an input dim, shard that
+                # input dim; otherwise it was broadcast, so replicate.
+                if common_dim_to_arg_dim[i] >= 0:
+                    shard_placements.append(
+                        _ShardingPlaceholder(common_dim_to_arg_dim[i])
+                    )
+                else:
+                    shard_placements.append(Replicate())
+            placements.append(shard_placements)
+        if partial_extra_rules:
+            n_tensors = len(tensor_arg_metas)
+            expected_len = 1 + n_tensors
+            for rule in partial_extra_rules:
+                # Filter rather than assert: some ops (e.g. mul.Tensor) mix
+                # unary rules (len 2, for scalar promotion) and binary rules
+                # (len 3, for tensor-tensor), so mismatched lengths are expected.
+                # see _MUL_RULES to see how _UNARY_LINEAR_RULES handles the
+                # scalar promotion case
+                if len(rule) == expected_len:
+                    placements.append(rule)
+        return placements
+
+    return strategy
+
+
+def _register(
+    op: OpOverload,
+    partial_extra_rules: list[list[Placement]] | None = None,
+    static_argnum: int = 0,
+) -> None:
+    register_single_dim_strategy(
+        op,
+        schema_info=RuntimeSchemaInfo(static_argnum, static_kwargkey=["out"]),
+    )(
+        _common_pointwise_single_dim_strategy(
+            partial_extra_rules=partial_extra_rules  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+
 _UNARY_LINEAR_RULES: list[list[Placement]] = [
     [Partial("sum"), Partial("sum")],
     [Partial("avg"), Partial("avg")],
@@ -86,6 +153,9 @@ _BINARY_ADDITIVE_RULES: list[list[Placement]] = [
     [Partial("avg"), Replicate(), Partial("avg")],
 ]
 
+for op in binary_additive_ops:
+    _register(op, _BINARY_ADDITIVE_RULES)
+
 # mul: partials propagate through either arg. div: only through numerator.
 binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor]
 binary_div_ops = [aten.div.Tensor, aten.div_.Tensor]
@@ -105,12 +175,21 @@ _DIV_RULES: list[list[Placement]] = [
     [Partial("avg"), Partial("avg"), Replicate()],
 ]
 
+for op in binary_mul_ops:
+    _register(op, _UNARY_LINEAR_RULES + _MUL_RULES)
+
+for op in binary_div_ops:
+    _register(op, _UNARY_LINEAR_RULES + _DIV_RULES)
+
 scalar_linear_ops = [
     aten.div.Scalar,
     aten.div_.Scalar,
     aten.mul.Scalar,
     aten.mul_.Scalar,
 ]
+
+for op in scalar_linear_ops:
+    _register(op, _UNARY_LINEAR_RULES, static_argnum=1)
 
 # Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
 # Only ops that are non-decreasing on their ENTIRE domain belong here.
@@ -162,6 +241,9 @@ _NON_DECREASING_RULES: list[list[Placement]] = [
     [Partial("min"), Partial("min")],
 ]
 
+for op in non_decreasing_unary_ops:
+    _register(op, _NON_DECREASING_RULES)
+
 # Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
 # Note: acos excluded due to domain constraints [-1,1] causing validation failures
 non_increasing_unary_ops: list[OpOverload] = [
@@ -175,10 +257,16 @@ _NON_INCREASING_RULES: list[list[Placement]] = [
     [Partial("max"), Partial("min")],
 ]
 
+for op in non_increasing_unary_ops:
+    _register(op, _NON_INCREASING_RULES)
+
 # neg is linear: -(A1 + A2) = -A1 + -A2
 neg_ops = [aten.neg.default, aten.neg_.default]
 
 _NEG_RULES: list[list[Placement]] = _UNARY_LINEAR_RULES + _NON_INCREASING_RULES
+
+for op in neg_ops:
+    _register(op, _NEG_RULES)
 
 # Linear nondecreasing unary ops: both linear (P(sum/avg) preserved) and
 # nondecreasing (P(max/min) preserved).  Multiplication by a positive constant.
@@ -193,6 +281,9 @@ _LINEAR_NONDECREASING_RULES: list[list[Placement]] = (
     _UNARY_LINEAR_RULES + _NON_DECREASING_RULES
 )
 
+for op in linear_nondecreasing_unary_ops:
+    _register(op, _LINEAR_NONDECREASING_RULES)
+
 # All-partial-preserving unary ops: P(x)->P(x) for all x.
 # TODO: positive should be removed once CIA (Copy Is All) optimizes it away.
 all_partial_preserving_unary_ops = [
@@ -204,6 +295,9 @@ _ALL_PARTIAL_PRESERVING_RULES: list[list[Placement]] = [
     [Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
 ]
 
+for op in all_partial_preserving_unary_ops:
+    _register(op, _ALL_PARTIAL_PRESERVING_RULES)
+
 all_partial_preserving_binary_ops = [
     aten.copy_.default,
     prims.copy_to.default,
@@ -212,6 +306,9 @@ all_partial_preserving_binary_ops = [
 _ALL_PARTIAL_BINARY_PRESERVING_RULES: list[list[Placement]] = [
     [Partial(r), Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
 ]
+
+for op in all_partial_preserving_binary_ops:
+    _register(op, _ALL_PARTIAL_BINARY_PRESERVING_RULES)
 
 # Monotonic increasing in both args but don't preserve any specific partial type.
 monotonic_binary_ops = [
@@ -225,6 +322,9 @@ _MONOTONE_BINARY_BASE_RULES: list[list[Placement]] = [
     [Partial("min"), Partial("min"), Replicate()],
     [Partial("min"), Replicate(), Partial("min")],
 ]
+
+for op in monotonic_binary_ops:
+    _register(op, _MONOTONE_BINARY_BASE_RULES)
 
 # Binary ops monotonically increasing in both arguments.
 # max-preserving: P(max)+P(max)->P(max) because max(max(a),max(b)) = max(a,b)
@@ -240,6 +340,9 @@ _MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
     [Partial("max"), Partial("max"), Partial("max")],
 ]
 
+for op in monotonic_max_preserving_binary_ops:
+    _register(op, _MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES)
+
 # min-preserving: P(min)+P(min)->P(min) because min(min(a),min(b)) = min(a,b)
 monotonic_min_preserving_binary_ops = [
     aten.clamp_max.Tensor,
@@ -252,6 +355,9 @@ _MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
     *_MONOTONE_BINARY_BASE_RULES,
     [Partial("min"), Partial("min"), Partial("min")],
 ]
+
+for op in monotonic_min_preserving_binary_ops:
+    _register(op, _MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES)
 
 
 # Ops that preserve specific Partial types through the operation.
@@ -763,58 +869,6 @@ def single_mesh_dim_common_pointwise_strategy(
     return placements_list
 
 
-def _common_pointwise_single_dim_strategy(
-    partial_extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
-) -> Callable[
-    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
-]:
-    """Factory for single-dim strategies that add partial placement rules."""
-
-    def strategy(
-        op: OpOverload,
-        args_schema: ArgsType,
-        kwargs_schema: KwargsType,
-    ) -> list[list[Placement | _ShardingPlaceholder]]:
-        tensor_arg_metas: list[TensorMeta] = [
-            arg for arg in args_schema if isinstance(arg, TensorMeta)
-        ]
-        common_shape = torch.broadcast_shapes(
-            *[arg.shape for arg in args_schema if isinstance(arg, TensorMeta)]
-        )
-        placements: list[list[Placement | _ShardingPlaceholder]] = []
-        for i in range(len(common_shape)):
-            shard_placements: list[Placement | _ShardingPlaceholder] = [
-                _ShardingPlaceholder(i)
-            ]
-            for arg in tensor_arg_metas:
-                common_dim_to_arg_dim = infer_broadcast_dims_map(
-                    common_shape, arg.shape
-                )
-                # If the output shard dim maps to an input dim, shard that
-                # input dim; otherwise it was broadcast, so replicate.
-                if common_dim_to_arg_dim[i] >= 0:
-                    shard_placements.append(
-                        _ShardingPlaceholder(common_dim_to_arg_dim[i])
-                    )
-                else:
-                    shard_placements.append(Replicate())
-            placements.append(shard_placements)
-        if partial_extra_rules:
-            n_tensors = len(tensor_arg_metas)
-            expected_len = 1 + n_tensors
-            for rule in partial_extra_rules:
-                # Filter rather than assert: some ops (e.g. mul.Tensor) mix
-                # unary rules (len 2, for scalar promotion) and binary rules
-                # (len 3, for tensor-tensor), so mismatched lengths are expected.
-                # see _MUL_RULES to see how _UNARY_LINEAR_RULES handles the
-                # scalar promotion case
-                if len(rule) == expected_len:
-                    placements.append(rule)
-        return placements
-
-    return strategy
-
-
 def copy_strategy(op_schema: OpSchema) -> StrategyType:
     """
     Strategy for copy_ that preserves any Partial placement.
@@ -1020,139 +1074,6 @@ norm_partial_avoidable_redistribute_ops = {
     aten.mul.Scalar,
     aten.mul_.Scalar,
 }
-
-# Register single-dim strategies for all categorized ops.
-
-for op in unary_linear_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-for op in binary_additive_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_BINARY_ADDITIVE_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-for op in binary_mul_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
-            + _MUL_RULES
-        )
-    )
-
-for op in binary_div_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
-            + _DIV_RULES
-        )
-    )
-
-for op in scalar_linear_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_UNARY_LINEAR_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-for op in non_decreasing_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_NON_DECREASING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-for op in non_increasing_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_NON_INCREASING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-for op in linear_nondecreasing_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_LINEAR_NONDECREASING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-for op in all_partial_preserving_unary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_ALL_PARTIAL_PRESERVING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-register_single_dim_strategy(
-    neg_ops,
-    schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]),
-)(
-    _common_pointwise_single_dim_strategy(
-        partial_extra_rules=_NEG_RULES  # pyrefly: ignore[bad-argument-type]
-    )
-)
-
-# Monotonic binary ops: max-preserving
-for op in monotonic_max_preserving_binary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-# Monotonic binary ops: min-preserving
-for op in monotonic_min_preserving_binary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-# Monotonic binary ops: no specific partial preservation
-for op in monotonic_binary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_MONOTONE_BINARY_BASE_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
-
-for op in all_partial_preserving_binary_ops:
-    register_single_dim_strategy(
-        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    )(
-        _common_pointwise_single_dim_strategy(
-            partial_extra_rules=_ALL_PARTIAL_BINARY_PRESERVING_RULES  # pyrefly: ignore[bad-argument-type]
-        )
-    )
 
 # TODO: add all for_each ops
 for_each_ops = [
