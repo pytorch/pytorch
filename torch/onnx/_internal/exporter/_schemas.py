@@ -302,7 +302,7 @@ def op_signature_from_function(
             if (
                 return_param_name := _get_type_constraint_name(return_type_i)
             ) in type_constraints:
-                # pyrefly: ignore [bad-index, index-error]
+                # pyrefly: ignore [bad-index]
                 type_constraint = type_constraints[return_param_name]
             else:
                 return_param_name = f"TReturn{i}"
@@ -315,7 +315,6 @@ def op_signature_from_function(
                 type_constraints[return_param_name] = type_constraint
             outputs.append(
                 ir.schemas.Parameter(
-                    # pyrefly: ignore [bad-argument-type]
                     name=return_param_name,
                     type_constraint=type_constraint,
                     required=True,
