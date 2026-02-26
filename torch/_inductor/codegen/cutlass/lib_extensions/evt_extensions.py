@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 from sympy import Expr
 
@@ -14,7 +14,7 @@ from ..utils import torch_dtype_to_cutlass_type, try_import_cutlass
 
 
 EpilogueFunctor = Any  # EpilogueFunctor local class defined in _trace
-Buffer = Union[ComputedBuffer, InputBuffer]
+Buffer = ComputedBuffer | InputBuffer
 CutlassTupleType = Any  # cutlass.backend.c_types.tuple_factory_.<locals>.TupleType
 CutlassVisitorType = Any  # cutlass.backend.c_types.visitor_factory.<locals>.VisitorType
 CutlassArgType = (
@@ -26,7 +26,6 @@ if try_import_cutlass():
     import ast
     import ctypes
     import textwrap
-    from typing import Union
 
     from cutlass_cppgen.backend.c_types import (  # type: ignore[import-not-found]
         EmptyByte,
@@ -81,7 +80,7 @@ if try_import_cutlass():
     def create_example_tensors(
         var_name_to_buffer_name: dict[str, str],
         name_to_buffer: dict[str, Buffer],
-        size_hint_fn: Callable[[Union[Expr, int]], int],
+        size_hint_fn: Callable[[Expr | int], int],
     ) -> dict[str, CutlassTensor]:
         def cutlass_tensor_from_buffer(
             buffer: Buffer,
@@ -121,7 +120,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         tile_description: TileDescription,
         epilogue_schedule: EpilogueScheduleType,
         name_to_buffer: dict[str, Buffer],
-        size_hint_fn: Callable[[Union[Expr, int]], int],
+        size_hint_fn: Callable[[Expr | int], int],
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str, EVTArgRenames]:
         cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
@@ -174,7 +173,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
     def _render_argument_type(
         epilogue_functor: EpilogueFunctor,
         name_to_buffer: dict[str, Buffer],
-        size_hint_fn: Callable[[Union[Expr, int]], int],
+        size_hint_fn: Callable[[Expr | int], int],
     ) -> tuple[str, EVTArgRenames]:
         epilogue_thread_type = epilogue_functor.epilogue_thread_type
         arg_renames = EVTArgRenames()
@@ -234,7 +233,7 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
     def _get_arg_from_node(
         arg_ty: type,
         node: Buffer,
-        size_hint_fn: Callable[[Union[Expr, int]], int],
+        size_hint_fn: Callable[[Expr | int], int],
         arg_renames: EVTArgRenames,
     ) -> str:
         from ..template import CUTLASSTemplate
