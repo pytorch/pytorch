@@ -956,6 +956,7 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
+        self.cudagraph_annotation: Any = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`

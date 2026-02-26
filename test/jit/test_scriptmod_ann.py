@@ -32,7 +32,8 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), (1,))
-        assert len(w) == 0
+        if len(w) != 0:
+            raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
 
     def test_annotated_nonempty_container(self):
         class M(torch.nn.Module):
@@ -46,7 +47,8 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
-        assert len(w) == 0
+        if len(w) != 0:
+            raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
 
     def test_annotated_empty_tensor(self):
         class M(torch.nn.Module):
@@ -60,7 +62,8 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), (torch.rand(2, 3),))
-        assert len(w) == 0
+        if len(w) != 0:
+            raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
 
     def test_annotated_with_jit_attribute(self):
         class M(torch.nn.Module):
@@ -74,7 +77,8 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
-        assert len(w) == 0
+        if len(w) != 0:
+            raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
 
     def test_annotated_class_level_annotation_only(self):
         class M(torch.nn.Module):
@@ -90,7 +94,8 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
-        assert len(w) == 0
+        if len(w) != 0:
+            raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
 
     def test_annotated_class_level_annotation_and_init_annotation(self):
         class M(torch.nn.Module):
@@ -106,7 +111,8 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
-        assert len(w) == 0
+        if len(w) != 0:
+            raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
 
     def test_annotated_class_level_jit_annotation(self):
         class M(torch.nn.Module):
@@ -122,7 +128,8 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
 
         with warnings.catch_warnings(record=True) as w:
             self.checkModule(M(), ([1, 2, 3],))
-        assert len(w) == 0
+        if len(w) != 0:
+            raise AssertionError(f"Expected no warnings, got {len(w)}: {w}")
 
     def test_annotated_empty_list(self):
         class M(torch.nn.Module):

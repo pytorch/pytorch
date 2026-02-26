@@ -5,7 +5,7 @@ import functools
 import importlib
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, Literal, Optional
+from typing import Any, cast, Literal
 
 import sympy
 from sympy import Expr, Integer
@@ -406,8 +406,8 @@ def create_flex_flash_attention_kernel(
 def _can_use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
-    joint_outputs: Optional[Any] = None,
-    score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
+    joint_outputs: Any | None = None,
+    score_mod_other_buffers: Sequence[TensorBox] | None = None,
     num_score_mod_placeholders: int = 5,
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
@@ -440,8 +440,8 @@ def _use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
     backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
-    joint_outputs: Optional[Any] = None,
-    score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
+    joint_outputs: Any | None = None,
+    score_mod_other_buffers: Sequence[TensorBox] | None = None,
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
@@ -485,14 +485,14 @@ def create_flex_flash_attention_backward_kernel(
     kernel_options: dict[str, Any],
     sparse_q_block_size: int,
     sparse_kv_block_size: int,
-    fw_subgraph_buffer: Optional[SubgraphResults] = None,
-    joint_subgraph_buffer: Optional[Any] = None,
-    score_mod_other_buffers: Optional[list[TensorBox]] = None,
-    mask_graph_buffer: Optional[SubgraphResults] = None,
-    q_num_blocks: Optional[TensorBox] = None,
-    q_indices: Optional[TensorBox] = None,
-    full_q_num_blocks: Optional[TensorBox] = None,
-    full_q_indices: Optional[TensorBox] = None,
+    fw_subgraph_buffer: SubgraphResults | None = None,
+    joint_subgraph_buffer: Any | None = None,
+    score_mod_other_buffers: list[TensorBox] | None = None,
+    mask_graph_buffer: SubgraphResults | None = None,
+    q_num_blocks: TensorBox | None = None,
+    q_indices: TensorBox | None = None,
+    full_q_num_blocks: TensorBox | None = None,
+    full_q_indices: TensorBox | None = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():

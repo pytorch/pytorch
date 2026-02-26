@@ -330,7 +330,10 @@ class TestFloat8Dtype(TestCase):
             tensor_int = torch.tensor([bits_int], dtype=torch.uint8, device=device)
             tensor_fp8 = tensor_int.view(dtype)
             if number_name == "nan":
-                assert tensor_fp8.isnan()
+                if not tensor_fp8.isnan():
+                    raise AssertionError(
+                        f"Expected NaN for {number_name}, got {tensor_fp8}"
+                    )
             else:
                 tensor_fp32 = tensor_fp8.float()
                 ref_tensor_fp32 = torch.tensor(

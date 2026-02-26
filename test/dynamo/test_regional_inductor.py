@@ -80,7 +80,8 @@ def aot_eager_regional_inductor(
             serialized = GraphPickler.dumps(result)
 
             fake_mode = detect_fake_mode(example_args)
-            assert fake_mode is not None
+            if fake_mode is None:
+                raise AssertionError("Expected fake_mode to be set")
             # Serialize and deserialize the result to confirm pickling works
             # Use a fresh tracing context on the new process
             context = torch._guards.TracingContext(fake_mode)
@@ -314,10 +315,10 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             captured_options.append(options)
 
             # Verify config is set as expected from explicit options
-            assert inductor_config.max_autotune, "max_autotune should be True"
-            assert not inductor_config.triton.cudagraphs, (
-                "triton.cudagraphs should be False"
-            )
+            if not inductor_config.max_autotune:
+                raise AssertionError("max_autotune should be True")
+            if inductor_config.triton.cudagraphs:
+                raise AssertionError("triton.cudagraphs should be False")
 
             return original_compile(*args, **kwargs)
 
@@ -535,10 +536,12 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 
         def regional_inductor_with_refcounting(gm, *example_args):
             fn = regional_inductor(gm, *example_args)
-            assert fn._boxed_call
+            if not fn._boxed_call:
+                raise AssertionError("Expected fn._boxed_call to be True")
 
             def run(args: Any) -> Any:
-                assert type(args) is list
+                if type(args) is not list:
+                    raise AssertionError(f"Expected args to be list, got {type(args)}")
 
                 # NOTE: sys.getrefcount adds a temporary reference to the object
                 # So sys.getrefcount(x) == 2 actually means we hold the single reference to x
@@ -1042,10 +1045,10 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
             captured_options.append(options)
 
             # Verify config is set as expected from explicit options
-            assert torch._inductor.config.max_autotune, "max_autotune should be True"
-            assert not inductor_config.triton.cudagraphs, (
-                "triton.cudagraphs should be False"
-            )
+            if not torch._inductor.config.max_autotune:
+                raise AssertionError("max_autotune should be True")
+            if inductor_config.triton.cudagraphs:
+                raise AssertionError("triton.cudagraphs should be False")
 
             return original_compile(*args, **kwargs)
 
@@ -1311,10 +1314,12 @@ def forward(self, primals_0, primals_1, primals_2, primals_3, primals_4, primals
 
         def regional_inductor_with_refcounting(gm, *example_args):
             fn = regional_inductor_invoke_subgraph(gm, *example_args)
-            assert fn._boxed_call
+            if not fn._boxed_call:
+                raise AssertionError("Expected fn._boxed_call to be True")
 
             def run(args: Any) -> Any:
-                assert type(args) is list
+                if type(args) is not list:
+                    raise AssertionError(f"Expected args to be list, got {type(args)}")
 
                 # NOTE: sys.getrefcount adds a temporary reference to the object
                 # So sys.getrefcount(x) == 2 actually means we hold the single reference to x

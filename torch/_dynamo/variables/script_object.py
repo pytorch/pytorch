@@ -20,8 +20,9 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 
 import functools
 import inspect
+import types
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -40,7 +41,12 @@ from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
 from ..eval_frame import skip_code
-from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
+from ..exc import (
+    raise_observed_exception,
+    unimplemented,
+    UnsafeScriptObjectError,
+    Unsupported,
+)
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
@@ -140,7 +146,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
                 )
 
         if ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
+            return VariableTracker.build(tx, obj)
 
         source = AttrSource(self.source, name) if self.source else None
         return VariableTracker.build(tx, obj, source)
@@ -172,7 +178,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
         var_args = TupleVariable(list(args))
         var_kwargs = ConstDictVariable(
-            {ConstantVariable(k): v for k, v in kwargs.items()}
+            {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
         )
         constant_args = var_args.as_python_constant()
         constant_kwargs = var_kwargs.as_python_constant()
@@ -206,7 +212,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         proxy: Proxy,
         value: Any,
         ctor_args_kwargs: Any = None,
-        source: Optional[Source] = None,
+        source: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
@@ -241,6 +247,16 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         return self.proxy
 
+    def __str__(self) -> str:
+        value = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        return f"{self.__class__.__name__}({value})"
+
+    __repr__ = __str__
+
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
@@ -259,6 +275,13 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 name,
             )
             if member_type is None:
+                # Special case: __bool__ and __len__ are used for truthiness checks.
+                # If they're not registered and the real object doesn't have them,
+                # raise ObservedAttributeError so the caller can fall back to
+                # treating the object as truthy (Python default behavior
+                if name in ("__bool__", "__len__") and not hasattr(real_obj, name):
+                    raise_observed_exception(AttributeError, tx)
+
                 unimplemented(
                     gb_type="Attempted to access unregistered member on an OpaqueObject",
                     context=f"value={real_obj}, attr={name}",
@@ -270,7 +293,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
-                if inspect.ismethod(value):
+                if inspect.ismethod(value) or isinstance(
+                    value, types.MethodWrapperType
+                ):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
@@ -279,7 +304,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             elif member_type == MemberType.INLINED:
                 value = getattr(real_obj, name)
-                if inspect.ismethod(value) and self.source is None:
+                if (
+                    inspect.ismethod(value)
+                    or isinstance(value, types.MethodWrapperType)
+                ) and self.source is None:
                     # When we don't have a source, fall back to call_method
                     # which creates a proxy node.
                     return LambdaVariable(
@@ -374,14 +402,20 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
-                args_const = [x.as_python_constant() for x in args]
-                kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+                def get_real_value(x: VariableTracker) -> Any:
+                    # For TorchScriptObjectVariable, get the real object directly
+                    if isinstance(x, TorchScriptObjectVariable):
+                        return x.get_real_value()
+                    return x.as_python_constant()
+
+                args_const = [get_real_value(x) for x in args]
+                kwargs_const = {k: get_real_value(v) for k, v in kwargs.items()}
 
                 method = getattr(real_obj, name)
 
                 if name == "__setattr__":
                     method(*args_const, **kwargs_const)
-                    return real_obj  # pyrefly: ignore[bad-return]
+                    return real_obj
 
                 constant_val = method(*args_const, **kwargs_const)
 

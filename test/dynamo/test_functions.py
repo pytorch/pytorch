@@ -604,9 +604,9 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_size_tuple_add(self):
         def fn():
             size = torch.Size([])
-            assert isinstance(size + size, torch.Size)
-            assert isinstance(size + (), tuple)
-            assert isinstance(size + (), torch.Size)
+            assert isinstance(size + size, torch.Size)  # noqa: S101
+            assert isinstance(size + (), tuple)  # noqa: S101
+            assert isinstance(size + (), torch.Size)  # noqa: S101
 
         fn()
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1277,8 +1277,8 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_chunks1(x):
         chunk_size = 5
-        assert x.shape[0] % chunk_size == 0
-        assert x.shape[0] // chunk_size == 2
+        assert x.shape[0] % chunk_size == 0  # noqa: S101
+        assert x.shape[0] // chunk_size == 2  # noqa: S101
         return x[:chunk_size] - x[chunk_size:]
 
     @make_test
@@ -1420,7 +1420,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_dict_ops(a, b):
         tmp = {"a": a + 1, "b": b + 2}
-        assert tmp.get("zzz") is None
+        assert tmp.get("zzz") is None  # noqa: S101
         v = tmp.pop("b") + tmp.get("a") + tmp.get("missing", 3) + tmp.pop("missing", 4)
         tmp.update({"d": 3})
         tmp["c"] = v + tmp["d"]
@@ -2354,13 +2354,13 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_tensor_new_with_size(x):
         y = torch.rand(5, 8)
         z = x.new(y.size())
-        assert z.size() == y.size()
+        assert z.size() == y.size()  # noqa: S101
 
     @make_test
     def test_tensor_new_with_shape(x):
         y = torch.rand(5, 8)
         z = x.new(y.shape)
-        assert z.size() == y.size()
+        assert z.size() == y.size()  # noqa: S101
 
     @make_test
     def test_jit_annotate(x):
@@ -2405,12 +2405,16 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         cnt = torch._dynamo.testing.CompileCounter()
         cfunc = torch._dynamo.optimize_assert(cnt, dynamic=dynamic)(func)
 
-        assert cnt.frame_count == 0
+        if cnt.frame_count != 0:
+            raise AssertionError(f"Expected frame_count 0, got {cnt.frame_count}")
         for i, x in enumerate(data):
             expected = func(x)
             output = cfunc(x)
             self.assertTrue(same(output, expected))
-            assert cnt.frame_count == expected_frame_counts[i]
+            if cnt.frame_count != expected_frame_counts[i]:
+                raise AssertionError(
+                    f"Expected frame_count {expected_frame_counts[i]}, got {cnt.frame_count}"
+                )
 
     @make_test
     def test_list_slice_assignment(x):
@@ -2478,12 +2482,14 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         cnt = torch._dynamo.testing.CompileCounter()
         cfunc = torch._dynamo.optimize_assert(cnt)(func)
 
-        assert cnt.frame_count == 0
+        if cnt.frame_count != 0:
+            raise AssertionError(f"Expected frame_count 0, got {cnt.frame_count}")
         x = torch.rand(10)
         expected = func(x, 12)
         output = cfunc(x, 12)
         self.assertTrue(same(output, expected))
-        assert cnt.frame_count == 1
+        if cnt.frame_count != 1:
+            raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
 
     @unittest.skipIf(sys.version_info < (3, 13), "math.fma introduced in python 3.13")
     def test_math_fma(self):
@@ -2494,24 +2500,28 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         cnt = torch._dynamo.testing.CompileCounter()
         cfma_scalars = torch._dynamo.optimize_assert(cnt)(fma_func)
 
-        assert cnt.frame_count == 0
+        if cnt.frame_count != 0:
+            raise AssertionError(f"Expected frame_count 0, got {cnt.frame_count}")
         expected = fma_func(2.0, 3.0, 4.0)
         output = cfma_scalars(2.0, 3.0, 4.0)
         self.assertEqual(output, expected)
-        assert cnt.frame_count == 0
+        if cnt.frame_count != 0:
+            raise AssertionError(f"Expected frame_count 0, got {cnt.frame_count}")
 
         # Test with tensors (Inductor path)
         cnt2 = torch._dynamo.testing.CompileCounter()
         cfma_tensors = torch._dynamo.optimize_assert(cnt2)(fma_func)
 
-        assert cnt2.frame_count == 0
+        if cnt2.frame_count != 0:
+            raise AssertionError(f"Expected frame_count 0, got {cnt2.frame_count}")
         x = torch.tensor(2.0)
         y = torch.tensor(3.0)
         z = torch.tensor(4.0)
         expected_tensors = x * y + z
         output_tensors = cfma_tensors(x, y, z)
         torch.testing.assert_close(output_tensors, expected_tensors)
-        assert cnt2.frame_count == 1
+        if cnt2.frame_count != 1:
+            raise AssertionError(f"Expected frame_count 1, got {cnt2.frame_count}")
 
     @make_test
     def test_numpy_meshgrid(x, y):
@@ -2641,8 +2651,8 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_in_not_in(x):
         mylist = [1, 2, 3, 4, 5, x]
         myotherlist = [1, 2, 3, 4, 5]
-        assert 3 in mylist
-        assert 6 not in myotherlist
+        assert 3 in mylist  # noqa: S101
+        assert 6 not in myotherlist  # noqa: S101
         return sum(mylist)
 
     @make_test
@@ -2651,7 +2661,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         try:
             raise exc
         except Exception as e:
-            assert e is exc
+            assert e is exc  # noqa: S101
             return x + y
 
     @make_test
@@ -2661,7 +2671,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         try:
             raise exc
         except Exception as e:
-            assert e is not exc1
+            assert e is not exc1  # noqa: S101
             return x + y
 
     @make_test
@@ -3337,7 +3347,7 @@ class GraphModule(torch.nn.Module):
         )  # Recompile! input is no longer a functools partial
 
     def test_manual_seed(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def foo():
             torch.manual_seed(3)
             return torch.randint(0, 5, (5,))
@@ -3399,7 +3409,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnts.frame_count, 1)
 
     def test_complex_closure(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def forward(y):
             def a():
                 def x(z):
@@ -3693,7 +3703,7 @@ class GraphModule(torch.nn.Module):
             y = x + next(it)
             z = g(y, it)
             k = next(it)
-            assert k == 7
+            assert k == 7  # noqa: S101
             return z + k
 
         x = torch.tensor([1.0])
@@ -4852,7 +4862,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
         tensor_list = set()
         tensor_list.add(param2)
-        assert param not in tensor_list
+        if param in tensor_list:
+            raise AssertionError("Expected param not in tensor_list")
 
         def fn(param, param2):
             param.add_(1)
@@ -4873,7 +4884,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
         tensor_list = set()
         tensor_list.add(param2)
-        assert param not in tensor_list
+        if param in tensor_list:
+            raise AssertionError("Expected param not in tensor_list")
 
         def fn(param, param2):
             y = param.add_(1)  # Tensor method

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -146,7 +146,7 @@ cutedsl_grouped_mm_template = CuteDSLTemplate(
 def grouped_mm_args(
     mat1: TensorBox,
     mat2: TensorBox,
-    offs: Optional[TensorBox],
+    offs: TensorBox | None,
     layout=None,
     out_dtype=None,
 ):
@@ -216,9 +216,9 @@ aten__scaled_grouped_mm = ExternKernelChoice(
 def can_use_triton_kernel(
     mat_a: TensorBox,
     mat_b: TensorBox,
-    offs: Optional[TensorBox],
-    bias: Optional[TensorBox],
-    scale_result: Optional[TensorBox],
+    offs: TensorBox | None,
+    bias: TensorBox | None,
+    scale_result: TensorBox | None,
 ) -> bool:
     if not (
         torch.cuda.is_available()
@@ -271,14 +271,14 @@ def _tuned_grouped_mm_common(
     kernel_template: TritonTemplate,
     mat_a: TensorBox,
     mat_b: TensorBox,
-    scale_a: Optional[TensorBox] = None,
-    scale_b: Optional[TensorBox] = None,
-    offs: Optional[TensorBox] = None,
-    bias: Optional[TensorBox] = None,
-    scale_result: Optional[TensorBox] = None,
-    out_dtype: Optional[torch.dtype] = None,
-    use_fast_accum: Optional[bool] = None,
-    layout: Optional[Layout] = None,
+    scale_a: TensorBox | None = None,
+    scale_b: TensorBox | None = None,
+    offs: TensorBox | None = None,
+    bias: TensorBox | None = None,
+    scale_result: TensorBox | None = None,
+    out_dtype: torch.dtype | None = None,
+    use_fast_accum: bool | None = None,
+    layout: Layout | None = None,
 ) -> TensorBox:
     assert (scale_a is None) == (scale_b is None)
     assert scale_result is None or scale_a is not None
@@ -457,10 +457,10 @@ def _tuned_grouped_mm_common(
 def tuned_grouped_mm(
     mat_a: TensorBox,
     mat_b: TensorBox,
-    offs: Optional[TensorBox] = None,
-    bias: Optional[TensorBox] = None,
-    out_dtype: Optional[torch.dtype] = None,
-    layout: Optional[Layout] = None,
+    offs: TensorBox | None = None,
+    bias: TensorBox | None = None,
+    out_dtype: torch.dtype | None = None,
+    layout: Layout | None = None,
 ) -> TensorBox:
     """Auto-tuning for _grouped_mm() operator."""
 
@@ -488,12 +488,12 @@ def tuned_scaled_grouped_mm(
     mat_b: TensorBox,
     scale_a: TensorBox,
     scale_b: TensorBox,
-    offs: Optional[TensorBox] = None,
-    bias: Optional[TensorBox] = None,
-    scale_result: Optional[TensorBox] = None,
-    out_dtype: Optional[torch.dtype] = None,
+    offs: TensorBox | None = None,
+    bias: TensorBox | None = None,
+    scale_result: TensorBox | None = None,
+    out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
-    layout: Optional[Layout] = None,
+    layout: Layout | None = None,
 ) -> TensorBox:
     """Auto-tuning for _scaled_grouped_mm() operator."""
 

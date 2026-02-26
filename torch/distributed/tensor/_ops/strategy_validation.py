@@ -314,8 +314,34 @@ def extract_tensors_from_sample(
     return tensors
 
 
+def _checkerboard_mask(
+    tensor: torch.Tensor, tensor_idx: int = 0, mask_shift: int = 0
+) -> torch.Tensor:
+    """Checkerboard mask that alternates in every dimension.
+
+    Unlike flat-index % 2, which can be uniform along even-stride dimensions
+    (causing all elements in a reduction group to get the same offset), the
+    checkerboard uses sum-of-coordinates mod 2 so adjacent elements differ
+    along every axis.
+
+    Returns a flat bool tensor of shape (numel,).
+    """
+    if tensor.ndim == 0:
+        return torch.tensor([(tensor_idx + mask_shift) % 2 == 0], device=tensor.device)
+    coords = [torch.arange(s, device=tensor.device) for s in tensor.shape]
+    grids = torch.meshgrid(*coords, indexing="ij")
+    coord_sum = grids[0].clone()
+    for g in grids[1:]:
+        coord_sum += g
+    return ((coord_sum + tensor_idx + mask_shift) % 2 == 0).flatten()
+
+
 def _create_partial_input(
-    tensor: torch.Tensor, placement: Partial, world_size: int, tensor_idx: int = 0
+    tensor: torch.Tensor,
+    placement: Partial,
+    world_size: int,
+    tensor_idx: int = 0,
+    mask_shift: int = 0,
 ) -> LocalTensor:
     """
     Create a LocalTensor with values that reduce to the original tensor.
@@ -345,14 +371,21 @@ def _create_partial_input(
     to falsely validate P(sum)->P(sum).
 
     Distinct magnitudes for P(min) vs P(max): P(min) offsets non-holding
-    ranks by +0.7 while P(max) offsets by -1.3. Using different
-    magnitudes prevents accidental cancellation when min and max
-    placements appear in the same combination.
+    ranks by +(range*2+1) while P(max) offsets by -(range*2+1), where
+    range is the tensor's value range. Using adaptive offsets that exceed
+    the value range ensures that index-returning ops (argmin/argmax)
+    produce different results on different ranks, correctly rejecting
+    P(min)/P(max) inputs for those ops. Using different signs for min vs
+    max prevents accidental cancellation when both appear in the same
+    combination.
 
-    Alternating rank ownership for P(min)/P(max): a mask alternating by
-    element (shifted by tensor index) controls which rank holds the true
-    value vs the offset value. This prevents the degenerate case where
-    one rank always holds all true values.
+    Alternating rank ownership for P(min)/P(max): a multi-dimensional
+    checkerboard mask (sum of coordinates mod 2) controls which rank holds
+    the true value vs the offset value. Unlike a flat-index mask which can
+    have uniform parity along an even-stride dimension, the checkerboard
+    guarantees alternation along EVERY dimension. The mask_shift parameter
+    allows re-validation with the complementary mask to catch ops where
+    the result coincidentally matches.
 
     """
     reduce_op = placement.reduce_op
@@ -365,9 +398,9 @@ def _create_partial_input(
         flat = tensor.flatten()
         offset_mag = flat.abs() + 1.0
         signs = torch.ones_like(flat)
-        signs[
-            (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
-        ] = -1.0
+        # Use checkerboard mask so offset sign alternates in every dimension,
+        # not just along flat index (which can be uniform along even-stride dims).
+        signs[_checkerboard_mask(tensor, tensor_idx, mask_shift)] = -1.0
         offset = (offset_mag * signs).reshape(tensor.shape)
 
         scale = world_size if reduce_op == "avg" else 1
@@ -382,30 +415,36 @@ def _create_partial_input(
     elif reduce_op == "min":
         # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        # Offset must exceed the tensor's value range so that the mask pattern
+        # determines argmin/argmax, not the original values.
+        value_range = (flat.max() - flat.min()).item()
+        min_offset = value_range * 2 + 1
+        mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
                 r_offset = torch.where(
-                    mask, torch.zeros_like(flat), torch.full_like(flat, 0.7)
+                    mask, torch.zeros_like(flat), torch.full_like(flat, min_offset)
                 )
             else:
                 r_offset = torch.where(
-                    mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
+                    mask, torch.full_like(flat, min_offset), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
     elif reduce_op == "max":
         # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        value_range = (flat.max() - flat.min()).item()
+        max_offset = -(value_range * 2 + 1)
+        mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
                 r_offset = torch.where(
-                    mask, torch.zeros_like(flat), torch.full_like(flat, -1.3)
+                    mask, torch.zeros_like(flat), torch.full_like(flat, max_offset)
                 )
             else:
                 r_offset = torch.where(
-                    mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
+                    mask, torch.full_like(flat, max_offset), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
@@ -425,6 +464,7 @@ def validate_combination(
     ground_truth: torch.Tensor | list[torch.Tensor],
     world_size: int = 2,
     mesh: DeviceMesh | None = None,
+    mask_shift: int = 0,
 ) -> tuple[bool, str]:
     """
     Validate a single placement combination against ground truth.
@@ -460,7 +500,7 @@ def validate_combination(
         ):
             if isinstance(placement, Partial):
                 local_tensor = _create_partial_input(
-                    tensor, placement, world_size, tensor_idx
+                    tensor, placement, world_size, tensor_idx, mask_shift
                 )
             elif isinstance(placement, Replicate):
                 _tmp = {r: tensor.clone() for r in range(world_size)}
@@ -1029,9 +1069,9 @@ def _query_dtensor_rules(
                     args_schema.append(spec)
                 args_schema.extend(non_tensor_args)
                 op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
-                DecompShardingStrategy.ensure_schema_info(aten_op, propagator)
-                output_strategy = DecompShardingStrategy.propagate_strategy(
-                    op_schema, propagator
+                propagator.decomp_strategy.ensure_schema_info(aten_op)
+                output_strategy = propagator.decomp_strategy.propagate_strategy(
+                    op_schema,
                 )
                 if output_strategy is not None:
                     rules |= _extract_rules_from_op_strategy(
@@ -1061,13 +1101,34 @@ def _validate_with_mitigations(
         op, sample, tensors, combo, ground_truth, world_size, mesh
     )
 
+    # Flipped-mask mitigation: the checkerboard mask that controls offset
+    # signs (for P(sum)/P(avg)) or rank ownership (for P(min)/P(max)) is
+    # deterministic per tensor_idx. Re-validate with the complementary mask
+    # to catch index-returning ops (argmin/argmax) where the result
+    # coincidentally matches because the dominant value happens to land on
+    # a position where both mask orientations preserve argmin/argmax.
+    if is_valid and has_any_partial(input_placements, output_placement):
+        flipped_valid, _ = validate_combination(
+            op,
+            sample,
+            tensors,
+            combo,
+            ground_truth,
+            world_size,
+            mesh,
+            mask_shift=1,
+        )
+        is_valid = is_valid and flipped_valid
+
     if (
         is_valid
         and mitigations.negated_sample
         and has_pmin_pmax(input_placements, output_placement)
     ):
-        assert mitigations.negated_tensors is not None
-        assert mitigations.negated_ground_truth is not None
+        if mitigations.negated_tensors is None:
+            raise AssertionError("negated_tensors is None")
+        if mitigations.negated_ground_truth is None:
+            raise AssertionError("negated_ground_truth is None")
         negated_combo = PlacementCombination(input_placements, output_placement)
         negated_valid, _ = validate_combination(
             op,
@@ -1085,7 +1146,8 @@ def _validate_with_mitigations(
         and mitigations.non_rounded_sample
         and has_any_partial(input_placements, output_placement)
     ):
-        assert mitigations.non_rounded_ground_truth is not None
+        if mitigations.non_rounded_ground_truth is None:
+            raise AssertionError("non_rounded_ground_truth is None")
         non_rounded_combo = PlacementCombination(input_placements, output_placement)
         non_rounded_valid, _ = validate_combination(
             op,
@@ -1103,8 +1165,10 @@ def _validate_with_mitigations(
         and mitigations.non_rounded_negated_sample
         and has_pmin_pmax(input_placements, output_placement)
     ):
-        assert mitigations.non_rounded_negated_tensors is not None
-        assert mitigations.non_rounded_negated_ground_truth is not None
+        if mitigations.non_rounded_negated_tensors is None:
+            raise AssertionError("non_rounded_negated_tensors is None")
+        if mitigations.non_rounded_negated_ground_truth is None:
+            raise AssertionError("non_rounded_negated_ground_truth is None")
         nr_negated_combo = PlacementCombination(input_placements, output_placement)
         nr_negated_valid, _ = validate_combination(
             op,
@@ -1127,10 +1191,11 @@ def _assert_keys_normalized(
 ) -> None:
     """Assert all combo keys have trivial shards already normalized to Replicate."""
     for key in keys:
-        assert key == normalize_combo_key(key, input_shapes, output_shape), (
-            f"Key {key} contains un-normalized trivial shards; "
-            f"call normalize_combo_key before _compare_rules"
-        )
+        if key != normalize_combo_key(key, input_shapes, output_shape):
+            raise AssertionError(
+                f"Key {key} contains un-normalized trivial shards; "
+                f"call normalize_combo_key before _compare_rules"
+            )
 
 
 def _compare_rules(
@@ -1240,9 +1305,7 @@ def _print_discrepancy_section(
 
     for op_str in sorted(by_op.keys()):
         print(f"\n  [{op_str}]")
-        for (inp, out), discs in sorted(  # pyrefly: ignore[not-iterable]
-            by_op[op_str].items(), key=str
-        ):
+        for (inp, out), discs in sorted(by_op[op_str].items(), key=str):
             inp_str = ", ".join(inp)
             print(f"    {inp_str} -> {out}")
             if show_repro:

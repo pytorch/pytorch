@@ -692,7 +692,8 @@ class CommDebugModeExample:
                         )
                     else:
                         x = block(x)
-                    assert x is not None
+                    if x is None:
+                        raise AssertionError
                     x = torch.nn.functional.relu(x)
                 return x
 
@@ -736,7 +737,8 @@ if __name__ == "__main__":
     # this script is launched via torchrun which automatically manages ProcessGroup
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    assert world_size == 4  # our example uses 4 worker ranks
+    if world_size != 4:
+        raise AssertionError  # our example uses 4 worker ranks
 
     parser = argparse.ArgumentParser(
         description="comm_mode_feature examples",

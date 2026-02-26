@@ -20,7 +20,7 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -1690,7 +1690,7 @@ def merge_view_inputs(
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
     # - idx, view_tensor, where we can generate the new output with view_tensor._view_func(old_args[idx])
     #   idx corresponds to which synthetic base from the outer calling context to view
-    inner_calling_convention_meta: dict[int, Union[int, tuple[int, torch.Tensor]]] = {}
+    inner_calling_convention_meta: dict[int, int | tuple[int, torch.Tensor]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,
@@ -1855,9 +1855,9 @@ def merge_view_inputs(
             inner_calling_convention_meta[old_idx] = new_idx
 
         # post process into a list
-        post_processed_calling_convention_meta: list[
-            Union[int, tuple[int, torch.Tensor]]
-        ] = [-1 for _ in range(len(inner_calling_convention_meta))]
+        post_processed_calling_convention_meta: list[int | tuple[int, torch.Tensor]] = [
+            -1 for _ in range(len(inner_calling_convention_meta))
+        ]
         for k, v in inner_calling_convention_meta.items():
             post_processed_calling_convention_meta[k] = v
         # Quick assert: every argument in the inner calling convention should be accounted for.
@@ -1983,7 +1983,7 @@ def _backward_prologue_functional(
             OutputType.custom_function_view,
         ]
         and issubclass(info.raw_type, torch.Tensor)
-        and info.requires_grad
+        and info.requires_grad_for_backward
     ]
     # intermediate bases always require gradients, and always participate in the backward graph.
     flat_bw_args_with_grads = [
@@ -2413,7 +2413,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
-        expected_type: Optional[type] = torch.Tensor
+        expected_type: type | None = torch.Tensor
         expected_meta = None
         if isinstance(meta, SubclassCreationMeta):
             expected_type = meta.original_subclass_type
@@ -2550,7 +2550,7 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
-            maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
+            maybe_subclass_metadata: SubclassMeta | None = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
@@ -3133,3 +3133,20 @@ def make_runtime_safe(
             for meta in maybe_subclass_meta.grad_input_metas:
                 if isinstance(meta, SubclassCreationMeta):
                     meta.make_runtime_safe()
+
+
+# Register inductor_compiled_code py_impl for _AnalyzeCustomOpInputOutputMode here
+# rather than in wrap.py to avoid a circular import (wrap.py is loaded during
+# torch.__init__ before torch._dynamo is available).
+from torch._higher_order_ops.wrap import inductor_compiled_code
+
+
+@inductor_compiled_code.py_impl(_AnalyzeCustomOpInputOutputMode)
+def _inductor_compiled_code_analyze_mode(
+    mode: _AnalyzeCustomOpInputOutputMode, func: Any, inputs: Any
+) -> Any:
+    # Re-dispatch without re-entering the mode so that other modes on the
+    # stack (e.g. FakeTensorMode) still get a chance to handle the HOP.
+    # _pop_mode_temporarily keeps our mode off the stack during this call,
+    # so we won't recurse back here.
+    return inductor_compiled_code(func, inputs)

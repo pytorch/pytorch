@@ -74,8 +74,10 @@ def start_debug_server(
     """
     global _WORKER_SERVER, _DEBUG_SERVER_PROC
 
-    assert _WORKER_SERVER is None, "debug server already started"
-    assert _DEBUG_SERVER_PROC is None, "debug server already started"
+    if _WORKER_SERVER is not None:
+        raise AssertionError("debug server already started")
+    if _DEBUG_SERVER_PROC is not None:
+        raise AssertionError("debug server already started")
 
     logger.info("Starting debug server on port %d", port)
 
@@ -125,8 +127,10 @@ def stop_debug_server() -> None:
     """
     global _WORKER_SERVER, _DEBUG_SERVER_PROC
 
-    assert _DEBUG_SERVER_PROC is not None
-    assert _WORKER_SERVER is not None
+    if _DEBUG_SERVER_PROC is None:
+        raise AssertionError
+    if _WORKER_SERVER is None:
+        raise AssertionError
 
     logger.info("Stopping debug server")
 

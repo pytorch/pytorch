@@ -8,7 +8,8 @@ from torch.distributed.pipelining import pipe_split, SplitPoint
 
 class ExampleCode(torch.nn.Module):
     def __init__(self, d_hid, splits=2):
-        assert splits <= 8
+        if not (splits <= 8):
+            raise AssertionError(f"Expected splits <= 8, got {splits}")
         super().__init__()
         self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -63,7 +64,8 @@ class ModelWithKwargs(torch.nn.Module):
     DEFAULT_BATCH_SIZE = 256
 
     def __init__(self, d_hid: int = DEFAULT_DHID, splits=2):
-        assert splits <= 8
+        if not (splits <= 8):
+            raise AssertionError(f"Expected splits <= 8, got {splits}")
         super().__init__()
         self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -184,6 +186,30 @@ class MultiMLP(torch.nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
+
+
+class TwoInputOutputOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input: torch.Tensor, weight: torch.Tensor):
+        return input, weight
+
+    @staticmethod
+    def backward(ctx, grad_input, grad_weight):
+        return grad_input, grad_weight
+
+
+# Model with multi-output intermediates
+class MultiInterMediateModel(torch.nn.Module):
+    def __init__(self, weight_shape: list[int]):
+        super().__init__()
+        self.shape = weight_shape
+        self.w = torch.nn.Parameter(torch.randn(*weight_shape))
+
+    def forward(self, x):
+        a, b = torch.split(x, self.shape, dim=1)
+        a, w = TwoInputOutputOp.apply(a, self.w)
+        a = torch.matmul(a, w)
+        return a * b
 
 
 # Multi-MLP with kwargs model

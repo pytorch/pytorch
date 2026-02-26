@@ -9,11 +9,10 @@ import logging
 import math
 import operator
 import os
-import textwrap
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeGuard, TypeVar, Union
+from typing import Any, cast, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -111,11 +110,11 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 )
 
 log = logging.getLogger(__name__)
-lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
+lowerings: dict[Callable[..., Any] | str, Callable[..., Any]] = {}
+# User-registered lowerings that take priority over built-in lowerings.
+user_lowerings: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
-_maybe_layout_constraints: dict[
-    torch._ops.OpOverload, Optional[Callable[..., Any]]
-] = {}
+_maybe_layout_constraints: dict[torch._ops.OpOverload, Callable[..., Any] | None] = {}
 fallbacks = OrderedSet[torch._ops.OpOverload]()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
@@ -167,7 +166,7 @@ def group_foreach_args(
     return out
 
 
-def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., Any]]:
+def maybe_layout_constraints(fn: Callable[..., Any]) -> Callable[..., Any] | None:
     """Get layout constraints. Returns None if there are no layout constraints."""
     if not isinstance(fn, torch._ops.OpOverload):
         # Only OpOverloads have layout constraints.
@@ -183,7 +182,7 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
 
 def tag_to_layout_constraint(
     tag: torch._C.Tag,
-) -> Optional[Callable[..., tuple[Any, Any]]]:
+) -> Callable[..., tuple[Any, Any]] | None:
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
     if tag == torch._C.Tag.needs_contiguous_strides:  # type: ignore[attr-defined]
@@ -201,12 +200,10 @@ def assert_nyi(cond: bool, msg: str) -> None:
 
 
 def add_needs_realized_inputs(
-    fn: Union[
-        Collection[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]],
-        torch._ops.OpOverload,
-        torch._ops.OpOverloadPacket,
-    ],
-) -> Optional[list[Any]]:
+    fn: Collection[torch._ops.OpOverload | torch._ops.OpOverloadPacket]
+    | torch._ops.OpOverload
+    | torch._ops.OpOverloadPacket,
+) -> list[Any] | None:
     if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
         # pyrefly: ignore [bad-argument-type]
         return [add_needs_realized_inputs(x) for x in fn]
@@ -220,7 +217,7 @@ def add_needs_realized_inputs(
 
 
 def add_layout_constraint(
-    fn: Union[torch._ops.OpOverloadPacket, torch._ops.OpOverload],
+    fn: torch._ops.OpOverloadPacket | torch._ops.OpOverload,
     constraint: Callable[..., tuple[Any, Any]],
 ) -> None:
     if isinstance(fn, torch._ops.OpOverloadPacket):
@@ -274,7 +271,7 @@ DTYPE_ID_LOOKUP = {
 }
 
 
-def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
+def decode_dtype(dtype: int | torch.dtype) -> torch.dtype:
     if not isinstance(dtype, int):
         return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
@@ -283,7 +280,7 @@ def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
     return dtype
 
 
-def is_integer_type(x: Any) -> TypeGuard[Union[TensorBox, sympy.Expr, int]]:
+def is_integer_type(x: Any) -> TypeGuard[TensorBox | sympy.Expr | int]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
@@ -292,7 +289,7 @@ def is_integer_type(x: Any) -> TypeGuard[Union[TensorBox, sympy.Expr, int]]:
         return isinstance(x, int)
 
 
-def is_boolean_type(x: Any) -> TypeGuard[Union[TensorBox, bool]]:
+def is_boolean_type(x: Any) -> TypeGuard[TensorBox | bool]:
     if isinstance(x, TensorBox):
         return is_boolean_dtype(x.get_dtype())
     else:
@@ -336,7 +333,7 @@ def get_overloads(aten_fn):
 
 
 def in_namespace(
-    op: Union[Any, torch._ops.OpOverloadPacket, torch._ops.OpOverload], namespace: str
+    op: Any | torch._ops.OpOverloadPacket | torch._ops.OpOverload, namespace: str
 ) -> bool:
     if isinstance(op, torch._ops.OpOverloadPacket):
         return namespace in op._qualified_op_name
@@ -353,7 +350,7 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
         x.get_size()
     ):
         return x
-    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
     cur_device = x.get_device()
     if (
         cur_device is not None
@@ -369,7 +366,7 @@ def transform_args(
     args: list[Any],
     kwargs: dict[str, Any],
     broadcast: bool,
-    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None,
     convert_input_to_bool: bool,
 ) -> tuple[list[Any], dict[str, Any]]:
     """
@@ -477,9 +474,9 @@ def _register_lowering(
     aten_fn,
     decomp_fn: Callable[..., Any],
     broadcast: bool,
-    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None,
     convert_input_to_bool: bool,
-    lowering_dict: dict[Union[Callable[..., Any], str], Callable[..., Any]],
+    lowering_dict: dict[Callable[..., Any] | str, Callable[..., Any]],
 ):
     """
     Add a lowering to lowerings dict
@@ -529,9 +526,8 @@ def _register_lowering(
 def register_lowering(
     aten_fn,
     broadcast=False,
-    type_promotion_kind: Optional[
-        ELEMENTWISE_TYPE_PROMOTION_KIND
-    ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    | None = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
     lowering_dict=lowerings,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
@@ -1183,7 +1179,7 @@ def expand(x, sizes):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.size_hint_or_throw(
+        x_size_product = V.graph.sizevars.guarding_hint_or_throw(
             sympy_product(x.get_size())
         )
         # TODO: It would be better to realize the input if any of its sizes
@@ -1193,7 +1189,7 @@ def expand(x, sizes):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
-                V.graph.sizevars.size_hint_or_throw(sympy_product(sizes))
+                V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
                 // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -1252,13 +1248,16 @@ def repeat(x, repeats):
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
+    # TODO Laith is there better check
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint_or_throw(sympy_product(old_size))
+        old_size_product = V.graph.sizevars.guarding_hint_or_throw(
+            sympy_product(old_size)
+        )
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
             x.mark_reuse(
-                V.graph.sizevars.size_hint_or_throw(sympy_product(new_size))
+                V.graph.sizevars.guarding_hint_or_throw(sympy_product(new_size))
                 // old_size_product
             )
 
@@ -1608,7 +1607,7 @@ def quantized_decomposed_dequantize_per_channel(
     quant_max: int,
     dtype: torch.dtype,
     *,
-    out_dtype: Optional[torch.dtype] = None,
+    out_dtype: torch.dtype | None = None,
 ) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
@@ -1699,7 +1698,7 @@ def quantized_decomposed_dequantize_per_tensor_default(
     quant_max: int,
     dtype: torch.dtype,
     *,
-    out_dtype: Optional[torch.dtype] = None,
+    out_dtype: torch.dtype | None = None,
 ) -> TensorBox:
     assert input.get_dtype() == dtype, (
         f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
@@ -1786,7 +1785,7 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     quant_max: int,
     dtype: torch.dtype,
     *,
-    out_dtype: Optional[torch.dtype] = None,
+    out_dtype: torch.dtype | None = None,
 ) -> TensorBox:
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
@@ -1848,7 +1847,7 @@ def cat(inputs, dim=0):
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
 
-    def unwrap_tensor(x: Union[TensorBox, ir.StorageBox]) -> ir.IRNode:
+    def unwrap_tensor(x: TensorBox | ir.StorageBox) -> ir.IRNode:
         if isinstance(x, TensorBox):
             if isinstance(x.data, ir.BaseView):
                 return x.data.unwrap_view()
@@ -1965,14 +1964,16 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
     if offset_negative:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
-                original_shape[dim1] + offset, original_shape[dim2]
+                original_shape[dim1] + offset,
+                original_shape[dim2],
             ),
             0,  # type: ignore[arg-type]
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
-                original_shape[dim1], original_shape[dim2] - offset
+                original_shape[dim1],
+                original_shape[dim2] - offset,
             ),
             0,  # type: ignore[arg-type]
         )
@@ -2138,9 +2139,9 @@ def unfold(x, dimension, size, step):
     sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint_or_throw(dim_size) > 0:
+    if sizevars.guarding_hint_or_throw(dim_size) > 0:
         x.mark_reuse(
-            sizevars.size_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
+            sizevars.guarding_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
         )
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
@@ -2607,8 +2608,8 @@ def searchsorted(
     *,
     out_int32: bool = False,
     right: bool = False,
-    side: Optional[str] = None,
-    sorter: Optional[TensorBox] = None,
+    side: str | None = None,
+    sorter: TensorBox | None = None,
 ) -> TensorBox:
     validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
         tb, BackendFeature.BUCKETIZE
@@ -3712,7 +3713,7 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    stride = [V.graph.sizevars.size_hint_or_throw(s) for s in stride]
+    stride = V.graph.sizevars.guarding_hints_or_throw(stride)
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
 
@@ -4214,7 +4215,7 @@ def scatter_fallback(
     index,
     src,
     *,
-    reduce: Optional[str] = None,
+    reduce: str | None = None,
     include_self: bool = True,
 ):
     src_is_tensor = isinstance(src, TensorBox)
@@ -4242,7 +4243,7 @@ def scatter_fallback(
 
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
-def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
+def scatter_(self, dim: int, index, src, *, reduce: str | None = None):
     assert reduce in (None, "add", "multiply")
     if reduce is None:
         op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
@@ -4394,7 +4395,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 def upsample_nearestnd(
     x,
     output_size,
-    scales_x: tuple[Optional[float], ...],
+    scales_x: tuple[float | None, ...],
     n: int = 2,
     exact: bool = False,
 ):
@@ -4439,25 +4440,25 @@ def upsample_nearestnd(
 
 
 @register_lowering(aten.upsample_nearest1d.default)
-def upsample_nearest1d(x, output_size, scales: Optional[float] = None):
+def upsample_nearest1d(x, output_size, scales: float | None = None):
     return upsample_nearestnd(x, output_size, (scales,), n=1)
 
 
 @register_lowering(aten._upsample_nearest_exact1d.default)
-def _upsample_nearest_exact1d(x, output_size, scales: Optional[float] = None):
+def _upsample_nearest_exact1d(x, output_size, scales: float | None = None):
     return upsample_nearestnd(x, output_size, (scales,), n=1, exact=True)
 
 
 @register_lowering(aten.upsample_nearest2d.default)
 def upsample_nearest2d(
-    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+    x, output_size, scales_h: float | None = None, scales_w: float | None = None
 ):
     return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2)
 
 
 @register_lowering(aten._upsample_nearest_exact2d.default)
 def _upsample_nearest_exact2d(
-    x, output_size, scales_h: Optional[float] = None, scales_w: Optional[float] = None
+    x, output_size, scales_h: float | None = None, scales_w: float | None = None
 ):
     return upsample_nearestnd(x, output_size, (scales_h, scales_w), n=2, exact=True)
 
@@ -4466,9 +4467,9 @@ def _upsample_nearest_exact2d(
 def upsample_nearest3d(
     x,
     output_size,
-    scales_d: Optional[float] = None,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales_d: float | None = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
 ):
     return upsample_nearestnd(x, output_size, (scales_d, scales_h, scales_w), n=3)
 
@@ -4477,9 +4478,9 @@ def upsample_nearest3d(
 def _upsample_nearest_exact3d(
     x,
     output_size,
-    scales_d: Optional[float] = None,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales_d: float | None = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
 ):
     return upsample_nearestnd(
         x, output_size, (scales_d, scales_h, scales_w), n=3, exact=True
@@ -4514,7 +4515,7 @@ def rev(x, dims):
 
 def inplace_constant_pad_nd(
     x: TensorBox, padding: Sequence[int], fill_value: float
-) -> Optional[TensorBox]:
+) -> TensorBox | None:
     """
     This optimization changes the semantics of padding from 'clone'
     style to 'view' style.
@@ -4663,7 +4664,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     )
 
 
-def range_mask_low(i: sympy.Expr, low: Union[sympy.Expr, int]):
+def range_mask_low(i: sympy.Expr, low: sympy.Expr | int):
     return ops.ge(
         ops.index_expr(i, torch.int64),
         ops.index_expr(sympy.Integer(low), torch.int64),
@@ -4733,13 +4734,13 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None
             + 2 * (stride[i] - 1),
             stride[i],
         )
-        if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
+        if V.graph.sizevars.guard_or_false(
+            sympy.Ge((x_alt - 1) * stride[i] - x - padding[i], 0)
+        ):
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
-            V.graph.sizevars.check_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
-        if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
+        if V.graph.sizevars.guard_or_false(sympy.Eq(x_out, x_alt)):
             # ceil mode is actually a no-op, lets guard on that
-            V.graph.sizevars.check_equals(x_out, x_alt)
             ceil_mode = False
         else:
             x_out = x_alt
@@ -4893,10 +4894,10 @@ def _low_memory_max_pool_with_offsets(
 
 def _pool_offsets_to_indices(
     offsets: TensorBox,
-    kernel_size: Sequence[Union[int, torch.SymInt]],
-    input_size: Sequence[Union[int, torch.SymInt]],
+    kernel_size: Sequence[int | torch.SymInt],
+    input_size: Sequence[int | torch.SymInt],
     increments_to_index: Callable[
-        [Sequence[Union[int, torch.SymInt]], Sequence[Union[int, torch.SymInt]]],
+        [Sequence[int | torch.SymInt], Sequence[int | torch.SymInt]],
         torch._inductor.virtualized.OpsValue,
     ],
 ) -> TensorBox:
@@ -5029,7 +5030,7 @@ def max_pool2d_with_indices_backward(
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()
     gO_stride = grad_output.maybe_get_stride()
-    x_stride: Optional[Sequence[Any]]
+    x_stride: Sequence[Any] | None
     if isinstance(x, TensorBox) and isinstance(x.data.data, Pointwise):  # type: ignore[attr-defined]
         data = x.data.data  # type: ignore[attr-defined]
         device = data.get_device()
@@ -6626,7 +6627,7 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
-def get_constant_value(x: ir.IRNode) -> Optional[ir.Constant]:
+def get_constant_value(x: ir.IRNode) -> ir.Constant | None:
     """Try convert an arbitrary IR node into an ir.Constant value"""
 
     # First try unwrapping the IRNode to see if it is already an ir.Constant
@@ -7490,7 +7491,7 @@ def triton_kernel_wrap_(
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
 def cond(
     pred, true_fn, false_fn, operands
-) -> list[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]]:
+) -> list[ir.TensorBox | ir.ShapeAsConstantBuffer]:
     # TODO: when graph_partition is enabled, skip - partitioning handles control flow
     # we run into memory cleanup issue
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
@@ -7842,15 +7843,8 @@ def prepare_softmax_online(x, dim):
         #
         # TODO: does inference need split online_softmax_reduce?
 
-        warnings.warn(
-            textwrap.dedent(
-                """
-            Online softmax is disabled on the fly since Inductor decides to
-            split the reduction. Cut an issue to PyTorch if this is an
-            important use case and you want to speed it up with online
-            softmax.
-            """
-            )
+        log.debug(
+            "Online softmax is disabled on the fly since Inductor decides to split the reduction."
         )
         amax = reduce_amax(x, dim, keepdims=True)
         exp = lowerings[aten.exp](sub(x, amax))
