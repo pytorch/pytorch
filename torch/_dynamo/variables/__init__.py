@@ -69,7 +69,6 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
-    FunctoolsWrapsVariable,
     InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
