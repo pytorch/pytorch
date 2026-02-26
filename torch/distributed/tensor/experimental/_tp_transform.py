@@ -60,8 +60,7 @@ def tensor_parallel_transformation(
             exported_program.graph_signature,
             parallel_strategies,
         )(gm)
-        if res is None:
-            raise AssertionError
+        assert res is not None
         gm = res.graph_module
 
     return exported_program._update(gm, sig, state_dict=state_dict)
@@ -117,8 +116,7 @@ def _generate_parameter_and_buffer_placements(
     for linear_fqn, parallel_style in parallel_strategies.items():
         weight_fqn = f"{linear_fqn}.weight"
         bias_fqn = f"{linear_fqn}.bias"
-        if weight_fqn not in params_and_buffers:
-            raise AssertionError
+        assert weight_fqn in params_and_buffers
         parameter_placements[weight_fqn] = (
             Shard(0) if parallel_style == ColwiseParallel else Shard(1)
         )
@@ -207,11 +205,9 @@ def _mark_sharding(
         elif node.op == "call_function":
             if node.target is operator.getitem:
                 input_nodes = node.all_input_nodes
-                if len(input_nodes) != 1:
-                    raise AssertionError(
-                        f"non-compute op only support one input now, found node: {node} "
-                        f"with length of inputs: {len(node.args)}"
-                    )
+                assert len(input_nodes) == 1, (
+                    f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
+                )
                 arg_strategy = placement_strategies[input_nodes[0]]
                 placement_strategies[node] = _create_placement_strategy(
                     node,
@@ -268,10 +264,8 @@ def _get_output_spec_from_output_sharding(
         return output_sharding.output_spec
     else:
         # For ops that return multiple outputs, the outputs should have the same output spec
-        if not isinstance(output_sharding.output_spec, Sequence):
-            raise AssertionError
-        if output_sharding.output_spec[0] is None:
-            raise AssertionError
+        assert isinstance(output_sharding.output_spec, Sequence)
+        assert output_sharding.output_spec[0] is not None
         output_sharding.output_spec[0].tensor_meta = None
         return output_sharding.output_spec[0]
 
@@ -301,19 +295,16 @@ def _populate_tensor_meta(node: Node, output_spec: OutputSpecType) -> None:
     Util function to populate tensor meta of output_spec based on node metadata.
     """
     if isinstance(node.meta["val"], Sequence):
-        if not isinstance(output_spec, Sequence):
-            raise AssertionError
+        assert isinstance(output_spec, Sequence)
         for spec, fake_tensor in zip(output_spec, node.meta["val"]):
-            if spec is None:
-                raise AssertionError
+            assert spec is not None
             spec.tensor_meta = TensorMeta(
                 shape=fake_tensor.shape,
                 stride=fake_tensor.stride(),
                 dtype=fake_tensor.dtype,
             )
     else:
-        if not isinstance(output_spec, DTensorSpec):
-            raise AssertionError
+        assert isinstance(output_spec, DTensorSpec)
         output_spec.tensor_meta = TensorMeta(
             shape=node.meta["val"].shape,
             stride=node.meta["val"].stride(),
@@ -434,8 +425,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
                 placement = cast(Shard, placement)
                 num_chunks = spec.mesh.size(mesh_dim=idx)
                 my_coord = spec.mesh.get_coordinate()
-                if my_coord is None:
-                    raise AssertionError("current rank not in mesh!")
+                assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]
                 local_shard = placement._select_split_tensor(
                     local_shard,
@@ -517,8 +507,7 @@ def _get_input_node_specs(
     for input_arg in node.all_input_nodes:
         if input_arg in placement_strategies:
             output_spec = placement_strategies[input_arg].output_specs
-            if not isinstance(output_spec, DTensorSpec):
-                raise AssertionError
+            assert isinstance(output_spec, DTensorSpec)
             input_specs_list.append(output_spec)
         else:
             raise ValueError(f"{input_arg} does not have output_spec populated.")
@@ -558,8 +547,7 @@ def _shard_state_dict(
             fqn = graph_signature.inputs_to_buffers[node.name]
         else:
             continue
-        if fqn not in state_dict:
-            raise AssertionError(f"{fqn} not found in state dict: {state_dict.keys()}")
+        assert fqn in state_dict, f"{fqn} not found in state dict: {state_dict.keys()}"
 
         original_param = state_dict[fqn]
         dtensor_param = distribute_tensor(

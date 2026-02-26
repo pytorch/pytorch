@@ -162,8 +162,7 @@ def match_coalesced_groups(
         if not op_list:
             # print("TODO- not sure if its valid for only some ranks in a PG to participate in a coalesced op?")
             return False
-        if op_list[-1].type != "coalesced":
-            raise AssertionError
+        assert op_list[-1].type == "coalesced"
         op_list.pop(-1)
 
     while all_ops:
@@ -602,8 +601,7 @@ def find_coalesced_group(
             break
 
     if len(found) > 1:
-        if found[-1][1]["profiling_name"] != "nccl:coalesced":
-            raise AssertionError
+        assert found[-1][1]["profiling_name"] == "nccl:coalesced"
         return found
     return []
 
@@ -702,23 +700,20 @@ def check_no_missing_dump_files(
     all_ranks = {int(membership.global_rank) for membership in memberships}
     dumps_ranks = {int(key) for key in entries}
     missing = all_ranks - dumps_ranks
-    if len(missing) != 0:
-        raise AssertionError(f"Missing dump files from ranks {missing}")
+    assert len(missing) == 0, f"Missing dump files from ranks {missing}"
 
 
 def check_version(version_by_ranks: dict[str, str], version: str) -> None:
     for rank, v in version_by_ranks.items():
-        if v != version:
-            raise AssertionError(
-                f"Rank {rank} has different version {v} from the given version {version}"
-            )
+        assert v == version, (
+            f"Rank {rank} has different version {v} from the given version {version}"
+        )
 
 
 def get_version_detail(version: str) -> tuple[int, int]:
     # pyrefly: ignore [bad-assignment]
     version = version.split(".")
-    if len(version) != 2:
-        raise AssertionError(f"Invalid version {version}")
+    assert len(version) == 2, f"Invalid version {version}"
     major, minor = map(int, version)
     return major, minor
 

@@ -30,8 +30,7 @@ __all__ = ["DTensorExtensions"]
 
 def _get_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
-    if device_mesh.ndim != 1:
-        raise AssertionError("Only 1D DeviceMeshes currently handled")
+    assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
 
     placement = tensor.placements[0]
     offsets = [0] * len(tensor.size())
@@ -53,15 +52,13 @@ def _get_box_for(tensor: DTensor, idx: int) -> tuple[torch.Size, torch.Size]:
 def _get_local_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     coord = device_mesh.get_coordinate()
-    if coord is None:
-        raise AssertionError
+    assert coord is not None
     return _get_box_for(tensor, coord[0])
 
 
 def _create_shard_md_from_dt(dt: DTensor, current_rank: int) -> ShardMetadata:
     mesh = dt.device_mesh
-    if mesh.ndim != 1:
-        raise AssertionError("Only 1D DeviceMeshes currently handled")
+    assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
 
     offsets, sizes = _get_local_box(dt)
     return ShardMetadata(
@@ -112,8 +109,7 @@ def _create_sharded_tensor_md_from_dt(
 
 def _get_dt_pg(dt: DTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
-    if mesh.ndim != 1:
-        raise AssertionError("Only 1D DeviceMeshes currently handled")
+    assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
     return mesh.get_group()
 
 
@@ -156,8 +152,7 @@ def _chunk_tensor(
     pg: dist.ProcessGroup,
 ) -> torch.Tensor:
     if type(tensor) is ShardedTensor:
-        if len(tensor.local_shards()) != 1:
-            raise AssertionError
+        assert len(tensor.local_shards()) == 1
 
         inner_param = tensor.local_tensor()
         inner_st = _create_chunk_sharded_tensor(
@@ -184,8 +179,7 @@ def _chunk_tensor(
         return st_outer
     elif type(tensor) is DTensor:
         device_mesh = tensor.device_mesh
-        if device_mesh.ndim != 1:
-            raise AssertionError("Only 1D DeviceMeshes currently handled")
+        assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
 
         inner_param = tensor._local_tensor
 
@@ -306,8 +300,7 @@ def _all_gather_dtensor(
     parent_mesh: DeviceMesh | None,
 ) -> torch.Tensor:
     """All gather a DTensor in its FSDP dimension and return the local tensor."""
-    if parent_mesh != tensor.device_mesh:
-        raise AssertionError
+    assert parent_mesh == tensor.device_mesh
 
     placements = list(copy.deepcopy(tensor.placements))
     # FSDP + TP: [Shard(0), tp_placement] -> [Replicate(), tp_placement]
