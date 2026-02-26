@@ -1301,6 +1301,11 @@ def _modified_cat_op_fake(a, b):
 class DistTensorCppPyTree(DTensorTestBase):
     @with_comms
     def test_cpp_cat(self):
+        from torch.distributed.tensor.debug import (
+            _clear_fast_path_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
+        )
+
         mesh = self.build_device_mesh()
         cases = [
             ((8, 8), (8, 8), 0, [Shard(1)], (Shard(1),)),
@@ -1308,17 +1313,25 @@ class DistTensorCppPyTree(DTensorTestBase):
             ((8, 8), (8, 8), 0, [Shard(0)], (Replicate(),)),
         ]
         for shape_a, shape_b, cat_dim, placements, expected_placements in cases:
+            _clear_fast_path_sharding_prop_cache()
             global_a = torch.randn(shape_a)
             global_b = torch.randn(shape_b)
             dt_a = distribute_tensor(global_a, mesh, placements)
             dt_b = distribute_tensor(global_b, mesh, placements)
-            # run twice to test cache hit
-            for _ in range(2):
-                result = torch.cat([dt_a, dt_b], dim=cat_dim)
-                self.assertEqual(result.placements, expected_placements)
-                self.assertEqual(
-                    result.full_tensor(), torch.cat([global_a, global_b], dim=cat_dim)
-                )
+            # first call: cache miss
+            result = torch.cat([dt_a, dt_b], dim=cat_dim)
+            self.assertEqual(result.placements, expected_placements)
+            self.assertEqual(
+                result.full_tensor(), torch.cat([global_a, global_b], dim=cat_dim)
+            )
+            # second call: should be a cache hit
+            result = torch.cat([dt_a, dt_b], dim=cat_dim)
+            hits, _ = _get_fast_path_sharding_prop_cache_stats()
+            self.assertEqual(hits, 1)
+            self.assertEqual(result.placements, expected_placements)
+            self.assertEqual(
+                result.full_tensor(), torch.cat([global_a, global_b], dim=cat_dim)
+            )
 
     @with_comms
     def test_two_list_op_cache_collision(self):
@@ -1326,6 +1339,10 @@ class DistTensorCppPyTree(DTensorTestBase):
 
         from torch.distributed.tensor._op_schema import RuntimeSchemaInfo
         from torch.distributed.tensor._ops.utils import replicate_op_strategy
+        from torch.distributed.tensor.debug import (
+            _clear_fast_path_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
+        )
 
         mesh = self.build_device_mesh()
         op = torch.ops.testlib.modified_cat_op
@@ -1335,11 +1352,15 @@ class DistTensorCppPyTree(DTensorTestBase):
             replicate_op_strategy,
             schema_info=RuntimeSchemaInfo(needs_pytree=True),
         ):
+            _clear_fast_path_sharding_prop_cache()
             a = distribute_tensor(torch.randn(4, 8), mesh, [Replicate()])
             b = distribute_tensor(torch.randn(4, 8), mesh, [Replicate()])
 
             op([a], [b])  # cache miss, populates cache
-            result = op([a, b], [])  # should still miss
+            result = op([a, b], [])  # different list sizes, should also miss
+            hits, misses = _get_fast_path_sharding_prop_cache_stats()
+            self.assertEqual(hits, 0)
+            self.assertEqual(misses, 2)
             self.assertEqual(result.shape, torch.Size([8, 8]))
 
 
