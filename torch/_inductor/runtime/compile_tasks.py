@@ -54,7 +54,7 @@ def _set_triton_ptxas_path() -> None:
 def _set_triton_libdevice_path() -> None:
     """
     Use the CUDA toolkit's libdevice instead of Triton's bundled version.
-    This ensures Triton's libdevice.pow matches CUDA's powf for bitwise precision.
+    This ensures Triton's pow matches CUDA's powf for bitwise precision.
     Gated by config.eager_numerics.use_pytorch_libdevice.
     """
     from torch._inductor import config
