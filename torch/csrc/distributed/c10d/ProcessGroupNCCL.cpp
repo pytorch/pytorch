@@ -2027,12 +2027,17 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   //
   // Or we get stuck in destructors, we will sleep for some time before calling
   // std::abort() to kill the whole process.
-  if ((pg_->terminateProcessGroup_.load() || shouldDump_.load()) &&
-      !terminateHeartbeatMonitorThread_.load()) {
-    std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
-    LOG(INFO)
-        << pg_->logPrefix() << "slept for " << heartbeatTimeoutInSec_
-        << " because we want to wait longer to verify there is indeed a watchdog hang.";
+  if (pg_->terminateProcessGroup_.load() || shouldDump_.load()) {
+    for (int t = 0; t < heartbeatTimeoutInSec_; ++t) {
+      if (terminateHeartbeatMonitorThread_.load()) {
+        if (t > 0)
+          LOG(INFO)
+              << pg_->logPrefix() << "slept for " << t
+              << " seconds because we want to wait longer to verify there is indeed a watchdog hang.";
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`

@@ -28,7 +28,7 @@ the function call as is in the graph, and only when we Dynamo through the backwa
 compiled autograd do we inline into the function.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -141,7 +141,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
         func: OpOverload,
         types: tuple[torch._C._TensorMeta, ...],
         args: tuple[object, ...] = (),
-        kwargs: Optional[dict[str, object]] = None,
+        kwargs: dict[str, object] | None = None,
     ) -> object:
         if func is torch.Tensor.__getitem__:
             tensor_to_index = args[0]
@@ -192,7 +192,7 @@ def _assert_meta(
 def inner_trace(
     mode: ProxyTorchDispatchMode,
     *args: Any,
-    bw_state: Optional[BackwardState] = None,
+    bw_state: BackwardState | None = None,
     **kwargs: Any,
 ) -> Any:
     def self_invoke(*args: Any, **dyn_kwargs: Any) -> Any:
