@@ -86,5 +86,6 @@ class ATenBiasAddMMConfigHeuristics(
         nodes = kernel_inputs.nodes()
         # for addmm, bias is the first input
         bias = nodes[0]
-        if bias.get_stride()[0] == 0 and inductor_config.triton.autotune_cublasLt:
-            yield dict()
+        # Conditions should be checked in tuned_addmm before adding this template
+        assert bias.get_stride()[0] == 0 and inductor_config.triton.autotune_cublasLt
+        yield from super()._get_template_configs_impl(kernel_inputs, op_name)

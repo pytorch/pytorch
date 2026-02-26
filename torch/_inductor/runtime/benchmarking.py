@@ -262,7 +262,7 @@ class Benchmarker:
 
         # Capture into CUDA graph
         cuda_graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(cuda_graph):
+        with torch.cuda.graph(cuda_graph, capture_error_mode="thread_local"):
             _callable()
         torch.cuda.synchronize()
 
