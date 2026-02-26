@@ -425,6 +425,104 @@ def mm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("mk,kn->mn")
 
 
+@register_op_strategy(
+    aten.linear.default, schema_info=RuntimeSchemaInfo(static_argnum=2)
+)
+def linear_strategy(op_schema: OpSchema) -> OpStrategy:
+    # aten.linear(input, weight, bias=None)
+    # input: (m, k), weight: (n, k), output: (m, n)
+    mesh = op_schema.get_mesh_from_args()
+    input_strategy, weight_strategy = op_schema.args_schema[0], op_schema.args_schema[1]
+    bias_strategy = op_schema.args_schema[2] if len(op_schema.args_schema) > 2 else None
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    if not isinstance(weight_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(weight_strategy)}")
+
+    # mk,nk->mn (weight is transposed relative to mm's mk,kn->mn)
+    mm_strategy = gen_einsum_strategies("mk,nk->mn", mesh)
+    strategies = mm_strategy.strategies
+    filtered_strategies = []
+
+    mm_out_shape = torch.Size(
+        [
+            weight_strategy.shape[0]
+            if i == len(input_strategy.shape) - 1
+            else dim_size
+            for i, dim_size in enumerate(input_strategy.shape)
+        ]
+    )
+
+    for strtg in strategies:
+        if strtg.input_specs is None:
+            raise AssertionError(
+                f"Expected input_specs to be not None, got {strtg.input_specs}"
+            )
+        input_spec = strtg.input_specs[0]
+        weight_spec = strtg.input_specs[1]
+
+        if is_tensor_shardable(
+            input_strategy.shape, input_spec, allow_unbacked_sharding=True
+        ) and is_tensor_shardable(
+            weight_strategy.shape, weight_spec, allow_unbacked_sharding=True
+        ):
+            if bias_strategy is not None and isinstance(bias_strategy, OpStrategy):
+                out_spec = strtg.output_spec
+                bias_shape = bias_strategy.shape
+                broadcast_dims_map = infer_broadcast_dims_map(
+                    mm_out_shape, bias_shape
+                )
+                bias_placements = map_placements_after_broadcast(
+                    out_spec.placements, mm_out_shape, broadcast_dims_map
+                )
+                bias_spec = DTensorSpec(mesh=mesh, placements=bias_placements)
+                strtg.input_specs = (input_spec, weight_spec, bias_spec)
+                redistribute_cost = [
+                    generate_redistribute_costs(input_strategy, input_spec),
+                    generate_redistribute_costs(weight_strategy, weight_spec),
+                    generate_redistribute_costs(bias_strategy, bias_spec),
+                ]
+            else:
+                strtg.input_specs = (input_spec, weight_spec)
+                redistribute_cost = [
+                    generate_redistribute_costs(input_strategy, input_spec),
+                    generate_redistribute_costs(weight_strategy, weight_spec),
+                ]
+            strtg.redistribute_cost = redistribute_cost
+            filtered_strategies.append(strtg)
+
+    mm_strategy.strategies = filtered_strategies
+    return mm_strategy
+
+
+@register_single_dim_strategy(aten.linear.default, allow_unbacked_sharding=True)
+def linear_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # aten.linear(input, weight, bias=None): bias is arg 2 (last), but
+    # gen_single_dim_einsum_strategies inserts bias at position 1 (for addmm
+    # where bias is the first arg). Generate without bias, then append it.
+    bias_meta = args_schema[2] if len(args_schema) > 2 else None
+    has_bias = isinstance(bias_meta, TensorMeta)
+    strategies = gen_single_dim_einsum_strategies("mk,nk->mn")
+    if not has_bias:
+        return strategies
+    # Append bias placement at the end to match (input, weight, bias) arg order.
+    # Output is (m, n), bias is (n,). Output dim 1 -> bias dim 0; dim 0 is broadcast.
+    result = []
+    for placement_list in strategies:
+        output_placement = placement_list[0]
+        if isinstance(output_placement, _ShardingPlaceholder):
+            if output_placement.dim == 1:
+                bias_placement: Placement | _ShardingPlaceholder = _ShardingPlaceholder(0)
+            else:
+                bias_placement = Replicate()
+        else:
+            bias_placement = copy.copy(output_placement)
+        result.append(placement_list + [bias_placement])
+    return result
+
+
 @register_op_strategy(aten.addmm.default)
 def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()

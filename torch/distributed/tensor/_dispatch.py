@@ -243,7 +243,8 @@ class OpDispatcher:
                 # When running under inference mode, CompositeImplicitAutograd ops show up in __torch_dispatch__,
                 # so we manually decompose them, here
                 out = op_call.decompose(*args, **kwargs)
-                assert out is not NotImplemented
+                if out is NotImplemented:
+                    raise
                 return out
             else:
                 raise
