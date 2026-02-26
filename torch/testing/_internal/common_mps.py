@@ -348,7 +348,6 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int64,
                 torch.uint8,
-                torch.bool,
             ],
             "median": [torch.bool],
             "mode": None,
@@ -379,7 +378,6 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.int32,
                 torch.uint8,
-                torch.bool,
                 torch.int8,
             ],
             "nn.functional.batch_norm": [
@@ -528,8 +526,6 @@ if torch.backends.mps.is_available():
                 torch.bool,
                 torch.int8,
             ],
-            "nn.functional.padreflect": [torch.bool],
-            "nn.functional.padreplicate": [torch.bool],
             "nn.functional.padreplicate_negative": [torch.bool],
             "nn.functional.pdist": None,
             "nn.functional.relu": [torch.bool],
@@ -538,7 +534,6 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.int32,
                 torch.uint8,
-                torch.bool,
                 torch.int8,
             ],
             "nn.functional.softplus": [
@@ -549,12 +544,9 @@ if torch.backends.mps.is_available():
                 torch.int16,
             ],
             "nn.functional.norm": None,
-            "nn.functional.threshold": [torch.bool],
             "ormqr": None,
             "pca_lowrank": None,
-            "pow": [torch.bool],
             "qr": None,
-            "remainder": [torch.bool],
             "rounddecimals_0": [
                 torch.uint8,
                 torch.int8,
@@ -590,7 +582,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "trunc": [torch.bool],
             "var_meanunbiased": [
                 torch.uint8,
                 torch.int8,
