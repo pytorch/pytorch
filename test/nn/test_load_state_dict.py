@@ -493,14 +493,18 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
                         return cls(src._data)
                     return cls(src)
         else:
-            assert isinstance(src, cls), (
-                f"Expected isinstance(src, {cls}) but got {type(src)}"
-            )
-            assert (
+            if not isinstance(src, cls):
+                raise AssertionError(
+                    f"Expected isinstance(src, {cls}) but got {type(src)}"
+                )
+            if not (
                 type(dest) is torch.Tensor
                 or type(dest) is torch.nn.Parameter
                 or issubclass(cls, type(dest))
-            )
+            ):
+                raise AssertionError(
+                    f"Expected dest to be Tensor, Parameter, or subclass of {cls}, got {type(dest)}"
+                )
             if assign:
                 return src.detach()
             else:

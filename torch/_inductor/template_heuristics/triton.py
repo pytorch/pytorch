@@ -77,6 +77,21 @@ ConvConfig = BaseConfig
 
 
 @dataclasses.dataclass
+class DepthwiseConvConfig:
+    """
+    Configuration for depthwise conv1d Triton template.
+    Uses BLOCK_N x BLOCK_L x BLOCK_C tiling (channels-last NLC layout).
+    Matches the hand-written NLC kernel from depthwise_conv1d_benchmark.py.
+    """
+
+    block_n: int
+    block_l: int
+    block_c: int
+    num_stages: int
+    num_warps: int
+
+
+@dataclasses.dataclass
 class BlackwellGPUGemmConfig(GemmConfig):
     """
     Gemm configuration used for templates with features explicitly
@@ -631,13 +646,84 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
         self.conv_configs: list[BaseConfig] = [
+            # BLOCK_K=16 configs
             ConvConfig(64, 256, 16, 2, 4),
             ConvConfig(256, 64, 16, 2, 4),
             ConvConfig(1024, 16, 16, 1, 8),
+            # BLOCK_K=32 configs
             ConvConfig(128, 128, 32, 2, 8),
             ConvConfig(64, 64, 32, 2, 4),
             ConvConfig(64, 256, 32, 2, 8),
             ConvConfig(256, 64, 32, 2, 8),
+            # BLOCK_K=64 configs
+            ConvConfig(128, 128, 64, 3, 8),
+            ConvConfig(64, 128, 64, 4, 4),
+            ConvConfig(128, 64, 64, 4, 4),
+            ConvConfig(256, 128, 64, 2, 8),
+            ConvConfig(128, 256, 64, 2, 8),
+            # BLOCK_K=128 configs - optimal when IN_C=128 (single iteration over channels)
+            ConvConfig(128, 128, 128, 2, 8),
+            ConvConfig(128, 128, 128, 3, 8),
+            ConvConfig(64, 128, 128, 4, 4),
+            ConvConfig(256, 128, 128, 2, 8),
+            ConvConfig(128, 256, 128, 2, 8),
+        ]
+
+        # Depthwise conv1d configs: BLOCK_N x BLOCK_L x BLOCK_C tiling
+        # Derived from autotuning results on H100 for depthwise conv1d
+        # channels-last (NLC) layout with shape x=[3072, 128, 202]
+        # Matches _nlc_autotune_configs from depthwise_conv1d_benchmark.py
+        self.depthwise_conv_configs: list[DepthwiseConvConfig] = [
+            # BLOCK_C=32, BLOCK_L=32
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=32, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=32, block_c=32, num_stages=5, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=32, block_c=32, num_stages=4, num_warps=4
+            ),
+            # BLOCK_C=32, BLOCK_L=64
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=32, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=64, block_c=32, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=32, BLOCK_L=256
+            DepthwiseConvConfig(
+                block_n=16, block_l=256, block_c=32, num_stages=5, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=256, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=256, block_c=32, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=64
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=64, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=64, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=64, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=128
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=128, num_stages=3, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=128, num_stages=3, num_warps=4
+            ),
         ]
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1004,6 +1090,21 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return partial(
             self.preprocess_mm_configs, configs=self.conv_configs, op_name="conv"
         )
+
+    def get_depthwise_conv_configs(self) -> list[TritonConfig]:
+        """Return TritonConfig list for depthwise conv1d autotuning."""
+        return [
+            TritonConfig(
+                {
+                    "BLOCK_N": cfg.block_n,
+                    "BLOCK_L": cfg.block_l,
+                    "BLOCK_C": cfg.block_c,
+                },
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+            )
+            for cfg in self.depthwise_conv_configs
+        ]
 
     # Flex attn helpers
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
@@ -1719,7 +1820,10 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             FlexConfig(128, 32, 2, 16),
             FlexConfig(128, 32, 2, 8),
         ]
-        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = []
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            FlexBwDConfig(32, 32, 32, 32, 2, 4),
+            FlexBwDConfig(64, 64, 64, 64, 2, 4),
+        ]
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
 
         if not bool(os.getenv("CI")):
@@ -1786,7 +1890,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             if head_dim == 64:
                 default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             elif head_dim == 128:
-                default_config = FlexBwDConfig(64, 128, 64, 128, 1, 8)
+                default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             else:
                 default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
         else:  # modest hardware or extremely large head_dim
@@ -1852,7 +1956,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         assert isinstance(kernel_inputs, MMKernelInputs)
         m, n, k = kernel_inputs.mnk_symbolic()
         # Calculate allow_tf32
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+        allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
             not inductor_config.force_same_precision
             or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
         )
