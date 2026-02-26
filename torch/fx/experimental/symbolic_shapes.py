@@ -4688,7 +4688,7 @@ class ShapeEnv:
     # Case 1: when SymInt is backed, dynamo can proceed with FakeTensors that have concrete shape.
     # produce_guards will trigger specializations on the outer stuff
 
-    # Case 2: when the SymInt is unbacked, we will throw an data dependent error in require_hint().
+    # Case 2: when the SymInt is unbacked, we will throw a data dependent error in guarding_hint_or_throw().
     #
     # It's probably good for now but it's important to note that this approach has implications for
     # the original shape_env when checking guards in different order.
@@ -4726,7 +4726,7 @@ class ShapeEnv:
                 raise AssertionError(
                     "expect the symbol is created from an shape env other than current one."
                 )
-            return maybe_sym.node.require_hint()
+            return guarding_hint_or_throw(maybe_sym.node)
         return maybe_sym
 
     @record_shapeenv_event()
