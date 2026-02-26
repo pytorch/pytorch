@@ -640,15 +640,23 @@ class TestVarlenAttention(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_seqused_k_kv_cache(self, device, dtype):
+    @parametrize(
+        "actual_kv_lens",
+        [
+            [32, 64, 96, 48],
+            [1, 1, 1, 1],
+            [128, 128, 128, 128],
+            [1, 128, 1, 128],
+            [127, 63, 33, 17],
+        ],
+    )
+    def test_seqused_k_kv_cache(self, device, dtype, actual_kv_lens):
         torch.manual_seed(42)
 
         batch_size = 4
         num_heads = 8
         head_dim = 64
         cache_size = 128
-
-        actual_kv_lens = [32, 64, 96, 48]
 
         q_seqs = [
             torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
