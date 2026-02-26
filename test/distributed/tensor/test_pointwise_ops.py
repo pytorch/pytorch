@@ -840,6 +840,63 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(div_result.full_tensor(), expected_div)
 
     @with_comms
+    def test_add_out_partial_propagation(self):
+        # out= variant: output placement must match the out tensor's placement.
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        local_val = 2.0
+
+        # Case 1: out=P(sum), self=P(sum), other=P(sum) -> P(sum), zero comm
+        d_self = DTensor.from_local(
+            torch.full((8, 8), local_val, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        d_other = DTensor.from_local(
+            torch.full((8, 8), local_val, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        d_out = DTensor.from_local(
+            torch.empty(8, 8, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        with comm_mode:
+            torch.add(d_self, d_other, out=d_out)
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(d_out.placements, (Partial("sum"),))
+        # sum(2,2,...) + sum(2,2,...) = 2*ws + 2*ws = 4*ws
+        expected = torch.full(
+            (8, 8), local_val * 2 * self.world_size, device=self.device_type
+        )
+        self.assertEqual(d_out.full_tensor(), expected)
+
+        # Case 2: out=R, self=P(sum), other=P(sum) -> must redistribute to R first
+        d_self2 = DTensor.from_local(
+            torch.full((8, 8), local_val, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        d_other2 = DTensor.from_local(
+            torch.full((8, 8), local_val, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        d_out2 = distribute_tensor(
+            torch.empty(8, 8, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+        with comm_mode:
+            torch.add(d_self2, d_other2, out=d_out2)
+
+        self.assertGreater(comm_mode.get_total_counts(), 0)
+        self.assertEqual(d_out2.placements, (Replicate(),))
+        self.assertEqual(d_out2.full_tensor(), expected)
+
+    @with_comms
     def test_inplace_add_partial_avg_with_replicate(self):
         # P(avg) += R -> P(avg): self is P(avg), other is R, valid inplace
         # because the rule P(avg)+R->P(avg) keeps output == self placement.
