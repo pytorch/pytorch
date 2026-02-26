@@ -36,6 +36,10 @@ def _sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.
     def to_symbol(
         replaced: sympy.Expr, replacement: Union[sympy.Expr, str]
     ) -> sympy.Symbol:
+        if not isinstance(replaced, sympy.Expr):
+            raise AssertionError(
+                f"Expected sympy.Expr key, got {type(replaced)}: {replaced}"
+            )
         if isinstance(replacement, str):
             return sympy.Symbol(
                 replacement,
@@ -51,26 +55,29 @@ def _sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.
     )
 
 
-def _maybe_realize_expr(expr: sympy.Expr, nan_fallback: Optional[int]) -> Optional[int]:
+def _maybe_realize_expr(
+    expr: sympy.Expr, nan_fallback: Optional[int]
+) -> Optional[Union[int, bool]]:
     """
     Handle special sympy values in hinting APIs.
 
     Returns:
+        - True/False for sympy.true/sympy.false (preserves bool type)
         - Raises ValueError for complex numbers
         - sys.maxsize for positive infinity
         - -sys.maxsize for negative infinity
         - fallback for NaN
         - None if no special handling needed
     """
+    if expr is sympy.true:
+        return True
+    if expr is sympy.false:
+        return False
+
     try:
         return int(expr)
     except (TypeError, ValueError):
         pass
-
-    if expr is sympy.true:
-        return 1
-    if expr is sympy.false:
-        return 0
 
     if isinstance(expr, sympy.Expr):
         if expr.has(sympy.I):
