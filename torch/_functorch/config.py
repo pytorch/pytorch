@@ -13,7 +13,7 @@ Global flags for aot autograd
 
 import os
 import sys
-from typing import Literal, Optional, TYPE_CHECKING
+from typing import Literal, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -99,7 +99,7 @@ check_custom_op_aliasing = True
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
 
 
-def remote_autograd_cache_default() -> Optional[bool]:
+def remote_autograd_cache_default() -> bool | None:
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":
         return True
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "0":
@@ -347,7 +347,7 @@ generate_fake_kernels_from_real_mismatches = False
 # compiler to proceed with compilation by choosing the preferred device type
 # for consistency. For example, set to "mtia" to prefer MTIA devices over
 # CPU, or "cuda" to prefer CUDA devices over CPU.
-fake_tensor_prefer_device_type: Optional[str] = None
+fake_tensor_prefer_device_type: str | None = None
 
 # CUDAGraph safe run_with_rng functionalization.
 # TODO: turn on by default
