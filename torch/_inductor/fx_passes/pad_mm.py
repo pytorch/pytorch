@@ -87,11 +87,7 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
 def hint_symbols(
     ds: Sequence[int | torch.SymInt],
 ) -> list[int]:
-    """Helper to convert symbolic dimensions to their concrete hint values.
-
-    Uses optimization_hint which handles both backed symbols (via _hint)
-    and unbacked symbols (via var_to_hint_override / fallback heuristics).
-    """
+    """Helper to convert symbolic dimensions to their concrete hint values."""
     from torch.fx.experimental.symbolic_shapes import optimization_hint
 
     return [optimization_hint(d) for d in ds]
