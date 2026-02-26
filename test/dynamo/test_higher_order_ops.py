@@ -47,7 +47,8 @@ from torch.testing._internal.triton_utils import (
 
 def count_ops(gm, args, freq, op):
     actual = [node.target for node in gm.graph.nodes].count(op)
-    assert actual == freq, f"expected={freq}, actual={actual}"
+    if actual != freq:
+        raise AssertionError(f"expected={freq}, actual={actual}")
     return gm
 
 
@@ -1157,7 +1158,7 @@ class GraphModule(torch.nn.Module):
         def _(pred, true_fn, false_fn, operands):
             nonlocal called
             called += 1
-            assert len(operands) == 1
+            assert len(operands) == 1  # noqa: S101
             a = cond_op(pred, true_fn, false_fn, (operands[0].a,))
             b = cond_op(pred, true_fn, false_fn, (operands[0].b,))
             return TwoTensor(a, b)
@@ -3221,7 +3222,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
 
         def my_hop_fn_2_impl(fn, *args, g=None):
             def wrapper(*args, **kwargs):
-                assert g is not None
+                assert g is not None  # noqa: S101
                 out = fn(*args)
                 if isinstance(out, tuple):
                     return (g(out[0]),)

@@ -14,7 +14,7 @@ class TestTritonSyntacticallyValid(TestCase):
         import torch.nn as nn
 
         def newtonschulz5(G, steps: int, eps=1e-7):
-            assert len(G.shape) == 2
+            assert len(G.shape) == 2  # noqa: S101
             a, b, c = (3.4445, -4.7750, 2.0315)
             X = G.to(
                 torch.bfloat16

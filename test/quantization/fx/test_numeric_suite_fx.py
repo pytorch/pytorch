@@ -1833,12 +1833,27 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             'cosine_similarity_int8_vs_fp32')
 
         for layer_results in results.values():
-            assert 'sqnr_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0]
-            assert 'l2_error_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0]
-            assert 'cosine_similarity_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0]
+            if (
+                'sqnr_int8_vs_fp32'
+                not in layer_results['weight']['int8'][0]
+            ):
+                raise AssertionError(
+                    f"'sqnr_int8_vs_fp32' not found in layer results: {layer_results['weight']['int8'][0].keys()}"
+                )
+            if (
+                'l2_error_int8_vs_fp32'
+                not in layer_results['weight']['int8'][0]
+            ):
+                raise AssertionError(
+                    f"'l2_error_int8_vs_fp32' not found in layer results: {layer_results['weight']['int8'][0].keys()}"
+                )
+            if (
+                'cosine_similarity_int8_vs_fp32'
+                not in layer_results['weight']['int8'][0]
+            ):
+                raise AssertionError(
+                    f"'cosine_similarity_int8_vs_fp32' not found in layer results: {layer_results['weight']['int8'][0].keys()}"
+                )
 
     @skipIfNoFBGEMM
     def test_int8_shadows_fp32_simple(self):

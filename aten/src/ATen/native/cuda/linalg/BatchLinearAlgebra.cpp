@@ -905,7 +905,7 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 }
 
 namespace {
-// At the moment of writing, the unconditional dispatch
+// At the time of writing, the unconditional dispatch
 // to the native cholesky_solve method in cuSOLVER is slow
 // with bached inputs.
 template <bool use_dedicated_kernel_unconditionally = false>

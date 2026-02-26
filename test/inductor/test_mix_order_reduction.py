@@ -81,7 +81,7 @@ class MixOrderReductionTest(TestBase):
                 if len(shape) == 3:
                     return reduction_fn(x, dim=(0, 1))
                 else:
-                    assert len(shape) == 2
+                    assert len(shape) == 2  # noqa: S101
                     return reduction_fn(x, dim=0)
 
             if swap:

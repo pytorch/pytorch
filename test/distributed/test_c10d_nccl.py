@@ -5929,7 +5929,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
                         and _get_torch_rocm_version() >= (6, 4)
                         and timing_enabled
                     ):
-                        assert t[-1]["state"] in ("scheduled", "started")
+                        if t[-1]["state"] not in ("scheduled", "started"):
+                            raise AssertionError(
+                                f"Expected state in ('scheduled', 'started'), got {t[-1]['state']}"
+                            )
                     else:
                         self.assertEqual(
                             t[-1]["state"], self.started_or_scheduled(timing_enabled)
@@ -6837,8 +6840,9 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
 
 
 if __name__ == "__main__":
-    assert not torch.cuda._initialized, (
-        "test_distributed must not have initialized CUDA context on main process"
-    )
+    if torch.cuda._initialized:
+        raise AssertionError(
+            "test_distributed must not have initialized CUDA context on main process"
+        )
 
     run_tests()
