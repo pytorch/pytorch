@@ -712,7 +712,8 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
         def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
             sizes = [1] * world_size
             t = t * 2
-            assert t.requires_grad
+            if not t.requires_grad:
+                raise AssertionError("Expected t.requires_grad to be True")
             out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
             out = out + 0
             return out
@@ -739,7 +740,8 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
         def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
             sizes = [1] * world_size
             t = t * 10
-            assert t.requires_grad
+            if not t.requires_grad:
+                raise AssertionError("Expected t.requires_grad to be True")
             out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
             out = out + 2
             return out.sum()
@@ -772,7 +774,8 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
         group = dist.group.WORLD.group_name
 
         def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
-            assert t.requires_grad
+            if not t.requires_grad:
+                raise AssertionError("Expected t.requires_grad to be True")
             out = ft_c.all_gather_tensor_autograd(
                 t * 1.0,
                 gather_dim=dim,
@@ -806,7 +809,8 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
         group = dist.group.WORLD.group_name
 
         def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
-            assert t.requires_grad
+            if not t.requires_grad:
+                raise AssertionError("Expected t.requires_grad to be True")
             rs_tensor = (
                 ft_c.reduce_scatter_tensor_autograd(
                     input_tensor * 1.0, "sum", scatter_dim=dim, group=group
@@ -841,7 +845,8 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         t = torch.ones((self.world_size, 2), requires_grad=True, device=device)
 
         sizes = [1] * self.world_size
-        assert t.requires_grad
+        if not t.requires_grad:
+            raise AssertionError("Expected t.requires_grad to be True")
         out = ft_c.all_to_all_single_autograd(t * 2, sizes, sizes, group) + 0
 
         self.assertEqual(out.shape, t.shape)
