@@ -348,11 +348,7 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-# S101 migration: Remaining test folders/files still needing migration (ignore S101 for now)
-# Note: test/export/**, test/jit/**, test/torch_np/numpy_tests/** have S101 added to existing entries above
 
-"test/onnx/**" = ["S101"]
-"test/quantization/**" = ["S101"]
 # torch/ folders still needing S101 migration
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
