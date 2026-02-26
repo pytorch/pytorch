@@ -5557,6 +5557,14 @@ class Scheduler:
                 why("node1 is extern but node2.node.data is not Pointwise")
                 return False
 
+            # the epilogue depends on expressions which may not available in the user triton kernel
+            # (e.g. indexing exprs used not in a load)
+            node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
+            for symbol in node2_inner_fn_free_symbols:
+                usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
+                if any(usage != "load" for usage in usages):
+                    return False
+
             # should be true now because we checked `can_fuse_epilogue`
             assert len(node1.node.mutable_args) == 1
             if node1.node.mutable_args[0].layout != node2.node.layout:

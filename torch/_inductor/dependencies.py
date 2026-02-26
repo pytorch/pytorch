@@ -888,3 +888,16 @@ def extract_free_symbols(
     ):
         fn(*args)
     return handler.symbols
+
+
+class SymbolUsageCollectorOpsHandler(DefaultHandler):
+    usages: OrderedSet[str]
+
+    def __init__(self, symbol: sympy.Symbol) -> None:
+        self.symbol = symbol
+        self.usages = OrderedSet()
+
+    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        used_here = self.symbol in args or self.symbol in kwargs.values()
+        if used_here:
+            self.usages.add(name)

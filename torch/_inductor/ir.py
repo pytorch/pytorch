@@ -81,6 +81,7 @@ from .dependencies import (
     extract_free_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
+    SymbolUsageCollectorOpsHandler,
     var_builder,
 )
 from .loop_body import LoopBody
@@ -1023,6 +1024,16 @@ class Loops(IRNode):
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
         return extract_free_symbols(self.inner_fn, index, unbacked_only=unbacked_only)
+
+    # returns a list of op names which references the symbol
+    def collect_inner_fn_symbol_usage(self, symbol: Symbol) -> OrderedSet[str]:
+        index = self._index(self.ranges)
+        handler = SymbolUsageCollectorOpsHandler(symbol)
+        with (
+            V.set_ops_handler(handler),
+        ):
+            self.inner_fn(index)
+        return handler.usages
 
     def get_reads(self) -> OrderedSet[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
