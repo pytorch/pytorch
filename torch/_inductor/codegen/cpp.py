@@ -5,6 +5,7 @@ import functools
 import itertools
 import math
 import operator
+import os
 import re
 import sys
 import warnings
@@ -5584,7 +5585,19 @@ class WorkSharing:
         if not self.in_parallel:
             self.num_threads = threads
             self.in_parallel = True
-            if config.cpp.dynamic_threads:
+            # Decide whether to use dynamic threading
+            use_dynamic = False
+            if config.cpp.threads >= 1:
+                # User explicitly set config.cpp.threads (hardcode it)
+                use_dynamic = False
+            elif threads == os.cpu_count():
+                # Thread count matches system CPU count (most likely default, use dynamic)
+                use_dynamic = True
+            else:
+                # Thread count differs from system (user probably set it so hardcode)
+                use_dynamic = False
+
+            if use_dynamic or config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
             else:
                 self.code.writeline(f"#pragma omp parallel num_threads({threads})")
