@@ -406,7 +406,11 @@ class AsyncCompile:
             _set_triton_libdevice_path()
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR", "TRITON_LIBDEVICE_PATH"]
+            env_vars = [
+                "TORCHINDUCTOR_CACHE_DIR",
+                "TRITON_CACHE_DIR",
+                "TRITON_LIBDEVICE_PATH",
+            ]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
             extra_config = {
                 "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher

@@ -629,7 +629,9 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 def _add_with_alpha_fma(a, b, alpha):
     """Compute a + alpha * b using FMA for CUDA floating-point precision."""
     dtype = get_promoted_dtype(
-        a, b, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        a,
+        b,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     )
     a_loader = a.make_loader()
     b_loader = b.make_loader()
@@ -671,20 +673,15 @@ def make_pointwise(
             if alpha is not None and alpha != 1:
                 # Use FMA for add-with-alpha on CUDA floating-point.
                 # Eager CUDA computes a + alpha * b as fma(b, alpha, a).
-                device = None
-                for i in inputs:
-                    if isinstance(i, IRNode) and is_gpu(i.get_device().type):
-                        device = i.get_device()
-                        break
-                inp_dtype = inputs[0].get_dtype() if isinstance(inputs[0], IRNode) else None
-                if (
-                    inp_dtype is not None
-                    and inp_dtype.is_floating_point
-                    and not torch.version.hip
-                    and device is not None
-                    and device.type == "cuda"
-                ):
-                    return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
+                if isinstance(inputs[0], IRNode):
+                    inp_device = inputs[0].get_device()
+                    if (
+                        inputs[0].get_dtype().is_floating_point
+                        and not torch.version.hip
+                        and inp_device is not None
+                        and inp_device.type == "cuda"
+                    ):
+                        return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
 
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
