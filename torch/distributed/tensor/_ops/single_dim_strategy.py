@@ -201,8 +201,12 @@ def _build_output_specs(
     per_mesh_dim_placements is indexed [mesh_dim][output_idx]. output_metas must
     have exactly num_outputs elements.
     """
-    assert num_outputs > 0
-    assert len(output_metas) == num_outputs
+    if num_outputs <= 0:
+        raise AssertionError(f"Expected num_outputs > 0, got {num_outputs}")
+    if len(output_metas) != num_outputs:
+        raise AssertionError(
+            f"Expected len(output_metas) == {num_outputs}, got {len(output_metas)}"
+        )
 
     def _placements_for_output(out_idx: int) -> tuple[Placement, ...]:
         return tuple(out[out_idx] for out in per_mesh_dim_placements)
