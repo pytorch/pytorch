@@ -264,7 +264,6 @@ _monotone_binary_base_rules: list[list[Placement]] = [
     [Partial("min"), Replicate(), Partial("min")],
 ]
 
-
 # Ops that preserve specific Partial types through the operation.
 # For example, torch.maximum preserves Partial("max") because
 # max(max(a), max(b)) == max(a, b).
@@ -273,6 +272,7 @@ partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.maximum.out: "max",
     aten.minimum.out: "min",
 }
+
 
 # The linear pointwise ops map, key is op, value is the type of linearity.
 # Reconstructed from category lists for the existing registration path.
