@@ -34,7 +34,6 @@ inline namespace CPU_CAPABILITY {
 #error "Big endian is not supported."
 #endif
 
-
 template <int index, bool mask_val>
 struct BlendRegs {
   static float32x4_t impl(

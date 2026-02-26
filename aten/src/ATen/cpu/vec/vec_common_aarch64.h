@@ -7,33 +7,33 @@
 
 #ifdef CPU_CAPABILITY_SVE128
 // SVE128: NEON Vectorized types with SVE bridge operators
-#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+#include <ATen/cpu/vec/sve/vec_qint.h>
+#include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_convert.h>
 #include <ATen/cpu/vec/vec128/vec128_double_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_int_aarch64.h>
 #include <ATen/cpu/vec/vec128/vec128_uint_aarch64.h>
-#include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
-#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
-#include <ATen/cpu/vec/vec128/vec128_convert.h>
-#include <ATen/cpu/vec/sve/vec_qint.h>
 
 #elif defined(CPU_CAPABILITY_SVE256)
 // SVE256: native SVE types
-#include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/sve/vec_bfloat16.h>
 #include <ATen/cpu/vec/sve/vec_double.h>
+#include <ATen/cpu/vec/sve/vec_float.h>
 #include <ATen/cpu/vec/sve/vec_int.h>
 #include <ATen/cpu/vec/sve/vec_qint.h>
-#include <ATen/cpu/vec/vec256/vec256_half.h>
 #include <ATen/cpu/vec/vec256/vec256_convert.h>
+#include <ATen/cpu/vec/vec256/vec256_half.h>
 
 #else // NEON (DEFAULT)
-#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
-#include <ATen/cpu/vec/vec128/vec128_double_neon.h>
-#include <ATen/cpu/vec/vec128/vec128_int_aarch64.h>
-#include <ATen/cpu/vec/vec128/vec128_uint_aarch64.h>
-#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
+#include <ATen/cpu/vec/vec128/vec128_double_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_int_aarch64.h>
+#include <ATen/cpu/vec/vec128/vec128_uint_aarch64.h>
 #include <ATen/cpu/vec/vec256/vec256_qint.h>
 #endif
 

@@ -736,52 +736,50 @@ Vectorized<c10::BFloat16> inline fnmsub(
 
 #if !(!defined(C10_MOBILE) && defined(__aarch64__))
 
-#define CONVERT_NON_VECTORIZED_INIT(type, name)                              \
-  inline std::tuple<Vectorized<float>, Vectorized<float>>                    \
-      convert_##name##_float(const Vectorized<type>& a) {                    \
-    constexpr int64_t K = Vectorized<type>::size();                          \
-    __at_align__ float arr[K];                                               \
-    __at_align__ type arr2[K];                                               \
-    a.store(arr2);                                                           \
-    for (int64_t i = 0; i < K; i++) {                                        \
-      arr[i] = static_cast<float>(arr2[i]);                                  \
-    }                                                                        \
-    return std::make_tuple(                                                  \
-        Vectorized<float>::loadu(arr),                                       \
-        Vectorized<float>::loadu(arr + Vectorized<float>::size()));           \
-  }                                                                          \
-  inline Vectorized<type> convert_float_##name(                              \
-      const Vectorized<float>& a, const Vectorized<float>& b) {              \
-    constexpr int64_t K = Vectorized<type>::size();                          \
-    __at_align__ float arr[K];                                               \
-    __at_align__ type arr2[K];                                               \
-    a.store(arr);                                                            \
-    b.store(arr + Vectorized<float>::size());                                \
-    for (int64_t i = 0; i < K; i++) {                                        \
-      arr2[i] = static_cast<type>(arr[i]);                                   \
-    }                                                                        \
-    return Vectorized<type>::loadu(arr2);                                     \
+#define CONVERT_NON_VECTORIZED_INIT(type, name)                     \
+  inline std::tuple<Vectorized<float>, Vectorized<float>>           \
+      convert_##name##_float(const Vectorized<type>& a) {           \
+    constexpr int64_t K = Vectorized<type>::size();                 \
+    __at_align__ float arr[K];                                      \
+    __at_align__ type arr2[K];                                      \
+    a.store(arr2);                                                  \
+    for (int64_t i = 0; i < K; i++) {                               \
+      arr[i] = static_cast<float>(arr2[i]);                         \
+    }                                                               \
+    return std::make_tuple(                                         \
+        Vectorized<float>::loadu(arr),                              \
+        Vectorized<float>::loadu(arr + Vectorized<float>::size())); \
+  }                                                                 \
+  inline Vectorized<type> convert_float_##name(                     \
+      const Vectorized<float>& a, const Vectorized<float>& b) {     \
+    constexpr int64_t K = Vectorized<type>::size();                 \
+    __at_align__ float arr[K];                                      \
+    __at_align__ type arr2[K];                                      \
+    a.store(arr);                                                   \
+    b.store(arr + Vectorized<float>::size());                       \
+    for (int64_t i = 0; i < K; i++) {                               \
+      arr2[i] = static_cast<type>(arr[i]);                          \
+    }                                                               \
+    return Vectorized<type>::loadu(arr2);                           \
   }
 
-#define LOAD_FP32_NON_VECTORIZED_INIT(type, name)                            \
-  inline void load_fp32_from_##name(                                         \
-      const type* data, Vectorized<float>& out) {                            \
-    __at_align__ float values[Vectorized<float>::size()];                    \
-    for (const auto k : c10::irange(Vectorized<float>::size())) {            \
-      values[k] = data[k];                                                   \
-    }                                                                        \
-    out = Vectorized<float>::loadu(values);                                  \
-  }                                                                          \
-  inline void load_fp32_from_##name(                                         \
-      const type* data,                                                      \
-      Vectorized<float>& out1,                                               \
-      Vectorized<float>& out2) {                                             \
-    __at_align__ float values[Vectorized<type>::size()];                     \
-    for (const auto k : c10::irange(Vectorized<type>::size())) {             \
-      values[k] = data[k];                                                   \
-    }                                                                        \
-    out1 = Vectorized<float>::loadu(values);                                 \
-    out2 = Vectorized<float>::loadu(values + Vectorized<float>::size());     \
+#define LOAD_FP32_NON_VECTORIZED_INIT(type, name)                           \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out) {                           \
+    __at_align__ float values[Vectorized<float>::size()];                   \
+    for (const auto k : c10::irange(Vectorized<float>::size())) {           \
+      values[k] = data[k];                                                  \
+    }                                                                       \
+    out = Vectorized<float>::loadu(values);                                 \
+  }                                                                         \
+  inline void load_fp32_from_##name(                                        \
+      const type* data, Vectorized<float>& out1, Vectorized<float>& out2) { \
+    __at_align__ float values[Vectorized<type>::size()];                    \
+    for (const auto k : c10::irange(Vectorized<type>::size())) {            \
+      values[k] = data[k];                                                  \
+    }                                                                       \
+    out1 = Vectorized<float>::loadu(values);                                \
+    out2 = Vectorized<float>::loadu(values + Vectorized<float>::size());    \
   }
 
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
