@@ -2746,18 +2746,40 @@ class DeviceCachingAllocator {
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    if (CUDAAllocatorConfig::graph_capture_record_stream_reuse() &&
-        !graph_reuse_context.empty()) {
-      auto capture_id = mempool_to_capture_id[mempool_id];
-      auto graph_context = graph_reuse_context[capture_id];
-      for (auto& [stream, _] : graph_context.visited) {
-        TORCH_INTERNAL_ASSERT(
-            stream_get_capture_info(stream).status ==
-                cudaStreamCaptureStatusNone,
-            "This stream should not be capturing when the capture is ended");
+    if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
+      // Remove stream reuse context and mapping for this capture, if present.
+      if (!graph_reuse_context.empty()) {
+        auto capture_id = mempool_to_capture_id[mempool_id];
+        auto graph_context = graph_reuse_context[capture_id];
+        for (auto& [stream, _] : graph_context.visited) {
+          TORCH_INTERNAL_ASSERT(
+              stream_get_capture_info(stream).status ==
+                  cudaStreamCaptureStatusNone,
+              "This stream should not be capturing when the capture is ended");
+        }
+        graph_reuse_context.erase(capture_id);
+        mempool_to_capture_id.erase(mempool_id);
       }
-      graph_reuse_context.erase(capture_id);
-      mempool_to_capture_id.erase(mempool_id);
+
+      // Free deferred blocks associated with the ended pool, if any.
+      if (!deferred_blocks.empty()) {
+        auto pool_it = graph_pools.find(mempool_id);
+        if (pool_it != graph_pools.end()) {
+          auto* private_pool = pool_it->second.get();
+          auto context = maybeGatherContext(RecordContext::ALL);
+          std::vector<Block*> blocks_to_erase;
+          for (auto& [block, markers] : deferred_blocks) {
+            if (block->pool->owner_PrivatePool == private_pool) {
+              block->stream_uses.clear();
+              free_block(block, context);
+              blocks_to_erase.push_back(block);
+            }
+          }
+          for (auto* b : blocks_to_erase) {
+            deferred_blocks.erase(b);
+          }
+        }
+      }
     }
 
     for (auto it = captures_underway.begin(); it != captures_underway.end();

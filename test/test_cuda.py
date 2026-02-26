@@ -6441,6 +6441,58 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:False"
         )
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_reclaim_shared_pool(self):
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+        shared_pool = torch.cuda.graph_pool_handle()
+        cap_stream = torch.cuda.Stream()
+        side_stream = torch.cuda.Stream()
+
+        g1 = torch.cuda.CUDAGraph(keep_graph=True)
+        g2 = torch.cuda.CUDAGraph(keep_graph=True)
+
+        numel = (8 * 1024 * 1024) // 4
+
+        with torch.cuda.stream(cap_stream):
+            g1.capture_begin(pool=shared_pool)
+            data = torch.empty(numel, device="cuda")
+            data_ptr = data.data_ptr()
+
+            side_stream.wait_stream(cap_stream)
+            with torch.cuda.stream(side_stream):
+                data.add_(1.0)
+                data.record_stream(side_stream)
+
+            cap_stream.wait_stream(side_stream)
+
+            del data
+            g1.capture_end()
+
+        torch.cuda.current_stream().wait_stream(cap_stream)
+        torch.cuda.synchronize()
+
+        with torch.cuda.stream(cap_stream):
+            g2.capture_begin(pool=shared_pool)
+            data2 = torch.empty(numel, device="cuda")
+            data2_ptr = data2.data_ptr()
+            g2.capture_end()
+
+        torch.cuda.current_stream().wait_stream(cap_stream)
+        torch.cuda.synchronize()
+
+        self.assertEqual(data_ptr, data2_ptr)
+
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:False"
+        )
+
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
