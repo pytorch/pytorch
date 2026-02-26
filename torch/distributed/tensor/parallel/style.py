@@ -85,6 +85,7 @@ class ColwiseParallel(ParallelStyle):
         input_layouts: Placement | None = None,
         output_layouts: Placement | None = None,
         use_local_output: bool = True,
+        grad_placements: tuple[Placement, ...] | None = None,
     ):
         super().__init__()
         self.input_layouts = (input_layouts or Replicate(),)
@@ -94,10 +95,11 @@ class ColwiseParallel(ParallelStyle):
         # 2. shard output on last dim
         self.desired_input_layouts = (Replicate(),)
         self.use_local_output = use_local_output
+        self.grad_placements = grad_placements
 
     @staticmethod
     def _prepare_input_fn(
-        input_layouts, desired_input_layouts, mod, inputs, device_mesh
+        input_layouts, desired_input_layouts, grad_placements, mod, inputs, device_mesh
     ):
         # TODO: figure out dynamo support for instance method and switch this to instance method
 
@@ -105,7 +107,11 @@ class ColwiseParallel(ParallelStyle):
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
             input_tensor = DTensor.from_local(
-                input_tensor, device_mesh, input_layouts, run_check=False
+                input_tensor,
+                device_mesh,
+                input_layouts,
+                run_check=False,
+                grad_placements=grad_placements,
             )
 
         # transform the input layouts to the desired layouts of ColwiseParallel
@@ -162,7 +168,10 @@ class ColwiseParallel(ParallelStyle):
             device_mesh,
             partition_fn,
             partial(
-                self._prepare_input_fn, self.input_layouts, self.desired_input_layouts
+                self._prepare_input_fn,
+                self.input_layouts,
+                self.desired_input_layouts,
+                self.grad_placements,
             ),
             partial(
                 self._prepare_output_fn, self.output_layouts, self.use_local_output
@@ -217,20 +226,26 @@ class RowwiseParallel(ParallelStyle):
         input_layouts: Placement | None = None,
         output_layouts: Placement | None = None,
         use_local_output: bool = True,
+        grad_placements: tuple[Placement, ...] | None = None,
     ):
         super().__init__()
         self.input_layouts = (input_layouts or Shard(-1),)
         self.output_layouts = (output_layouts or Replicate(),)
         self.use_local_output = use_local_output
+        self.grad_placements = grad_placements
 
     @staticmethod
     def _prepare_input_fn(
-        input_layouts, desired_input_layouts, mod, inputs, device_mesh
+        input_layouts, desired_input_layouts, grad_placements, mod, inputs, device_mesh
     ):
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
             input_tensor = DTensor.from_local(
-                input_tensor, device_mesh, input_layouts, run_check=False
+                input_tensor,
+                device_mesh,
+                input_layouts,
+                run_check=False,
+                grad_placements=grad_placements,
             )
 
         if input_layouts != desired_input_layouts:
@@ -310,7 +325,10 @@ class RowwiseParallel(ParallelStyle):
             device_mesh,
             partition_fn,
             partial(
-                self._prepare_input_fn, self.input_layouts, self.desired_input_layouts
+                self._prepare_input_fn,
+                self.input_layouts,
+                self.desired_input_layouts,
+                self.grad_placements,
             ),
             partial(
                 self._prepare_output_fn, self.output_layouts, self.use_local_output
