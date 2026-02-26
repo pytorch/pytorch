@@ -74,7 +74,7 @@ jobs:
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: Populate binary env
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${PYTORCH_ROOT}/.ci/pytorch/binary_populate_env.sh"
       - name: Build PyTorch binary
         run: |
           set -eux -o pipefail
