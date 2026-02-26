@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import functools
 from math import sqrt
-from typing import Optional
 
 import torch
 
@@ -155,7 +154,7 @@ def randint(low, high=None, size=None):
 
 @deco_stream
 @normalizer
-def choice(a: ArrayLike, size=None, replace=True, p: Optional[ArrayLike] = None):
+def choice(a: ArrayLike, size=None, replace=True, p: ArrayLike | None = None):
     # https://stackoverflow.com/questions/59461811/random-choice-with-pytorch
     if a.numel() == 1:
         a = torch.arange(a)

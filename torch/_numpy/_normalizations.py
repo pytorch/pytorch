@@ -16,8 +16,8 @@ from . import _dtypes, _dtypes_impl, _util
 
 
 ArrayLike = typing.TypeVar("ArrayLike")
-Scalar = typing.Union[int, float, complex, bool]
-ArrayLikeOrScalar = typing.Union[ArrayLike, Scalar]
+Scalar = int | float | complex | bool
+ArrayLikeOrScalar = ArrayLike | Scalar
 
 DTypeLike = typing.TypeVar("DTypeLike")
 AxisLike = typing.TypeVar("AxisLike")
@@ -135,15 +135,21 @@ normalizers = {
     "ArrayLike": normalize_array_like,
     "ArrayLikeOrScalar": normalize_array_like_or_scalar,
     "Optional[ArrayLike]": normalize_optional_array_like,
+    "ArrayLike | None": normalize_optional_array_like,
     "Sequence[ArrayLike]": normalize_seq_array_like,
     "Optional[ArrayLikeOrScalar]": normalize_optional_array_like_or_scalar,
+    "ArrayLikeOrScalar | None": normalize_optional_array_like_or_scalar,
     "Optional[NDArray]": normalize_ndarray,
+    "NDArray | None": normalize_ndarray,
     "Optional[OutArray]": normalize_outarray,
+    "OutArray | None": normalize_outarray,
     "NDArray": normalize_ndarray,
     "Optional[DTypeLike]": normalize_dtype,
+    "DTypeLike | None": normalize_dtype,
     "AxisLike": normalize_axis_like,
     "NotImplementedType": normalize_not_implemented,
     "Optional[CastingModes]": normalize_casting,
+    "CastingModes | None": normalize_casting,
 }
 
 

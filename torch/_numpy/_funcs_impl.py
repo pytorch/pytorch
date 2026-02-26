@@ -13,7 +13,7 @@ from __future__ import annotations
 import builtins
 import itertools
 import operator
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -43,7 +43,7 @@ def copy(
 def copyto(
     dst: NDArray,
     src: ArrayLike,
-    casting: Optional[CastingModes] = "same_kind",
+    casting: CastingModes | None = "same_kind",
     where: NotImplementedType = None,
 ):
     (src,) = _util.typecast_tensors((src,), dst.dtype, casting=casting)
@@ -103,7 +103,7 @@ def _concat_cast_helper(tensors, out=None, dtype=None, casting="same_kind"):
 
 
 def _concatenate(
-    tensors, axis=0, out=None, dtype=None, casting: Optional[CastingModes] = "same_kind"
+    tensors, axis=0, out=None, dtype=None, casting: CastingModes | None = "same_kind"
 ):
     # pure torch implementation, used below and in cov/corrcoef below
     tensors, axis = _util.axis_none_flatten(*tensors, axis=axis)
@@ -114,9 +114,9 @@ def _concatenate(
 def concatenate(
     ar_tuple: Sequence[ArrayLike],
     axis=0,
-    out: Optional[OutArray] = None,
-    dtype: Optional[DTypeLike] = None,
-    casting: Optional[CastingModes] = "same_kind",
+    out: OutArray | None = None,
+    dtype: DTypeLike | None = None,
+    casting: CastingModes | None = "same_kind",
 ):
     _concat_check(ar_tuple, dtype, out=out)
     result = _concatenate(ar_tuple, axis=axis, out=out, dtype=dtype, casting=casting)
@@ -126,8 +126,8 @@ def concatenate(
 def vstack(
     tup: Sequence[ArrayLike],
     *,
-    dtype: Optional[DTypeLike] = None,
-    casting: Optional[CastingModes] = "same_kind",
+    dtype: DTypeLike | None = None,
+    casting: CastingModes | None = "same_kind",
 ):
     _concat_check(tup, dtype, out=None)
     tensors = _concat_cast_helper(tup, dtype=dtype, casting=casting)
@@ -140,8 +140,8 @@ row_stack = vstack
 def hstack(
     tup: Sequence[ArrayLike],
     *,
-    dtype: Optional[DTypeLike] = None,
-    casting: Optional[CastingModes] = "same_kind",
+    dtype: DTypeLike | None = None,
+    casting: CastingModes | None = "same_kind",
 ):
     _concat_check(tup, dtype, out=None)
     tensors = _concat_cast_helper(tup, dtype=dtype, casting=casting)
@@ -151,8 +151,8 @@ def hstack(
 def dstack(
     tup: Sequence[ArrayLike],
     *,
-    dtype: Optional[DTypeLike] = None,
-    casting: Optional[CastingModes] = "same_kind",
+    dtype: DTypeLike | None = None,
+    casting: CastingModes | None = "same_kind",
 ):
     # XXX: in numpy 1.24 dstack does not have dtype and casting keywords
     # but {h,v}stack do.  Hence add them here for consistency.
@@ -164,8 +164,8 @@ def dstack(
 def column_stack(
     tup: Sequence[ArrayLike],
     *,
-    dtype: Optional[DTypeLike] = None,
-    casting: Optional[CastingModes] = "same_kind",
+    dtype: DTypeLike | None = None,
+    casting: CastingModes | None = "same_kind",
 ):
     # XXX: in numpy 1.24 column_stack does not have dtype and casting keywords
     # but row_stack does. (because row_stack is an alias for vstack, really).
@@ -178,10 +178,10 @@ def column_stack(
 def stack(
     arrays: Sequence[ArrayLike],
     axis=0,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     *,
-    dtype: Optional[DTypeLike] = None,
-    casting: Optional[CastingModes] = "same_kind",
+    dtype: DTypeLike | None = None,
+    casting: CastingModes | None = "same_kind",
 ):
     _concat_check(arrays, dtype, out=out)
 
@@ -301,7 +301,7 @@ def linspace(
     num=50,
     endpoint=True,
     retstep=False,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     axis=0,
 ):
     if axis != 0 or retstep or not endpoint:
@@ -317,7 +317,7 @@ def geomspace(
     stop: ArrayLike,
     num=50,
     endpoint=True,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     axis=0,
 ):
     if axis != 0 or not endpoint:
@@ -338,7 +338,7 @@ def logspace(
     num=50,
     endpoint=True,
     base=10.0,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     axis=0,
 ):
     if axis != 0 or not endpoint:
@@ -347,10 +347,10 @@ def logspace(
 
 
 def arange(
-    start: Optional[ArrayLikeOrScalar] = None,
-    stop: Optional[ArrayLikeOrScalar] = None,
-    step: Optional[ArrayLikeOrScalar] = 1,
-    dtype: Optional[DTypeLike] = None,
+    start: ArrayLikeOrScalar | None = None,
+    stop: ArrayLikeOrScalar | None = None,
+    step: ArrayLikeOrScalar | None = 1,
+    dtype: DTypeLike | None = None,
     *,
     like: NotImplementedType = None,
 ):
@@ -392,7 +392,7 @@ def arange(
 
 def empty(
     shape,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "C",
     *,
     like: NotImplementedType = None,
@@ -408,7 +408,7 @@ def empty(
 
 def empty_like(
     prototype: ArrayLike,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "K",
     subok: NotImplementedType = False,
     shape=None,
@@ -422,7 +422,7 @@ def empty_like(
 def full(
     shape,
     fill_value: ArrayLike,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "C",
     *,
     like: NotImplementedType = None,
@@ -439,7 +439,7 @@ def full(
 def full_like(
     a: ArrayLike,
     fill_value,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "K",
     subok: NotImplementedType = False,
     shape=None,
@@ -453,7 +453,7 @@ def full_like(
 
 def ones(
     shape,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "C",
     *,
     like: NotImplementedType = None,
@@ -465,7 +465,7 @@ def ones(
 
 def ones_like(
     a: ArrayLike,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "K",
     subok: NotImplementedType = False,
     shape=None,
@@ -478,7 +478,7 @@ def ones_like(
 
 def zeros(
     shape,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "C",
     *,
     like: NotImplementedType = None,
@@ -490,7 +490,7 @@ def zeros(
 
 def zeros_like(
     a: ArrayLike,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "K",
     subok: NotImplementedType = False,
     shape=None,
@@ -531,12 +531,12 @@ def _xy_helper_corrcoef(x_tensor, y_tensor=None, rowvar=True):
 
 def corrcoef(
     x: ArrayLike,
-    y: Optional[ArrayLike] = None,
+    y: ArrayLike | None = None,
     rowvar=True,
     bias=None,
     ddof=None,
     *,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
 ):
     if bias is not None or ddof is not None:
         # deprecated in NumPy
@@ -559,14 +559,14 @@ def corrcoef(
 
 def cov(
     m: ArrayLike,
-    y: Optional[ArrayLike] = None,
+    y: ArrayLike | None = None,
     rowvar=True,
     bias=False,
     ddof=None,
-    fweights: Optional[ArrayLike] = None,
-    aweights: Optional[ArrayLike] = None,
+    fweights: ArrayLike | None = None,
+    aweights: ArrayLike | None = None,
     *,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
 ):
     m = _xy_helper_corrcoef(m, y, rowvar)
 
@@ -629,7 +629,7 @@ def correlate(a: ArrayLike, v: ArrayLike, mode="valid"):
 # ### logic & element selection ###
 
 
-def bincount(x: ArrayLike, /, weights: Optional[ArrayLike] = None, minlength=0):
+def bincount(x: ArrayLike, /, weights: ArrayLike | None = None, minlength=0):
     if x.numel() == 0:
         # edge case allowed by numpy
         x = x.new_empty(0, dtype=int)
@@ -642,8 +642,8 @@ def bincount(x: ArrayLike, /, weights: Optional[ArrayLike] = None, minlength=0):
 
 def where(
     condition: ArrayLike,
-    x: Optional[ArrayLikeOrScalar] = None,
-    y: Optional[ArrayLikeOrScalar] = None,
+    x: ArrayLikeOrScalar | None = None,
+    y: ArrayLikeOrScalar | None = None,
     /,
 ):
     if (x is None) != (y is None):
@@ -748,7 +748,7 @@ def meshgrid(*xi: ArrayLike, copy=True, sparse=False, indexing="xy"):
     return list(output)  # match numpy, return a list
 
 
-def indices(dimensions, dtype: Optional[DTypeLike] = int, sparse=False):
+def indices(dimensions, dtype: DTypeLike | None = int, sparse=False):
     # https://github.com/numpy/numpy/blob/v1.24.0/numpy/core/numeric.py#L1691-L1791
     dimensions = tuple(dimensions)
     N = len(dimensions)
@@ -809,7 +809,7 @@ def tri(
     N,
     M=None,
     k=0,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     *,
     like: NotImplementedType = None,
 ):
@@ -879,7 +879,7 @@ def take(
     a: ArrayLike,
     indices: ArrayLike,
     axis=None,
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     mode: NotImplementedType = "raise",
 ):
     (a,), axis = _util.axis_none_flatten(a, axis=axis)
@@ -930,7 +930,7 @@ def put_along_axis(arr: ArrayLike, indices: ArrayLike, values: ArrayLike, axis):
 def choose(
     a: ArrayLike,
     choices: Sequence[ArrayLike],
-    out: Optional[OutArray] = None,
+    out: OutArray | None = None,
     mode: NotImplementedType = "raise",
 ):
     # First, broadcast elements of `choices`
@@ -983,9 +983,9 @@ def flatnonzero(a: ArrayLike):
 
 def clip(
     a: ArrayLike,
-    min: Optional[ArrayLike] = None,
-    max: Optional[ArrayLike] = None,
-    out: Optional[OutArray] = None,
+    min: ArrayLike | None = None,
+    max: ArrayLike | None = None,
+    out: OutArray | None = None,
 ):
     return torch.clamp(a, min, max)
 
@@ -1041,8 +1041,8 @@ def trace(
     offset=0,
     axis1=0,
     axis2=1,
-    dtype: Optional[DTypeLike] = None,
-    out: Optional[OutArray] = None,
+    dtype: DTypeLike | None = None,
+    out: OutArray | None = None,
 ):
     result = torch.diagonal(a, offset, dim1=axis1, dim2=axis2).sum(-1, dtype=dtype)
     return result
@@ -1052,7 +1052,7 @@ def eye(
     N,
     M=None,
     k=0,
-    dtype: Optional[DTypeLike] = None,
+    dtype: DTypeLike | None = None,
     order: NotImplementedType = "C",
     *,
     like: NotImplementedType = None,
@@ -1066,7 +1066,7 @@ def eye(
     return z
 
 
-def identity(n, dtype: Optional[DTypeLike] = None, *, like: NotImplementedType = None):
+def identity(n, dtype: DTypeLike | None = None, *, like: NotImplementedType = None):
     return torch.eye(n, dtype=dtype)
 
 
@@ -1171,7 +1171,7 @@ def tensordot(a: ArrayLike, b: ArrayLike, axes=2):
     return torch.tensordot(a, b, dims=axes)
 
 
-def dot(a: ArrayLike, b: ArrayLike, out: Optional[OutArray] = None):
+def dot(a: ArrayLike, b: ArrayLike, out: OutArray | None = None):
     dtype = _dtypes_impl.result_type_impl(a, b)
     is_bool = dtype == torch.bool
     if is_bool:
@@ -1214,7 +1214,7 @@ def inner(a: ArrayLike, b: ArrayLike, /):
     return result
 
 
-def outer(a: ArrayLike, b: ArrayLike, out: Optional[OutArray] = None):
+def outer(a: ArrayLike, b: ArrayLike, out: OutArray | None = None):
     return torch.outer(a, b)
 
 
@@ -1410,7 +1410,7 @@ def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 
 
 def searchsorted(
-    a: ArrayLike, v: ArrayLike, side="left", sorter: Optional[ArrayLike] = None
+    a: ArrayLike, v: ArrayLike, side="left", sorter: ArrayLike | None = None
 ):
     if a.dtype.is_complex:
         raise NotImplementedError(f"searchsorted with dtype={a.dtype}")
@@ -1515,8 +1515,8 @@ def diff(
     a: ArrayLike,
     n=1,
     axis=-1,
-    prepend: Optional[ArrayLike] = None,
-    append: Optional[ArrayLike] = None,
+    prepend: ArrayLike | None = None,
+    append: ArrayLike | None = None,
 ):
     axis = _util.normalize_axis_index(axis, a.ndim)
 
@@ -1731,7 +1731,7 @@ def gradient(f: ArrayLike, *varargs, axis=None, edge_order=1):
 # ### Type/shape etc queries ###
 
 
-def round(a: ArrayLike, decimals=0, out: Optional[OutArray] = None):
+def round(a: ArrayLike, decimals=0, out: OutArray | None = None):
     if a.is_floating_point():
         result = torch.round(a, decimals=decimals)
     elif a.is_complex():
@@ -1793,11 +1793,11 @@ def isrealobj(x: ArrayLike):
     return not torch.is_complex(x)
 
 
-def isneginf(x: ArrayLike, out: Optional[OutArray] = None):
+def isneginf(x: ArrayLike, out: OutArray | None = None):
     return torch.isneginf(x)
 
 
-def isposinf(x: ArrayLike, out: Optional[OutArray] = None):
+def isposinf(x: ArrayLike, out: OutArray | None = None):
     return torch.isposinf(x)
 
 
@@ -1890,7 +1890,7 @@ def histogram(
     bins: ArrayLike = 10,
     range=None,
     normed=None,
-    weights: Optional[ArrayLike] = None,
+    weights: ArrayLike | None = None,
     density=None,
 ):
     if normed is not None:
@@ -1933,9 +1933,9 @@ def histogram2d(
     x,
     y,
     bins=10,
-    range: Optional[ArrayLike] = None,
+    range: ArrayLike | None = None,
     normed=None,
-    weights: Optional[ArrayLike] = None,
+    weights: ArrayLike | None = None,
     density=None,
 ):
     # vendored from https://github.com/numpy/numpy/blob/v1.24.0/numpy/lib/twodim_base.py#L655-L821
@@ -1958,9 +1958,9 @@ def histogram2d(
 def histogramdd(
     sample,
     bins=10,
-    range: Optional[ArrayLike] = None,
+    range: ArrayLike | None = None,
     normed=None,
-    weights: Optional[ArrayLike] = None,
+    weights: ArrayLike | None = None,
     density=None,
 ):
     # have to normalize manually because `sample` interpretation differs

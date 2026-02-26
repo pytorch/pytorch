@@ -38,7 +38,7 @@ through `register_opaque_type(MyClass, typ="value")`.
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NewType, Optional
+from typing import Any, Literal, NewType
 from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
@@ -95,7 +95,7 @@ _OPAQUE_TYPES: WeakKeyDictionary[Any, _OpaqueTypeInfo] = WeakKeyDictionary()
 _OPAQUE_TYPES_BY_NAME: dict[str, _OpaqueTypeInfo] = {}
 
 
-def _resolve_opaque_type_info(cls: Any) -> Optional[_OpaqueTypeInfo]:
+def _resolve_opaque_type_info(cls: Any) -> _OpaqueTypeInfo | None:
     if cls in _OPAQUE_TYPES:
         return _OPAQUE_TYPES[cls]
     if not isinstance(cls, type):
@@ -348,7 +348,7 @@ def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
     return repr_str, globals_dict
 
 
-def get_opaque_obj_info(cls: Any) -> Optional[_OpaqueTypeInfo]:
+def get_opaque_obj_info(cls: Any) -> _OpaqueTypeInfo | None:
     if not is_opaque_type(cls):
         return None
 
@@ -358,7 +358,7 @@ def get_opaque_obj_info(cls: Any) -> Optional[_OpaqueTypeInfo]:
     return _resolve_opaque_type_info(cls)
 
 
-def get_member_type(cls: Any, member_name: str) -> Optional[MemberType]:
+def get_member_type(cls: Any, member_name: str) -> MemberType | None:
     """
     Get the MemberType for a specific member of an opaque object class.
 

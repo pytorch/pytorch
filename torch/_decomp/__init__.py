@@ -68,7 +68,7 @@ def _add_op_to_registry(registry, op, fn):
     If op is OpOverload, it will be added to the registry directly.
     If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
     """
-    overloads: list[Union[torch._ops.OperatorBase]] = []
+    overloads: list[torch._ops.OperatorBase] = []
     if isinstance(op, HigherOrderOperator):
         # There's no concept of overloads for HigherOrderOperator
         registry[op] = fn
@@ -229,7 +229,7 @@ def register_decomposition(
 
 
 def get_decompositions(
-    aten_ops: Sequence[Union[torch._ops.OperatorBase, OpOverloadPacket]],
+    aten_ops: Sequence[torch._ops.OperatorBase | OpOverloadPacket],
     type: str = "post_autograd",
 ) -> dict[torch._ops.OperatorBase, Callable]:
     """
@@ -266,7 +266,7 @@ def get_decompositions(
 
 def remove_decompositions(
     decompositions: dict[torch._ops.OperatorBase, Callable],
-    aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
+    aten_ops: Sequence[OpOverload | OpOverloadPacket],
 ) -> None:
     """
     Given a dictionary of decompositions obtained from get_decompositions(), removes
