@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
-#include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
