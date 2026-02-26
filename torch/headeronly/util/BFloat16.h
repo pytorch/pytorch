@@ -35,19 +35,6 @@ struct alignas(2) BFloat16 {
   C10_HOST_DEVICE BFloat16() = default;
   // Fast conversion constructors
   inline C10_HOST_DEVICE BFloat16(__bf16 value) : x__bf16(value) {}
-  inline C10_HOST_DEVICE BFloat16(unsigned long value)
-      : x__bf16(static_cast<__bf16>(value)) {}
-  inline C10_HOST_DEVICE BFloat16(unsigned int value)
-      : x__bf16(static_cast<__bf16>(value)) {}
-
-  inline C10_HOST_DEVICE BFloat16(double value);
-  explicit inline C10_HOST_DEVICE operator double() const;
-  inline C10_HOST_DEVICE BFloat16(int value);
-  explicit inline C10_HOST_DEVICE operator int() const;
-  inline C10_HOST_DEVICE BFloat16(int64_t value);
-  explicit inline C10_HOST_DEVICE operator int64_t() const;
-
-  inline C10_HOST_DEVICE BFloat16(bool value) : x(value ? 0x3F80 : 0x0000) {  }
 #else
   uint16_t x;
   BFloat16() = default;
@@ -156,24 +143,6 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 #endif
 {
 }
-
-#if defined(__HIPCC__)
-inline C10_HOST_DEVICE BFloat16::BFloat16(int value)
-    : x__bf16(static_cast<__bf16>(value)) {}
-inline C10_HOST_DEVICE BFloat16::operator int() const {
-  return static_cast<int>(x__bf16);
-}
-inline C10_HOST_DEVICE BFloat16::BFloat16(int64_t value)
-    : x__bf16(static_cast<__bf16>(value)) {}
-inline C10_HOST_DEVICE BFloat16::operator int64_t() const {
-  return static_cast<int64_t>(x__bf16);
-}
-inline C10_HOST_DEVICE BFloat16::BFloat16(double value)
-    : x__bf16(static_cast<__bf16>(value)) {}
-inline C10_HOST_DEVICE BFloat16::operator double() const {
-  return static_cast<double>(x__bf16);
-}
-#endif
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
@@ -479,23 +448,6 @@ inline C10_HOST_DEVICE bool operator<(BFloat16& lhs, BFloat16& rhs) {
   return lhs.x__bf16 < rhs.x__bf16;
 #else
   return float(lhs) < float(rhs);
-#endif
-}
-
-/// Returns the sign of variable x as BFloat16 -1, 0, 1
-inline C10_HOST_DEVICE BFloat16 signum_indicator(BFloat16 x) {
-#if defined(__HIPCC__)
-  constexpr uint16_t kSignMask = 0x8000;
-  constexpr uint16_t kMagMask = 0x7FFF;
-  constexpr uint16_t kOneBits = 0x3F80;   // 1.0 in bfloat16
-  constexpr uint16_t kNegOneBits = 0xBF80;  // -1.0 in bfloat16
-  uint16_t mag = x.x & kMagMask;
-  bool is_negative = (x.x & kSignMask) != 0;
-  uint16_t result_bits =
-      (mag == 0) ? 0 : (is_negative ? kNegOneBits : kOneBits);
-  return BFloat16(static_cast<unsigned short>(result_bits), BFloat16::from_bits());
-#else
-  return  (BFloat16(0) < x) - (x < BFloat16(0));
 #endif
 }
 
