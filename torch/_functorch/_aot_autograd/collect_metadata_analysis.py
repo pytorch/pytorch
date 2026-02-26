@@ -690,12 +690,18 @@ from a multi-output view call"
                 if isinstance(o, FunctionalTensor):
                     view_meta_sequence = ViewMetaSequence(o)
 
+            requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
-                requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
+                requires_grad=requires_grad,
+                # A view created under no_grad() inherits requires_grad from
+                # its base but has no grad_fn and does not participate in
+                # differentiation.
+                requires_grad_for_backward=requires_grad
+                and (o._base is None or grad_fn is not None),
                 view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
@@ -784,7 +790,7 @@ from a multi-output view call"
                 OutputType.custom_function_view,
             ]
             and issubclass(info.raw_type, torch.Tensor)
-            and info.requires_grad
+            and info.requires_grad_for_backward
         ]
         f_output_tangents, f_output_tangents_descs = (
             [x[0] for x in f_output_tangents_pairs],
