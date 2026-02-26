@@ -71,7 +71,8 @@ def define_targets(rules):
         "$(execpath //torchgen:gen)",
         "--install_dir=$(RULEDIR)",
         "--source-path aten/src/ATen",
-        "--aoti_install_dir=$(RULEDIR)/torch/csrc/inductor/aoti_torch/generated"
+        "--aoti_install_dir=$(RULEDIR)/torch/csrc/inductor/aoti_torch/generated",
+        "--update-aoti-c-shim"
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []) + ["--mtia"])
 
     gen_aten_outs_cuda = (
@@ -327,6 +328,7 @@ GENERATED_AUTOGRAD_CPP = [
 
 GENERATED_AOTI_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_aten.cpp",
 ]
 
 GENERATED_AOTI_CUDA_CPP = [
