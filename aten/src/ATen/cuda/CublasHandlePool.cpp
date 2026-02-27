@@ -265,8 +265,8 @@ size_t getCUDABlasLtWorkspaceSize() {
       pool_size = cublasWorkspaceSize;
     }
   }
-  return pool_size;
 #endif
+  return pool_size;
 }
 
 at::DataPtr getNewWorkspace() {
