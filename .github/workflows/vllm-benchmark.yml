@@ -20,6 +20,12 @@ on:
         required: false
         type: string
         default: ''
+      compilation_config:
+        description: |
+          A JSON string for vLLM --compilation-config, applied to all benchmark tests, e.g. '{"cudagraph_mode": "PIECEWISE", "use_inductor_graph_partition": true}'
+        required: false
+        type: string
+        default: ''
       runners:
         description: |
           A comma-separated list of runners from .github/scripts/generate_vllm_benchmark_matrix.py to run the benchmark (optional, default to run everything)
@@ -120,4 +126,5 @@ jobs:
       pytorch_branch: ${{ inputs.pytorch_branch }}
       pytorch_commit: ${{ inputs.pytorch_commit }}
       models: ${{ matrix.models }}
+      compilation_config: ${{ inputs.compilation_config }}
     secrets: inherit
