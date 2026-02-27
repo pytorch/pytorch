@@ -1075,6 +1075,16 @@ norm_partial_avoidable_redistribute_ops = {
     aten.mul_.Scalar,
 }
 
+for op in partial_preserving_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        partial_preserving_pointwise_strategy
+    )
+
+for op in pointwise_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        pointwise_strategy
+    )
+
 # TODO: add all for_each ops
 for_each_ops = [
     aten._foreach_abs.default,
