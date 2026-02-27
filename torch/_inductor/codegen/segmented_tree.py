@@ -1,11 +1,11 @@
 from collections.abc import Callable
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 
 T = TypeVar("T")
 
 
-def _value_or(opt: Optional[T], default: T) -> T:
+def _value_or(opt: T | None, default: T) -> T:
     return opt if opt is not None else default
 
 
@@ -55,7 +55,7 @@ class SegmentedTree(Generic[T]):
         # we receive an interval query that neither fully
         # contains the node nor fully doesn't contain the
         # node
-        self.lazy: list[Optional[T]] = [None] * self.size
+        self.lazy: list[T | None] = [None] * self.size
 
         # Build the tree
         self._build(values, 1, 0, self.n - 1)

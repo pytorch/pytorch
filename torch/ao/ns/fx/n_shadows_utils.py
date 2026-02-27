@@ -97,7 +97,6 @@ class OutputProp:
                 # pyrefly: ignore [unbound-name]
                 node.traced_result = result
 
-            # pyrefly: ignore [unsupported-operation]
             # pyrefly: ignore [unbound-name]
             env[node.name] = result
 
@@ -404,10 +403,8 @@ def create_submodule_from_subgraph(
                         cur_name_idx += 1
                         setattr(gm, mod_name, new_arg)
                         new_arg_placeholder = gm.placeholder(mod_name)  # type: ignore[operator]
-                        # pyrefly: ignore [missing-attribute]
                         cur_args_copy.append(new_arg_placeholder)
                     elif isinstance(arg, (float, int, torch.dtype)):
-                        # pyrefly: ignore [missing-attribute]
                         cur_args_copy.append(arg)
                     else:
                         raise AssertionError(f"arg of type {type(arg)} not handled yet")

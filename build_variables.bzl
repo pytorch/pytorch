@@ -785,7 +785,7 @@ libtorch_nvshmem_sources = [
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu",
-    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu",
+    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -946,6 +946,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/dynamo/stackref_bridge.c",
     "torch/csrc/functorch/init.cpp",
+    "torch/csrc/fx/graph.cpp",
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
