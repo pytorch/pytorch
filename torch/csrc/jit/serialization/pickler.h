@@ -91,6 +91,7 @@ class TORCH_API Pickler {
       const IValue& ivalue,
       const char* list_name,
       const std::function<void(const IValue&)>& item_pusher);
+  void pushGlobal(const c10::HashedKey<std::string>& module_and_class_name);
   void pushGlobal(std::string_view module_name, std::string_view class_name);
   // raw string data is appended directly to the byte stream
   void pushBytes(const std::string& string);
