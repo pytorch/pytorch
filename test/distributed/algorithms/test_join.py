@@ -130,7 +130,8 @@ class AllReducer(Joinable):
         common_rank = torch.tensor([rank if to_consider else -1], device=self.device)
         dist.all_reduce(common_rank, op=dist.ReduceOp.MAX, group=self.process_group)
         common_rank = common_rank.item()
-        assert common_rank >= 0
+        if not (common_rank >= 0):
+            raise AssertionError(f"Expected common_rank >= 0, got {common_rank}")
         return common_rank
 
 
