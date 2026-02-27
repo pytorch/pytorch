@@ -8918,6 +8918,32 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     scale_tensor2 = make_scale(scale2, torch.float8_e4m3fn)
     samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
+    # Case 4: MXFP4 (float4_e2m1fn_x2) with E8M0 blockwise scaling
+    # Regression test: E8M0 blockwise scale size validation must account for
+    # packed FP4 format where self.size(1) = K/2.
+    # Only supported on MI350 (gfx950).
+    if device == 'cuda' and torch.version.hip:
+        if 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName:
+            mxfp4_M, mxfp4_K, mxfp4_N = 256, 256, 256
+            block_size_k = 32
+            block_size_mn = 128
+            num_k_blocks = math.ceil(mxfp4_K / block_size_k)
+            padded_num_k_blocks = math.ceil(num_k_blocks / 4) * 4
+            scale_a_size = block_size_mn * math.ceil(mxfp4_M / block_size_mn) * padded_num_k_blocks
+            scale_b_size = block_size_mn * math.ceil(mxfp4_N / block_size_mn) * padded_num_k_blocks
+            mat1 = _bfloat16_to_float4_e2m1fn_x2(
+                torch.randn(mxfp4_M, mxfp4_K, device=device, dtype=torch.bfloat16)
+            )
+            mat2 = _bfloat16_to_float4_e2m1fn_x2(
+                torch.randn(mxfp4_N, mxfp4_K, device=device, dtype=torch.bfloat16)
+            ).t()
+            scale_tensor1 = torch.ones(scale_a_size, device=device, dtype=torch.float8_e8m0fnu)
+            scale_tensor2 = torch.ones(scale_b_size, device=device, dtype=torch.float8_e8m0fnu)
+            samples.append(SampleInput(
+                mat1, mat2, scale_tensor1, scale_tensor2,
+                out_dtype=torch.bfloat16,
+            ))
+
     yield from samples
 
 def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
@@ -19666,11 +19692,13 @@ op_db: list[OpInfo] = [
     *(OpInfo('index_reduce',
              variant_test_name=reduction_type,
              dtypes=all_types_and(torch.float16, torch.bfloat16),
+             dtypesIfMPS=custom_types(
+                 torch.float32, torch.bfloat16, torch.float16, torch.int32,
+                 torch.int16, torch.int8, torch.uint8,
+             ),
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
-                 # Error: The operator 'aten::index_reduce.out' is not currently implemented for the MPS device
-                 DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
