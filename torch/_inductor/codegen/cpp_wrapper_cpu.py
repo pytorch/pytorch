@@ -2521,6 +2521,9 @@ if (!custom_op_wrapper) {
             return f"{val}"
 
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
+        """Generate C++ code that converts a single operator argument into a Python
+        object and inserts it into a PyTuple at the given index."""
+
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             def handle_scalar(scalar):
                 if isinstance(scalar, int):
@@ -2598,19 +2601,31 @@ if (!custom_op_wrapper) {
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
                 )
 
-        lines = []
-        if isinstance(arg_type, torch.ListType):
-            assert isinstance(raw_arg, (list, tuple)), str(raw_arg) + " is not a list"
-            lines.append(
+        def handle_sequence_arg(raw_arg_, arg_type_, lines_):
+            assert isinstance(raw_arg_, (list, tuple)), str(raw_arg) + " is not a list"
+            lines_.append(
                 f"PyObject* {py_args_var}_{idx} = PyList_New({len(raw_arg)});\n"
             )
-            for i, elem in enumerate(raw_arg):
-                lines.append(
-                    f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(lines, elem, arg_type.getElementType())});\n"
+            for i, elem in enumerate(raw_arg_):
+                lines_.append(
+                    f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(lines, elem, arg_type_.getElementType())});\n"
                 )
-            lines.append(
+            lines_.append(
                 f"PyTuple_SetItem({py_args_var}, {idx}, {py_args_var}_{idx});\n"
             )
+
+        lines = []
+        if isinstance(arg_type, torch.ListType):
+            handle_sequence_arg(raw_arg, arg_type, lines)
+        elif isinstance(arg_type, torch.OptionalType) and isinstance(
+            arg_type.getElementType(), torch.ListType
+        ):
+            if raw_arg is None:
+                lines.append(
+                    f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(lines, raw_arg, arg_type)});\n"
+                )
+            else:
+                handle_sequence_arg(raw_arg, arg_type.getElementType(), lines)
         else:
             lines.append(
                 f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(lines, raw_arg, arg_type)});\n"

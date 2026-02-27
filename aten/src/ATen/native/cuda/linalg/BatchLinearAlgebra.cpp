@@ -811,7 +811,7 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 namespace {
 // At the time of writing, the unconditional dispatch
 // to the native cholesky_solve method in cuSOLVER is slow
-// with bached inputs.
+// with batched inputs.
 template <bool use_dedicated_kernel_unconditionally = false>
 inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
   const Tensor& self,
@@ -833,8 +833,10 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
       // NOTE: we tolerate redispatch with at::triangular_solve_triangular
       // because it handles memory layout optimization and conj/neg flags.
       // IMPORTANT NOTE: `self` and `A` are not processed for kernel calls yet!
-      auto X = at::linalg_solve_triangular(*L, self, /*upper=*/false, /*left=*/true);
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(X), L->mH(), X, /*upper=*/true, /*left=*/true);
+      // Step 1: Solve for Y: L Y = B or U^H Y = B.
+      auto X = at::linalg_solve_triangular(*L, self, /*upper=*/false);
+      // Step 2: Solve for X: L^H X = Y or U X = Y.
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(X), L->mH(), X, /*upper=*/true);
       return X;
     }
   }
