@@ -1816,7 +1816,9 @@ class TestIndexing(TestCase):
 
     @parametrize("reduce", ["prod", "amin", "amax", "mean"])
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    @dtypesIfMPS(torch.int32, torch.float32)
+    @dtypesIfMPS(
+        torch.half, torch.bfloat16, torch.float32, torch.int32, torch.int16, torch.int8
+    )
     def test_index_reduce(self, device, dtype, reduce):
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]
@@ -1884,7 +1886,16 @@ class TestIndexing(TestCase):
                             expected.div_(counts, rounding_mode="floor")
                     expected = expected.transpose(0, dim)
 
-                    self.assertEqual(dest, expected)
+                    # MPS uses atomics for index_reduce which causes
+                    # non-deterministic rounding for low-precision types
+                    kwargs = {}
+                    if (
+                        "mps" in device
+                        and dtype in [torch.bfloat16, torch.float16]
+                        and reduce in ["mean", "prod"]
+                    ):
+                        kwargs = {"atol": 0.02, "rtol": 0.1}
+                    self.assertEqual(dest, expected, **kwargs)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
