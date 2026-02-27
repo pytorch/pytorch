@@ -1521,7 +1521,7 @@ def calculate_fused_tensor_size(split_node: torch.fx.Node, indices: list[int]) -
     ),
     pass_dict=construct_pattern_matcher_pass("merge_getitem_cat_pass"),
 )
-def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
+def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):  # noqa: docstring_linter
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
         return
     graph = match.graph

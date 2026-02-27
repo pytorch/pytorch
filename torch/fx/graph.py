@@ -21,6 +21,7 @@ from typing import Any, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
+
 # pyrefly: ignore [missing-module-attribute]
 from torch._C import _fx_map_arg as map_arg, _GraphBase, _NamespaceBase
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
