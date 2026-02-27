@@ -134,8 +134,8 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm)
-    CUDA_VERSION=12.9.1
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     VISION=yes

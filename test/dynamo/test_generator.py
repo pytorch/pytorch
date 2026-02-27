@@ -1144,7 +1144,7 @@ class TestGeneratorClose(GeneratorTestsBase):
         except exc:
             z = 1
         finally:
-            assert z == 1
+            assert z == 1  # noqa: S101
 
     def test_close_with_subgen(self):
         L = []
@@ -1500,7 +1500,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
                 z = 1
             except Exception as e:
                 raise AssertionError from e
-            assert z == 1
+            assert z == 1  # noqa: S101
             return t.sin()
 
         self._compile_check(fn)
@@ -1520,7 +1520,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             try:
                 gen.throw(ValueError)
             except StopIteration as e:
-                assert e.args[0] == 3
+                assert e.args[0] == 3  # noqa: S101
             except Exception as e:
                 raise AssertionError from e
             return t.sin()
@@ -1546,7 +1546,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             try:
                 gen.throw(ValueError)
             except StopIteration as e:
-                assert e.args[0].x == 3
+                assert e.args[0].x == 3  # noqa: S101
             except Exception as e:
                 raise AssertionError from e
             return t.sin()
@@ -1568,7 +1568,7 @@ class TestGeneratorThrow(GeneratorTestsBase):
             try:
                 gen.throw(ValueError)
             except StopIteration as e:
-                assert len(e.args) == 0
+                assert len(e.args) == 0  # noqa: S101
             except Exception as e:
                 raise AssertionError from e
             return t.sin()
