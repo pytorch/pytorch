@@ -370,7 +370,7 @@ _scaled_gemm(
           const bool use_fast_accum,
           Tensor& out,
           const std::optional<Tensor>& alpha = std::nullopt) {
-  cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
+  cublasCommonArgs args(mat1, mat2, out, std::nullopt, std::nullopt, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
   // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
   if (_scaled_mm_allowed_device(true, false)) {
