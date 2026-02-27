@@ -1,6 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import warnings
+
 import torch
 import torch.distributed._functional_collectives as funcol
 from torch.distributed.device_mesh import init_device_mesh
@@ -13,6 +15,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import local_map
+from torch.distributed.tensor.experimental._func_map import _WARNINGS_SHOWN
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -196,7 +199,7 @@ class TestLocalMap(DTensorTestBase):
         with comm_mode:
             Y_dt = local_mm_forward(X_dt, W_dt)
 
-        # no communication should occur in this case
+        # even sharding - no communication needed
         self.assertEqual(comm_mode.get_total_counts(), 0)
         for placement in Y_dt.placements:
             self.assertTrue(placement.is_shard(dim=0))
@@ -208,10 +211,11 @@ class TestLocalMap(DTensorTestBase):
             out_placements=row_wise,
             device_mesh=device_mesh,
         )
-        with comm_mode:
+        comm_mode_2 = CommDebugMode()
+        with comm_mode_2:
             Y_dt = local_mm_forward(X_dt, W_dt)
 
-        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(comm_mode_2.get_total_counts(), 0)
         for placement in Y_dt.placements:
             self.assertTrue(placement.is_shard(dim=0))
         self.assertEqual(Y_dt.full_tensor(), Y)
@@ -225,10 +229,11 @@ class TestLocalMap(DTensorTestBase):
             device_mesh=device_mesh,
         )
         Y = torch.mul(X, 2.0)
-        with comm_mode:
+        comm_mode_3 = CommDebugMode()
+        with comm_mode_3:
             Y_dt = local_mul_forward(X_dt, 2.0)
 
-        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(comm_mode_3.get_total_counts(), 0)
         for placement in Y_dt.placements:
             self.assertTrue(placement.is_shard(dim=0))
         self.assertEqual(Y_dt.full_tensor(), Y)
@@ -240,10 +245,12 @@ class TestLocalMap(DTensorTestBase):
             in_placements=(None, None),
             device_mesh=device_mesh,
         )
-        with comm_mode:
+        comm_mode_4 = CommDebugMode()
+        with comm_mode_4:
             Y_dt_local = local_mm_forward(X_dt.to_local(), W_dt.to_local())
 
-        self.assertEqual(comm_mode.get_total_counts(), 0)
+        # Test 4 has out_placements=None, so no communication
+        self.assertEqual(comm_mode_4.get_total_counts(), 0)
         self.assertEqual(
             DTensor.from_local(Y_dt_local, device_mesh, row_wise).full_tensor(),
             torch.mm(X, W),
@@ -256,10 +263,12 @@ class TestLocalMap(DTensorTestBase):
             in_placements=(replicate, row_wise),
             device_mesh=device_mesh,
         )
-        with comm_mode:
+        comm_mode_5 = CommDebugMode()
+        with comm_mode_5:
             Y_dt_local = local_mm_forward(X_dt.to_local(), W_dt.to_local())
 
-        self.assertEqual(comm_mode.get_total_counts(), 0)
+        # Test 5 has out_placements=None, so no communication
+        self.assertEqual(comm_mode_5.get_total_counts(), 0)
         self.assertEqual(
             DTensor.from_local(Y_dt_local, device_mesh, row_wise).full_tensor(),
             torch.mm(X, W),
@@ -384,6 +393,134 @@ class TestLocalMap(DTensorTestBase):
             )
             self.assertEqual(W_dt.grad.full_tensor(), W.grad)
 
+    @with_comms
+    def test_local_map_uneven_sharding(self):
+        """
+        Test that local_map correctly handles uneven sharding where
+        local shards have different sizes across ranks.
+        """
+        device_mesh = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size,)
+        )
+
+        uneven_size = self.world_size * 2 + 1  # e.g., 5 for world_size=2
+        X = torch.randn(uneven_size, 4, device=self.device_type, requires_grad=False)
+        W = torch.randn(4, 8, device=self.device_type, requires_grad=False)
+        Y = torch.mm(X, W)
+
+        X_dt = distribute_tensor(X, device_mesh, row_wise)
+        W_dt = distribute_tensor(W, device_mesh, replicate)
+
+        local_x_size = X_dt.to_local().shape[0]
+        expected_sizes = [
+            (uneven_size + self.world_size - 1 - i) // self.world_size
+            for i in range(self.world_size)
+        ]
+        self.assertEqual(local_x_size, expected_sizes[self.rank])
+
+        # with allow_uneven_sharding=True
+        local_mm_forward = local_map(
+            mm_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, replicate),
+            device_mesh=device_mesh,
+            allow_uneven_sharding=True,
+        )
+
+        Y_dt = local_mm_forward(X_dt, W_dt)
+
+        self.assertEqual(Y_dt.full_tensor().shape, Y.shape)
+        self.assertEqual(Y_dt.full_tensor(), Y)
+        for placement in Y_dt.placements:
+            self.assertTrue(placement.is_shard(dim=0))
+
+        # with out_shapes provided (zero overhead)
+        local_mm_forward_shapes = local_map(
+            mm_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, replicate),
+            device_mesh=device_mesh,
+            out_shapes=[Y.shape],
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            Y_dt_shapes = local_mm_forward_shapes(X_dt, W_dt)
+
+        # should have no communication since shape is provided
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(Y_dt_shapes.full_tensor().shape, Y.shape)
+        self.assertEqual(Y_dt_shapes.full_tensor(), Y)
+        for placement in Y_dt_shapes.placements:
+            self.assertTrue(placement.is_shard(dim=0))
+
+    @with_comms
+    def test_local_map_uneven_sharding_warns(self):
+        """
+        Test that local_map warns when input has uneven sharding but
+        allow_uneven_sharding is False and out_shapes is not provided.
+        """
+        device_mesh = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size,)
+        )
+
+        uneven_size = self.world_size * 2 + 1  # e.g., 5 for world_size=2
+        X = torch.randn(uneven_size, 4, device=self.device_type, requires_grad=False)
+
+        X_dt = distribute_tensor(X, device_mesh, row_wise)
+
+        local_mul = local_map(
+            mul_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, None),
+            device_mesh=device_mesh,
+        )
+
+        # Should warn about uneven sharding
+        _WARNINGS_SHOWN.clear()
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            local_mul(X_dt, 2.0)
+            uneven_warnings = [x for x in w if "uneven sharding" in str(x.message)]
+            self.assertGreater(len(uneven_warnings), 0)
+
+        # Should NOT warn when allow_uneven_sharding=True
+        local_mul_uneven = local_map(
+            mul_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, None),
+            device_mesh=device_mesh,
+            allow_uneven_sharding=True,
+        )
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            local_mul_uneven(X_dt, 2.0)
+            uneven_warnings = [x for x in w if "uneven sharding" in str(x.message)]
+            self.assertEqual(len(uneven_warnings), 0)
+
+        # Should NOT warn when out_shapes is provided
+        Y = torch.mul(X, 2.0)
+        local_mul_shapes = local_map(
+            mul_forward,
+            out_placements=row_wise,
+            in_placements=(row_wise, None),
+            device_mesh=device_mesh,
+            out_shapes=[Y.shape],
+        )
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            local_mul_shapes(X_dt, 2.0)
+            uneven_warnings = [x for x in w if "uneven sharding" in str(x.message)]
+            self.assertEqual(len(uneven_warnings), 0)
+
+
+class TestLocalMap4GPU(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
     @skip_if_lt_x_gpu(4)
     @with_comms
     def test_multi_mesh_inputs(self):
@@ -420,11 +557,107 @@ class TestLocalMap(DTensorTestBase):
         with comm_mode:
             Y_dt = local_mm_forward(X_dt, W_dt)
 
+        # even sharding - no communication needed (fast path)
         self.assertEqual(comm_mode.get_total_counts(), 0)
         # output local shape should be (8, 4)
         self.assertEqual(Y_dt.to_local().shape, (8, 4))
         # output lives in mesh_2d
         self.assertEqual(Y_dt.device_mesh, mesh_2d)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_local_map_uneven_sharding_2d_mesh(self):
+        """
+        Test uneven sharding with 2D mesh where multiple dimensions
+        can be unevenly sharded.
+        """
+        device_mesh = init_device_mesh(device_type=self.device_type, mesh_shape=(2, 2))
+
+        X = torch.randn(9, 5, device=self.device_type, requires_grad=False)
+        scalar = 2.0
+        Y = torch.mul(X, scalar)
+
+        X_dt = distribute_tensor(X, device_mesh, [Shard(0), Shard(1)])
+
+        local_mul_forward = local_map(
+            mul_forward,
+            out_placements=[Shard(0), Shard(1)],
+            in_placements=([Shard(0), Shard(1)], None),
+            device_mesh=device_mesh,
+            allow_uneven_sharding=True,
+        )
+
+        Y_dt = local_mul_forward(X_dt, scalar)
+
+        self.assertEqual(Y_dt.full_tensor().shape, Y.shape)
+        self.assertEqual(Y_dt.full_tensor(), Y)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_local_map_same_dim_sharded_on_two_mesh_dims(self):
+        """
+        Test that even sharding works correctly when the same tensor dim
+        is sharded on 2 mesh dims.
+        """
+        device_mesh = init_device_mesh(device_type=self.device_type, mesh_shape=(2, 2))
+
+        # Global tensor size: 8x4, sharded on dim 0 across both mesh dims
+        # Each rank should have 8 / 2 / 2 = 2 rows
+        X = torch.randn(8, 4, device=self.device_type, requires_grad=False)
+        scalar = 2.0
+        Y = torch.mul(X, scalar)
+
+        # Shard dim 0 on both mesh dims
+        X_dt = distribute_tensor(X, device_mesh, [Shard(0), Shard(0)])
+
+        # Verify local shape is 2x4 (8 / 2 / 2 = 2)
+        self.assertEqual(X_dt.to_local().shape, (2, 4))
+
+        local_mul_forward = local_map(
+            mul_forward,
+            out_placements=[Shard(0), Shard(0)],
+            in_placements=([Shard(0), Shard(0)], None),
+            device_mesh=device_mesh,
+        )
+
+        Y_dt = local_mul_forward(X_dt, scalar)
+
+        # Verify global shape is correctly inferred as 8x4
+        self.assertEqual(Y_dt.shape, torch.Size([8, 4]))
+        self.assertEqual(Y_dt.full_tensor().shape, Y.shape)
+        self.assertEqual(Y_dt.full_tensor(), Y)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_local_map_uneven_sharding_same_dim_on_two_mesh_dims(self):
+        """
+        Test uneven sharding when the same tensor dim is sharded on 2 mesh dims.
+        """
+        device_mesh = init_device_mesh(device_type=self.device_type, mesh_shape=(2, 2))
+
+        # Global tensor size: 9x4, sharded on dim 0 across both mesh dims
+        # With uneven sharding, different ranks will have different local sizes
+        X = torch.randn(9, 4, device=self.device_type, requires_grad=False)
+        scalar = 2.0
+        Y = torch.mul(X, scalar)
+
+        # Shard dim 0 on both mesh dims
+        X_dt = distribute_tensor(X, device_mesh, [Shard(0), Shard(0)])
+
+        local_mul_forward = local_map(
+            mul_forward,
+            out_placements=[Shard(0), Shard(0)],
+            in_placements=([Shard(0), Shard(0)], None),
+            device_mesh=device_mesh,
+            allow_uneven_sharding=True,
+        )
+
+        Y_dt = local_mul_forward(X_dt, scalar)
+
+        # Verify global shape is correctly computed as 9x4
+        self.assertEqual(Y_dt.shape, torch.Size([9, 4]))
+        self.assertEqual(Y_dt.full_tensor().shape, Y.shape)
+        self.assertEqual(Y_dt.full_tensor(), Y)
 
 
 if __name__ == "__main__":
