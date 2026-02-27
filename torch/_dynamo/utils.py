@@ -160,6 +160,8 @@ except ImportError:
 
 
 T = TypeVar("T")
+T1 = TypeVar("T1")
+T2 = TypeVar("T2")
 R = TypeVar("R")
 _P = ParamSpec("_P")
 
@@ -1090,6 +1092,16 @@ def istype(obj: object, allowed_types: type[T]) -> TypeIs[T]: ...
 def istype(
     obj: object, allowed_types: tuple[type[list[T]], type[tuple[T, ...]]]
 ) -> TypeIs[T]: ...
+
+
+@overload
+def istype(obj: object, allowed_types: tuple[type[T], type[T1]]) -> TypeIs[T | T1]: ...
+
+
+@overload
+def istype(
+    obj: object, allowed_types: tuple[type[T], type[T1], type[T2]]
+) -> TypeIs[T | T1 | T2]: ...
 
 
 @overload
