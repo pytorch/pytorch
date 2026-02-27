@@ -47,7 +47,12 @@ from ..utils import (
     raise_args_mismatch,
     specialize_symnode,
 )
-from .base import ValueMutationExisting, ValueMutationNew, VariableTracker
+from .base import (
+    AttributeMutationExisting,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
@@ -1966,11 +1971,11 @@ class DunderDictVariable(ConstDictVariable):
         vt: VariableTracker,
         dict_proxy: dict[str, VariableTracker],
     ) -> "DunderDictVariable":
-        mutation = ValueMutationExisting() if vt.source else ValueMutationNew()
+        mutation = AttributeMutationExisting() if vt.source else AttributeMutationNew()
         source = vt.source and AttrSource(vt.source, "__dict__")
         return cls(
             vt,
-            dict_proxy=dict_proxy,
+            dict_proxy=types.MappingProxyType(dict_proxy),
             side_effects=tx.output.side_effects,
             mutation_type=mutation,
             source=source,
@@ -1979,7 +1984,7 @@ class DunderDictVariable(ConstDictVariable):
     def __init__(
         self,
         vt: VariableTracker,
-        dict_proxy: dict[str, VariableTracker],  # object __dict__
+        dict_proxy: types.MappingProxyType[str, VariableTracker],  # object __dict__
         side_effects: "SideEffects",
         **kwargs: Any,
     ) -> None:
@@ -2060,7 +2065,6 @@ class DunderDictVariable(ConstDictVariable):
                     "0 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source)
             merged_items = self._get_merged_dict(tx)
@@ -2097,3 +2101,13 @@ class DunderDictVariable(ConstDictVariable):
                 merged[make_key(k)] = v
 
         return merged
+
+    # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
+    # so we don't need to install guards. Guard installation is overridden to no-op.
+    def install_dict_keys_match_guard(self) -> None:
+        pass
+
+    def install_dict_contains_guard(
+        self, tx: "InstructionTranslator", args: list[VariableTracker]
+    ) -> None:
+        pass
