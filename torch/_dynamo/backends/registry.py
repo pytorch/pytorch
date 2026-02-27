@@ -62,7 +62,7 @@ import functools
 import logging
 from collections.abc import Callable, Sequence
 from importlib.metadata import EntryPoint
-from typing import Any, Optional, Protocol, Union
+from typing import Any, Protocol
 
 import torch
 from torch import fx
@@ -77,13 +77,13 @@ class CompiledFn(Protocol):
 
 CompilerFn = Callable[[fx.GraphModule, list[torch.Tensor]], CompiledFn]
 
-_BACKENDS: dict[str, Optional[EntryPoint]] = {}
+_BACKENDS: dict[str, EntryPoint | None] = {}
 _COMPILER_FNS: dict[str, CompilerFn] = {}
 
 
 def register_backend(
-    compiler_fn: Optional[CompilerFn] = None,
-    name: Optional[str] = None,
+    compiler_fn: CompilerFn | None = None,
+    name: str | None = None,
     tags: Sequence[str] = (),
 ) -> Callable[..., Any]:
     """
@@ -116,7 +116,7 @@ register_experimental_backend = functools.partial(
 )
 
 
-def lookup_backend(compiler_fn: Union[str, CompilerFn]) -> CompilerFn:
+def lookup_backend(compiler_fn: str | CompilerFn) -> CompilerFn:
     """Expand backend strings to functions"""
     if isinstance(compiler_fn, str):
         if compiler_fn not in _BACKENDS:

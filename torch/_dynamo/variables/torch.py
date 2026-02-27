@@ -33,7 +33,7 @@ import math
 import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
-from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
@@ -211,7 +211,7 @@ constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
 @functools.cache
-def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
+def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
     # Defined as a function to avoid circular import like torch.onnx
     return {
         torch.jit.is_scripting: False,
@@ -307,7 +307,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
 def _collect_tensors_with_sources(
     var: VariableTracker,
-) -> list[tuple[torch.Tensor, Optional[str]]]:
+) -> list[tuple[torch.Tensor, str | None]]:
     """Extract (fake_tensor, source_name) pairs from a VariableTracker.
 
     Used by handle_autograd_grad to collect tensors from the outputs and inputs
@@ -317,7 +317,7 @@ def _collect_tensors_with_sources(
     from .lists import BaseListVariable
     from .tensor import TensorVariable
 
-    results: list[tuple[torch.Tensor, Optional[str]]] = []
+    results: list[tuple[torch.Tensor, str | None]] = []
     if isinstance(var, TensorVariable):
         fake_tensor = var.as_proxy().node.meta.get("example_value")
         assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
@@ -1228,7 +1228,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 get_rank,
                 get_world_size,
             )
-            from torch.distributed.tensor import DTensor
 
             @register(
                 _get_group_size_by_name,
@@ -1290,66 +1289,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # guard propagation via options is the best we can do.
                 return VariableTracker.build(tx, invocation_result)
 
-            @register(DTensor.from_local)
-            def handle_from_local(
-                self,
-                tx: "InstructionTranslator",
-                *args: VariableTracker,
-                **kwargs: VariableTracker,
-            ) -> VariableTracker:
-                # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
-                # and rewrite args to have only proxyable args, then insert call_function
-                placements_vt = kwargs.get("placements")
-
-                if placements_vt is None and len(args) >= 3:
-                    placements_vt = args[2]
-
-                if placements_vt is None:
-                    placements_vt = CONSTANT_VARIABLE_NONE
-                elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
-                    placements_vt = VariableTracker.build(tx, tuple).call_function(
-                        tx, [placements_vt], {}
-                    )
-
-                new_args = list(args)
-                if len(new_args) >= 3:
-                    new_args[2] = placements_vt
-                elif kwargs.get("placements") is not None:
-                    kwargs["placements"] = placements_vt
-
-                args_as_value = [x.as_python_constant() for x in new_args[1:]]
-                kwargs_as_value = {
-                    k: v.as_python_constant()
-                    for k, v in kwargs.items()
-                    if k not in ["shape", "stride"]
-                }
-
-                kwargs_to_be_proxied = {
-                    k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
-                }
-
-                def fn_with_prim_types(
-                    x: Any, shape: Any | None = None, stride: Any | None = None
-                ) -> Any:
-                    return self.value(
-                        x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
-                    )
-
-                # attach the same function name for better debugging
-                fn_with_prim_types.__name__ = "prim " + self.value.__name__
-
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        fn_with_prim_types,
-                        *proxy_args_kwargs(
-                            [args[0]],
-                            kwargs_to_be_proxied,
-                        ),
-                    ),
-                )
-
         @register(torch.nested.nested_tensor)
         def handle_nested_tensor(
             self,
@@ -1409,7 +1348,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
-            fallback: Optional[VariableTracker] = None,
+            fallback: VariableTracker | None = None,
         ) -> VariableTracker | None:
             fallback_int = fallback.as_python_constant() if fallback else None
             if isinstance(expr, SymNodeVariable):
@@ -2469,11 +2408,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
-            func_to_graphable,
             is_graphable_type,
             is_valid_output,
             to_graphable,
         )
+        from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
 
@@ -2582,23 +2521,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 fake_tensor_tls.allow_non_fake_inputs_override = old_val
             return res
 
-        # `flat_apply` wants a TreeSpec for the function input.
-        _, f_spec = func_to_graphable(patched_fn)
+        f_callable = _LeafCallable(patched_fn)
 
-        # TreeSpec isn't graphable, so we register the function and input
-        # specs as attributes on the graph module.
-        f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            f"{fn.__name__}_spec", f_spec
+        f_callable_proxy = tx.output.register_static_attr_and_return_proxy(
+            f"{fn.__name__}_callable", f_callable
         )
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
             # pyrefly: ignore [unbound-name]
             input_spec,
         )
-        f_spec_proxy.node.type = type(f_spec)
+        f_callable_proxy.node.type = type(f_callable)
         # pyrefly: ignore [unbound-name]
         input_spec_proxy.node.type = type(input_spec)
-        all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
+        all_args = (f_callable_proxy, input_spec_proxy, *proxified_flat_args)
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
@@ -2743,8 +2679,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._dynamo.utils import _make_inlined
-        from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import (
+            _LeafCallable,
             invoke_leaf_function,
             make_leaf_function_wrappers,
         )
@@ -2795,17 +2731,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl, fake_impl, captured_out_spec
         )
 
-        _, real_impl_spec = func_to_graphable(wrapped_real_impl)
-        _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
+        real_impl_callable = _LeafCallable(wrapped_real_impl)
+        fake_impl_callable = _LeafCallable(wrapped_fake_impl)
 
-        def make_spec_proxy(name: str, spec: Any) -> Any:
+        def make_callable_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)
             proxy.node.type = type(spec)
             return proxy
 
-        real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
-        fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
-        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
+        real_impl_proxy = make_callable_proxy("real_fn", real_impl_callable)
+        fake_impl_proxy = make_callable_proxy("fake_fn", fake_impl_callable)
+        input_spec_proxy = make_callable_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
