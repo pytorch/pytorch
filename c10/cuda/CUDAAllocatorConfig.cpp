@@ -49,6 +49,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
       " != ",
       get()->name());
   if (used_cudaMallocAsync) {
+#if CUDA_VERSION >= 11040
     int version = 0;
     C10_CUDA_CHECK(cudaDriverGetVersion(&version));
     TORCH_CHECK(
@@ -56,6 +57,13 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
         "backend:cudaMallocAsync requires CUDA runtime "
         "11.4 or newer, but cudaDriverGetVersion returned ",
         version);
+#else // CUDA_VERSION >= 11040
+    TORCH_CHECK(
+        false,
+        "backend:cudaMallocAsync requires PyTorch to be built with "
+        "CUDA 11.4 or newer, but CUDA_VERSION is ",
+        CUDA_VERSION);
+#endif // CUDA_VERSION >= 11040
   }
 #endif // USE_ROCM
   return i;

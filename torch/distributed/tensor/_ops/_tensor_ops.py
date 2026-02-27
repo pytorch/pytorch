@@ -1313,3 +1313,66 @@ def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
             for strategy in out_spec.strategies
         ]
     )
+
+
+def _pass_through_partials(
+    num_inputs: int = 1,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Pass-through strategies for all supported reduce ops."""
+    return [[Partial(op)] * (1 + num_inputs) for op in ("sum", "avg", "max", "min")]
+
+
+def _shard_inactive_dims(
+    ndim: int, active_dims: set[int], num_inputs: int = 1
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Single-dim strategies: shard on dims the op doesn't touch."""
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d not in active_dims:
+            strategies.append([_ShardingPlaceholder(d)] * (1 + num_inputs))
+    return strategies
+
+
+@register_single_dim_strategy(aten.roll.default, schema_info=RuntimeSchemaInfo(1))
+def roll_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+    raw_dims = cast(list[int], args_schema[2]) if len(args_schema) > 2 else []
+    # When dims is empty, roll flattens the tensor — all dims are active
+    if not raw_dims:
+        raw_dims = list(range(ndim))
+    active_dims = {normalize_dim(d, ndim) for d in raw_dims}
+    return _shard_inactive_dims(ndim, active_dims) + _pass_through_partials()
+
+
+@register_single_dim_strategy(aten.flip.default, schema_info=RuntimeSchemaInfo(1))
+def flip_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+    raw_dims = cast(list[int], args_schema[1])
+    active_dims = {normalize_dim(d, ndim) for d in raw_dims}
+    return _shard_inactive_dims(ndim, active_dims) + _pass_through_partials()
+
+
+@register_single_dim_strategy(
+    [aten._fft_c2c.default, aten._fft_r2c.default, aten._fft_c2r.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def fft_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+    raw_dims = cast(list[int], args_schema[1])
+    active_dims = {normalize_dim(d, ndim) for d in raw_dims}
+    return _shard_inactive_dims(ndim, active_dims) + _pass_through_partials()
