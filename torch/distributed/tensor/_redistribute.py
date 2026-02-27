@@ -1660,6 +1660,94 @@ def redistribute_local_tensor(
     return new_local_tensor
 
 
+def _redistribute_backward(
+    grad_output: "dtensor.DTensor",
+    previous_spec: DTensorSpec,
+    original_dtype: torch.dtype | None = None,
+    backward_dtype: torch.dtype | None = None,
+    async_op: bool = False,
+):
+    """
+    Common function for redistributing a distributed tensor during backward
+    and twice-backward backpropagation steps.
+
+    Args:
+        grad_output: The output gradient tensor.
+        previous_spec: DTensorSpec prior to redistribution.
+        original_dtype: Original output tensor dtype from forward pass (for type checking)
+        backward_dtype: Desired data type for backwards output.
+        async_op: whether to perform the DTensor redistribute operation
+                asynchronously or not. Default: False
+
+    Returns:
+        A :class:`torch.Tensor` object.
+        A :class:`DTensorSpec` object.
+    """
+    if backward_dtype != grad_output._local_tensor.dtype:
+        local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
+        current_spec = DTensorSpec(
+            mesh=grad_output._spec.device_mesh,
+            placements=grad_output._spec.placements,
+            tensor_meta=TensorMeta(
+                shape=grad_output.shape,
+                stride=grad_output.stride(),
+                # pyrefly: ignore [bad-argument-type]
+                dtype=backward_dtype,
+            ),
+        )
+        previous_spec = DTensorSpec(
+            mesh=previous_spec.device_mesh,
+            placements=previous_spec.placements,
+            tensor_meta=current_spec.tensor_meta,
+        )
+    else:
+        local_tensor = grad_output._local_tensor
+        current_spec = grad_output._spec
+    # skip the replicate to partial transformation when we are in backward pass
+    # In this case we keep the grad as replicate, this is because we don't
+    # want to convert the replicated gradients back to partial, although
+    # that's logically conform with the same layout, converting the gradients
+    # back to partial is actually useless as you would have to do reduce later
+    # which would be more expensive than keeping it replicate!
+
+    # for backward shard -> partial, we just do shard -> replicate
+    # for backward replicate -> partial, we skip the transformation
+    normalized_placements: list[Placement] = []
+    for current, target in zip(current_spec.placements, previous_spec.placements):
+        if (current.is_shard() or current.is_replicate()) and target.is_partial():
+            normalized_placements.append(Replicate())
+        else:
+            normalized_placements.append(target)
+
+    previous_spec = DTensorSpec(
+        previous_spec.device_mesh,
+        placements=tuple(normalized_placements),
+        tensor_meta=previous_spec.tensor_meta,
+    )
+
+    output = redistribute_local_tensor(
+        local_tensor,
+        current_spec,
+        previous_spec,
+        async_op=async_op,
+        is_explicit=True,
+    )
+
+    if output.dtype != original_dtype:
+        output = output.to(original_dtype)
+
+    spec = DTensorSpec(
+        previous_spec.device_mesh,
+        tuple(normalized_placements),
+        tensor_meta=TensorMeta(
+            shape=grad_output.shape,
+            stride=grad_output.stride(),
+            dtype=output.dtype,
+        ),
+    )
+    return output, spec
+
+
 class Redistribute(torch.autograd.Function):
     @staticmethod
     def forward(  # type: ignore[override]
@@ -1722,77 +1810,76 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        async_op = ctx.async_op
-        backward_dtype = ctx.backward_dtype or ctx.original_dtype
-
-        if backward_dtype != grad_output._local_tensor.dtype:
-            local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
-            current_spec = DTensorSpec(
-                mesh=grad_output._spec.device_mesh,
-                placements=grad_output._spec.placements,
-                tensor_meta=TensorMeta(
-                    shape=grad_output.shape,
-                    stride=grad_output.stride(),
-                    dtype=backward_dtype,
-                ),
-            )
-            previous_spec = DTensorSpec(
-                mesh=previous_spec.device_mesh,
-                placements=previous_spec.placements,
-                tensor_meta=current_spec.tensor_meta,
-            )
-        else:
-            local_tensor = grad_output._local_tensor
-            current_spec = grad_output._spec
-        # skip the replicate to partial transformation when we are in backward pass
-        # In this case we keep the grad as replicate, this is because we don't
-        # want to convert the replicated gradients back to partial, although
-        # that's logically conform with the same layout, converting the gradients
-        # back to partial is actually useless as you would have to do reduce later
-        # which would be more expensive than keeping it replicate!
-
-        # for backward shard -> partial, we just do shard -> replicate
-        # for backward replicate -> partial, we skip the transformation
-        normalized_placements: list[Placement] = []
-        for current, target in zip(current_spec.placements, previous_spec.placements):
-            if (current.is_shard() or current.is_replicate()) and target.is_partial():
-                normalized_placements.append(Replicate())
-            else:
-                normalized_placements.append(target)
-
-        previous_spec = DTensorSpec(
-            previous_spec.device_mesh,
-            placements=tuple(normalized_placements),
-            tensor_meta=previous_spec.tensor_meta,
-        )
-
-        output = redistribute_local_tensor(
-            local_tensor,
-            current_spec,
+        output_dtensor = NestedRedistribute.apply(
+            grad_output,
             previous_spec,
-            async_op=async_op,
-            is_explicit=True,
+            ctx.async_op,
+            ctx.backward_dtype,
+            ctx.original_dtype,
+        )
+        return (
+            output_dtensor,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
 
-        if output.dtype != ctx.original_dtype:
-            output = output.to(ctx.original_dtype)
 
-        spec = DTensorSpec(
-            previous_spec.device_mesh,
-            tuple(normalized_placements),
-            tensor_meta=TensorMeta(
-                shape=grad_output.shape,
-                stride=grad_output.stride(),
-                dtype=output.dtype,
-            ),
+class NestedRedistribute(torch.autograd.Function):
+    """
+    This class is used to make the redistribution of a DTensor twice-differentiable.
+    This is called during the `Redistribute.forward`.
+    Therefore, `NestedRedistribute.forward` is called during the first backward pass,
+    and `NestedRedistribute.backward` is called during the second backward pass.
+
+    Note: `NestedRedistribute.backward` is not differentiable, and therefore triple
+    backward is not yet supported.
+    """
+
+    @staticmethod
+    def forward(  # type: ignore[override]
+        # pyre-fixme[2]: Parameter must be annotated.
+        ctx,
+        grad_output: "dtensor.DTensor",
+        previous_spec,
+        async_op: bool = False,
+        backward_dtype: torch.dtype | None = None,
+        original_dtype: torch.dtype | None = None,
+    ):
+        ctx.original_dtype = original_dtype
+        ctx.async_op = async_op
+        ctx.backward_dtype = backward_dtype or ctx.original_dtype
+        ctx.original_dtype = grad_output._local_tensor.dtype
+
+        output, spec = _redistribute_backward(
+            grad_output, previous_spec, ctx.original_dtype, backward_dtype, async_op
         )
+
+        ctx.current_spec = spec
+
         # pyrefly: ignore [bad-argument-type]
-        output_dtensor = dtensor.DTensor(
+        return dtensor.DTensor(
             # pyrefly: ignore [bad-argument-count]
             output,
             spec,
             # pyrefly: ignore [unexpected-keyword]
             requires_grad=grad_output.requires_grad,
+        )
+
+    @staticmethod
+    def backward(ctx, grad2_output: "dtensor.DTensor"):  # type: ignore[override]
+        previous_spec = ctx.current_spec
+        async_op = ctx.async_op
+        backward_dtype = ctx.backward_dtype or ctx.original_dtype
+
+        output_dtensor = NestedRedistribute.apply(
+            grad2_output,
+            previous_spec,
+            async_op,
+            backward_dtype,
+            ctx.original_dtype,
         )
 
         return (

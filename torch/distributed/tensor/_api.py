@@ -150,12 +150,11 @@ class _ToTorchTensor(torch.autograd.Function):
             )
         return (
             # pyrefly: ignore [bad-argument-type]
-            DTensor(
+            DTensor.from_local(
                 # pyrefly: ignore [bad-argument-count]
                 grad_output,
-                grad_spec,
-                # pyrefly: ignore [unexpected-keyword]
-                requires_grad=grad_output.requires_grad,
+                grad_spec.device_mesh,
+                grad_spec.placements,
             ),
             None,
         )
@@ -616,8 +615,9 @@ class DTensor(torch.Tensor):
         Returns:
             A :class:`DTensor` object
 
-        .. note:: ``redistribute`` is differentiable, which means user do not need to worry about
-            the backward formula of the redistribute operation.
+        .. note:: ``redistribute`` is twice-differentiable, which means user do not need to worry about
+            the backward formula of the redistribute operation, or its compatibility with autograd for
+            second-order gradients. Higher-order differentiation has not been tested (but may work).
 
         .. note:: ``redistribute`` currently only supports redistributing DTensor on the same DeviceMesh,
             Please file an issue if you need to redistribute DTensor to different DeviceMesh.

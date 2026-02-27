@@ -782,6 +782,68 @@ class RedistributeTest(DTensorTestBase):
         self.assertEqual(new_tensor.stride(), new_meta_tensor.stride())
 
     @with_comms
+    @parametrize("dtype", [torch.float32])
+    def test_shard_to_replicate_forward_backward_backward(self, dtype):
+        # 1) test shard -> replicate forward
+        device_mesh = self.build_device_mesh()
+        replica_spec = [Replicate()]
+
+        input_sizes_and_shard_dim = [
+            ((self.world_size * 3, 3), 0),
+            ((self.world_size * 3 + 1, 3), 0),
+            ((self.world_size * 3 + 2, 3), 0),
+            ((3, self.world_size * 3), 1),
+            ((3, self.world_size * 3 + 1), 1),
+            ((3, self.world_size * 3 + 2), 1),
+        ]
+
+        activation = torch.nn.ReLU()
+
+        comm_mode = CommDebugMode()
+        for input_size, shard_dim in input_sizes_and_shard_dim:
+            shard_spec = [Shard(shard_dim)]
+            weight_ref = torch.nn.Parameter(torch.randn([]))
+            weight = distribute_tensor(weight_ref, device_mesh, replica_spec)
+            expected_tensor = torch.randn(
+                input_size, device=self.device_type, requires_grad=True, dtype=dtype
+            )
+            dtensor = distribute_tensor(expected_tensor, device_mesh, shard_spec)
+            dtensor_act = activation(dtensor * weight)
+            expected_tensor_act = torch.square(activation(expected_tensor * weight_ref))
+            with comm_mode:
+                reshard_dtensor_act = torch.square(dtensor_act.full_tensor())
+            self.assertEqual(reshard_dtensor_act.size(), torch.Size(input_size))
+            self.assertEqual(expected_tensor_act, reshard_dtensor_act)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+            )
+
+            # 2) test shard -> replicate backward:
+            output_dist = reshard_dtensor_act.mean()
+            output_ref = expected_tensor_act.mean()
+            self.assertEqual(output_ref, output_dist)
+            grad_input_ref = torch.autograd.grad(
+                outputs=output_ref, inputs=expected_tensor, create_graph=True
+            )[0]
+            with comm_mode:
+                grad_input = torch.autograd.grad(
+                    outputs=output_dist, inputs=dtensor, create_graph=True
+                )[0].full_tensor()
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+            )
+            self.assertEqual(grad_input, grad_input_ref)
+
+            # 3) test grad weight for shard -> replicate double-backward:
+            grad_input_ref.mean().backward()
+            with comm_mode:
+                grad_input.mean().backward()
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1
+            )
+            self.assertEqual(weight_ref.grad, weight.grad.full_tensor())
+
+    @with_comms
     def test_one_chunk_mesh(self):
         # mesh size is 1 on second dim
         mesh = init_device_mesh(self.device_type, (4, 1))
