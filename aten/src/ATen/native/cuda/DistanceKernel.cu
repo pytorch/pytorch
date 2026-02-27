@@ -36,8 +36,11 @@ struct dists {
   // Zero norm
   struct zero {
     static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t /*p*/) {
-      // std::min does not guarantee NaN propagation so we need an explicit check
-      agg += at::_isnan(diff) ? diff : std::min(std::ceil(std::abs(diff)), static_cast<scalar_t>(1.0));
+      if (diff != diff) { // NaN
+        agg = diff;
+      } else if (diff != 0.0) {
+        agg += 1.0;
+      }
     }
     static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
     static __forceinline__ __device__ void agg(scalar_t& update, const scalar_t other) { update += other; }
