@@ -4,6 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandBase.h>
+#include <ATen/OpMathType.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -205,25 +206,33 @@ void normal_fill_VSX(const TensorBase &self, const scalar_t mean, const scalar_t
 
 template <typename scalar_t, typename RNG>
 void normal_fill(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
+  using opmath_t = at::opmath_type<scalar_t>;
   scalar_t *data = self.data_ptr<scalar_t>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
-  for (const auto i : c10::irange(size)) {
-    at::uniform_real_distribution<scalar_t> uniform(0, 1);
-    data[i] = uniform(generator);
-  }
+  auto omean = static_cast<opmath_t>(mean);
+  auto ostd = static_cast<opmath_t>(std);
+  at::uniform_real_distribution<opmath_t> uniform(0, 1);
+  opmath_t buf[16];
 
   for (int64_t i = 0; i < size - 15; i += 16) {
-    normal_fill_16<scalar_t>(data + i, mean, std);
+    for (int j = 0; j < 16; j++) {
+      buf[j] = uniform(generator);
+    }
+    normal_fill_16<opmath_t>(buf, omean, ostd);
+    for (int j = 0; j < 16; j++) {
+      data[i + j] = static_cast<scalar_t>(buf[j]);
+    }
   }
   if (size % 16 != 0) {
-    // Recompute the last 16 values.
-    data = data + size - 16;
-    for (const auto i : c10::irange(16)) {
-      at::uniform_real_distribution<scalar_t> uniform(0, 1);
-      data[i] = uniform(generator);
+    int64_t offset = size - 16;
+    for (int j = 0; j < 16; j++) {
+      buf[j] = uniform(generator);
     }
-    normal_fill_16<scalar_t>(data, mean, std);
+    normal_fill_16<opmath_t>(buf, omean, ostd);
+    for (int j = 0; j < 16; j++) {
+      data[offset + j] = static_cast<scalar_t>(buf[j]);
+    }
   }
 }
 
@@ -267,9 +276,10 @@ template<typename RNG>
 void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG generator) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "uniform_kernel_cpu", [&]() {
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    auto from = static_cast<scalar_t>(from_);
-    auto to = static_cast<scalar_t>(to_);
-    at::uniform_real_distribution<scalar_t> uniform(from, to);
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto from = static_cast<opmath_t>(from_);
+    auto to = static_cast<opmath_t>(to_);
+    at::uniform_real_distribution<opmath_t> uniform(from, to);
     cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {
       return static_cast<scalar_t>(uniform(generator));
     });
