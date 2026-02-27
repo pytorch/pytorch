@@ -280,7 +280,9 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name, *, cacheable=False):
+    def __init__(
+        self, name, *, cacheable=False, supports_training_input_mutation=False
+    ):
         super().__init__()
         if type(self) is HigherOrderOperator:
             raise RuntimeError(
@@ -294,6 +296,10 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         self._ns = "higher_order"
         self.__module__ = "torch.ops.higher_order"
         self._cacheable = cacheable
+        # When True, allows mutating inputs that don't require grad during
+        # training. Mutations must be handled by auto_functionalize before
+        # reaching autograd.
+        self._supports_training_input_mutation = supports_training_input_mutation
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -331,7 +337,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             from torch._higher_order_ops.utils import _has_gen_schema
 
-            if _has_gen_schema(self):
+            if not self._supports_training_input_mutation and _has_gen_schema(self):
                 schema = self.gen_schema(*args, **kwargs)
                 if any(arg.is_write for arg in schema.arguments):
                     raise RuntimeError(

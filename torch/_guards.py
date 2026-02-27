@@ -956,6 +956,7 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
+        self.cudagraph_annotation: Any = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
@@ -1280,8 +1281,14 @@ class ChainedSource(Source):
         return value
 
     def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
-        cloned_base = self.base.clone(transform_fn)
-        result = dataclasses.replace(self, base=cloned_base)
+        cloned_fields: dict[str, Any] = {"base": self.base.clone(transform_fn)}
+        for f in dataclasses.fields(self):
+            if f.name == "base":
+                continue
+            val = getattr(self, f.name)
+            if isinstance(val, Source):
+                cloned_fields[f.name] = val.clone(transform_fn)
+        result = dataclasses.replace(self, **cloned_fields)
         if transform_fn is not None:
             result = transform_fn(result)
         return result
