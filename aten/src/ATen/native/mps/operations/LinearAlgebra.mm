@@ -876,7 +876,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
       output.mul_(beta);
     }
     return output;
-}
+  }
 
   if (use_metal_mm(self, other, output)) {
     return do_metal_addmm(self, other, output, alpha, beta, *bias_);
