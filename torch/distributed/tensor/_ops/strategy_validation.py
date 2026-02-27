@@ -1439,11 +1439,15 @@ def compare_operator(
                 first_gt = (
                     ground_truth[0] if isinstance(ground_truth, list) else ground_truth
                 )
-                if first_gt.numel() > 0 and (first_gt == 0).all():
+                if first_gt.numel() == 0:
+                    total_samples -= 1
+                    skip_reasons["zero-element output"] += 1
+                    continue
+                if (first_gt == 0).all():
                     total_samples -= 1
                     skip_reasons["all-zero output"] += 1
                     continue
-                if first_gt.numel() > 0 and first_gt.isnan().all():
+                if first_gt.isnan().all():
                     total_samples -= 1
                     skip_reasons["all-NaN output"] += 1
                     continue
