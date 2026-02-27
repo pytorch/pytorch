@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -543,22 +544,10 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         norm = dt.norm()
         self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
 
-        res = aten.mul.Scalar(norm, 2)
-        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
-        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        self.assertEqual(res, 20)
-
-        res = aten.div.Scalar(norm, 2)
-        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
-        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        self.assertEqual(res, 5)
-
-        res = aten.mul.Scalar(norm, -2)
-        self.assertTrue(res._spec.placements[0].is_replicate())
-
-        res = aten.div.Scalar(norm, -2)
-        self.assertEqual(res, -5)
-        self.assertTrue(res._spec.placements[0].is_replicate())
+        self.assertEqual(aten.mul.Scalar(norm, 2).full_tensor(), 20)
+        self.assertEqual(aten.div.Scalar(norm, 2).full_tensor(), 5)
+        self.assertEqual(aten.mul.Scalar(norm, -2).full_tensor(), -20)
+        self.assertEqual(aten.div.Scalar(norm, -2).full_tensor(), -5)
 
     @with_comms
     def test_add_sub_scalar_partial(self):
@@ -683,15 +672,25 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             self.assertEqual(z.placements, (Partial(partial_op),))
             self.assertEqual(z.full_tensor(), expected_full)
 
-        # test non-sum/avg partial to assert the partial not getting propagated
-        # since -max(A1, A2) != max(-A1, -A2)
+        # test non-sum/avg partial: neg is monotone decreasing, so
+        # -max(A1, A2) = min(-A1, -A2), i.e. Partial("max") -> Partial("min")
         d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
 
-        z = torch.neg(d_input)
-        self.assertEqual(z.placements, (Replicate(),))
-        self.assertEqual(
-            z.to_local(), torch.full((8, 8), -2.0, device=self.device_type)
-        )
+        with comm_mode:
+            z = torch.neg(d_input)
+
+        comm_counts = comm_mode.get_total_counts()
+        self.assertEqual(comm_counts, 0)
+        self.assertEqual(z.placements, (Partial("min"),))
+
+        d_input = DTensor.from_local(input, device_mesh, [Partial("min")])
+
+        with comm_mode:
+            z = torch.neg(d_input)
+
+        comm_counts = comm_mode.get_total_counts()
+        self.assertEqual(comm_counts, 0)
+        self.assertEqual(z.placements, (Partial("max"),))
 
     @with_comms
     def test_maximum_mixed_partials_redistribution(self):
@@ -723,8 +722,274 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected_value = float(self.world_size)
         self.assertEqual(result.full_tensor()[0, 0].item(), expected_value)
 
+    @with_comms
+    def test_add_partial_with_replicate_rules(self):
+        # P(x) + R -> P(x) for x in {avg, max, min}: adding a replicated constant
+        # preserves the partial reduce type (constant is the same on all ranks)
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        other_val = 3.0
+        d_other = distribute_tensor(
+            torch.full((8, 8), other_val, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+
+        expected_full = {
+            "avg": (self.world_size + 1) / 2.0 + other_val,
+            "max": float(self.world_size) + other_val,
+            "min": 1.0 + other_val,
+        }
+
+        for reduce_op in ("avg", "max", "min"):
+            input_tensor = torch.ones(8, 8, device=self.device_type) * (self.rank + 1)
+            d_input = DTensor.from_local(
+                input_tensor, device_mesh, [Partial(reduce_op)]
+            )
+
+            with comm_mode:
+                result = d_input + d_other
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.placements, (Partial(reduce_op),))
+            self.assertEqual(
+                result.full_tensor(),
+                torch.full((8, 8), expected_full[reduce_op], device=self.device_type),
+            )
+
+    @with_comms
+    def test_add_replicate_with_partial_avg(self):
+        # R + P(avg) -> P(avg): avg is linear, so this holds for any alpha
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        replicate_val = 3.0
+        d_input = distribute_tensor(
+            torch.full((8, 8), replicate_val, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+        other_tensor = torch.ones(8, 8, device=self.device_type) * (self.rank + 1)
+        d_other = DTensor.from_local(other_tensor, device_mesh, [Partial("avg")])
+
+        with comm_mode:
+            result = d_input + d_other
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(result.placements, (Partial("avg"),))
+        # full_tensor = R_val + avg(1, 2, ..., world_size) = 3 + (ws+1)/2
+        expected = torch.full(
+            (8, 8),
+            replicate_val + (self.world_size + 1) / 2.0,
+            device=self.device_type,
+        )
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    def test_mul_div_replicate_partial_asymmetry(self):
+        # mul is bilinear: r * (p1 + p2) = r*p1 + r*p2, so R * P(sum) -> P(sum).
+        # div is only linear in the numerator: r / (p1 + p2) != r/p1 + r/p2.
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        replicate_val = 3.0
+        partial_local_val = 2.0
+
+        d_replicate = distribute_tensor(
+            torch.full((8, 8), replicate_val, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+
+        # R * P(sum) -> P(sum): valid, zero communication
+        d_partial = DTensor.from_local(
+            torch.full((8, 8), partial_local_val, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        with comm_mode:
+            mul_result = d_replicate * d_partial
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(mul_result.placements, (Partial("sum"),))
+        # 3 * sum(2, 2, ...) = 3 * 2 * world_size
+        expected_mul = torch.full(
+            (8, 8),
+            replicate_val * partial_local_val * self.world_size,
+            device=self.device_type,
+        )
+        self.assertEqual(mul_result.full_tensor(), expected_mul)
+
+        # R / P(sum) -> requires communication (not linear in denominator)
+        d_partial2 = DTensor.from_local(
+            torch.full((8, 8), partial_local_val, device=self.device_type),
+            device_mesh,
+            [Partial("sum")],
+        )
+        with comm_mode:
+            div_result = d_replicate / d_partial2
+
+        self.assertGreater(comm_mode.get_total_counts(), 0)
+        # After P(sum) reduction: 3 / (2 * world_size)
+        expected_div = torch.full(
+            (8, 8),
+            replicate_val / (partial_local_val * self.world_size),
+            device=self.device_type,
+        )
+        self.assertEqual(div_result.full_tensor(), expected_div)
+
+    @with_comms
+    def test_inplace_add_partial_avg_with_replicate(self):
+        # P(avg) += R -> P(avg): self is P(avg), other is R, valid inplace
+        # because the rule P(avg)+R->P(avg) keeps output == self placement.
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        self_tensor = torch.ones(8, 8, device=self.device_type) * (self.rank + 1)
+        d_self = DTensor.from_local(self_tensor, device_mesh, [Partial("avg")])
+        d_other = distribute_tensor(
+            torch.full((8, 8), 3.0, device=self.device_type),
+            device_mesh,
+            [Replicate()],
+        )
+
+        with comm_mode:
+            d_self.add_(d_other)
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(d_self.placements, (Partial("avg"),))
+        # avg(1,2,...,ws) + 3 = (ws+1)/2 + 3
+        expected = torch.full(
+            (8, 8),
+            (self.world_size + 1) / 2.0 + 3.0,
+            device=self.device_type,
+        )
+        self.assertEqual(d_self.full_tensor(), expected)
+
+    @with_comms
+    def test_inplace_add_replicate_with_partial_avg_requires_comm(self):
+        # R += P(avg): the out-of-place rule R+P(avg)->P(avg) is valid, but
+        # inplace requires output == self == R, so P(avg) output is rejected.
+        # The runtime must redistribute P(avg) to R first (communication).
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        self_tensor = torch.full((8, 8), 3.0, device=self.device_type)
+        d_self = distribute_tensor(self_tensor, device_mesh, [Replicate()])
+        other_tensor = torch.ones(8, 8, device=self.device_type) * (self.rank + 1)
+        d_other = DTensor.from_local(other_tensor, device_mesh, [Partial("avg")])
+
+        with comm_mode:
+            d_self.add_(d_other)
+
+        self.assertGreater(comm_mode.get_total_counts(), 0)
+        self.assertEqual(d_self.placements, (Replicate(),))
+        # 3 + avg(1,2,...,ws) = 3 + (ws+1)/2
+        expected = torch.full(
+            (8, 8),
+            3.0 + (self.world_size + 1) / 2.0,
+            device=self.device_type,
+        )
+        self.assertEqual(d_self.full_tensor(), expected)
+
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)
+
+
+class TestPointwiseRuleValidation(TestCase):
+    """Validate registered partial-placement rules via OpInfo samples."""
+
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(
+                "fake", rank=0, world_size=self.world_size
+            )
+
+    def tearDown(self):
+        super().tearDown()
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
+    def _with_even_sizes(self, fn):
+        """Run fn with opinfo sizes overridden to be evenly divisible by world_size."""
+        import torch.testing._internal.common_methods_invocations as common_ops
+        from torch.testing._internal.opinfo import core as opinfo_core
+
+        orig_sizes = (opinfo_core.L, opinfo_core.M, opinfo_core.S, opinfo_core.XS)
+        opinfo_core.L = common_ops.L = 24
+        opinfo_core.M = common_ops.M = 12
+        opinfo_core.S = common_ops.S = 4
+        opinfo_core.XS = common_ops.XS = 2
+        try:
+            return fn()
+        finally:
+            (
+                opinfo_core.L,
+                opinfo_core.M,
+                opinfo_core.S,
+                opinfo_core.XS,
+            ) = orig_sizes
+            (
+                common_ops.L,
+                common_ops.M,
+                common_ops.S,
+                common_ops.XS,
+            ) = orig_sizes
+
+    def test_per_category_no_incorrect_rules(self):
+        """Verify no incorrect rules for one representative op per category.
+
+        Each category of specialized pointwise ops shares the same partial
+        placement rules. Validating one representative per category catches
+        any mathematically incorrect rules via OpInfo samples (including
+        edge cases like negative alpha for add/sub).
+        """
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+
+        representative_ops = [
+            # (op_name, category, expected_true_positives)
+            ("add", "binary_additive", 81),
+            ("mul", "binary_mul", 49),
+            ("div", "binary_div", 67),
+            ("sigmoid", "non_decreasing_unary", 5),
+            ("erfc", "non_increasing_unary", 5),
+            ("neg", "neg", 6),
+            ("deg2rad", "linear_nondecreasing", 6),
+            ("maximum", "monotonic_max_preserving", 57),
+            ("minimum", "monotonic_min_preserving", 57),
+            ("logaddexp", "monotonic_binary", 49),
+            ("abs", "pointwise_generic", 2),
+        ]
+
+        for op_name, category, expected_tp in representative_ops:
+            with self.subTest(op=op_name, category=category):
+
+                def run(name=op_name, expected=expected_tp):
+                    stats = compare_operator(
+                        name,
+                        device="cpu",
+                        dtype=torch.float32,
+                        world_size=self.world_size,
+                        incorrect_only=True,
+                    )
+                    self.assertEqual(
+                        stats.true_positives,
+                        expected,
+                        f"{name}: expected {expected} true_positives, got {stats.true_positives}",
+                    )
+                    self.assertEqual(
+                        len(stats.false_positives),
+                        0,
+                        f"{name}: found incorrect rules: {stats.false_positives}",
+                    )
+
+                self._with_even_sizes(run)
+
+
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
 )
