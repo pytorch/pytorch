@@ -316,11 +316,12 @@ static inline void launch_vectorized_kernel(
   if (p->major != 9 && p->major != 10) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
-#if !defined(CUDA_VERSION) || CUDA_VERSION < 12080
+  // Here we purposely omit vec8 for 1-byte data because of a bug in NVCC
+  // that causes some numerical mismatches with uint8 on sm80 and sm90.
+  // TODO: Revisit this after CUDA 12.8 update.
   if constexpr (sizeof(cpp_type) < 2) {
     vec_size = std::min<uint16_t>(vec_size, 4);
   }
-#endif
   int tws = elems_per_thread<io_size>();
 #endif
   int bws = tws * num_threads();
