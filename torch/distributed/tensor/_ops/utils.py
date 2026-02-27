@@ -390,13 +390,42 @@ def expand_to_full_mesh_op_strategy(
             [Replicate(), Replicate(), Replicate()]
         ]
     """
+    # Auto-append output placement for out= kwarg in .out variant ops.
+    # The out tensor must match the output placement, so we duplicate it.
+    args_strategy = op_schema.args_strategy
+    kwargs_strategy = op_schema.kwargs_strategy
+    if op_schema.is_out_variant_op():
+        assert "out" in op_schema.kwargs_schema, (
+            f"out variant op {op_schema.op} missing 'out' in kwargs_schema"
+        )
+        n_kwargs_tensors = len(kwargs_strategy)
+        expected_len = input_index + len(args_strategy) + n_kwargs_tensors
+        if n_kwargs_tensors == 1:
+            # Only the out= kwarg tensor — auto-append output placement.
+            expanded_strategies = []
+            for strategy in single_mesh_dim_strategies:
+                assert len(strategy) == expected_len - 1, (
+                    f"Strategy length {len(strategy)} != expected {expected_len - 1} "
+                    f"(outputs={input_index} + args={len(args_strategy)}) "
+                    f"for {op_schema.op}"
+                )
+                # out kwarg must match output placement
+                expanded_strategies.append(list(strategy) + [strategy[0]])
+            single_mesh_dim_strategies = expanded_strategies
+        elif n_kwargs_tensors > 1:
+            # TODO: support ops with tensor kwargs beyond out=.
+            # Strategy author must spell out placements for all tensor kwargs.
+            for strategy in single_mesh_dim_strategies:
+                assert len(strategy) == expected_len, (
+                    f"Strategy length {len(strategy)} != expected {expected_len} "
+                    f"for op with {n_kwargs_tensors} tensor kwargs: {op_schema.op}"
+                )
+
     # Expand the single_mesh_dim_strategies to full mesh dim strategies.
     all_mesh_dim_strategies = [single_mesh_dim_strategies] * mesh.ndim
 
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
 
-    args_strategy = op_schema.args_strategy
-    kwargs_strategy = op_schema.kwargs_strategy
     input_args_strategy = args_strategy + kwargs_strategy
     all_strategies = []
     # Track input placements if we skip strategies due to inplace placement mismatch
