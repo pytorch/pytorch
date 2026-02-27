@@ -2,7 +2,8 @@ set(PYTORCH_FOUND_HIP FALSE)
 
 # If ROCM_PATH is set, assume intention is to compile with
 # ROCm support and error out if the ROCM_PATH does not exist.
-# Else ROCM_PATH does not exist, assume a default of /opt/rocm
+# Else ROCM_PATH does not exist, try to get it from rocm-sdk,
+# or assume a default of /opt/rocm
 # In the latter case, if /opt/rocm does not exist emit status
 # message and return.
 if(DEFINED ENV{ROCM_PATH})
@@ -13,17 +14,42 @@ if(DEFINED ENV{ROCM_PATH})
       "Set a valid ROCM_PATH or unset ROCM_PATH environment variable to fix.")
   endif()
 else()
-  if(UNIX)
-    set(ROCM_PATH /opt/rocm)
-  else() # Win32
-    set(ROCM_PATH C:/opt/rocm)
+  # Try to get ROCM_PATH from rocm-sdk if available
+  find_program(ROCM_SDK_EXECUTABLE rocm-sdk)
+  if(ROCM_SDK_EXECUTABLE)
+    execute_process(
+      COMMAND ${ROCM_SDK_EXECUTABLE} path --root
+      OUTPUT_VARIABLE ROCM_SDK_PATH
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE ROCM_SDK_RESULT
+      ERROR_QUIET
+    )
+    if(ROCM_SDK_RESULT EQUAL 0 AND EXISTS "${ROCM_SDK_PATH}")
+      set(ROCM_PATH "${ROCM_SDK_PATH}")
+      message(STATUS "Found ROCm installation via rocm-sdk at: ${ROCM_PATH}")
+    endif()
   endif()
+
+  # Fall back to default paths if rocm-sdk did not work
+  if(NOT DEFINED ROCM_PATH OR NOT EXISTS ${ROCM_PATH})
+    if(UNIX)
+      set(ROCM_PATH /opt/rocm)
+    else() # Win32
+      set(ROCM_PATH C:/opt/rocm)
+    endif()
+  endif()
+
   if(NOT EXISTS ${ROCM_PATH})
     message(STATUS
         "ROCM_PATH environment variable is not set and ${ROCM_PATH} does not exist.\n"
         "Building without ROCm support.")
     return()
   endif()
+endif()
+
+# Set ROCM_SOURCE_DIR for Kineto/roctracer if not already set
+if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
+  set(ENV{ROCM_SOURCE_DIR} "${ROCM_PATH}")
 endif()
 
 # MAGMA_HOME
