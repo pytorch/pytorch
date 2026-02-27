@@ -160,8 +160,7 @@ CPU_TEST_FAILURES = {
     "test_while_loop_simple": fail_stack_allocation(is_skip=True),
     "test_while_loop_nested": fail_stack_allocation(is_skip=True),
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
-    # TODO: error: cannot convert ArrayRefTensor<float> to AtenTensorHandle
-    "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
+    "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=False),
     # TODO: use of undeclared identifier 'float8_e4m3fn' and 'half'
     "test_fp8": fail_minimal_arrayref_interface(is_skip=True),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
