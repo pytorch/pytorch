@@ -888,7 +888,9 @@ class OpDecompositions:
 
     @staticmethod
     def reciprocal(x: OpVarT) -> OpVarT:
-        return ops.truediv(ops.constant(1, torch.int32), x)
+        # Use float32 constant so that div_rn can be applied when
+        # eager_numerics.division_rounding is enabled
+        return ops.truediv(ops.constant(1.0, torch.float32), x)
 
     @staticmethod
     def square(x: OpVarT) -> OpVarT:
@@ -940,6 +942,11 @@ class OpDecompositions:
     def mul_rn(x: OpVarT, y: OpVarT) -> OpVarT:
         # for backends that don't override this, just use regular mul
         return ops.mul(x, y)
+
+    @staticmethod
+    def div_rn(x: OpVarT, y: OpVarT) -> OpVarT:
+        # for backends that don't override this, just use regular div
+        return ops.truediv(x, y)
 
     @staticmethod
     def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
