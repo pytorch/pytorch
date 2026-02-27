@@ -107,6 +107,56 @@ non_increasing_unary_ops: list[OpOverload] = [
     aten.special_erfcx.default,
 ]
 
+# Linear nondecreasing unary ops: both linear (P(sum/avg) preserved) and
+# nondecreasing (P(max/min) preserved).  Multiplication by a positive constant.
+linear_nondecreasing_unary_ops = [
+    aten.deg2rad.default,
+    aten.deg2rad_.default,
+    aten.rad2deg.default,
+    aten.rad2deg_.default,
+]
+
+# All-partial-preserving unary ops: P(x)->P(x) for all x.
+# TODO: positive should be removed once CIA (Copy Is All) optimizes it away.
+all_partial_preserving_unary_ops = [
+    aten.positive.default,
+]
+
+# Binary ops monotonically increasing in both arguments.
+# max-preserving: P(max)+P(max)->P(max) because max(max(a),max(b)) = max(a,b)
+monotonic_max_preserving_binary_ops = [
+    aten.clamp_min.Tensor,
+    aten.fmax.default,
+    aten.maximum.default,
+    prims.fmax.default,
+]
+
+# min-preserving: P(min)+P(min)->P(min) because min(min(a),min(b)) = min(a,b)
+monotonic_min_preserving_binary_ops = [
+    aten.clamp_max.Tensor,
+    aten.fmin.default,
+    aten.minimum.default,
+    prims.fmin.default,
+]
+
+# Monotonic increasing in both args but don't preserve any specific partial type.
+monotonic_binary_ops = [
+    aten.logaddexp.default,
+    aten.logaddexp2.default,
+]
+
+# Ops that preserve specific Partial types through the operation.
+# For example, torch.maximum preserves Partial("max") because
+# max(max(a), max(b)) == max(a, b).
+partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
+    aten.maximum.default: "max",
+    aten.maximum.out: "max",
+    prims.fmax.default: "max",
+    aten.minimum.default: "min",
+    aten.minimum.out: "min",
+    prims.fmin.default: "min",
+}
+
 pointwise_ops = (
     [
         # please keep the entries below alphabetically sorted
@@ -195,9 +245,7 @@ pointwise_ops = (
         aten.clamp_.default,
         aten.clamp_.Tensor,
         aten.clamp_min.default,
-        aten.clamp_min.Tensor,
         aten.clamp_max.default,
-        aten.clamp_max.Tensor,
         aten.clip.default,
         aten.clip.out,
         aten.clip_.default,
@@ -216,9 +264,7 @@ pointwise_ops = (
         aten.cosh.default,
         aten.cosh.out,
         aten.cosh_.default,
-        aten.deg2rad.default,
         aten.deg2rad.out,
-        aten.deg2rad_.default,
         aten.digamma.default,
         aten.digamma.out,
         aten.digamma_.default,
@@ -247,9 +293,7 @@ pointwise_ops = (
         aten.float_power_.Scalar,
         aten.float_power_.Tensor,
         aten.floor.out,
-        aten.fmax.default,
         aten.fmax.out,
-        aten.fmin.default,
         aten.fmin.out,
         aten.fmod.Scalar,
         aten.fmod.Scalar_out,
@@ -321,9 +365,7 @@ pointwise_ops = (
         aten.log2.out,
         aten.log2_.default,
         aten.log_.default,
-        aten.logaddexp.default,
         aten.logaddexp.out,
-        aten.logaddexp2.default,
         aten.logaddexp2.out,
         aten.logical_and.default,
         aten.logical_and.out,
@@ -357,7 +399,6 @@ pointwise_ops = (
         aten.polygamma.default,
         aten.polygamma.out,
         aten.polygamma_.default,
-        aten.positive.default,
         aten.pow.Scalar,
         aten.pow.Scalar_out,
         aten.pow.Tensor_Scalar,
@@ -366,12 +407,10 @@ pointwise_ops = (
         aten.pow.Tensor_Tensor_out,
         aten.pow_.Scalar,
         aten.pow_.Tensor,
+        aten.rad2deg.out,
         aten.reciprocal.default,
         aten.reciprocal.out,
         aten.reciprocal_.default,
-        aten.rad2deg.default,
-        aten.rad2deg.out,
-        aten.rad2deg_.default,
         aten.remainder.Scalar,
         aten.remainder.Scalar_Tensor,
         aten.remainder.Scalar_out,
@@ -450,6 +489,19 @@ pointwise_ops = (
     ]
     + non_decreasing_unary_ops
     + non_increasing_unary_ops
+    + linear_nondecreasing_unary_ops
+    + all_partial_preserving_unary_ops
+    + monotonic_binary_ops
+    + [
+        op
+        for op in monotonic_max_preserving_binary_ops
+        if op not in partial_preserving_ops
+    ]
+    + [
+        op
+        for op in monotonic_min_preserving_binary_ops
+        if op not in partial_preserving_ops
+    ]
 )
 
 # the linear pointwise ops map, key is op, value is the type of linearity
@@ -470,18 +522,6 @@ linear_pointwise_ops = {
     # neg is linear: -(A1 + A2) = -A1 + -A2
     aten.neg.default: 0,
     aten.neg_.default: 0,
-}
-
-# Ops that preserve specific Partial types through the operation.
-# For example, torch.maximum preserves Partial("max") because
-# max(max(a), max(b)) == max(a, b).
-partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
-    aten.maximum.default: "max",
-    aten.maximum.out: "max",
-    prims.fmax.default: "max",
-    aten.minimum.default: "min",
-    aten.minimum.out: "min",
-    prims.fmin.default: "min",
 }
 
 
