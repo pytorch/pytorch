@@ -22,6 +22,7 @@ maintaining proper semantics while enabling optimizations where possible.
 """
 
 import _collections  # type: ignore[import-not-found]
+import _thread
 import builtins
 import collections
 import contextlib
@@ -957,6 +958,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             return variables.MappingProxyVariable(args[0])
+        elif self.value is _thread.RLock:
+            return variables.RLockVariable.create(tx, source=self.source)
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and self.source:
             with do_not_convert_to_tracable_parameter():
                 return tx.inline_user_function_return(
