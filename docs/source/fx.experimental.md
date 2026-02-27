@@ -227,6 +227,24 @@ These APIs are experimental and subject to change without notice.
     reify
 ```
 
+## torch.fx.experimental.unification.multipledispatch.utils
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.utils
+```
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    typename
+```
+
 ## torch.fx.experimental.unification.unification_tools
 
 ```{eval-rst}
