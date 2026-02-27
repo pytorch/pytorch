@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda.h>
 #include <cstddef>
 #include <cstdint>
 
