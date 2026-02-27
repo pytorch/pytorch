@@ -1996,6 +1996,11 @@ class aot_inductor:
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
+    # Override Clang's default -fbracket-depth=256 limit. The minimal arrayref
+    # interface generates fold expressions whose nesting depth is proportional
+    # to the number of model inputs. Set to 0 to use the compiler default.
+    clang_bracket_depth: int = 0
+
     # Whether the compiled .so should link to libtorch
     link_libtorch: bool = True
 
