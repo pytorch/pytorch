@@ -1,11 +1,13 @@
 # Owner(s): ["module: cpp"]
 
+import gc
 import math
 import sysconfig
 import unittest
 from pathlib import Path
 
 import torch
+from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -19,7 +21,6 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     skipIfWindows,
     TestCase,
@@ -27,48 +28,21 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def get_supported_dtypes():
-    """Return a list of dtypes that are supported by torch stable ABI."""
-    return [
-        torch.int8,
-        torch.int16,
-        torch.int32,
-        torch.int64,
-        torch.uint8,
-        torch.uint16,
-        torch.uint32,
-        torch.uint64,
-        torch.bfloat16,
-        torch.float16,
-        torch.float32,
-        torch.float64,
-        torch.float8_e5m2,
-        torch.float8_e4m3fn,
-        torch.float8_e5m2fnuz,
-        torch.float8_e4m3fnuz,
-        torch.complex32,
-        torch.complex64,
-        torch.complex128,
-        torch.bool,
-    ]
+def _torchVersionLessThan(major, minor):
+    version_parts = torch.__version__.split(".")
+    current_major = int(version_parts[0])
+    current_minor = int(
+        version_parts[1].split("+")[0].split("a")[0].split("b")[0].split("rc")[0]
+    )
+    return (current_major < major) or (current_major == major and current_minor < minor)
 
 
 def skipIfTorchVersionLessThan(major, minor):
     """Skip test if PyTorch version is less than specified version."""
 
     def decorator(func):
-        version_parts = torch.__version__.split(".")
-        current_major = int(version_parts[0])
-        current_minor = int(
-            version_parts[1].split("+")[0].split("a")[0].split("b")[0].split("rc")[0]
-        )
-
-        should_skip = (current_major < major) or (
-            current_major == major and current_minor < minor
-        )
         reason = f"Test requires PyTorch >= {major}.{minor}, current version is {torch.__version__}"
-
-        return unittest.skipIf(should_skip, reason)(func)
+        return unittest.skipIf(_torchVersionLessThan(major, minor), reason)(func)
 
     return decorator
 
@@ -81,10 +55,12 @@ class TestLibtorchAgnostic(TestCase):
     """
     Tests for versioned libtorch_agnostic extensions.
 
-    This test class supports testing both:
+    This test class supports testing:
 
     - libtorch_agn_2_9: Extension built with TORCH_TARGET_VERSION=2.9.0
     - libtorch_agn_2_10: Extension built with TORCH_TARGET_VERSION=2.10.0
+    - libtorch_agn_2_11: Extension built with TORCH_TARGET_VERSION=2.11.0
+    - libtorch_agn_2_12: Extension built with TORCH_TARGET_VERSION=2.12.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -92,7 +68,7 @@ class TestLibtorchAgnostic(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # Build both 2.9 and 2.10 extensions
+        # Build versioned extensions
         base_dir = Path(__file__).parent
 
         try:
@@ -102,7 +78,7 @@ class TestLibtorchAgnostic(TestCase):
                 extension_root=base_dir / "libtorch_agn_2_9_extension"
             )
 
-        # Only build 2.10 extension if running on PyTorch 2.10+
+        # Only build 2.X extension if running on PyTorch 2.X+
         import re
 
         version_parts = torch.__version__.split(".")
@@ -119,6 +95,26 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.10 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 11):
+            try:
+                import libtorch_agn_2_11  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_11_extension"
+                )
+        else:
+            print(f"Skipping 2.11 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 12):
+            try:
+                import libtorch_agn_2_12  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_12_extension"
+                )
+        else:
+            print(f"Skipping 2.12 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -155,7 +151,8 @@ class TestLibtorchAgnostic(TestCase):
             t = torch.rand(32, 32, device=device)
             self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
             identi_t = libtorch_agnostic.ops.identity(t)
-            assert identi_t is t
+            if identi_t is not t:
+                raise AssertionError("Expected identity op to return the same tensor")
 
         init_mem = torch.cuda.memory_allocated(device)
 
@@ -249,6 +246,27 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_9 as libtorch_agnostic
 
         t = torch.rand(3, 1, device=device) - 0.5
+        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
+        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
+
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_ones_like(t, device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.ones_like(t, device=device))
+
+        if t.is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+            for _ in range(3):
+                _make_cuda_tensors(init_mem)
+                curr_mem = torch.cuda.memory_allocated(device)
+                self.assertEqual(curr_mem, init_mem)
+
+    @xfailIfTorchDynamo
+    @skipIfTorchVersionLessThan(2, 11)  # Requires 2.11 for Float8_e8m0fnu support
+    def test_my_ones_like_with_Float8_e8m0fnu(self, device):
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        t = torch.zeros(3, 1, device=device, dtype=torch.float8_e8m0fnu)
         cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
         self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
 
@@ -360,6 +378,39 @@ class TestLibtorchAgnostic(TestCase):
         out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
         expected0 = torch.narrow(t, dim0, start0, length0)
         self.assertEqual(out0, expected0)
+
+    @onlyCPU
+    def test_my_narrow_symint(self, device):
+        op = torch.ops.libtorch_agn_2_9.my_narrow_symint
+
+        t1 = torch.randn(4, 5, device=device)
+        out = op(t1, 0, 1, 2)
+        expected = torch.narrow(t1, 0, 1, 2)
+        self.assertEqual(out, expected)
+
+        torch.library.opcheck(
+            torch.ops.libtorch_agn_2_9.my_narrow_symint,
+            (t1, 0, 1, 2),
+        )
+
+        # Below is a real example to confirm recompilation doesn't happen
+        # Wrap in a function so shape computation happens inside the compiled
+        # region — t.shape[0] becomes a symbolic SymInt during tracing
+        def fn(t):
+            return op(t, 0, 2, t.shape[0] - 2)
+
+        cnt = CompileCounter()
+        compiled_fn = torch.compile(fn, dynamic=True, backend=cnt)
+
+        out2 = compiled_fn(t1)
+        self.assertEqual(out2, torch.narrow(t1, 0, 2, t1.shape[0] - 2))
+        frame_count = cnt.frame_count
+
+        # Second call with different shape should not recompile
+        t2 = torch.randn(6, 3, device=device)
+        out3 = compiled_fn(t2)
+        self.assertEqual(out3, torch.narrow(t2, 0, 2, t2.shape[0] - 2))
+        self.assertEqual(cnt.frame_count, frame_count)
 
     @onlyCUDA
     @deviceCountAtLeast(2)
@@ -948,13 +999,52 @@ class TestLibtorchAgnostic(TestCase):
             p = libtorch_agnostic.ops.get_any_data_ptr(t, mutable)
             self.assertEqual(p, expected_p)
 
+    def get_supported_dtypes_for_data_ptr(self):
+        """Return a list of dtypes that are supported for casting Tensor data_ptrs.
+
+        This is an intersection of supported dtypes in the stable ABI and the
+        supported dtypes in TensorMethods.cpp/tensor_inl.h.
+        """
+        supported_by_2_10 = [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+            torch.bfloat16,
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.float8_e5m2,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2fnuz,
+            torch.float8_e4m3fnuz,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.bool,
+        ]
+
+        supported_by_2_11 = [
+            torch.float8_e8m0fnu,
+        ]
+
+        return supported_by_2_10 + (
+            supported_by_2_11 if not _torchVersionLessThan(2, 11) else []
+        )
+
     @skipIfTorchVersionLessThan(2, 10)
     @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
     def test_get_template_any_data_ptr(self, device):
-        import libtorch_agn_2_10 as libtorch_agnostic
+        if _torchVersionLessThan(2, 11):
+            import libtorch_agn_2_10 as libtorch_agnostic
+        else:
+            import libtorch_agn_2_11 as libtorch_agnostic
 
-        supported_dtypes = get_supported_dtypes()
-
+        supported_dtypes = self.get_supported_dtypes_for_data_ptr()
         for dtype in supported_dtypes:
             t = torch.empty(2, 5, device=device, dtype=dtype)
             expected_p = t.data_ptr()
@@ -1231,7 +1321,6 @@ class TestLibtorchAgnostic(TestCase):
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
-    @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
     @parametrize("show_cpp_stacktraces", [False, True])
     def test_std_cuda_check_error(self, device, show_cpp_stacktraces):
         """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message.
@@ -1403,7 +1492,6 @@ except RuntimeError as e:
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
     @parametrize("show_cpp_stacktraces", [False, True])
-    @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
     @unittest.skipIf(
         _get_torch_cuda_version() >= (13, 0), "To be resolved after branch cut"
     )
@@ -1662,6 +1750,175 @@ except RuntimeError as e:
         result_broadcast = libtorch_agnostic.ops.my_subtract(a, c)
         expected_broadcast = torch.subtract(a, c)
         self.assertEqual(result_broadcast, expected_broadcast)
+
+    @skipIfTorchVersionLessThan(2, 11)
+    @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+    def test_my_from_blob_with_deleter(self, device):
+        """Test for from_blob with custom deleter (2.11 feature)."""
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        is_cuda = torch.device(device).type == "cuda"
+        if is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+
+        def inner():
+            libtorch_agnostic.ops.reset_deleter_call_count()
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+
+            # We need an original tensor to create the tensor with from_blob.
+            original = torch.rand(2, 3, device=device, dtype=torch.float32)
+            blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
+                original.data_ptr(),
+                original.size(),
+                original.stride(),
+                device,
+                torch.float32,
+            )
+
+            self.assertEqual(blob_tensor, original)
+            self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
+
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+
+            del blob_tensor
+            gc.collect()
+
+            # Ensure the deleter was called. The original tensor still exists
+            # and can be used.
+            self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
+            original += 1
+            # original goes out of scope here and its cuda memory should be
+            # freed.
+
+        inner()
+
+        if is_cuda:
+            # original tensor is out of scope, all the memory should be freed
+            torch.cuda.synchronize(device)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+    @skipIfTorchVersionLessThan(2, 12)
+    @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+    def test_my_from_blob_with_lambda_deleter(self, device):
+        """Test for from_blob with capturing-lambda deleter (2.12 feature)."""
+        import libtorch_agn_2_12 as libtorch_agnostic
+
+        from_blob_fn = libtorch_agnostic.ops.my_from_blob_with_lambda_deleter
+        get_count = libtorch_agnostic.ops.get_lambda_deleter_call_count
+        reset_count = libtorch_agnostic.ops.reset_lambda_deleter_call_count
+
+        is_cuda = torch.device(device).type == "cuda"
+        if is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+
+        def inner():
+            reset_count()
+            self.assertEqual(get_count(), 0)
+
+            # We need an original tensor to create the tensor with from_blob.
+            original = torch.rand(2, 3, device=device, dtype=torch.float32)
+            blob_tensor = from_blob_fn(
+                original.data_ptr(),
+                original.size(),
+                original.stride(),
+                device,
+                torch.float32,
+            )
+
+            self.assertEqual(blob_tensor, original)
+            self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
+
+            self.assertEqual(get_count(), 0)
+
+            del blob_tensor
+            gc.collect()
+
+            # Ensure the deleter was called. The original tensor still exists
+            # and can be used.
+            self.assertEqual(get_count(), 1)
+            original += 1
+            # original goes out of scope here and its cuda memory should be
+            # freed.
+
+        inner()
+
+        if is_cuda:
+            # original tensor is out of scope, all the memory should be freed
+            torch.cuda.synchronize(device)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 11)
+    def test_my_from_blob_with_cuda_deleter_no_leak(self, device):
+        """Test that from_blob deleter properly frees cudaMalloc'd memory."""
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        torch.cuda.synchronize(device)
+        init_mem = torch.cuda.memory_allocated(device)
+        numel = 1024 * 1024  # 4 MB per tensor
+
+        for _ in range(10):
+            tensor = libtorch_agnostic.ops.my_from_blob_with_cuda_deleter(numel, device)
+            # Verify tensor was created correctly
+            self.assertEqual(tensor.numel(), numel)
+            self.assertEqual(tensor.device, torch.device(device))
+            del tensor
+            gc.collect()
+            torch.cuda.synchronize(device)
+
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 12)
+    def test_my_from_blob_with_cuda_lambda_deleter_no_leak(self, device):
+        """Test that from_blob lambda deleter properly frees cudaMalloc'd memory."""
+        import libtorch_agn_2_12 as libtorch_agnostic
+
+        from_blob_fn = libtorch_agnostic.ops.my_from_blob_with_cuda_lambda_deleter
+
+        torch.cuda.synchronize(device)
+        init_mem = torch.cuda.memory_allocated(device)
+        numel = 1024 * 1024  # 4 MB per tensor
+
+        for _ in range(10):
+            tensor = from_blob_fn(numel, device)
+            # Verify tensor was created correctly
+            self.assertEqual(tensor.numel(), numel)
+            self.assertEqual(tensor.device, torch.device(device))
+            del tensor
+            gc.collect()
+            torch.cuda.synchronize(device)
+
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+    @onlyCPU
+    def test_my_layout(self, device):
+        """Test layout() method for various tensor layouts."""
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        # Test strided layout
+        t_strided = torch.randn(3, 4, device=device)
+        self.assertTrue(libtorch_agnostic.ops.my_layout(t_strided, torch.strided))
+        self.assertFalse(libtorch_agnostic.ops.my_layout(t_strided, torch.sparse_coo))
+
+        # Test sparse COO layout
+        indices = torch.tensor([[0, 1, 2], [0, 1, 2]])
+        values = torch.tensor([1.0, 2.0, 3.0])
+        t_sparse_coo = torch.sparse_coo_tensor(indices, values, (3, 3))
+        self.assertTrue(libtorch_agnostic.ops.my_layout(t_sparse_coo, torch.sparse_coo))
+        self.assertFalse(libtorch_agnostic.ops.my_layout(t_sparse_coo, torch.strided))
+
+        # Test sparse CSR layout
+        crow_indices = torch.tensor([0, 1, 2, 3])
+        col_indices = torch.tensor([0, 1, 2])
+        csr_values = torch.tensor([1.0, 2.0, 3.0])
+        t_sparse_csr = torch.sparse_csr_tensor(crow_indices, col_indices, csr_values)
+        self.assertTrue(libtorch_agnostic.ops.my_layout(t_sparse_csr, torch.sparse_csr))
+        self.assertFalse(libtorch_agnostic.ops.my_layout(t_sparse_csr, torch.strided))
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)

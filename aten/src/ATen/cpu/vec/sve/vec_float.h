@@ -201,31 +201,35 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_atanhfx_u10sve(values)), map(std::atanh));
   }
-  Vectorized<float> atan2(const Vectorized<float>& b) const {USE_SLEEF(
-      { return Vectorized<float>(Sleef_atan2fx_u10sve(values, b)); },
-      {
-        __at_align__ float tmp[size()];
-        __at_align__ float tmp_b[size()];
-        store(tmp);
-        b.store(tmp_b);
-        for (int64_t i = 0; i < size(); i++) {
-          tmp[i] = std::atan2(tmp[i], tmp_b[i]);
-        }
-        return loadu(tmp);
-      })} Vectorized<float> copysign(const Vectorized<float>& sign) const {
-
-      USE_SLEEF(
-          { return Vectorized<float>(Sleef_copysignfx_sve(values, sign)); },
-          {
-            __at_align__ float tmp[size()];
-            __at_align__ float tmp_sign[size()];
-            store(tmp);
-            sign.store(tmp_sign);
-            for (int64_t i = 0; i < size(); ++i) {
-              tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
-            }
-            return loadu(tmp);
-          })} Vectorized<float> erf() const {
+  Vectorized<float> atan2(const Vectorized<float>& b) const {
+    USE_SLEEF(
+        { return Vectorized<float>(Sleef_atan2fx_u10sve(values, b)); },
+        {
+          __at_align__ float tmp[size()];
+          __at_align__ float tmp_b[size()];
+          store(tmp);
+          b.store(tmp_b);
+          for (int64_t i = 0; i < size(); i++) {
+            tmp[i] = std::atan2(tmp[i], tmp_b[i]);
+          }
+          return loadu(tmp);
+        });
+  }
+  Vectorized<float> copysign(const Vectorized<float>& sign) const {
+    USE_SLEEF(
+        { return Vectorized<float>(Sleef_copysignfx_sve(values, sign)); },
+        {
+          __at_align__ float tmp[size()];
+          __at_align__ float tmp_sign[size()];
+          store(tmp);
+          sign.store(tmp_sign);
+          for (int64_t i = 0; i < size(); ++i) {
+            tmp[i] = std::copysign(tmp[i], tmp_sign[i]);
+          }
+          return loadu(tmp);
+        });
+  }
+  Vectorized<float> erf() const {
     return USE_SLEEF(
         Vectorized<float>(Sleef_erffx_u10sve(values)), map(std::erf));
   }
@@ -284,30 +288,35 @@ class Vectorized<float> {
   Vectorized<float> fexp_u20() const {
     return exp_u20();
   }
-  Vectorized<float> fmod(const Vectorized<float>& q) const {USE_SLEEF(
-      { return Vectorized<float>(Sleef_fmodfx_sve(values, q)); },
-      {
-        __at_align__ float tmp[size()];
-        __at_align__ float tmp_q[size()];
-        store(tmp);
-        q.store(tmp_q);
-        for (int64_t i = 0; i < size(); ++i) {
-          tmp[i] = std::fmod(tmp[i], tmp_q[i]);
-        }
-        return loadu(tmp);
-      })} Vectorized<float> hypot(const Vectorized<float>& b) const {
-      USE_SLEEF(
-          { return Vectorized<float>(Sleef_hypotfx_u05sve(values, b)); },
-          {
-            __at_align__ float tmp[size()];
-            __at_align__ float tmp_b[size()];
-            store(tmp);
-            b.store(tmp_b);
-            for (int64_t i = 0; i < size(); i++) {
-              tmp[i] = std::hypot(tmp[i], tmp_b[i]);
-            }
-            return loadu(tmp);
-          })} Vectorized<float> i0() const {
+  Vectorized<float> fmod(const Vectorized<float>& q) const {
+    USE_SLEEF(
+        { return Vectorized<float>(Sleef_fmodfx_sve(values, q)); },
+        {
+          __at_align__ float tmp[size()];
+          __at_align__ float tmp_q[size()];
+          store(tmp);
+          q.store(tmp_q);
+          for (int64_t i = 0; i < size(); ++i) {
+            tmp[i] = std::fmod(tmp[i], tmp_q[i]);
+          }
+          return loadu(tmp);
+        });
+  }
+  Vectorized<float> hypot(const Vectorized<float>& b) const {
+    USE_SLEEF(
+        { return Vectorized<float>(Sleef_hypotfx_u05sve(values, b)); },
+        {
+          __at_align__ float tmp[size()];
+          __at_align__ float tmp_b[size()];
+          store(tmp);
+          b.store(tmp_b);
+          for (int64_t i = 0; i < size(); i++) {
+            tmp[i] = std::hypot(tmp[i], tmp_b[i]);
+          }
+          return loadu(tmp);
+        });
+  }
+  Vectorized<float> i0() const {
     return map(calc_i0);
   }
   Vectorized<float> i0e() const {
@@ -336,18 +345,21 @@ class Vectorized<float> {
     }
     return loadu(tmp);
   }
-  Vectorized<float> nextafter(const Vectorized<float>& b) const {USE_SLEEF(
-      { return Vectorized<float>(Sleef_nextafterfx_sve(values, b)); },
-      {
-        __at_align__ float tmp[size()];
-        __at_align__ float tmp_b[size()];
-        store(tmp);
-        b.store(tmp_b);
-        for (int64_t i = 0; i < size(); ++i) {
-          tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
-        }
-        return loadu(tmp);
-      })} Vectorized<float> log() const {
+  Vectorized<float> nextafter(const Vectorized<float>& b) const {
+    USE_SLEEF(
+        { return Vectorized<float>(Sleef_nextafterfx_sve(values, b)); },
+        {
+          __at_align__ float tmp[size()];
+          __at_align__ float tmp_b[size()];
+          store(tmp);
+          b.store(tmp_b);
+          for (int64_t i = 0; i < size(); ++i) {
+            tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
+          }
+          return loadu(tmp);
+        });
+  }
+  Vectorized<float> log() const {
     return USE_SLEEF(
         Vectorized<float>(Sleef_logfx_u10sve(values)), map(std::log));
   }
@@ -455,20 +467,23 @@ class Vectorized<float> {
   Vectorized<float> rsqrt() const {
     return svdivr_f32_x(ptrue, svsqrt_f32_x(ptrue, values), ONE_F32);
   }
-  Vectorized<float> pow(const Vectorized<float>& b) const {USE_SLEEF(
-      { return Vectorized<float>(Sleef_powfx_u10sve(values, b)); },
-      {
-        __at_align__ float tmp[size()];
-        __at_align__ float tmp_b[size()];
-        store(tmp);
-        b.store(tmp_b);
-        for (int64_t i = 0; i < size(); i++) {
-          tmp[i] = std::pow(tmp[i], tmp_b[i]);
-        }
-        return loadu(tmp);
-      })} // Comparison using the _CMP_**_OQ predicate.
-          //   `O`: get false if an operand is NaN
-          //   `Q`: do not raise if an operand is NaN
+  Vectorized<float> pow(const Vectorized<float>& b) const {
+    USE_SLEEF(
+        { return Vectorized<float>(Sleef_powfx_u10sve(values, b)); },
+        {
+          __at_align__ float tmp[size()];
+          __at_align__ float tmp_b[size()];
+          store(tmp);
+          b.store(tmp_b);
+          for (int64_t i = 0; i < size(); i++) {
+            tmp[i] = std::pow(tmp[i], tmp_b[i]);
+          }
+          return loadu(tmp);
+        });
+  }
+  // Comparison using the _CMP_**_OQ predicate.
+  //   `O`: get false if an operand is NaN
+  //   `Q`: do not raise if an operand is NaN
   Vectorized<float> operator==(const Vectorized<float>& other) const {
     svbool_t mask = svcmpeq_f32(ptrue, values, other);
     return svsel_f32(mask, ALL_F32_TRUE_MASK, ALL_F32_FALSE_MASK);

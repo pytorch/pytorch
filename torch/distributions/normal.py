@@ -88,7 +88,6 @@ class Normal(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         # compute the variance
-        # pyrefly: ignore [unsupported-operation]
         var = self.scale**2
         log_scale = (
             math.log(self.scale)

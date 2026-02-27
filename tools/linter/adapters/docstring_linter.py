@@ -224,7 +224,8 @@ def make_terse(
 
         if kids := b["children"]:
             if not all(isinstance(k, int) for k in kids):
-                assert all(isinstance(k, dict) for k in kids)
+                if not all(isinstance(k, dict) for k in kids):
+                    raise AssertionError("children must be all int or all dict")
                 d["children"] = make_terse(kids)
 
     return result
@@ -241,7 +242,8 @@ def file_summary(
         elif status == "grandfather":
             fail = ": (grandfathered)"
         else:
-            assert status == "bad"
+            if status != "bad":
+                raise AssertionError(f"Expected status 'bad', got '{status}'")
             fail = ": FAIL"
         name = v["name"]
         lines = v["lines"]

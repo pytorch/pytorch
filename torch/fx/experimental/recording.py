@@ -104,10 +104,16 @@ class ShapeEnvEvent:
 
         # Special handling for the constructor event.
         if self.f is ShapeEnv:
-            assert shape_env is None and self.args is None and self.kwargs is not None
+            if not (
+                shape_env is None and self.args is None and self.kwargs is not None
+            ):
+                raise AssertionError(
+                    "ShapeEnv constructor requires shape_env=None, args=None, kwargs set"
+                )
             return ShapeEnv(**self.kwargs)
 
-        assert shape_env is not None
+        if shape_env is None:
+            raise AssertionError("shape_env is required for non-constructor events")
         args = list(self.args or [])
         kwargs = dict(self.kwargs or {})
 
@@ -133,9 +139,11 @@ class ShapeEnvEvent:
             # If, at some point, we created an FX node, it means that translation validation is on.
             # It also means we are building an FX graph for symbolic shapes at shape_env.graph, and
             # we are tracking node names at shape_env.name_to_node.
-            assert hasattr(shape_env, "name_to_node")
+            if not hasattr(shape_env, "name_to_node"):
+                raise AssertionError("shape_env missing name_to_node attribute")
             name_to_node = shape_env.name_to_node  # type: ignore[attr-defined]
-            assert x.name in name_to_node
+            if x.name not in name_to_node:
+                raise AssertionError(f"Node {x.name} not found in name_to_node")
             return name_to_node[x.name]
 
         # Replaces the value of an specific argument by the result of fn.
@@ -193,7 +201,8 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 
     def assert_equal(old: Optional[ShapeEnv], new: ShapeEnv) -> ShapeEnv:
         if old is not None:
-            assert old is new, "call with different ShapeEnv"
+            if old is not new:
+                raise AssertionError("call with different ShapeEnv")
         return new
 
     shape_env = None
@@ -234,12 +243,14 @@ def record_shapeenv_event(
     *, save_tracked_fakes: bool = False, name: Optional[str] = None
 ) -> Callable:
     def decorator(fn: Callable) -> Callable:
-        assert callable(fn)
+        if not callable(fn):
+            raise AssertionError(f"Expected callable, got {type(fn)}")
         args = inspect.getfullargspec(fn).args
-        assert args and args[0] == "self", (
-            "record_shapeenv_event should only wrap methods on ShapeEnv; refactor your "
-            "code so that it calls into a method on ShapeEnv"
-        )
+        if not (args and args[0] == "self"):
+            raise AssertionError(
+                "record_shapeenv_event should only wrap methods on ShapeEnv; refactor your "
+                "code so that it calls into a method on ShapeEnv"
+            )
         nonlocal name
         if name is None:
             name = fn.__name__
@@ -248,7 +259,8 @@ def record_shapeenv_event(
         def wrapper(*args, **kwargs):
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            assert isinstance(args[0], ShapeEnv)
+            if not isinstance(args[0], ShapeEnv):
+                raise AssertionError(f"Expected ShapeEnv, got {type(args[0])}")
 
             global NEST
 
@@ -338,7 +350,10 @@ def replay_shape_env_events(events):
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     constructor_event = events[0]
-    assert constructor_event.f == ShapeEnv
+    if constructor_event.f != ShapeEnv:
+        raise AssertionError(
+            f"First event must be ShapeEnv constructor, got {constructor_event.f}"
+        )
 
     # Constructs the new ShapeEnv.
     shape_env = constructor_event.run()

@@ -10,10 +10,10 @@ void my__foreach_mul_(torch::headeronly::HeaderOnlyArrayRef<Tensor> self, torch:
   aoti_torch_call_dispatcher("aten::_foreach_mul_", "List", stack.data());
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my__foreach_mul_(Tensor(a!)[] self, Tensor[] other) -> ()");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my__foreach_mul_", TORCH_BOX(&my__foreach_mul_));
 }

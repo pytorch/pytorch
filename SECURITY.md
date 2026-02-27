@@ -20,6 +20,8 @@ All reports submitted through the security advisories mechanism would **either b
 
 **Note on crashes and out of bounds access**: PyTorch is a computational framework that performs operations on behalf of the caller. Like many low-level libraries, PyTorch generally does not validate all inputs to every function—the responsibility for providing valid arguments lies with the calling code. While crashes and out of bounds memory access should be reported as bugs, they are generally not considered security vulnerabilities in PyTorch's threat model.
 
+**Note on numerical stability**: Issues related to incorrect calculations, numerical instability, or precision loss (CWE-682: Incorrect Calculation) should be reported as regular bugs, not as security vulnerabilities.
+
 Please refer to the following page for our responsible disclosure policy, reward guidelines, and those things that should not be reported:
 
 https://www.facebook.com/whitehat
@@ -46,6 +48,8 @@ Important Note: The trustworthiness of a model is not binary. You must always de
 ### TorchScript models
 
 TorchScript models should be treated the same way as locally executable code from an unknown source. Only run TorchScript models if you trust the provider. Please note, that tools for introspecting TorchScript models (such as `torch.utils.model_dump`) may also execute partial or full code stored in those models, therefore they should be used only if you trust the provider of the binary you are about to load.
+
+PyTorch mobile models (`.ptl` files) are TorchScript models optimized for mobile deployment and should be treated with the same level of caution. Only load PyTorch mobile models from trusted sources.
 
 ### Untrusted inputs during training and prediction
 

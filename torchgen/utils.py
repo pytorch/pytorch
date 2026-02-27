@@ -146,9 +146,8 @@ class FileManager:
         template_fn: str | Path,
         env_callable: Callable[[], str | dict[str, Any]],
     ) -> str:
-        assert not Path(template_fn).is_absolute(), (
-            f"template_fn must be relative: {template_fn}"
-        )
+        if Path(template_fn).is_absolute():
+            raise AssertionError(f"template_fn must be relative: {template_fn}")
         template_path = self.template_dir / template_fn
         env = env_callable()
         if isinstance(env, dict):
@@ -202,9 +201,11 @@ class FileManager:
         env_callable: Callable[[], str | dict[str, Any]],
     ) -> None:
         filename = Path(filename)
-        assert not filename.is_absolute(), f"filename must be relative: {filename}"
+        if filename.is_absolute():
+            raise AssertionError(f"filename must be relative: {filename}")
         file = self.install_dir / filename
-        assert file not in self.files, f"duplicate file write {file}"
+        if file in self.files:
+            raise AssertionError(f"duplicate file write {file}")
         self.files.add(file)
         if not self.dry_run:
             substitute_out = self.substitute_with_template(
@@ -255,7 +256,8 @@ class FileManager:
         sharded_keys: set[str],
     ) -> None:
         file = Path(filename)
-        assert not file.is_absolute(), f"filename must be relative: {filename}"
+        if file.is_absolute():
+            raise AssertionError(f"filename must be relative: {filename}")
         everything: dict[str, Any] = {"shard_id": "Everything"}
         shards: list[dict[str, Any]] = [
             {"shard_id": f"_{i}"} for i in range(num_shards)
@@ -269,16 +271,16 @@ class FileManager:
         for key in sharded_keys:
             for shard in all_shards:
                 if key in shard:
-                    assert isinstance(shard[key], list), (
-                        "sharded keys in base_env must be a list"
-                    )
+                    if not isinstance(shard[key], list):
+                        raise AssertionError("sharded keys in base_env must be a list")
                     shard[key] = shard[key].copy()
                 else:
                     shard[key] = []
 
         def merge_env(into: dict[str, list[str]], from_: dict[str, list[str]]) -> None:
             for k, v in from_.items():
-                assert k in sharded_keys, f"undeclared sharded key {k}"
+                if k not in sharded_keys:
+                    raise AssertionError(f"undeclared sharded key {k}")
                 into[k] += v
 
         if self.dry_run:
@@ -425,9 +427,11 @@ class NamespaceHelper:
     ) -> None:
         # cpp_namespace can be a colon joined string such as torch::lazy
         cpp_namespaces = namespace_str.split("::")
-        assert len(cpp_namespaces) <= max_level, (
-            f"Codegen doesn't support more than {max_level} level(s) of custom namespace. Got {namespace_str}."
-        )
+        if len(cpp_namespaces) > max_level:
+            raise AssertionError(
+                f"Codegen doesn't support more than {max_level} level(s) of "
+                f"custom namespace. Got {namespace_str}."
+            )
         self.cpp_namespace_ = namespace_str
         self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
         self.epilogue_ = "\n".join(

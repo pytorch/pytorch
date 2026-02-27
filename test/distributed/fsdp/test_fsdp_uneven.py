@@ -9,7 +9,7 @@ from torch.nn import Linear
 from torch.optim import SGD
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
@@ -27,7 +27,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 device_type = torch.device(get_devtype())
 
 
-class TestUnevenParamShard(FSDPTest):
+class TestUnevenParamShard(FSDPTestContinuous):
     def _get_ref_results(self, device, model, input, my_lr):
         with torch.no_grad():
             # Compute one iteration local output.

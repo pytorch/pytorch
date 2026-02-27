@@ -1225,7 +1225,7 @@ void qelu_kernel(
         // ELU
         const auto y = x >= 0
           ? x * scale_coef
-          : ((std::exp(x * input_scale_coef) - 1) * alpha_float * scale_coef);
+          : (std::expm1(x * input_scale_coef) * alpha_float * scale_coef);
 
         // quantize
         return at::native::quantize_val<scalar_t>(o_scale, o_zp, y);
@@ -1243,8 +1243,7 @@ void qelu_kernel(
             Vec dx_vec_copy_neg_elu = value * one_vec;
             // calculate the negative part of ELU on the copy
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * input_scale_coef_vec;
-            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.exp();
-            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu - one_vec;
+            dx_vec_copy_neg_elu = dx_vec_copy_neg_elu.expm1();
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * alpha_vec;
             // blend
             value = Vec::blendv(dx_vec_copy_neg_elu, value,

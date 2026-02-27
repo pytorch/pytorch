@@ -21,14 +21,14 @@ void my_cuda_stream_synchronize(void* stream, int32_t device_index) {
   TORCH_ERROR_CODE_CHECK(torch_cuda_stream_synchronize(stream, device_index));
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_get_current_cuda_stream(int device_index) -> int");
   m.def("my_set_current_cuda_stream(int stream, int device_index) -> ()");
   m.def("my_get_cuda_stream_from_pool(bool isHighPriority, int device_index) -> int");
   m.def("my_cuda_stream_synchronize(int stream, int device_index) -> ()");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_get_current_cuda_stream", TORCH_BOX(&my_get_current_cuda_stream));
   m.impl("my_set_current_cuda_stream", TORCH_BOX(&my_set_current_cuda_stream));
   m.impl("my_get_cuda_stream_from_pool", TORCH_BOX(&my_get_cuda_stream_from_pool));

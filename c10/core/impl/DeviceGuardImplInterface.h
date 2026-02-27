@@ -144,6 +144,17 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const = 0;
 
   /**
+   * Returns a backend-specific, opaque native handle associated with the given
+   * stream.
+   *
+   * The returned pointer is owned and managed by PyTorch. Callers must not
+   * modify or free it.
+   */
+  virtual void* getStreamNativeHandle(const Stream) const {
+    TORCH_CHECK(false, "Backend doesn't support getting stream native handle.")
+  }
+
+  /**
    * Destroys the given event.
    */
   virtual void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)

@@ -62,7 +62,8 @@ if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 # Protects against includes accidentally setting the default dtype
-assert torch.get_default_dtype() is torch.float32
+if torch.get_default_dtype() is not torch.float32:
+    raise AssertionError("default dtype should be float32")
 
 def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
     """
@@ -180,6 +181,28 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
+
+    @onlyCUDA
+    @dtypes(torch.cfloat, torch.cdouble)
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_mm_with_mH_args(self, dtype, backend):
+        # Testing mm with mH-transformed arguments.
+        # The root cause of:
+        # https://github.com/pytorch/pytorch/issues/174382
+        val = 3 + 4j
+        x = torch.zeros(2, 3, dtype=dtype, device="cuda")
+        x.diagonal().fill_(val)
+
+        ref_corrcoef = torch.empty(2, 2, dtype=dtype, device="cuda")
+        ref_corrcoef.fill_(-0.5)
+        ref_corrcoef.diagonal().fill_(1.0)
+
+        with blas_library_context(backend):
+            for a in (x, x.mH):
+                norm_squared = (a @ a.mH).sum().item()
+                self.assertEqual(norm_squared, 50 + 0j)
+
+            self.assertEqual(torch.corrcoef(x), ref_corrcoef)
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above

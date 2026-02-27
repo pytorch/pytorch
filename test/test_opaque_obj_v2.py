@@ -18,12 +18,15 @@ from torch._dynamo.testing import (
     InductorAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import counters as dynamo_counters
+from torch._dynamo.utils import counters, counters as dynamo_counters
+from torch._functorch import config as functorch_config
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
     aot_export_module,
 )
+from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
@@ -269,6 +272,37 @@ class NestedValueSize(OpaqueBase):
         return repr_str, all_globals
 
 
+class HoistedString(torch._opaque_base.OpaqueBase):
+    def __init__(self, val):
+        self.val = val
+
+    def __eq__(self, other):
+        return self.val == other.val
+
+    def __hash__(self):
+        return hash(self.val)
+
+    def __fx_repr__(self):
+        return (f"HoistedString('{self.val}')", {"HoistedString": HoistedString})
+
+
+register_opaque_type(HoistedString, typ="value", hoist=True)
+
+
+@torch.library.custom_op("mylib::op_with_string", mutates_args=())
+def op_with_string(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+    if s.val == "double":
+        return x * 2
+    elif s.val == "square":
+        return x**2
+    raise AssertionError("expected double or square")
+
+
+@op_with_string.register_fake
+def _(x, s):
+    return torch.empty_like(x)
+
+
 register_opaque_type(OpaqueQueue, typ="reference")
 register_opaque_type(
     RNGState,
@@ -328,7 +362,10 @@ class TensorWithCounter(torch.Tensor):
         if outer_stride is None:
             outer_stride = a.stride()
 
-        assert a.device == b.device and a.dtype == b.dtype
+        if not (a.device == b.device and a.dtype == b.dtype):
+            raise AssertionError(
+                f"device/dtype mismatch: {a.device}/{a.dtype} vs {b.device}/{b.dtype}"
+            )
         kwargs = {}
         kwargs["strides"] = outer_stride
         kwargs["storage_offset"] = a.storage_offset()
@@ -414,7 +451,8 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::queue_push", "CompositeExplicitAutograd", lib=self.lib
         )
         def push_impl(queue: OpaqueQueue, b: torch.Tensor) -> None:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             queue.push(b)
 
         @torch.library.register_fake("_TestOpaqueObject::queue_push", lib=self.lib)
@@ -430,7 +468,8 @@ class TestOpaqueObject(TestCase):
         )
 
         def pop_impl(queue: OpaqueQueue) -> torch.Tensor:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             return queue.pop()
 
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
@@ -453,7 +492,8 @@ class TestOpaqueObject(TestCase):
             mutates_args=[],
         )
         def size_impl(queue: OpaqueQueue) -> int:
-            assert isinstance(queue, OpaqueQueue)
+            if not isinstance(queue, OpaqueQueue):
+                raise AssertionError(f"expected OpaqueQueue, got {type(queue)}")
             return queue.size()
 
         @size_impl.register_fake
@@ -474,7 +514,8 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::noisy_inject", "CompositeExplicitAutograd", lib=self.lib
         )
         def noisy_inject(x: torch.Tensor, rng_state: RNGState) -> torch.Tensor:
-            assert isinstance(rng_state, RNGState)
+            if not isinstance(rng_state, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(rng_state)}")
             out = x.clone()
             for i in range(out.numel()):
                 out.view(-1)[i] += rng_state.rng.random()
@@ -482,8 +523,10 @@ class TestOpaqueObject(TestCase):
 
         @torch.library.register_fake("_TestOpaqueObject::noisy_inject", lib=self.lib)
         def noisy_inject_fake(x: torch.Tensor, obj: RNGState) -> torch.Tensor:
-            assert isinstance(obj, RNGState)
-            assert obj.seed >= 0
+            if not isinstance(obj, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(obj)}")
+            if obj.seed < 0:
+                raise AssertionError(f"seed must be >= 0, got {obj.seed}")
             return torch.empty_like(x)
 
         @torch.library.custom_op(
@@ -491,7 +534,8 @@ class TestOpaqueObject(TestCase):
             mutates_args=["prev"],
         )
         def increment_counter_impl(c: Counter, prev: torch.Tensor) -> torch.Tensor:
-            assert isinstance(c, Counter)
+            if not isinstance(c, Counter):
+                raise AssertionError(f"expected Counter, got {type(c)}")
             prev.copy_(c.counter)
             c.increment_counter()
             return c.counter
@@ -515,7 +559,8 @@ class TestOpaqueObject(TestCase):
         def process_with_config_impl(
             x: torch.Tensor, config: ValueConfig
         ) -> torch.Tensor:
-            assert isinstance(config, ValueConfig)
+            if not isinstance(config, ValueConfig):
+                raise AssertionError(f"expected ValueConfig, got {type(config)}")
             if config.mode == "square":
                 return x * x
             elif config.mode == "double":
@@ -546,7 +591,8 @@ class TestOpaqueObject(TestCase):
         def process_nested_config_impl(
             x: torch.Tensor, config: NestedValueSize
         ) -> torch.Tensor:
-            assert isinstance(config, NestedValueSize)
+            if not isinstance(config, NestedValueSize):
+                raise AssertionError(f"expected NestedValueSize, got {type(config)}")
             if config.config.mode == "square":
                 return x * x
             elif config.config.mode == "double":
@@ -957,7 +1003,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     def test_compile1(self):
         def foo(rng_state, x):
-            assert isinstance(rng_state, RNGState)
+            if not isinstance(rng_state, RNGState):
+                raise AssertionError(f"expected RNGState, got {type(rng_state)}")
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
             x = x * x
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
@@ -1293,7 +1340,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             "_TestOpaqueObject::module_mul", "CompositeExplicitAutograd", lib=self.lib
         )
         def module_mul_impl(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
-            assert isinstance(m, AddModule)
+            if not isinstance(m, AddModule):
+                raise AssertionError(f"expected AddModule, got {type(m)}")
             return m(a, b)
 
         @torch.library.register_fake("_TestOpaqueObject::module_mul", lib=self.lib)
@@ -1940,6 +1988,68 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
     return (apply_color_scale,)""",  # noqa: B950
         )
 
+    def test_hoist_basic(self):
+        def f(x):
+            return op_with_string(x, HoistedString("double"))
+
+        x = torch.tensor(3.0)
+
+        # backend = "eager"
+        backend = EagerAndRecordGraphs()
+        _ = torch.compile(f, fullgraph=True, backend=backend)(x)
+        graph = backend.graphs[0]
+        self.assertNotIn("double", str(graph))
+
+        # backend = "aot_eager"
+        backend = AotEagerAndRecordGraphs()
+        _ = torch.compile(f, fullgraph=True, backend=backend)(x)
+        graph = backend.graphs[0]
+        self.assertNotIn("double", str(graph))
+
+        # backend = "inductor"
+        y = torch.compile(f, fullgraph=True)(x)
+        self.assertEqual(y, 2 * x)
+
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @inductor_config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
+        }
+    )
+    def test_hoist_cache_hits(self):
+        torch._dynamo.reset()
+        AOTAutogradCache.clear()
+        torch._inductor.codecache.FxGraphCache.clear()
+        counters.clear()
+
+        # Because HoistedString should not be in the graph, the following
+        # two functions should share AOTAutogradCache and FXGraphCache entries
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return op_with_string(x, HoistedString("double"))
+
+        @torch.compile(fullgraph=True)
+        def g(x):
+            return op_with_string(x, HoistedString("square"))
+
+        x = torch.tensor(3.0)
+
+        f(x)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+        g(x)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
     def test_opaque_class_literal_attribute_inlined(self):
         """Test that literal attributes on opaque classes are inlined without source tracking.
 
@@ -2137,6 +2247,43 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(ref.grad, res.grad)
 
+    def test_value_type_subclass(self):
+        """Subclasses of registered opaque types should be recognized as opaque."""
+
+        class ExtendedConfig(ValueConfig):
+            def __init__(self, mode: str, scale: float):
+                super().__init__(mode)
+                self.scale = scale
+
+            def __eq__(self, other):
+                return (
+                    isinstance(other, ExtendedConfig)
+                    and self.mode == other.mode
+                    and self.scale == other.scale
+                )
+
+            def __hash__(self):
+                return hash((self.mode, self.scale))
+
+            def __fx_repr__(self):
+                return (
+                    f"ExtendedConfig(mode={self.mode!r}, scale={self.scale!r})",
+                    {"ExtendedConfig": ExtendedConfig},
+                )
+
+        self.assertTrue(is_opaque_type(ExtendedConfig))
+        self.assertTrue(is_opaque_value_type(ExtendedConfig))
+
+        cfg = ExtendedConfig("square", 2.0)
+
+        def foo(x):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(foo, fullgraph=True, backend="aot_eager")
+        res = opt_f(x)
+        self.assertEqual(res, foo(x))
+
     def test_opaque_object_with_inductor_backend(self):
         """Test that opaque objects work correctly with inductor's get_attr handling."""
 
@@ -2161,6 +2308,34 @@ class GraphModule(torch.nn.Module):
 
         expected = x * float(Color.RED.value)
         self.assertTrue(torch.allclose(result, expected))
+
+    def test_captured_opaque_object_export(self):
+        """Test that opaque objects captured from closures work with torch.export.
+
+        When an opaque object is captured via a module hook closure, it gets a
+        CellContentsSource instead of GetItemSource. The export path needs to
+        handle this gracefully.
+        """
+        rng = RNGState(42)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                torch.ops._TestOpaqueObject.noisy_inject(x, rng)
+                return self.linear(x)
+
+        ep = torch.export.export(Model(), (torch.randn(4, 4),), strict=True)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear,)""",  # noqa: B950
+        )
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

@@ -4,11 +4,12 @@ import contextlib
 import dataclasses
 import itertools
 import logging
+import math
 import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast, NamedTuple
+from typing import cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -40,6 +41,12 @@ logger = logging.getLogger(__name__)
 # When False, prefers the greedy algorithm for faster planning. Uses the graph-based algorithm
 # only when necessary to support strided-shard redistribution
 _FORCE_MIN_COST_REDISTRIBUTION_PLAN: bool | None = None
+
+# Global kill switch to disable the transform optimization pass in
+# _optimize_transform_infos.  When True, the optimization that merges
+# consecutive same-type collectives into flattened operations is skipped,
+# and the unmodified transform_infos list is returned as-is.
+_DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION: bool = False
 
 
 @contextlib.contextmanager
@@ -103,7 +110,37 @@ def use_min_cost_redistribution_plan(enabled: bool = True):
         _FORCE_MIN_COST_REDISTRIBUTION_PLAN = old_value
 
 
-class _TransformInfo(NamedTuple):
+@contextlib.contextmanager
+def disable_redistribute_transform_optimization(disabled: bool = True):
+    """
+    Context manager to disable the transform optimization pass that merges
+    consecutive same-type collectives into single flattened operations.
+
+    When the optimization is disabled, ``_optimize_transform_infos`` becomes a
+    no-op and returns the original list of ``_TransformInfo`` objects unchanged.
+    This is useful for debugging or isolating issues related to the flattened
+    collective merging logic.
+
+    The flag can also be set directly::
+
+        torch.distributed.tensor._redistribute._DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION = True
+
+    Args:
+        disabled (bool): If True (default), disables the optimization.
+                         If False, explicitly enables it (the normal default).
+    """
+    global _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION
+
+    old_value = _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION
+    _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION = disabled
+    try:
+        yield
+    finally:
+        _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION = old_value
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _TransformInfo:
     mesh_dim: int
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
@@ -114,6 +151,442 @@ class _TransformInfo(NamedTuple):
         assert self.src_dst_placements[0] != self.src_dst_placements[1], (
             "TransformInfo should only be created if it is an op with some effect, not a no-op"
         )
+
+    def _comm_type_key(self) -> str | None:
+        """
+        Return a key for grouping transforms by communication type.
+
+        Returns None for local ops (no communication needed), or a string
+        that identifies the collective type for potential grouping/merging.
+        """
+        src, dst = self.src_dst_placements
+        if src.is_partial() and dst.is_replicate():
+            return "all_reduce"
+        elif src.is_partial() and dst.is_shard():
+            return "reduce_scatter"
+        elif src.is_shard() and dst.is_replicate():
+            return "all_gather"
+        elif src.is_shard() and dst.is_shard():
+            return "all_to_all"
+        else:
+            # Local ops (Replicate->Shard, Replicate->Partial, noop, etc.)
+            return None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _FlattenedTransformInfo(_TransformInfo):
+    """
+    Represents a flattened transform that combines multiple mesh dimensions
+    into a single collective operation using a flattened DeviceMesh.
+
+    Note: inherits the fields from _TransformInfo. Gets an __init__ with parent fields, followed by child fields,
+    and runs parent validation (post_init)
+    """
+
+    # The flattened DeviceMesh to use for the collective operation
+    mesh: DeviceMesh
+    # The mesh dimensions from the original mesh that are being flattened (for debugging)
+    original_mesh_dims: tuple[int, ...]
+    # Scale factor for merged sum/avg partials (product of avg mesh dim sizes)
+    # When merging sum/avg partials, we use sum for the collective and divide by this afterward
+    avg_scale: int | None = None
+
+    def __post_init__(self) -> None:
+        _TransformInfo.__post_init__(self)
+        if self.avg_scale is not None:
+            assert self.avg_scale > 1, (
+                f"avg_scale must be > 1 if set, got {self.avg_scale}"
+            )
+
+
+def _update_shard_order_and_placements(
+    transform_info: _TransformInfo,
+    current_placements: list[Placement],
+    shard_order_dict: dict[int, list[int]],
+) -> None:
+    """
+    Update current_placements and shard_order_dict in-place to reflect the
+    effect of a single transform step.
+    """
+    src_placement, dst_placement = transform_info.src_dst_placements
+
+    if isinstance(transform_info, _FlattenedTransformInfo):
+        mesh_dims = transform_info.original_mesh_dims
+    else:
+        mesh_dims = (transform_info.mesh_dim,)
+
+    if isinstance(src_placement, Shard | _StridedShard):
+        src_dim = src_placement.dim  # type: ignore[attr-defined]
+        removed_dim = set()
+        for _ in mesh_dims:
+            if len(shard_order_dict[src_dim]) == 0:
+                raise ValueError(
+                    "Invalid shard_order update. No entries left to pop for src_dim "
+                    f"{src_dim}. transform_info={transform_info}, "
+                    f"current_placements={current_placements}, "
+                    f"shard_order={shard_order_dict}"
+                )
+            removed_dim.add(shard_order_dict[src_dim].pop())
+
+        if not set(mesh_dims) == removed_dim:
+            raise ValueError(
+                "Mismatch between expected and removed mesh dims during shard_order "
+                "update. Expected to remove "
+                f"{set(mesh_dims)}, but removed {removed_dim}. "
+                f"transform_info={transform_info}, "
+                f"current_placements={current_placements}, "
+                f"shard_order={shard_order_dict}"
+            )
+    if isinstance(dst_placement, Shard | _StridedShard):
+        dst_dim = dst_placement.dim  # type: ignore[attr-defined]
+        if dst_dim not in shard_order_dict:
+            shard_order_dict[dst_dim] = []
+        for mesh_dim in mesh_dims:
+            shard_order_dict[dst_dim].append(mesh_dim)
+
+    for mesh_dim in mesh_dims:
+        current_placements[mesh_dim] = dst_placement
+
+
+def _get_flattened_mesh_by_layout(
+    mesh: DeviceMesh, mesh_dims: tuple[int, ...]
+) -> DeviceMesh | None:
+    """
+    Query for an explicitly created flattened mesh using layout comparison.
+
+    Args:
+        mesh: The DeviceMesh to query
+        mesh_dims: Tuple of mesh dimension indices to look for
+
+    Returns:
+        The flattened DeviceMesh if it was explicitly created, None otherwise.
+    """
+    root_mesh = mesh._get_root_mesh()
+    mesh_dim_names = mesh.mesh_dim_names
+
+    if mesh_dim_names is None:
+        return None
+
+    # Convert mesh dim indices to dim names
+    dim_names = tuple(mesh_dim_names[i] for i in mesh_dims)
+
+    # Compute expected layout WITHOUT creating a submesh (avoids tracing issues)
+    # _get_slice_mesh_layout does pure layout math, no tensor operations
+    sliced_layout = mesh._get_slice_mesh_layout(dim_names)
+    expected_layout = sliced_layout.coalesce()
+    if len(expected_layout) > 1:
+        expected_layout = expected_layout.nest()
+
+    # Search existing flattened meshes by comparing layouts
+    for flattened_mesh in root_mesh._flatten_mapping.values():
+        if flattened_mesh._layout == expected_layout:
+            return flattened_mesh
+
+    return None
+
+
+# Track (mesh_hash, mesh_dims, reason) we've already warned about to avoid repeated warnings
+_warned_flatten_issues: set[tuple[int, tuple[int, ...], str]] = set()
+
+
+def _warn_flatten_optimization_not_possible(
+    device_mesh: DeviceMesh,
+    mesh_dims: tuple[int, ...],
+    src_placements: tuple[Placement, ...],
+    dst_placements: tuple[Placement, ...],
+    num_ops: int,
+    comm_type: str,
+    reason: str,
+) -> None:
+    """
+    Warn once per (mesh, dims, reason) about inability to flatten operations.
+
+    Args:
+        device_mesh: The device mesh being used
+        mesh_dims: Tuple of mesh dimensions that could not be flattened
+        src_placements: Source placements for the redistribution
+        dst_placements: Target placements for the redistribution
+        num_ops: Number of sequential operations that will be performed
+        comm_type: Type of collective operation (e.g., "reduce_scatter")
+        reason: Either "no_flattened_mesh" or "uneven_tensor_shape"
+    """
+    cache_key = (hash(device_mesh), mesh_dims, reason)
+    if cache_key in _warned_flatten_issues:
+        return
+    _warned_flatten_issues.add(cache_key)
+
+    mesh_dim_names = device_mesh.mesh_dim_names
+    if mesh_dim_names is not None:
+        dim_names = [mesh_dim_names[d] for d in mesh_dims]
+        dims_str = ", ".join(f'"{name}"' for name in dim_names)
+    else:
+        dims_str = f"dims {', '.join(str(d) for d in mesh_dims)} of {device_mesh}"
+
+    common_warning = (
+        "While redistributing from %s to %s, %d sequential %s "
+        "operations will be performed. This is suboptimal: "
+        "multiple collective operations have higher latency "
+        "(separate kernel launches and synchronization points) "
+        "and may give inconsistent results between ranks due to different reduction orders. %s"
+    )
+
+    if reason == "no_flattened_mesh":
+        reason_msg = f"To optimize, flatten mesh dimensions [{dims_str}] so DTensor can use a single operation instead."
+    elif reason == "uneven_tensor_shape":
+        reason_msg = (
+            " Unfortunately, because the tensor dimension is not evenly divisible by the product of "
+            "the mesh dim sizes that would need to be flattened for the optimization to work, it can not be optimized.",
+        )
+    elif reason == "non_ascending_mesh_dims":
+        reason_msg = (
+            f"it is not possible to merge non-ascending order {comm_type} operations."
+        )
+    else:
+        raise AssertionError(f"Unexpected reason: {reason}")
+
+    logger.warning(
+        common_warning, src_placements, dst_placements, num_ops, comm_type, reason_msg
+    )
+
+
+def _optimize_transform_infos(
+    transform_infos: list[_TransformInfo],
+    device_mesh: DeviceMesh,
+    src_placements: tuple[Placement, ...],
+    dst_placements: tuple[Placement, ...],
+) -> list[_TransformInfo | _FlattenedTransformInfo]:
+    """
+    Optimize transform infos by merging consecutive same-type collectives into
+    a single flattened operation when a matching flattened DeviceMesh exists.
+
+    Merging requirements:
+    - Operations must be consecutive in the transform list (no reordering).
+      Notably, redistributing from P, P, P -> R, S, R is not optimized here and cannot be optimized due to
+      optimization needing to fuse non-contiguous reductions, leaving this pattern vulnerable to numerics issues and
+      suboptimal perf
+    - Operations must have the same comm type (e.g., all allgather or all reduce_scatter)
+    - Operations must have identical src_dst_placements (e.g., can't merge
+      Partial->Shard(0) with Partial->Shard(1))
+    - A flattened mesh covering the relevant dimensions must exist
+    - For reduce_scatter, tensor dim must be evenly divisible by flattened mesh size
+
+    For nested sharding, the merged operation uses the logical_shape from the
+    outermost mesh dimension (smallest mesh_dim index) which represents the
+    global tensor shape needed for correct padding/unpadding.
+
+    TODO:
+    - all_to_all operations are excluded from merging, but it may be possible to merge them in some cases.
+
+    """
+    if len(transform_infos) < 2:
+        return transform_infos
+
+    if _DISABLE_REDISTRIBUTE_TRANSFORM_OPTIMIZATION:
+        return transform_infos
+
+    # Comm types that are safe to merge (all_to_all excluded for now)
+    MERGEABLE_COMM_TYPES = frozenset({"all_gather", "all_reduce", "reduce_scatter"})
+
+    def is_mergeable(key: str | None) -> bool:
+        """Check if a comm type key represents a mergeable operation."""
+        return key in MERGEABLE_COMM_TYPES
+
+    def are_placements_mergeable(
+        p1: tuple[Placement, Placement], p2: tuple[Placement, Placement]
+    ) -> bool:
+        """
+        Check if two src_dst_placements can be merged.
+
+        Allows merging of Partial("sum") and Partial("avg") since they can be
+        combined: perform sum reduction, then scale by avg mesh dims afterward.
+        """
+        if p1 == p2:
+            return True
+
+        src1, dst1 = p1
+        src2, dst2 = p2
+
+        # Destinations must match exactly
+        if dst1 != dst2:
+            return False
+
+        # Both sources must be partial
+        if not (src1.is_partial() and src2.is_partial()):
+            return False
+
+        # Only sum and avg can be merged (both use sum reduction, avg just scales)
+        partial1 = cast(Partial, src1)
+        partial2 = cast(Partial, src2)
+        mergeable_reduce_ops = {"sum", "avg"}
+        return (
+            partial1.reduce_op in mergeable_reduce_ops
+            and partial2.reduce_op in mergeable_reduce_ops
+        )
+
+    def try_create_flattened(
+        infos: list[_TransformInfo],
+    ) -> tuple[_FlattenedTransformInfo | None, str | None]:
+        """
+        Try to create a flattened transform from 2+ same-type transforms.
+
+        Returns (result, failure_reason) where:
+        - result is the FlattenedTransformInfo if successful, None otherwise
+        - failure_reason is None if successful, or one of:
+          - "too_few_transforms": Less than 2 transforms provided
+          - "no_flattened_mesh": No flattened mesh exists for the required dimensions
+          - "uneven_tensor_shape": For reduce_scatter, tensor dim not evenly divisible
+        """
+        if len(infos) < 2:
+            return None, "too_few_transforms"
+
+        # All transforms must have mergeable src_dst_placements
+        # (e.g., can't merge Partial->Shard(0) with Partial->Shard(1))
+        first_placements = infos[0].src_dst_placements
+        comm_type = infos[0]._comm_type_key()
+        assert all(
+            are_placements_mergeable(info.src_dst_placements, first_placements)
+            for info in infos
+        )
+        mesh_dims = tuple(info.mesh_dim for info in infos)
+        sorted_mesh_dims = tuple(sorted(mesh_dims))
+
+        # For reduce_scatter and all_gather, order matters for correctness.
+        # Flattened meshes only exist for ascending dim order.
+        if comm_type == "reduce_scatter":
+            # For reduce_scatter: the transform order determines the operation sequence.
+            # If transforms are in order (1, 0) but flattened mesh is (0, 1), we can't flatten.
+            if mesh_dims != sorted_mesh_dims:
+                return None, "non_ascending_mesh_dims"
+        elif comm_type == "all_gather":
+            # For all_gather: transforms come from planner in innermost-to-outermost order
+            # (descending mesh dims for ascending shard order). If transforms are not in
+            # descending order, the shard order isn't ascending and we can't flatten.
+            if mesh_dims != sorted_mesh_dims[::-1]:
+                return None, "non_ascending_mesh_dims"
+        # Use sorted dims for mesh lookup (required by DeviceMesh API)
+        flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, sorted_mesh_dims)
+        if flattened_mesh is None:
+            return None, "no_flattened_mesh"
+
+        # For nested sharding, each transform has a different logical_shape.
+        # We need the outermost transform's logical_shape, which represents the
+        # tensor shape before any of the transforms in this group are applied.
+        # The outermost transform has the largest logical_shape on the affected
+        # tensor dimension (least divided by prior shards).
+        src, dst = first_placements
+        if comm_type == "all_gather":
+            # S->R (all_gather): affected dim is the source shard dim
+            affected_dim = cast(Shard, src).dim
+            outermost_info = max(infos, key=lambda x: x.logical_shape[affected_dim])
+        elif comm_type == "reduce_scatter":
+            affected_dim = cast(Shard, dst).dim
+            outermost_info = max(infos, key=lambda x: x.logical_shape[affected_dim])
+            tensor_dim_size = outermost_info.logical_shape[affected_dim]
+            effective_shard_mesh_size = math.prod(
+                device_mesh.size(info.mesh_dim) for info in infos
+            )
+            # For reduce_scatter (Partial -> Shard), we cannot flatten if the tensor
+            # dimension is not evenly divisible by the flattened mesh size.
+            # The effective size is the product of mesh sizes for dims being transformed
+            # (not all dims with matching placement - intervening shards are already
+            # accounted for in logical_shape).
+            if tensor_dim_size % effective_shard_mesh_size != 0:
+                return None, "uneven_tensor_shape"
+        elif comm_type == "all_reduce":
+            # no shape change, any info works
+            outermost_info = infos[0]
+        else:
+            raise NotImplementedError(
+                f"Unsupported comm type for try_create_flattened: {comm_type}"
+            )
+
+        # For mixed sum/avg partials: use sum for the collective, compute avg scale
+        avg_scale = None
+        merged_src = src
+        if src.is_partial():
+            scale = math.prod(
+                device_mesh.size(info.mesh_dim)
+                for info in infos
+                if cast(Partial, info.src_dst_placements[0]).reduce_op == "avg"
+            )
+            if scale > 1:
+                avg_scale = scale
+                merged_src = Partial("sum")
+
+        merged_placements = (merged_src, dst)
+
+        return (
+            _FlattenedTransformInfo(
+                mesh_dim=0,
+                src_dst_placements=merged_placements,
+                logical_shape=outermost_info.logical_shape,
+                mesh=flattened_mesh,
+                original_mesh_dims=sorted_mesh_dims,
+                avg_scale=avg_scale,
+            ),
+            None,
+        )
+
+    # Merge consecutive same-type operations (without reordering)
+    result: list[_TransformInfo | _FlattenedTransformInfo] = []
+    i = 0
+
+    while i < len(transform_infos):
+        info = transform_infos[i]
+        current_key = info._comm_type_key()
+
+        # Only try to merge if this is a mergeable comm type
+        if not is_mergeable(current_key):
+            result.append(info)
+            i += 1
+            continue
+
+        # Collect consecutive transforms with mergeable src_dst_placements
+        # (not just same comm type - e.g., Partial->Shard(0) vs Partial->Shard(1) can't merge)
+        # Note: sum/avg partials can be merged since they use the same reduction
+        current_placements = info.src_dst_placements
+        group: list[_TransformInfo] = [info]
+        j = i + 1
+        while (
+            j < len(transform_infos)
+            and is_mergeable(transform_infos[j]._comm_type_key())
+            and are_placements_mergeable(
+                transform_infos[j].src_dst_placements, current_placements
+            )
+        ):
+            group.append(transform_infos[j])
+            j += 1
+
+        # Try to flatten the group
+        flattened, failure_reason = try_create_flattened(group)
+        if flattened is not None:
+            result.append(flattened)
+        else:
+            # Can't flatten - add individually and warn once if applicable
+            result.extend(group)
+            # Warn for reasons that indicate a real optimization opportunity was missed
+            if failure_reason in (
+                "no_flattened_mesh",
+                "uneven_tensor_shape",
+                "non_ascending_mesh_dims",
+            ):
+                mesh_dims = tuple(sorted(g.mesh_dim for g in group))
+                _warn_flatten_optimization_not_possible(
+                    device_mesh,
+                    mesh_dims,
+                    src_placements,
+                    dst_placements,
+                    len(group),
+                    current_key,  # type: ignore[arg-type]
+                    failure_reason,
+                )
+
+        i = j
+    logger.debug(
+        "_optimize_transform_infos original: %s, optimized: %s", transform_infos, result
+    )
+
+    return result
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -242,6 +715,7 @@ class DTensorRedistributePlanner:
         transform_infos: Sequence[_TransformInfo],
         src_placement: tuple[Placement, ...],
         src_shard_order: ShardOrder | None = None,
+        use_strided_shard_as_shard_order: bool = False,
     ) -> str:
         """
         Generate a string representation of the sequence of state transitions
@@ -255,11 +729,20 @@ class DTensorRedistributePlanner:
             src_shard_order: (Optional) The initial ShardOrder representing
                 the mapping of tensor dimensions to mesh dimensions. If None,
                 the default shard order is computed from src_placement and mesh.
+            use_strided_shard_as_shard_order: If True, normalize _StridedShard
+                placements into regular Shard placements with an explicit
+                shard_order before stringifying.
 
         Returns:
             A string showing the sequence of DistState transitions, separated by '->'.
         """
         assert len(src_placement) == mesh.ndim
+        if use_strided_shard_as_shard_order:
+            src_placement, src_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    src_placement, mesh, use_strided_shard_as_shard_order=True
+                )
+            )
         if src_shard_order is None:
             src_shard_order = DTensorSpec.compute_default_shard_order(src_placement)
         cur_placement = list(src_placement)
@@ -272,26 +755,30 @@ class DTensorRedistributePlanner:
         state_list = [
             cur_state,
         ]
+        # Track whether each transition is flattened (for visualization)
+        is_flattened_list: list[bool] = []
+
         for transform_info in transform_infos:
-            src_dim_placement, dst_dim_placement = transform_info.src_dst_placements
-            if src_dim_placement.is_shard():
-                src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
-                assert (
-                    src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
-                )
-                shard_order_dict[src_dim].pop()
-            if dst_dim_placement.is_shard():
-                dst_dim = dst_dim_placement.dim  # type: ignore[attr-defined]
-                if dst_dim not in shard_order_dict:
-                    shard_order_dict[dst_dim] = []
-                shard_order_dict[dst_dim].append(transform_info.mesh_dim)
-            cur_placement[transform_info.mesh_dim] = dst_dim_placement
+            is_flattened = isinstance(transform_info, _FlattenedTransformInfo)
+
+            _update_shard_order_and_placements(
+                transform_info, cur_placement, shard_order_dict
+            )
+
             new_state = DTensorRedistributePlanner.DistState(
                 tuple(cur_placement),
                 DTensorRedistributePlanner._dict_to_ShardOrder(shard_order_dict),
             )
             state_list.append(new_state)
-        return "->".join([str(s) for s in state_list])
+            is_flattened_list.append(is_flattened)
+
+        # Build the trace string using '-->' for flattened transforms, '->' for regular
+        trace_parts = [str(state_list[0])]
+        for i, is_flattened in enumerate(is_flattened_list):
+            separator = "-->" if is_flattened else "->"
+            trace_parts.append(separator)
+            trace_parts.append(str(state_list[i + 1]))
+        return "".join(trace_parts)
 
     def __init__(
         self,
@@ -311,6 +798,7 @@ class DTensorRedistributePlanner:
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
         self.strided_shard_placements_in_target: set[_StridedShard] = set()
+        self.partial_reduce_ops_in_target: set[str] = set()
         self.setup_cost_callbacks()
 
     def setup_cost_callbacks(
@@ -330,6 +818,7 @@ class DTensorRedistributePlanner:
                 placements=state.placements,
                 tensor_meta=self.dtensor_meta,
                 shard_order=state.tensor_dim_to_mesh_dim,
+                use_strided_shard_as_shard_order=False,
             )
 
         def cost_function(src_state, dst_state):
@@ -534,19 +1023,30 @@ class DTensorRedistributePlanner:
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
-        # handle case 6: Replicate() -> Partial(), default to partial(sum)
+        # handle case 6: Replicate() -> Partial()
+        # Generate transitions only for reduce_ops that are present in the src/dst
+        # placements for this redistribution, avoiding unnecessary graph expansion.
         for mesh_dim, placement in enumerate(placements):
             if not isinstance(placement, Replicate):
                 continue
-            new_placements = list(placements)
-            new_placements[mesh_dim] = Partial()
-            dist_state = self.DistState(
-                self._to_tuple(new_placements), tensor_mesh_dim_tuple
-            )
-            all_next_state[dist_state] = self.cost_function(
-                cur_dist_state,
-                dist_state,
-            )
+            for reduce_op in self.partial_reduce_ops_in_target:
+                new_placements = list(placements)
+                new_placements[mesh_dim] = Partial(reduce_op)
+
+                # Skip if this would create mixed partial types (except sum+avg which commute)
+                partial_reduce_ops = {
+                    p.reduce_op for p in new_placements if isinstance(p, Partial)
+                }
+                if len(partial_reduce_ops) > 1 and partial_reduce_ops != {"sum", "avg"}:
+                    continue
+
+                dist_state = self.DistState(
+                    self._to_tuple(new_placements), tensor_mesh_dim_tuple
+                )
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
 
         # Additional cases handling for _StridedShard
 
@@ -698,43 +1198,28 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        # In case _StridedShard exists in placements, we let _StridedShard have
-        # higher priority to express shard_order.
         # TODO(zpcore): Temporary workaround for backward compatibility where
         # _StridedShard was used to encode device shard order. We should migrate
         # to explicit `shard_order` instead.
         def _try_normalize_spec(
             spec: DTensorSpec,
-        ) -> tuple[tuple[Placement, ...], ShardOrder | None]:
-            # If any _StridedShard is present, try normalize placements into
-            # explicit shard_order.
-            if any(isinstance(p, _StridedShard) for p in spec.placements):
+        ) -> tuple[tuple[Placement, ...], ShardOrder]:
+            if spec.use_strided_shard_as_shard_order:
                 new_placements, shard_order = (
                     DTensorSpec._normalize_placements_into_shard_order(
-                        spec.placements, spec.mesh
+                        spec.placements,
+                        spec.mesh,
+                        use_strided_shard_as_shard_order=True,
                     )
                 )
-            else:
-                new_placements, shard_order = spec.placements, spec.shard_order
-
-            if shard_order is not None:
                 return new_placements, shard_order
-
-            # Fallback: compute default shard_order (treat _StridedShard as
-            # normal shard for order).
-            shard_order = DTensorSpec.compute_default_shard_order(
-                spec.placements, treat_strided_shard_as_shard=True
-            )
-            return spec.placements, shard_order
+            else:
+                if spec.shard_order is None:
+                    raise ValueError(f"Missing shard_order field in {spec}")
+                return spec.placements, spec.shard_order
 
         src_placements, src_shard_order = _try_normalize_spec(src_spec)
         dst_placements, dst_shard_order = _try_normalize_spec(dst_spec)
-
-        if src_shard_order is None or dst_shard_order is None:
-            raise ValueError(
-                f"Cannot compute redistribution plan from {src_spec} to {dst_spec}: "
-                "failed to derive a valid shard_order"
-            )
 
         # In case _StridedShard still exists in placements, collect possible
         # split_factor values in the target placements. Need those values to
@@ -742,6 +1227,13 @@ class DTensorRedistributePlanner:
         for placement in dst_placements:
             if isinstance(placement, _StridedShard):
                 self.strided_shard_placements_in_target.add(placement)
+
+        # Collect Partial reduce ops from src and dst placements. These are used
+        # to generate R->P transitions only for reduce ops that are actually
+        # present in the redistribution, avoiding unnecessary graph expansion.
+        for placement in itertools.chain(src_placements, dst_placements):
+            if isinstance(placement, Partial):
+                self.partial_reduce_ops_in_target.add(placement.reduce_op)
 
         src_state = self.DistState(src_placements, src_shard_order)
         dst_state = self.DistState(dst_placements, dst_shard_order)
@@ -958,6 +1450,8 @@ def redistribute_local_tensor(
     *,
     async_op: bool = False,
     use_graph_based_transform: bool | None = None,
+    # True if user explicitly called DTensor.redistribute()
+    is_explicit: bool = False,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -968,6 +1462,11 @@ def redistribute_local_tensor(
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
+
+    if current_spec.use_strided_shard_as_shard_order is None:
+        raise ValueError(
+            "use_strided_shard_as_shard_order should be initialized in DTensorSpec.__post_init__()"
+        )
 
     # We do not see a valid use case for mixing different partial types in the same DTensor.
     # in principle it could be supported, but since nonlinear reductions (e.g. max) exist, relative ordering
@@ -992,7 +1491,16 @@ def redistribute_local_tensor(
             current_spec, target_spec, use_graph_based_transform
         )
 
+    # Optimize by grouping same-type collectives into flattened operations
+    optimized_transform_infos = _optimize_transform_infos(
+        transform_infos,
+        device_mesh,
+        current_spec.placements,
+        target_spec.placements,
+    )
+
     debug_mode = get_active_debug_mode()
+
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
             local_tensor,
@@ -1000,20 +1508,27 @@ def redistribute_local_tensor(
             target_spec.placements,
             DTensorRedistributePlanner.stringify_transform_infos(
                 device_mesh,
-                transform_infos,
+                optimized_transform_infos,
                 current_spec.placements,
                 current_spec.shard_order,
+                current_spec.use_strided_shard_as_shard_order,
             ),
+            is_explicit=is_explicit,
         )
         if debug_mode is not None
         else contextlib.nullcontext()
     )
 
     with redistribute_context:
-        for transform_info in transform_infos:
+        for transform_info in optimized_transform_infos:
+            # Determine which mesh to use: flattened transforms have their own mesh
+            if isinstance(transform_info, _FlattenedTransformInfo):
+                mesh_to_use = transform_info.mesh
+            else:
+                mesh_to_use = device_mesh
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
-            num_chunks = device_mesh.size(mesh_dim=i)
+            num_chunks = mesh_to_use.size(mesh_dim=i)
 
             if current == target:
                 # short cut, just use the original local tensor
@@ -1031,12 +1546,18 @@ def redistribute_local_tensor(
                 if current.is_partial():
                     partial_spec = cast(Partial, current)
                     new_local_tensor = partial_spec._reduce_value(
-                        local_tensor, device_mesh, i
+                        local_tensor, mesh_to_use, i
                     )
+                    # For merged sum/avg partials, apply avg scaling
+                    if (
+                        isinstance(transform_info, _FlattenedTransformInfo)
+                        and transform_info.avg_scale is not None
+                    ):
+                        new_local_tensor = new_local_tensor / transform_info.avg_scale
                 elif current.is_shard():
                     current_placement = cast(Shard, current)
                     new_local_tensor = current_placement._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                        local_tensor, mesh_to_use, i, transform_info.logical_shape
                     )
                 elif isinstance(current, _StridedShard):
                     new_local_tensor = current._to_replicate_tensor(
@@ -1053,19 +1574,25 @@ def redistribute_local_tensor(
                 if current.is_partial():
                     partial_spec = cast(Partial, current)
                     new_local_tensor = partial_spec._reduce_shard_value(
-                        local_tensor, device_mesh, i, target_placement
+                        local_tensor, mesh_to_use, i, target_placement
                     )
+                    # For merged sum/avg partials, apply avg scaling
+                    if (
+                        isinstance(transform_info, _FlattenedTransformInfo)
+                        and transform_info.avg_scale is not None
+                    ):
+                        new_local_tensor = new_local_tensor / transform_info.avg_scale
                 elif current.is_replicate():
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
-                        local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
+                        local_tensor, mesh_to_use, i, mesh_to_use._sym_get_coordinate(i)
                     )
                 elif current.is_shard():
                     shard_spec = cast(Shard, current)
                     if shard_spec.dim != target_placement.dim:
                         new_local_tensor = shard_spec._to_new_shard_dim(
                             local_tensor,
-                            device_mesh,
+                            mesh_to_use,
                             i,
                             transform_info.logical_shape,
                             target_placement.dim,
@@ -1082,7 +1609,7 @@ def redistribute_local_tensor(
                 if current.is_replicate():
                     partial_spec = cast(Partial, target)
                     new_local_tensor = partial_spec._partition_value(
-                        local_tensor, device_mesh, i
+                        local_tensor, mesh_to_use, i
                     )
                 elif current.is_shard() or isinstance(current, _StridedShard):
                     raise RuntimeError(
@@ -1172,7 +1699,11 @@ class Redistribute(torch.autograd.Function):
             )
 
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, async_op=async_op
+                local_tensor,
+                current_spec,
+                target_spec,
+                async_op=async_op,
+                is_explicit=True,
             )
         else:
             # use the same local tensor if placements are the same.
@@ -1240,6 +1771,7 @@ class Redistribute(torch.autograd.Function):
             current_spec,
             previous_spec,
             async_op=async_op,
+            is_explicit=True,
         )
 
         if output.dtype != ctx.original_dtype:

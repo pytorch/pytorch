@@ -62,6 +62,9 @@ int dsa_get_device_count() {
 }
 
 bool dsa_check_if_all_devices_support_managed_memory() {
+#ifdef USE_ROCM
+  return true;
+#else
 // It looks as though this'll work best on CUDA GPUs with Pascal
 // architectures or newer, per
 // https://developer.nvidia.com/blog/unified-memory-cuda-beginners/
@@ -74,6 +77,7 @@ bool dsa_check_if_all_devices_support_managed_memory() {
   return true;
 #else
   return false;
+#endif
 #endif
 }
 
@@ -294,11 +298,18 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   C10_CUDA_CHECK_WO_DSA(
       cudaMallocManaged(&uvm_assertions_ptr, sizeof(DeviceAssertionsData)));
 
-#if CUDART_VERSION >= 13000
+#if CUDART_VERSION >= 13000 && !defined(USE_ROCM)
   cudaMemLocation cpuDevice;
   cpuDevice.type = cudaMemLocationTypeDevice;
   cpuDevice.id = cudaCpuDeviceId;
+#ifdef USE_ROCM
+  // hipify replaces cudaMemAdvise -> hipMemAdvise, but we want v2
+#define hipMemAdvise hipMemAdvise_v2
+#endif
 #else
+  // might be a ROCm bug that using hipMemAdvise_v2 fails if
+  // hipMemLocationTypeDevice + hipCpuDeviceId, but using the v1 API sets
+  // hipMemLocationTypeHost + hipCpuDeviceId and passes
   const auto cpuDevice = cudaCpuDeviceId;
 #endif
 

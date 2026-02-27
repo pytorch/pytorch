@@ -55,6 +55,7 @@ ser
 serde
 serder
 serdes
+sme
 statics
 strat
 subtile

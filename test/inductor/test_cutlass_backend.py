@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
+from torch._inductor.codegen.cutlass.serialization import (
+    get_cutlass_operation_serializer,
+)
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
@@ -32,11 +34,8 @@ import torch.version
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
-from torch._inductor.codegen.cuda.cutlass_utils import (
-    _gen_ops_cached,
-    get_max_alignment,
-)
+from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
+from torch._inductor.codegen.cutlass.utils import _gen_ops_cached, get_max_alignment
 from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
@@ -133,10 +132,10 @@ use_evt_config = config.patch(
     {
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
-        "cuda.cutlass_max_profiling_configs": 1,
+        "cutlass.cutlass_max_profiling_configs": 1,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cuda.cutlass_tma_only": True,
-        "cuda.cutlass_epilogue_fusion_enabled": True,
+        "cutlass.cutlass_tma_only": True,
+        "cutlass.cutlass_epilogue_fusion_enabled": True,
     }
 )
 
@@ -144,9 +143,9 @@ fp8_config = config.patch(
     {
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
-        "cuda.cutlass_max_profiling_configs": 1,
+        "cutlass.cutlass_max_profiling_configs": 1,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cuda.cutlass_tma_only": True,
+        "cutlass.cutlass_tma_only": True,
     }
 )
 
@@ -198,7 +197,7 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
             num_fusions,
         )
         torch.testing.assert_close(result, ref_result)
@@ -206,7 +205,7 @@ class TestCutlassBackend(TestCase):
     def test_check_paths(self):
         cutlass_mock_imports_path = os.path.join(
             os.path.dirname(torch.__file__),
-            "_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports",
+            "_inductor/codegen/cutlass/lib_extensions/cutlass_mock_imports",
         )
         cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
         cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
@@ -234,8 +233,9 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_backend_min_gemm_size": 100000,
-                "cuda.cutlass_max_profiling_configs": 2,
+                # Make it slightly too large to be accepted (m*n*k)
+                "cutlass.cutlass_backend_min_gemm_size": 100 * 100 * 10 + 1,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             with mock.patch(
@@ -251,7 +251,7 @@ class TestCutlassBackend(TestCase):
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
-        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
         self.assertTrue(try_import_cutlass())
 
@@ -259,7 +259,7 @@ class TestCutlassBackend(TestCase):
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
-        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
         self.assertTrue(try_import_cutlass())
         from torch._inductor.codecache import cutlass_key
@@ -287,7 +287,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             Y_compiled = torch.compile(torch.mm)(a, b)
@@ -324,7 +324,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             for x_shape in x_shapes:
@@ -354,7 +354,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
             }
         ):
             Y_compiled = torch.compile(torch.bmm)(a, b)
@@ -386,7 +386,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -428,8 +428,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 1,
-                "cuda.cutlass_max_profiling_swizzle_options": [
+                "cutlass.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_swizzle_options": [
                     1,
                     2,
                     4,
@@ -505,7 +505,7 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ),
             dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -595,9 +595,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                     "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-                    "cuda.cutlass_tma_only": True,
+                    "cutlass.cutlass_tma_only": True,
                 }
             ),
             dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -716,7 +716,7 @@ class TestCutlassBackend(TestCase):
                     {
                         "max_autotune": True,
                         "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                        "cuda.cutlass_max_profiling_configs": 2,
+                        "cutlass.cutlass_max_profiling_configs": 2,
                     }
                 ),
                 dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -785,7 +785,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             expected = [model(*input) for input in inputs]
@@ -814,8 +814,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                "cutlass.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
             }
         ):
             for M, K, N in (
@@ -858,7 +858,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
             }
         ):
             with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
@@ -888,8 +888,8 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 1,
-                    "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                    "cutlass.cutlass_max_profiling_configs": 1,
+                    "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
                 }
             ):
                 _ = compiled_model(a, b)
@@ -923,18 +923,20 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 4,
+                "cutlass.cutlass_max_profiling_configs": 4,
                 "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
-            counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
-            assert mm is not None
+            counters["inductor"]["cutlass_epilogue_fusion_counter"] = 0
+            if mm is None:
+                raise AssertionError("mm is None")
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
-            actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
-            assert actual_count == expected_fuse_count, (
-                f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
-            )
+            actual_count = counters["inductor"]["cutlass_epilogue_fusion_counter"]
+            if actual_count != expected_fuse_count:
+                raise AssertionError(
+                    f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
+                )
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1022,7 +1024,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -1041,7 +1043,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             model = MyModel()
@@ -1079,7 +1081,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             model = MyModel()
@@ -1112,8 +1114,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             model = MyModel()
@@ -1156,7 +1158,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
                 "autotune_local_cache": True,
             }
         ):
@@ -1167,7 +1169,8 @@ class TestCutlassBackend(TestCase):
         cache = torch._inductor.codecache.LocalCache().lookup(
             "sparse_semi_structured_mm"
         )
-        assert cache is not None
+        if cache is None:
+            raise AssertionError("cache is None")
         high = cache[
             f"[('cuda', 'torch.float16', {m}, {k // 2}, {k // 2}, 1, 0), "
             f"('cuda', 'torch.int16', {m}, {k // 16}, {k // 16}, 1, 0), "
@@ -1177,7 +1180,10 @@ class TestCutlassBackend(TestCase):
         for kernel, duration in high.items():
             if kernel.startswith("cutlass_gemm") and not math.isinf(duration):
                 cutlass_kernels_count += 1
-        assert cutlass_kernels_count > 0
+        if cutlass_kernels_count <= 0:
+            raise AssertionError(
+                f"Expected cutlass_kernels_count > 0, got {cutlass_kernels_count}"
+            )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1196,9 +1202,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
-                    "cuda.cutlass_op_allowlist_regex": "",
-                    "cuda.cutlass_op_denylist_regex": "pingpong",
+                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_op_allowlist_regex": "",
+                    "cutlass.cutlass_op_denylist_regex": "pingpong",
                 }
             ):
                 with mock.patch(
@@ -1211,18 +1217,26 @@ class TestCutlassBackend(TestCase):
                         torch.compile(my_addmm, dynamic=False)(x, a, b, 1.0, 2.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
-                    assert op_name == "addmm"
+                    if op_name != "addmm":
+                        raise AssertionError(
+                            f"Expected op_name 'addmm', got {op_name!r}"
+                        )
                     cuda_template_count = 0
                     for choice in choices:
-                        if isinstance(choice, CUDATemplateCaller):
+                        if isinstance(choice, CUTLASSTemplateCaller):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
-                            assert isinstance(op_conf_name, str)
-                            assert "pingpong" not in op_conf_name, (
-                                "All pingpong Kernels should have been filtered"
-                            )
+                            if not isinstance(op_conf_name, str):
+                                raise AssertionError(
+                                    f"Expected op_conf_name to be str, got {type(op_conf_name)}"
+                                )
+                            if "pingpong" in op_conf_name:
+                                raise AssertionError(
+                                    "All pingpong Kernels should have been filtered"
+                                )
                             cuda_template_count += 1
-                    assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+                    if cuda_template_count <= 0:
+                        raise AssertionError("No CUTLASSTemplateCaller choices")
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1241,9 +1255,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
-                    "cuda.cutlass_op_allowlist_regex": "pingpong",
-                    "cuda.cutlass_op_denylist_regex": None,
+                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_op_allowlist_regex": "pingpong",
+                    "cutlass.cutlass_op_denylist_regex": None,
                 }
             ):
                 with mock.patch(
@@ -1256,18 +1270,26 @@ class TestCutlassBackend(TestCase):
                         torch.compile(addmm, dynamic=False)(x, a, b, 1.0, 1.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
-                    assert op_name == "addmm"
+                    if op_name != "addmm":
+                        raise AssertionError(
+                            f"Expected op_name 'addmm', got {op_name!r}"
+                        )
                     cuda_template_count = 0
                     for choice in choices:
-                        if isinstance(choice, CUDATemplateCaller):
+                        if isinstance(choice, CUTLASSTemplateCaller):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
-                            assert isinstance(op_conf_name, str)
-                            assert "pingpong" in op_conf_name, (
-                                "Only pingpong Kernels should have been allowed"
-                            )
+                            if not isinstance(op_conf_name, str):
+                                raise AssertionError(
+                                    f"Expected op_conf_name to be str, got {type(op_conf_name)}"
+                                )
+                            if "pingpong" not in op_conf_name:
+                                raise AssertionError(
+                                    "Only pingpong Kernels should have been allowed"
+                                )
                             cuda_template_count += 1
-                    assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+                    if cuda_template_count <= 0:
+                        raise AssertionError("No CUTLASSTemplateCaller choices")
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1312,7 +1334,7 @@ class TestCutlassBackend(TestCase):
                     {
                         "max_autotune": True,
                         "max_autotune_gemm_backends": "CUTLASS",
-                        "cuda.cutlass_max_profiling_configs": 2,
+                        "cutlass.cutlass_max_profiling_configs": 2,
                     }
                 ):
                     with mock.patch(
@@ -1335,20 +1357,26 @@ class TestCutlassBackend(TestCase):
                         _, choices, _, _ = args
                         cuda_template_count = 0
                         for choice in choices:
-                            if isinstance(choice, CUDATemplateCaller):
+                            if isinstance(choice, CUTLASSTemplateCaller):
                                 choice_info = choice.info_dict()
                                 op_conf_name = choice_info.get("op_conf_name", "")
-                                assert isinstance(op_conf_name, str)
+                                if not isinstance(op_conf_name, str):
+                                    raise AssertionError(
+                                        f"Expected op_conf_name to be str, got {type(op_conf_name)}"
+                                    )
                                 if use_fast_accum:
-                                    assert "fastaccum" in op_conf_name, (
-                                        "Only fastaccum Kernels should have been allowed"
-                                    )
+                                    if "fastaccum" not in op_conf_name:
+                                        raise AssertionError(
+                                            "Only fastaccum Kernels should have been allowed"
+                                        )
                                 else:
-                                    assert "fastaccum" not in op_conf_name, (
-                                        "fastaccum Kernels should have been filtered"
-                                    )
+                                    if "fastaccum" in op_conf_name:
+                                        raise AssertionError(
+                                            "fastaccum Kernels should have been filtered"
+                                        )
                                 cuda_template_count += 1
-                        assert cuda_template_count > 0, "No CUDATemplateCaller choices"
+                        if cuda_template_count <= 0:
+                            raise AssertionError("No CUTLASSTemplateCaller choices")
 
         run_test(True)
         run_test(False)
@@ -1389,7 +1417,7 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ),
             mock.patch(
@@ -1411,19 +1439,23 @@ class TestCutlassBackend(TestCase):
                 )
                 args, _ = sa.call_args
                 op_name, choices, _, __ = args
-                assert op_name == "mm"
+                if op_name != "mm":
+                    raise AssertionError(f"Expected op_name 'mm', got {op_name!r}")
                 cuda_template_count = 0
                 for choice in choices:
-                    if isinstance(choice, CUDATemplateCaller):
+                    if isinstance(choice, CUTLASSTemplateCaller):
                         choice_info = choice.info_dict()
                         op_conf_name = choice_info.get("op_conf_name", "")
-                        assert isinstance(op_conf_name, str)
+                        if not isinstance(op_conf_name, str):
+                            raise AssertionError(
+                                f"Expected op_conf_name to be str, got {type(op_conf_name)}"
+                            )
                         cuda_template_count += 1
 
                 self.assertGreater(
                     cuda_template_count,
                     0,
-                    "No CUDATemplateCaller choices found for matmul with shape "
+                    "No CUTLASSTemplateCaller choices found for matmul with shape "
                     f"M={M}, N={N}, K={K}",
                 )
 
@@ -1500,13 +1532,13 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
-                "cuda.generate_test_runner": True,  # put standalone runner in the generated code
+                "cutlass.cutlass_max_profiling_configs": 2,
+                "cutlass.generate_test_runner": True,  # put standalone runner in the generated code
             }
         ):
             from tempfile import NamedTemporaryFile
 
-            from torch._inductor.codegen.cuda.cutlass_utils import (
+            from torch._inductor.codegen.cuda.compile_utils import (
                 cuda_standalone_runner_compile_command,
                 CUDACompileSourceCapturingContext,
             )
@@ -1523,7 +1555,8 @@ class TestCutlassBackend(TestCase):
 
                 sources = ctx.sources
 
-            assert len(sources) >= 1
+            if len(sources) < 1:
+                raise AssertionError(f"Expected len(sources) >= 1, got {len(sources)}")
 
             # Get names for temporary source and executable files.
             cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)  # noqa: SIM115
@@ -1583,7 +1616,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
                 # needed for log searching
                 "fx_graph_cache": False,
                 "fx_graph_remote_cache": False,
@@ -1592,7 +1625,7 @@ class TestCutlassBackend(TestCase):
             with (
                 log_settings("+inductor"),
                 self.assertLogs(
-                    logger="torch._inductor.codegen.cuda", level=logging.DEBUG
+                    logger="torch._inductor.codegen.cutlass", level=logging.DEBUG
                 ) as test_log,
             ):
                 Y_compiled = torch.compile(mm, dynamic=False)(a, b)
@@ -1604,7 +1637,8 @@ class TestCutlassBackend(TestCase):
             match = re.search(
                 r"Got cutlass configs: total number of ops: (\d+)", output
             )
-            assert match, "Expect to find the cutlass configs log"
+            if not match:
+                raise AssertionError("Expect to find the cutlass configs log")
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 
@@ -1630,7 +1664,7 @@ class TestCutlassBackend(TestCase):
         expected = model(A, B)
 
         # Track render calls
-        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
@@ -1647,8 +1681,8 @@ class TestCutlassBackend(TestCase):
                     "max_autotune_gemm_backends": "CUTLASS",
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cuda.enable_caching_codegen": True,
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.enable_caching_codegen": True,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                 }
             ):
                 compiled_model = torch.compile(model, fullgraph=True)
@@ -1684,7 +1718,7 @@ class TestCutlassBackend(TestCase):
         d = torch.randn(64, 128).cuda().half().t()
 
         # Track render calls
-        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
@@ -1699,10 +1733,10 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cuda.enable_caching_codegen": True,
+                    "cutlass.enable_caching_codegen": True,
                 }
             ):
                 # Get expected results
@@ -1745,7 +1779,7 @@ class TestCutlassBackend(TestCase):
         b = torch.randn(32, 64).cuda().half().t()
 
         # Track render calls
-        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
@@ -1760,10 +1794,10 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cutlass.cutlass_max_profiling_configs": 2,
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cuda.enable_caching_codegen": True,
+                    "cutlass.enable_caching_codegen": True,
                 }
             ):
                 # Get expected results
@@ -1791,7 +1825,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1810,7 +1844,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cuda.cutlass_max_profiling_configs": 2,
+                "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1834,7 +1868,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1856,13 +1890,14 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1884,7 +1919,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1910,7 +1945,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
+                "cutlass.cutlass_max_profiling_configs": 1,
             }
         ):
             if use_aoti:
@@ -1956,7 +1991,8 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
         )
         torch.testing.assert_close(result, ref_result)
 
@@ -1980,7 +2016,8 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
         )
         torch.testing.assert_close(result, ref_result)
 
@@ -2007,18 +2044,19 @@ class TestCutlassBackend(TestCase):
 
         # baseline is cutlass kernel + triton
         # matches expected casting behavior
-        with config.patch({"cuda.cutlass_epilogue_fusion_enabled": False}):
+        with config.patch({"cutlass.cutlass_epilogue_fusion_enabled": False}):
             ref_result = torch.compile(model)(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 0
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            0,
         )
 
         torch._dynamo.reset()
         result = torch.compile(model)(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"],
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
             1,
         )
 
@@ -2076,7 +2114,7 @@ class TestCutlassBackend(TestCase):
 
             self.assertEqual(
                 torch._dynamo.utils.counters["inductor"][
-                    "cuda_epilogue_fusion_counter"
+                    "cutlass_epilogue_fusion_counter"
                 ],
                 2 * (i + 1),
             )
@@ -2103,7 +2141,8 @@ class TestCutlassBackend(TestCase):
         ref_result = model(a, b, extra_args)
 
         self.assertEqual(
-            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+            torch._dynamo.utils.counters["inductor"]["cutlass_epilogue_fusion_counter"],
+            1,
         )
         torch.testing.assert_close(result, ref_result)
 
@@ -2416,7 +2455,7 @@ class TestCutlassBackend(TestCase):
                         "max_autotune_gemm_backends": "CUTLASS",
                         # needed for log searching
                         "force_disable_caches": True,
-                        "cuda.cutlass_max_profiling_swizzle_options": [2],
+                        "cutlass.cutlass_max_profiling_swizzle_options": [2],
                     }
                 ):
                     with mock.patch(

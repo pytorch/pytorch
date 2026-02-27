@@ -5,10 +5,10 @@ torch::stable::DeviceIndex test_device_index(torch::stable::Device device) {
   return device.index();
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("test_device_index(Device device) -> DeviceIndex");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("test_device_index", TORCH_BOX(&test_device_index));
 }

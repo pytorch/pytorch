@@ -1,6 +1,6 @@
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 
 namespace c10d {
 namespace intra_node_comm {

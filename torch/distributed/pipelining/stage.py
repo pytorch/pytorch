@@ -155,7 +155,6 @@ class _PipelineStageBase(ABC):
         self.submod = submodule
         self.stage_index = stage_index
         self.num_stages = num_stages
-        # pyrefly: ignore [read-only]
         self.device = device
         self.group = group
 

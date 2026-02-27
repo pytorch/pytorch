@@ -175,8 +175,10 @@ def add_inference_rule(n: Node):
     Note that we do not modify the operand types themselves after applying broadcasting
     to them. We only use them to calculate the final type
     """
-    assert isinstance(n.args[0], Node)
-    assert isinstance(n.args[1], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
+    if not isinstance(n.args[1], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[1])}")
     t1 = n.args[0].type
     t2 = n.args[1].type
 
@@ -251,11 +253,14 @@ def transpose_inference_rule(n: Node):
     are within range of the tensor type of the node
     """
     if n.target is torch.transpose:
-        assert isinstance(n.args[0], Node)
+        if not isinstance(n.args[0], Node):
+            raise AssertionError(f"Expected Node, got {type(n.args[0])}")
         t = n.args[0].type
 
-        assert isinstance(n.args[1], int)
-        assert isinstance(n.args[2], int)
+        if not isinstance(n.args[1], int):
+            raise AssertionError(f"Expected int, got {type(n.args[1])}")
+        if not isinstance(n.args[2], int):
+            raise AssertionError(f"Expected int, got {type(n.args[2])}")
         dim1, dim2 = n.args[1], n.args[2]
 
         if t == Dyn:
@@ -290,10 +295,12 @@ def reshape_inference_rule(n: Node):
     as well as input where some of the tensor dimensions
     are unknown. In this case we check for divisibility
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     t1 = n.args[0].type
 
-    assert isinstance(n.args[1], list)
+    if not isinstance(n.args[1], list):
+        raise AssertionError(f"Expected list, got {type(n.args[1])}")
     t2 = n.args[1]
     t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])
 
@@ -306,7 +313,8 @@ def reshape_inference_rule(n: Node):
     # if any of the dimensions are unknown,
     # we check for divisibility
     elif isinstance(t1, TensorType):
-        assert isinstance(t1, TensorType)
+        if not isinstance(t1, TensorType):
+            raise AssertionError(f"Expected TensorType, got {type(t1)}")
         a = [e if e != Dyn else 1 for e in t1.__args__]
         p1 = reduce(operator.mul, a)
         p2 = reduce(operator.mul, t2)
@@ -330,7 +338,8 @@ def bn2d_inference_rule(n: Node, module_instance):
     - x_2' is consistent with the module's num_features
     output type: the more precise type of t and t'
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     n.args[0].type = expand_to_tensor_dim(n.args[0].type, 4)
     arg_type = n.args[0].type
     n.type = expand_to_tensor_dim(n.type, 4)
@@ -424,7 +433,8 @@ def conv2d_inference_rule(n: Node, module_instance):
     - let o = (x_1, out_channels, H_out, W_out)
     then the output is the greatest upper bound of o and the existing node type t'.
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     n.args[0].type = expand_to_tensor_dim(n.args[0].type, 4)
     arg_type = n.args[0].type
     curr_node_type = expand_to_tensor_dim(n.type, 4)
@@ -451,7 +461,8 @@ def relu_inference_rule(n: Node, module_instance):
     """
     Input and output shapes should be equal.
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
 
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
         n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
@@ -493,7 +504,8 @@ def maxpool2d_inference_rule(n: Node, module_instance):
     - Our final result is the greatest upper bound of the output we calculate
       and the current node type.
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
 
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
         n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
@@ -527,7 +539,8 @@ def linear_inference_rule(n: Node, module_instance):
     Applies the shape information to the input then gets the greatest upper bound
     of the resulting type and the existing type
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
         n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
     if isinstance(n.args[0].type, TensorType):
@@ -565,7 +578,8 @@ def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
     The input and output sizes should be the same except for the last
     two dimensions taken from the input, which represent width and height
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
         n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
     if isinstance(n.args[0].type, TensorType):
@@ -603,18 +617,21 @@ def flatten_inference_rule(n: Node):
     Applies the flatten shape information to the input then gets the
     greatest upper bound of the resulting type and the existing type
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
 
     # set the default start and end dims
     start_dim = 1
     end_dim = -1
 
     if len(n.args) > 1:
-        assert isinstance(n.args[1], int)
+        if not isinstance(n.args[1], int):
+            raise AssertionError(f"Expected int, got {type(n.args[1])}")
         start_dim = n.args[1]
 
     if len(n.args) > 2:
-        assert isinstance(n.args[2], int)
+        if not isinstance(n.args[2], int):
+            raise AssertionError(f"Expected int, got {type(n.args[2])}")
         end_dim = n.args[2]
 
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
@@ -675,7 +692,8 @@ class GraphTypeChecker:
 
         elif n.op == "call_function":
             if n.target is getattr:
-                assert getattr in _INFERENCE_RULES
+                if getattr not in _INFERENCE_RULES:
+                    raise AssertionError("getattr not in _INFERENCE_RULES")
                 return _INFERENCE_RULES[n.target](n, self.traced)
 
             elif n.target in _INFERENCE_RULES:
@@ -713,7 +731,8 @@ def conv_refinement_rule(n: Node):
     the input and output
     """
     res = []
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
         res = [Equality(arg_type.__args__[0], n.type.__args__[0])]
@@ -727,7 +746,8 @@ def linear_refinement_rule(n: Node):
     the input and output
     """
     res = []
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
         res = [Equality(arg_type.__args__[0], n.type.__args__[0])]
@@ -741,7 +761,8 @@ def all_eq(n: Node):
     For operations where the input shape is equal to the output shape
     """
     res = []
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
         args1 = arg_type.__args__
@@ -758,7 +779,8 @@ def first_two_eq(n: Node):
     are equal
     """
     res = []
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
         args1 = arg_type.__args__
@@ -815,7 +837,8 @@ def flatten_refinement_rule(n: Node):
     Generates equality constraints between the dimensions of the input and output
     that will not be involved in the flatten operation
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
 
     eq_const = []
 
@@ -823,11 +846,13 @@ def flatten_refinement_rule(n: Node):
     end_dim = -1
 
     if len(n.args) > 1:
-        assert isinstance(n.args[1], int)
+        if not isinstance(n.args[1], int):
+            raise AssertionError(f"Expected int, got {type(n.args[1])}")
         start_dim = n.args[1]
 
     if len(n.args) > 2:
-        assert isinstance(n.args[2], int)
+        if not isinstance(n.args[2], int):
+            raise AssertionError(f"Expected int, got {type(n.args[2])}")
         end_dim = n.args[2]
 
     if isinstance(n.type, TensorType) and isinstance(n.args[0].type, TensorType):
@@ -850,7 +875,8 @@ def conv_rule(n: Node, module_instance):
     Represents the output in terms of an algrbraic expression w.r.t
     the input when possible
     """
-    assert isinstance(n.args[0], Node)
+    if not isinstance(n.args[0], Node):
+        raise AssertionError(f"Expected Node, got {type(n.args[0])}")
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
         w_in = arg_type.__args__[3]

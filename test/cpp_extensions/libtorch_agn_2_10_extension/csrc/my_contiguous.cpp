@@ -16,12 +16,12 @@ Tensor my_contiguous_memory_format(
   return torch::stable::contiguous(self, memory_format);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_contiguous(Tensor self) -> Tensor");
   m.def("my_contiguous_memory_format(Tensor self, MemoryFormat memory_format) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("my_contiguous", TORCH_BOX(&my_contiguous));
   m.impl("my_contiguous_memory_format", TORCH_BOX(&my_contiguous_memory_format));
 }
