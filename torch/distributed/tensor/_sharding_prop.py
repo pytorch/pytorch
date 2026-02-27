@@ -28,6 +28,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
+    _dijkstra_expand_single_dim_strategy_to_mesh,
     _expand_single_dim_strategy_to_mesh,
     _SingleDimStrategyInfo,
 )
@@ -674,14 +675,23 @@ class ShardingPropagator:
             if single_dim_strategy_info is not None:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
                 assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
-                # expand to generate the full set of strategy combinations, each one
-                # with a redistribute cost, and then find the min strategy over those costs.
-                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                    mesh, strategy_schema, single_dim_strategy_info, out_tensor_meta
+                # Try PQ search first (returns None for StridedShard inputs)
+                op_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+                    mesh, op_schema, single_dim_strategy_info, out_tensor_meta
                 )
-                op_strategy = _expanded_strategy_fn(
-                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
-                )
+                if op_strategy is None:
+                    # Fall back to full O(S^N) expansion
+                    _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                        mesh,
+                        strategy_schema,
+                        single_dim_strategy_info,
+                        out_tensor_meta,
+                    )
+                    op_strategy = _expanded_strategy_fn(
+                        op_schema.op,
+                        strategy_schema.args_meta,
+                        strategy_schema.kwargs_meta,
+                    )
             else:
                 assert op_strategy_func is not None
                 op_strategy = op_strategy_func(strategy_schema)

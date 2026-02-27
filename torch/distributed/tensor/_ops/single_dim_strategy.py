@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
+from typing_extensions import TypeIs
 
 import torch
 from torch._ops import OpOverload
@@ -39,7 +40,7 @@ from torch.utils._pytree import tree_map_only
 logger = logging.getLogger(__name__)
 
 
-def _is_sharding(p: Placement) -> bool:
+def _is_sharding(p: Placement) -> TypeIs[Shard | _StridedShard]:
     return isinstance(p, (Shard, _StridedShard))
 
 
@@ -705,7 +706,8 @@ def _get_neighbor_placements(
 def _dijkstra_expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
-    single_dim_strategy: Callable[
+    single_dim_strategy: _SingleDimStrategyInfo
+    | Callable[
         [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
     ],
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
@@ -741,9 +743,6 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
             full transition graph, adding every shardable match to the set. Still
             returns the optimal (first) match.
     """
-    # Note: circular import
-    from torch.distributed.tensor._ops.utils import generate_redistribute_costs
-
     # Extract input DTensorSpecs from op_schema.args_schema, handling both
     # raw DTensorSpec and OpStrategy wrappers (the caller wraps specs in OpStrategy)
     input_specs: list[DTensorSpec] = []
@@ -792,9 +791,6 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
             if p.is_shard():
                 num_shards *= mesh_topo.mesh_dim_devices[i]
         per_input_comm_bytes_gb.append(total_bytes / num_shards / (1024**3))
-
-    # Wrap input specs for generate_redistribute_costs (called on match)
-    src_strategies = [OpStrategy([OpSpec(spec)]) for spec in input_specs]
 
     pq: list[_PQEntry] = []
     visited: set[tuple[tuple[Placement, ...], ...]] = set()
@@ -859,19 +855,14 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
             mesh, candidate.placements, input_specs
         )
         if match_result is not None:
-            # Replace zero redistribute costs with actual costs from src
+            # Use pre-computed per-input costs from the PQ search instead of
+            # recomputing via generate_redistribute_costs -> _gen_transform_infos.
             match_spec = match_result.strategies[0]
             assert match_spec.input_specs is not None
-            redistribute_costs = [
-                generate_redistribute_costs(src_strategy, arg_spec)
-                for src_strategy, arg_spec in zip(
-                    src_strategies, match_spec.input_specs
-                )
-            ]
             op_spec = OpSpec(
                 output_specs=match_spec.output_specs,
                 input_specs=list(match_spec.input_specs),
-                redistribute_cost=redistribute_costs,
+                redistribute_cost=[[cost] for cost in candidate.per_input_costs],
             )
 
             exhaustive = len(prepared_strategy.expanded_strategies) ** mesh.ndim
