@@ -54,28 +54,6 @@ prims = torch.ops.prims
 #     "real",  # complex data type only
 # ]
 
-# Linear pointwise ops, split by linearity type.
-unary_linear_ops = [aten.to.dtype]
-
-binary_additive_ops = [
-    aten.add.Tensor,
-    aten.add_.Tensor,
-    aten.sub.Tensor,
-    aten.sub_.Tensor,
-]
-
-# mul: partials propagate through either arg. div: only through numerator.
-binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor]
-binary_div_ops = [aten.div.Tensor, aten.div_.Tensor]
-
-scalar_linear_ops = [
-    aten.div.Scalar,
-    aten.div_.Scalar,
-    aten.mul.Scalar,
-    aten.mul_.Scalar,
-]
-
-neg_ops = [aten.neg.default, aten.neg_.default]
 
 # Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
 # Only ops monotonic on their ENTIRE domain belong here.
@@ -526,15 +504,24 @@ pointwise_ops = (
     ]
 )
 
-
-# Reconstruct the original linear_pointwise_ops dict for the existing registration path.
-linear_pointwise_ops: dict[OpOverload, int] = {
-    **dict.fromkeys(unary_linear_ops, 0),
-    **dict.fromkeys(binary_additive_ops, 1),
-    **dict.fromkeys(binary_mul_ops, 2),
-    **dict.fromkeys(binary_div_ops, 2),
-    **dict.fromkeys(scalar_linear_ops, 0),
-    **dict.fromkeys(neg_ops, 0),
+# the linear pointwise ops map, key is op, value is the type of linearity
+linear_pointwise_ops = {
+    aten.to.dtype: 0,
+    aten.add.Tensor: 1,
+    aten.add_.Tensor: 1,
+    aten.sub.Tensor: 1,
+    aten.sub_.Tensor: 1,
+    aten.div.Scalar: 0,
+    aten.div_.Scalar: 0,
+    aten.div.Tensor: 2,
+    aten.div_.Tensor: 2,
+    aten.mul.Scalar: 0,
+    aten.mul_.Scalar: 0,
+    aten.mul.Tensor: 2,
+    aten.mul_.Tensor: 2,
+    # neg is linear: -(A1 + A2) = -A1 + -A2
+    aten.neg.default: 0,
+    aten.neg_.default: 0,
 }
 
 
