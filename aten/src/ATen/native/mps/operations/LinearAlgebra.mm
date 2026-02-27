@@ -1419,8 +1419,8 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
   if (result.numel() == 0) {
     return result;
   }
-  auto cholesky =
-      upper ? result.triu().clone(at::MemoryFormat::Contiguous) : result.tril().clone(at::MemoryFormat::Contiguous);
+  auto cholesky = upper ? result.triu().clone() : result.tril().clone();
+  cholesky = cholesky.contiguous();
 
   auto n = result.size(-1);
   auto identity = at::eye(n, result.options()).expand_as(result).contiguous();
