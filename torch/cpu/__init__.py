@@ -17,7 +17,6 @@ from . import amp
 
 
 __all__ = [
-    "DeviceModule",
     "Event",
     "Stream",
     "StreamContext",
