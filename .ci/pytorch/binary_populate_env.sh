@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC2002,SC2004,SC2086,SC2129,SC2155
 set -eux -o pipefail
 export TZ=UTC
 
