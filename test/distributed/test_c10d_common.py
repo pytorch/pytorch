@@ -2166,7 +2166,8 @@ class ReduceOpTest(TestCase):
             self.assertTrue(isinstance(reduce_op, c10d.ReduceOp))
         for scale in (torch.tensor(1.0), 2.0):
             self.assertTrue(
-                isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp)
+                isinstance(dist._make_nccl_premul_sum(scale), c10d.ReduceOp),
+                isinstance(c10d.ReduceOp.PREMUL_SUM(scale), c10d.ReduceOp),
             )
 
     # Ref: https://github.com/pytorch/pytorch/pull/87303#discussion_r1002879700
