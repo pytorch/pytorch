@@ -232,16 +232,6 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_V3>
     using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
 };
 
-template <>
-struct PipelineTypeTraits<ck_tile::GemmPipeline::MEMORY>
-{
-    template <typename PipelineProblem>
-    using GemmPipeline = ck_tile::GemmPipelineAgBgCrMem<PipelineProblem>;
-    template <typename PipelineProblem>
-    using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrMem<PipelineProblem>;
-};
-
-
 template <typename PrecType, ck_tile::index_t M_Warp_Tile>
 constexpr ck_tile::index_t get_k_warp_tile()
 {
@@ -260,28 +250,25 @@ constexpr ck_tile::index_t get_k_warp_tile()
 #endif
 }
 
-// GEMM configuration for ROCM using CK tile
 template <typename PrecType>
 struct AsyncGemmConfig
 {
-
-
     static constexpr ck_tile::index_t M_Tile = 128;
-    static constexpr ck_tile::index_t N_Tile = 128;  // Change from 256
+    static constexpr ck_tile::index_t N_Tile = 256;
     static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
     
     static constexpr ck_tile::index_t M_Warp = 2;
-    static constexpr ck_tile::index_t N_Warp = 2;  // Change from 1
+    static constexpr ck_tile::index_t N_Warp = 1;
     static constexpr ck_tile::index_t K_Warp = 1;
     
-    static constexpr ck_tile::index_t M_Warp_Tile = 16;  // Change from 32
-    static constexpr ck_tile::index_t N_Warp_Tile = 16;  // Change from 32
+    static constexpr ck_tile::index_t M_Warp_Tile = 32;
+    static constexpr ck_tile::index_t N_Warp_Tile = 32;
     static constexpr ck_tile::index_t K_Warp_Tile = 
-        get_k_warp_tile<PrecType, M_Warp_Tile>();  // Will be 32 for bf16
+        get_k_warp_tile<PrecType, M_Warp_Tile>(); 
     
-    static constexpr bool kPadM = false;  // Change from true
-    static constexpr bool kPadN = false;  // Change from true
-    static constexpr bool kPadK = false;  // Change from true
+    static constexpr bool kPadM = false;
+    static constexpr bool kPadN = false;
+    static constexpr bool kPadK = false;
     
     static constexpr bool DoubleSmemBuffer = false;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
@@ -289,11 +276,11 @@ struct AsyncGemmConfig
     
     static constexpr bool TransposeC = false;
     static constexpr bool UseStructuredSparsity = false;
-    static constexpr ck_tile::index_t NumWaveGroups = 1;
+    static constexpr ck_tile::index_t NumWaveGroups = 2;
     static constexpr bool Preshuffle = false;
     
-    static constexpr ck_tile::index_t TileParitionerGroupNum = 8;  // Changed to match CK test
-    static constexpr ck_tile::index_t TileParitionerM01 = 4;  // Changed to match CK test
+    static constexpr ck_tile::index_t TileParitionerGroupNum = 8;
+    static constexpr ck_tile::index_t TileParitionerM01 = 4;
     static constexpr bool PermuteA = false;
     static constexpr bool PermuteB = false;
     
@@ -301,144 +288,6 @@ struct AsyncGemmConfig
 };
 
 } // namespace
-
-// Simple GEMM test without async scheduler
-template <typename LayoutB>
-at::Tensor simple_gemm_ck_tile(
-    at::Tensor a,
-    at::Tensor b,
-    at::Tensor out) {
-  c10::hip::HIPGuardMasqueradingAsCUDA guard(a.device());
-
-  using ElementA = ck_tile::bf16_t;
-  using LayoutA = ck_tile::tensor_layout::gemm::RowMajor;
-  
-  using ElementB = ck_tile::bf16_t;
-  
-  using ElementC = ck_tile::bf16_t;
-  using LayoutC = ck_tile::tensor_layout::gemm::RowMajor;
-  
-  using ElementAccumulator = float;
-
-  int M = static_cast<int>(a.sizes()[0]);
-  int N = static_cast<int>(b.sizes()[1]);
-  int K = static_cast<int>(a.sizes()[1]);
-
-  constexpr bool is_b_row_major = std::is_same_v<LayoutB, ck_tile::tensor_layout::gemm::RowMajor>;
-  const ck_tile::index_t stride_A = K;
-  const ck_tile::index_t stride_B = is_b_row_major ? N : K;
-  const ck_tile::index_t stride_C = N;
-
-  std::cout << "[SIMPLE GEMM TEST] M=" << M << ", N=" << N << ", K=" << K << std::endl;
-  std::cout << "[SIMPLE GEMM TEST] strides: A=" << stride_A << ", B=" << stride_B << ", C=" << stride_C << std::endl;
-
-  // Use standard GemmHostArgs (not Universal)
-  ck_tile::GemmHostArgs args{
-      reinterpret_cast<const void*>(a.data_ptr<at::BFloat16>()),
-      reinterpret_cast<const void*>(b.data_ptr<at::BFloat16>()),
-      reinterpret_cast<void*>(out.data_ptr<at::BFloat16>()),
-      1, // k_batch
-      M,
-      N,
-      K,
-      stride_A,
-      stride_B,
-      stride_C
-  };
-
-  // Use simpler config
-  using GemmConfig = AsyncGemmConfig<ElementA>;
-  
-  using GemmShape = ck_tile::TileGemmShape<
-      ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
-      ck_tile::sequence<GemmConfig::M_Warp, GemmConfig::N_Warp, GemmConfig::K_Warp>,
-      ck_tile::sequence<GemmConfig::M_Warp_Tile, GemmConfig::N_Warp_Tile, GemmConfig::K_Warp_Tile>,
-      GemmConfig::PermuteA,
-      GemmConfig::PermuteB>;
-
-  using TilePartitioner =
-      ck_tile::GemmSpatiallyLocalTilePartitioner<GemmShape,
-                                                 GemmConfig::TileParitionerGroupNum,
-                                                 GemmConfig::TileParitionerM01>;
-
-  using GemmUniversalTraits =
-      ck_tile::TileGemmUniversalTraits<GemmConfig::kPadM,
-                                       GemmConfig::kPadN,
-                                       GemmConfig::kPadK,
-                                       GemmConfig::DoubleSmemBuffer,
-                                       LayoutA,
-                                       LayoutB,
-                                       LayoutC,
-                                       GemmConfig::TransposeC,
-                                       GemmConfig::UseStructuredSparsity,
-                                       false, // Not persistent
-                                       GemmConfig::NumWaveGroups,
-                                       GemmConfig::Preshuffle>;
-
-  constexpr auto scheduler = GemmConfig::Scheduler;
-
-  using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<ElementA,
-                                                                     ElementB,
-                                                                     ElementAccumulator,
-                                                                     GemmShape,
-                                                                     GemmUniversalTraits,
-                                                                     scheduler>;
-
-  using GemmPipeline = typename PipelineTypeTraits<
-      GemmConfig::Pipeline>::template GemmPipeline<UniversalGemmProblem>;
-
-  using GemmEpilogue = ck_tile::CShuffleEpilogue<
-      ck_tile::CShuffleEpilogueProblem<ElementA,
-                                       ElementB,
-                                       ck_tile::tuple<>,
-                                       ElementAccumulator,
-                                       ElementC,
-                                       ck_tile::tuple<>,
-                                       LayoutC,
-                                       ck_tile::element_wise::PassThrough,
-                                       TilePartitioner::MPerBlock,
-                                       TilePartitioner::NPerBlock,
-                                       GemmConfig::M_Warp,
-                                       GemmConfig::N_Warp,
-                                       GemmConfig::M_Warp_Tile,
-                                       GemmConfig::N_Warp_Tile,
-                                       GemmConfig::K_Warp_Tile,
-                                       UniversalGemmProblem::TransposeC,
-                                       GemmConfig::NumWaveGroups,
-                                       false,
-                                       1,
-                                       false,
-                                       1,
-                                       GemmConfig::DoubleSmemBuffer>>;
-
-  using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
-
-  auto kargs = Kernel::MakeKernelArgs(args);
-  const dim3 grids = Kernel::GridSize(M, N, 1);
-  const dim3 blocks = Kernel::BlockSize();
-
-  std::cout << "[SIMPLE GEMM TEST] Grid: {" << grids.x << ", " << grids.y << ", " << grids.z << "}" << std::endl;
-  std::cout << "[SIMPLE GEMM TEST] Blocks: {" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}" << std::endl;
-
-  bool is_supported = Kernel::IsSupportedArgument(kargs);
-  std::cout << "[SIMPLE GEMM TEST] IsSupportedArgument: " << (is_supported ? "true" : "false") << std::endl;
-  
-  TORCH_CHECK(is_supported, "Simple GEMM: Arguments not supported");
-
-  ck_tile::stream_config stream_cfg{
-      at::hip::getCurrentHIPStreamMasqueradingAsCUDA(),
-      false,
-      0
-  };
-
-  ck_tile::launch_kernel(
-      stream_cfg,
-      ck_tile::make_kernel<GemmConfig::kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
-
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
-  std::cout << "[SIMPLE GEMM TEST] Kernel launched successfully" << std::endl;
-  return out;
-}
 
 template <typename LayoutB>
 at::Tensor async_input_mm_impl_ck_tile(
@@ -581,17 +430,14 @@ at::Tensor async_input_mm_impl_ck_tile(
   const ck_tile::index_t stride_B = is_b_row_major ? N : K;
   const ck_tile::index_t stride_C = N;
 
-    // Debug output
+    // Debug logs
   std::cout << "[ROCM AsyncMM] M=" << M << ", N=" << N << ", K=" << K << std::endl;
   std::cout << "[ROCM AsyncMM] is_b_row_major=" << is_b_row_major << std::endl;
   std::cout << "[ROCM AsyncMM] stride_A=" << K << ", stride_B=" << (is_b_row_major ? N : K) << ", stride_C=" << N << std::endl;
   std::cout << "[ROCM AsyncMM] M_Tile=" << GemmConfig::M_Tile << ", N_Tile=" << GemmConfig::N_Tile << ", K_Tile=" << GemmConfig::K_Tile << std::endl;
-  
-  // Check input tensor validity
   std::cout << "[ROCM AsyncMM] A ptr=" << a.data_ptr<at::BFloat16>() << ", size=" << a.sizes() << ", strides=" << a.strides() << std::endl;
   std::cout << "[ROCM AsyncMM] B ptr=" << b.data_ptr<at::BFloat16>() << ", size=" << b.sizes() << ", strides=" << b.strides() << std::endl;
   std::cout << "[ROCM AsyncMM] Out ptr=" << out.data_ptr<at::BFloat16>() << ", size=" << out.sizes() << ", strides=" << out.strides() << std::endl;
-
 
   // Create universal GEMM host arguments with async scheduler
   ck_tile::UniversalGemmHostArgs<1, 1, 0> host_args(
@@ -614,11 +460,12 @@ at::Tensor async_input_mm_impl_ck_tile(
   // Use grid size based on problem size for non-persistent kernel
   ck_tile::stream_config stream_cfg{
       at::hip::getCurrentHIPStreamMasqueradingAsCUDA(),
-      false, // flush_cache
-      0      // log_level (0 = no verbose output)
+      false,
+      0
   };
   
-  const dim3 grids = Kernel::GridSize(M, N, 1);  // Use problem-based grid size
+//   const dim3 grids = Kernel::GridSize(512, 1, 1);  // Use problem-based grid size
+  const dim3 grids = Kernel::MaxOccupancyGridSize(stream_cfg);
   const dim3 blocks = Kernel::BlockSize();
 
   bool is_supported = Kernel::UniversalGemmKernel::IsSupportedArgument(kargs);
