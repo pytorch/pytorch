@@ -3,8 +3,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#include <ATen/core/class_type.h>
-#include <ATen/core/enum_type.h>
 #include <ATen/quantized/Quantizer.h>
 
 #include <c10/util/irange.h>

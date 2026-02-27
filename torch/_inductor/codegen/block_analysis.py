@@ -1,7 +1,6 @@
 import collections
 import functools
 import textwrap
-from typing import Optional
 
 import sympy
 from sympy import Expr, Symbol
@@ -91,7 +90,7 @@ class BlockPatternMatcher:
         index_var: Symbol,
         numel: Expr,
         num_dims: int,
-    ) -> Optional[tuple[list[Expr], list[Expr], list[Expr]]]:
+    ) -> tuple[list[Expr], list[Expr], list[Expr]] | None:
         """
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
@@ -205,7 +204,7 @@ class BlockPatternMatcher:
         cls,
         index: Expr,
         index_var: Symbol,
-    ) -> Optional[Expr]:
+    ) -> Expr | None:
         """
         Matches simple expressions of the form stride * index, returning the
         stride.
