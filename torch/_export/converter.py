@@ -6,7 +6,7 @@ import typing
 import warnings
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.export._trace
@@ -72,8 +72,8 @@ def _trace_and_get_graph_from_model(model, args):
 
 
 def _create_jit_graph(
-    model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> tuple[torch.Graph, list["_C.IValue"], Any, Optional[torch.ScriptModule]]:
+    model: torch.nn.Module | torch.jit.ScriptFunction, args: Sequence[Any]
+) -> tuple[torch.Graph, list["_C.IValue"], Any, torch.ScriptModule | None]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         torch_out = None
@@ -393,7 +393,7 @@ def get_op_overload(node: torch._C.Node):
 class TS2FXGraphConverter:
     def __init__(
         self,
-        ts_graph: Union[torch._C.Graph, torch._C.Block],
+        ts_graph: torch._C.Graph | torch._C.Block,
         name_to_param: dict[str, torch.Tensor],
         name_to_buffer: dict[str, torch.Tensor],
         blocks_to_lifted_attrs: dict[torch._C.Block, set[str]],
@@ -413,7 +413,7 @@ class TS2FXGraphConverter:
 
         # Mapping of TS node name to converted FX node
         self.name_to_node: dict[
-            str, Union[torch.fx.Node, list[torch.fx.Node], dict[Any, torch.fx.Node]]
+            str, torch.fx.Node | list[torch.fx.Node] | dict[Any, torch.fx.Node]
         ] = {}
         # Mapping of TS node name to constant value (int, str, TorchBind obj,
         # tensor constants ...)
@@ -1338,7 +1338,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
 
     def __init__(
         self,
-        ts_graph: Union[torch._C.Graph, torch._C.Block],
+        ts_graph: torch._C.Graph | torch._C.Block,
         name_to_param: dict[str, torch.Tensor],
         name_to_buffer: dict[str, torch.Tensor],
         blocks_to_lifted_attrs: dict[torch._C.Block, set[str]],
@@ -1400,9 +1400,9 @@ class TS2EPConverter:
     # TorchScript model to ExportedProgram converter
     def __init__(
         self,
-        ts_model: Union[torch.jit.ScriptModule, torch.jit.ScriptFunction],
+        ts_model: torch.jit.ScriptModule | torch.jit.ScriptFunction,
         sample_args: tuple[Any, ...],
-        sample_kwargs: Optional[dict[str, Any]] = None,
+        sample_kwargs: dict[str, Any] | None = None,
     ):
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)

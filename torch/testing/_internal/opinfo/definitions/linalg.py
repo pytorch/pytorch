@@ -1169,16 +1169,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
-            # RuntimeError: Failed to create function state object for: cross_float2
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
         ),
     ),
     OpInfo(
@@ -2873,14 +2863,14 @@ python_ref_db: list[OpInfo] = [
                 "TestCommon",
                 "test_python_ref",
                 device_type="mps",
-                dtypes=(torch.bfloat16, torch.complex64, torch.float16),
+                dtypes=(torch.bfloat16, torch.float16),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref_torch_fallback",
                 device_type="mps",
-                dtypes=(torch.bfloat16, torch.complex64, torch.float16),
+                dtypes=(torch.bfloat16, torch.float16),
             ),
         ),
     ),

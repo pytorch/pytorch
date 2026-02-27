@@ -437,7 +437,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     def test_isinstance_symint(self):
         def fn(x):
-            assert isinstance(x.size(0), int)
+            assert isinstance(x.size(0), int)  # noqa: S101
             return x * 2
 
         x = torch.randn(20)
