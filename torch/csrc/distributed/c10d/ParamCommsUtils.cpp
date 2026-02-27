@@ -18,7 +18,8 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     std::vector<int64_t> outSplitSizes,
     int globalRankStart,
     int globalRankStride,
-    int worldSize)
+    int worldSize,
+    bool isAsynchronizedOp)
     : pgName_(std::move(pgName)),
       rank_(rank),
       worldSize_(worldSize),
@@ -29,7 +30,8 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
       inputSplitSizes_(std::move(inSplitSizes)),
       outputSplitSizes_(std::move(outSplitSizes)),
       globalRankStart_(globalRankStart),
-      globalRankStride_(globalRankStride) {
+      globalRankStride_(globalRankStride),
+      isAsynchronizedOp_(isAsynchronizedOp) {
   if (globalRankStride > 0) {
     for (int i = 0; i < worldSize; i++) {
       groupRanks_.push_back(globalRankStart + i * globalRankStride);

@@ -77,7 +77,6 @@ class OrderedSet(MutableSet[T], Reversible[T]):
     def pop(self) -> T:
         if not self:
             raise KeyError("pop from an empty set")
-        # pyrefly: ignore [bad-return]
         return self._dict.popitem()[0]
 
     def copy(self) -> OrderedSet[T]:

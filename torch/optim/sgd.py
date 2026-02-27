@@ -350,7 +350,6 @@ def _single_tensor_sgd(
                     # usually this is the differentiable path, which is why the param.clone() is needed
                     grad = grad.addcmul_(param.clone(), weight_decay)
                 else:
-                    # pyrefly: ignore [bad-argument-type]
                     grad = grad.add(param, alpha=weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)

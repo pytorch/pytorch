@@ -24,7 +24,7 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Union, Any
+from typing import Any
 from collections.abc import Callable
 from collections.abc import Sequence
 
@@ -508,7 +508,7 @@ def nllloss_no_reduce_test():
 
 def nllloss_no_reduce_ignore_index_test():
     t = Variable(torch.empty(15).uniform_().mul(10).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 2, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 2, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -611,7 +611,7 @@ def nllloss2d_no_reduce_test():
 
 def nllloss2d_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLoss2d_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -668,7 +668,7 @@ def nlllossNd_no_reduce_test():
 
 def nlllossNd_no_reduce_ignore_index_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    kwargs: dict[str, Union[int, str]] = {'ignore_index': 1, 'reduction': 'none'}
+    kwargs: dict[str, int | str] = {'ignore_index': 1, 'reduction': 'none'}
     return dict(
         fullname='NLLLossNd_no_reduce_ignore_index',
         constructor=wrap_functional(
@@ -3231,7 +3231,7 @@ class NNTestCase(TestCase):
     @abstractmethod
     def _backward(self, module: nn.Module,
                   input: _TensorOrTensors, output: torch.Tensor,
-                  grad_output: Union[torch.Tensor, Sequence[torch.Tensor]],
+                  grad_output: torch.Tensor | Sequence[torch.Tensor],
                   create_graph: bool = False):
         raise NotImplementedError
 
