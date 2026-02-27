@@ -756,9 +756,14 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
     assert len(input_specs) > 0, "broken input"
     num_inputs = len(input_specs)
 
-    # Fall back to full expansion if any input has _StridedShard
+    # Fall back to full expansion if any input has _StridedShard or symbolic shapes
+    # (symbolic shapes produce SymFloat costs that can't be compared in the PQ)
     for spec in input_specs:
         if any(isinstance(p, _StridedShard) for p in spec.placements):
+            return None
+        if spec.tensor_meta is not None and any(
+            isinstance(s, torch.SymInt) for s in spec.tensor_meta.shape
+        ):
             return None
 
     prepared_strategy = _PreparedSingleDimStrategy(

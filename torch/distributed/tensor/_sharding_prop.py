@@ -677,7 +677,7 @@ class ShardingPropagator:
                 assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
                 # Try PQ search first (returns None for StridedShard inputs)
                 op_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
-                    mesh, op_schema, single_dim_strategy_info, out_tensor_meta
+                    mesh, strategy_schema, single_dim_strategy_info, out_tensor_meta
                 )
                 if op_strategy is None:
                     # Fall back to full O(S^N) expansion
