@@ -4278,7 +4278,7 @@ class InstructionTranslatorBase(
             # same as => arg1.__type_params__ = arg2
             assert isinstance(arg1, BaseUserFunctionVariable)
             arg1.call_method(
-                self,
+                self,  # pyrefly: ignore[bad-argument-type]
                 "__setattr__",
                 [ConstantVariable.create("__type_params__"), arg2],
                 {},
