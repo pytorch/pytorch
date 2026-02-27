@@ -936,6 +936,11 @@ def _get_optimization_cflags(
         if config.aot_inductor.enable_lto and _is_clang(cpp_compiler):
             cflags.append("flto=thin")
 
+        if config.aot_inductor.clang_bracket_depth > 0 and _is_clang(cpp_compiler):
+            cflags.append(
+                f"fbracket-depth={config.aot_inductor.clang_bracket_depth}"
+            )
+
     return cflags, ldflags
 
 
