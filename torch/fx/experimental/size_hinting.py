@@ -126,7 +126,6 @@ def _guarding_hint_or_throw_base(
             for unbacked symbols.
     """
     from torch.fx.experimental.symbolic_shapes import (
-        GuardOnDataDependentSymNode,
         has_free_unbacked_symbols,
         symbol_is_type,
         SymT,
@@ -155,7 +154,7 @@ def _guarding_hint_or_throw_base(
         # Note: we could do better here and call
         # _maybe_evaluate_static(orig_expr, compute_hint=True)
         # but is it worth the overhead? probably not.
-        raise GuardOnDataDependentSymNode(expr)
+        raise shape_env._make_data_dependent_error(expr, expr)
 
     result = _maybe_realize_expr(expr, None)
     if result is None:
