@@ -60,6 +60,7 @@ def propagate_scale_by(nodes_with_chunking_meta: Sequence[Node]) -> None:
             print("Propagate scale_by:")
             format_node_with_chunking_meta(node, True)
 
+        # pyrefly: ignore [missing-attribute]
         assert all(arg_meta is not None for arg_meta in arg_metas), node.format_node()
 
         # None of the input has scale_by set
@@ -72,11 +73,13 @@ def propagate_scale_by(nodes_with_chunking_meta: Sequence[Node]) -> None:
             or target not in propagate_rules
         ):
             raise CantChunk(
+                # pyrefly: ignore [missing-attribute]
                 f"Missing scale_by propagation rule for target {target}: {node.format_node()}"
             )
 
         if not propagate_rules[target](node):
             raise CantChunk(
+                # pyrefly: ignore [missing-attribute]
                 f"scale_by propagate rule for {target} fail: {node.format_node()}"
             )
 

@@ -173,6 +173,7 @@ def can_reach_amplified_node(
 
 
 def propagate(amplifier_node: Node) -> None:
+    # pyrefly: ignore [missing-attribute]
     log.debug("amplifier_node is %s", amplifier_node.format_node())
     # Chunk the batch dimension (dim 0) of the amplifier_node
     graph = amplifier_node.graph
@@ -207,6 +208,7 @@ def propagate(amplifier_node: Node) -> None:
 def propagate_single_node(
     queue: Queue, fwd_filter: dict[Node, bool], bwd_filter: dict[Node, bool], node: Node
 ) -> None:  # type: ignore[type-arg]
+    # pyrefly: ignore [missing-attribute]
     log.debug("Propagate_single_node: %s", node.format_node())
 
     if node.op != "call_function":
@@ -221,6 +223,7 @@ def propagate_single_node(
 
     if not isinstance(target, torch._ops.OpOverload) or target not in propagate_rules:
         raise CantChunk(
+            # pyrefly: ignore [missing-attribute]
             f"Missing propagation rule for target {target}: {node.format_node()}"
         )
 
@@ -231,6 +234,7 @@ def propagate_single_node(
         format_node_with_chunking_meta(node, True)
 
     if status == PropagateStatus.FAIL:
+        # pyrefly: ignore [missing-attribute]
         raise CantChunk(f"Propagate rule for {target} fail: {node.format_node()}")
     elif status == PropagateStatus.SUCCEED_WITH_CHANGE:
         # propagate to used nodes

@@ -664,6 +664,7 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
     # (4) Reroute all consumers of the original LSTM node and its sub-nodes
     for user in list(node.users.keys()):
         if user != output and user != hidden:
+            # pyrefly: ignore [missing-attribute]
             user.replace_input_with(node, lstm_output_dq)
     # The getitem and tuple nodes we added here may interfere with reference quantized
     # pattern matching, so we need to redirect the consumers of internal nodes to the

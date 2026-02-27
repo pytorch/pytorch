@@ -1866,6 +1866,7 @@ class ConstructorMoverPass:
             for idx, node in enumerate(movable_cpu_placeholders):
                 with graph.inserting_after(last_node):
                     gpu_node = graph.call_function(operator.getitem, (gpu_split, idx))
+                    # pyrefly: ignore [missing-attribute]
                     node.replace_all_uses_with(
                         gpu_node,
                         lambda x: x
@@ -1885,6 +1886,7 @@ class ConstructorMoverPass:
                     and user.args[1] == target_device
                 ]
                 for noop in noop_device_puts:
+                    # pyrefly: ignore [missing-attribute]
                     noop.replace_all_uses_with(gpu_node)
                     graph.erase_node(noop)
 

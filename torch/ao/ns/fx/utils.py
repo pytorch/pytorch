@@ -540,6 +540,7 @@ def get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
     args and kwargs to the best of its ability.
     """
     try:
+        # pyrefly: ignore [missing-attribute]
         norm_args_and_kwargs = node.normalized_arguments(
             gm, normalize_to_only_use_kwargs=True
         )

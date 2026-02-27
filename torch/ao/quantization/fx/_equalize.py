@@ -701,6 +701,7 @@ def remove_node(model: GraphModule, node: Node, prev_node: Node):
     # the input quantization observer node
     orig_users = list(node.users.keys())
     for user_node in orig_users:
+        # pyrefly: ignore [missing-attribute]
         user_node.replace_input_with(node, prev_node)
 
     # Erase the InputEqualizationObserver node

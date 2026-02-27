@@ -1963,6 +1963,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
                 ),
                 {"output_dtype": self.original_dtype},
             )
+            # pyrefly: ignore [missing-attribute]
             observer_node.replace_all_uses_with(dq_node)
             model.graph.erase_node(observer_node)
 

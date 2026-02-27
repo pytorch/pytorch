@@ -1482,6 +1482,7 @@ class OverlapScheduler:
         for node in self.scheduled:
             if node.op == "placeholder":
                 continue
+            # pyrefly: ignore [missing-attribute]
             output_node.prepend(node)
         self.graph.lint()
 

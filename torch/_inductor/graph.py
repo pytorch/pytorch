@@ -2102,6 +2102,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         assert new_unbacked_defs >= renamed_unbacked_bindings, (
             f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
+            # pyrefly: ignore [missing-attribute]
             f"fx node is: {n.format_node()}\n"
             f"new operations are:\n\n{format_new_defs()}"
         )

@@ -191,6 +191,7 @@ def _dce_subgraph(
                     )
                     # Copy metadata from old node
                     new_getitem.meta = user.meta.copy()
+                # pyrefly: ignore [missing-attribute]
                 user.replace_all_uses_with(new_getitem)
                 parent_gm.graph.erase_node(user)
 

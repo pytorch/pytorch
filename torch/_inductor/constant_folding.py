@@ -60,6 +60,7 @@ def replace_node_with_constant(
         else:
             # this is the case for lifted constants
             new_input_node = g.create_node("placeholder", qualname, (), {})
+        # pyrefly: ignore [missing-attribute]
         node.replace_all_uses_with(new_input_node)
         new_input_node.meta.update(node.meta)
         g.erase_node(node)

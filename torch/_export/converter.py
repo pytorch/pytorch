@@ -1369,6 +1369,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
                 "call_function",
                 lambda: None,
                 (),
+                # pyrefly: ignore [bad-argument-count]
                 {},
             ),
         )

@@ -1426,6 +1426,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
                         (node,),
                         {"dtype": expected_out_dtype},
                     )
+                    # pyrefly: ignore [missing-attribute]
                     node.replace_all_uses_with(output_cast_node)
                     output_cast_node.args = (node,)
                     logger.info(

@@ -1208,6 +1208,7 @@ def _merge_graph_inputs(
                 # Override with new_ph if there exists a old placeholder.
                 if arg in lifted_freevars:
                     old_ph = lifted_freevars[arg].node
+                    # pyrefly: ignore [missing-attribute]
                     old_ph.replace_all_uses_with(new_ph)
                     # replace_all_uses_with doesn't clean users. Clean it manually so that we could erase it.
                     old_ph.users = {}

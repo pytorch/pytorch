@@ -21,6 +21,7 @@ from typing import Any, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
+# pyrefly: ignore [missing-module-attribute]
 from torch._C import _fx_map_arg as map_arg, _GraphBase, _NamespaceBase
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -1183,8 +1184,10 @@ class Graph(_GraphBase):
         # - _len = 0
         # - _root = None (will be set below)
         super().__init__()
+        # pyrefly: ignore [bad-argument-count]
         self._root: Node = Node(self, "", "root", "", (), {})
         self._used_names: dict[str, int] = {}  # base name -> number
+        # pyrefly: ignore [missing-attribute]
         self._insert = self._root.prepend
         self._graph_namespace = _Namespace()
         self._owning_module = owning_module
@@ -1334,6 +1337,7 @@ class Graph(_GraphBase):
 
         candidate = name if name is not None else self._target_to_str(target)
         name = self._graph_namespace.create_name(candidate, None)
+        # pyrefly: ignore [bad-argument-count]
         n = Node(self, name, op, target, args, kwargs, type_expr)
 
         if (
@@ -1425,6 +1429,7 @@ class Graph(_GraphBase):
             return self.inserting_after(self._root)
         if n.graph != self:
             raise AssertionError("Node to insert before is not in graph.")
+        # pyrefly: ignore [missing-attribute]
         return _InsertPoint(self, n.prepend)
 
     @compatibility(is_backward_compatible=True)
@@ -1450,6 +1455,7 @@ class Graph(_GraphBase):
             return self.inserting_before(self._root)
         if n.graph != self:
             raise AssertionError("Node to insert after is not in graph.")
+        # pyrefly: ignore [missing-attribute]
         return _InsertPoint(self, n.append)
 
     @compatibility(is_backward_compatible=True)

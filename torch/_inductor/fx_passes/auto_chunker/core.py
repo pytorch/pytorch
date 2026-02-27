@@ -185,6 +185,7 @@ def reorder_nodes(graph: Graph) -> Graph:
         if log.isEnabledFor(logging.DEBUG):
             fake_tensor = get_fake_tensor_from_node_arg(node)
             shape = list(fake_tensor.shape) if fake_tensor is not None else "?"
+            # pyrefly: ignore [missing-attribute]
             log.debug(" - %s: %s %s", typestr, shape, node.format_node())
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 

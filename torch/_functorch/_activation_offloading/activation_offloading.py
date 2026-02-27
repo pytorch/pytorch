@@ -142,6 +142,7 @@ def offload_activation_fw(graph: fx.Graph) -> None:
         node_to_offload[node] = cpu_node
 
     # Update the return node args
+    # pyrefly: ignore [missing-attribute]
     output_node.update_arg(
         0, tuple(node_to_offload.get(node, node) for node in fwd_outputs)
     )
@@ -334,6 +335,7 @@ def offload_chosen_sets(
         bwd_offload_node.meta.update(fwd_node.meta)
         bwd_offload_node.meta["saved_for_offloading"] = True
         bwd_offload_node.meta["original_device"] = bwd_node.meta["val"].device
+        # pyrefly: ignore [missing-attribute]
         bwd_node.replace_all_uses_with(bwd_offload_node)
         bwd_module.graph.erase_node(bwd_node)
 
@@ -688,6 +690,7 @@ def reorder_for_prefetch(
             while reload_queue:
                 entry: ReloadQueueEntry = reload_queue.pop(0)
                 for reload_group_node in reversed(entry.pattern.reload_group_nodes):
+                    # pyrefly: ignore [missing-attribute]
                     node.append(reload_group_node)
             break
         elif node in reload_patterns:
@@ -711,6 +714,7 @@ def reorder_for_prefetch(
             if reload_queue[0].remaining_time_ms <= 0:
                 entry: ReloadQueueEntry = reload_queue.pop(0)
                 for reload_group_node in entry.pattern.reload_group_nodes:
+                    # pyrefly: ignore [missing-attribute]
                     node.prepend(reload_group_node)
 
 
@@ -757,6 +761,7 @@ def activation_offload_sink_wait(fwd_module: fx.GraphModule) -> None:
     # Find the output node, and move all wait_event nodes to just before the output node
     output_node: fx.Node = graph.find_nodes(op="output")[0]
     for wait_node in wait_nodes_to_sink:
+        # pyrefly: ignore [missing-attribute]
         output_node.prepend(wait_node)
 
 

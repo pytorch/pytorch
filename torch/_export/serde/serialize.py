@@ -1992,6 +1992,7 @@ class GraphModuleSerializer(metaclass=Final):
                 output_arguments.append(self.serialize_output(user_node_name, meta))
             else:
                 raise ValueError(
+                    # pyrefly: ignore [missing-attribute]
                     f"Unhandled output type {type(meta)} from node {node.format_node()}"
                 )
 
@@ -3193,6 +3194,7 @@ class GraphModuleDeserializer(metaclass=Final):
         ):
             # manually rename the node to a unused name to avoid naming conflicts
             fx_node.meta["val"] = None
+            # pyrefly: ignore [missing-attribute]
             fx_node._rename(f"{self.graph._target_to_str(fx_node.target)}_unused")
             return
 

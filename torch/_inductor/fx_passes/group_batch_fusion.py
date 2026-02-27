@@ -288,6 +288,7 @@ class PostGradBatchLinearFusion(BatchFusion):
                             batch_biases_meta[i]["val"], new_mm.meta["val"]
                         )
             new_mm_cont = new_bias_add if has_bias else new_mm  # type: ignore[possibly-undefined]
+            # pyrefly: ignore [missing-attribute]
             original_mm.replace_all_uses_with(new_mm_cont)
             new_mm_cont.meta.update(original_mm.meta)
             graph.erase_node(original_mm)  # type: ignore[operator]
@@ -369,6 +370,7 @@ class GroupLinearFusion(GroupFusion):
         for i, original_mm in enumerate(group_nodes):
             with graph.inserting_after(fused_mm):  # type: ignore[operator]
                 new_mm = graph.call_function(operator.getitem, args=(fused_mm, i))  # type: ignore[operator]
+            # pyrefly: ignore [missing-attribute]
             original_mm.replace_all_uses_with(new_mm)
             new_mm.meta.update(original_mm.meta)
             graph.erase_node(original_mm)  # type: ignore[operator]
@@ -473,6 +475,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
                     new_add = graph.call_function(  # type: ignore[operator]
                         torch.ops.aten.select, args=((batch_op, 0, i))
                     )
+                # pyrefly: ignore [missing-attribute]
                 original_add.replace_all_uses_with(new_add)
                 new_add.meta.update(original_add.meta)
                 graph.erase_node(original_add)  # type: ignore[operator]
@@ -568,6 +571,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 new_node = graph.call_function(  # type: ignore[operator]
                     operator.getitem, args=(fused_lhs_list, i)
                 )
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(new_node)
             new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
@@ -725,6 +729,7 @@ class PreGradBatchLinearFusion(BatchFusion):
             for i, linear in enumerate(batch_nodes):
                 with graph.inserting_after(bmm):  # type: ignore[operator]
                     getitem = graph.call_function(operator.getitem, args=(bmm, i))  # type: ignore[operator]
+                # pyrefly: ignore [missing-attribute]
                 linear.replace_all_uses_with(getitem)
                 getitem.meta.update(linear.meta)
                 graph.erase_node(linear)  # type: ignore[operator]
@@ -899,6 +904,7 @@ class BatchLayernormFusion(BatchFusion):
                 new_node = graph.call_function(  # type: ignore[operator]
                     operator.getitem, args=(batch_layer_norm_unbind, i)
                 )
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(new_node)
             new_node.meta.update(node.meta)
             graph.erase_node(node)  # type: ignore[operator]
@@ -979,6 +985,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             for i, node in enumerate(batch_nodes):
                 with graph.inserting_after(unbind_op):  # type: ignore[operator]
                     getitem = graph.call_function(operator.getitem, args=(unbind_op, i))  # type: ignore[operator]
+                # pyrefly: ignore [missing-attribute]
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)  # type: ignore[operator]
@@ -1038,6 +1045,7 @@ class BatchPointwiseOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             for i, node in enumerate(batch_nodes):
                 with graph.inserting_after(batch_op):  # type: ignore[operator]
                     getitem = graph.call_function(aten.select, args=(batch_op, 0, i))  # type: ignore[operator]
+                # pyrefly: ignore [missing-attribute]
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)  # type: ignore[operator]
@@ -1105,6 +1113,7 @@ class BatchMathOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
             for i, node in enumerate(batch_nodes):
                 with graph.inserting_after(unbind_op):  # type: ignore[operator]
                     getitem = graph.call_function(operator.getitem, args=(unbind_op, i))  # type: ignore[operator]
+                # pyrefly: ignore [missing-attribute]
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)  # type: ignore[operator]

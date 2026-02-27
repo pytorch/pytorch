@@ -331,6 +331,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     src,
                     [scatter_view_op],
                 )
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
             return
@@ -344,6 +345,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 src_src,
                 [scatter_view_op, *src_scatter_view_op],  # type: ignore[misc]
             )
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
 
@@ -918,6 +920,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             replacement = replace_dict[replacement]
         replace_dict[node] = replacement
 
+        # pyrefly: ignore [missing-attribute]
         node.replace_all_uses_with(replacement)
         graph.erase_node(node)
 

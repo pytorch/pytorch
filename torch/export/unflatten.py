@@ -1325,6 +1325,7 @@ class _ModuleFrame:
                 # Important to *prepend* the output to match how we are
                 # inserting placeholder nodes.
                 with self.parent.graph.inserting_before(self.parent_call_module):
+                    # pyrefly: ignore [missing-attribute]
                     self.parent_call_module.insert_arg(0, self.parent.remap_input(x))
             return self.node_to_placeholder[x]
         elif x.op == "call_function" and (
@@ -1508,6 +1509,7 @@ class _ModuleFrame:
                 raise AssertionError(f"unexpected placeholder node at index {node_idx}")
 
             self.print()
+            # pyrefly: ignore [missing-attribute]
             self.print("STEP", node_idx, node.format_node())
             self.print(self.module_stack)
             depth = len(self.module_stack)
@@ -1888,6 +1890,7 @@ def _sink_params(
             with graph.inserting_after(the_last_input):
                 new_node = graph.create_node("get_attr", ".".join(attr_path))
 
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(new_node, propagate_meta=True)
 
         graph.erase_node(node)

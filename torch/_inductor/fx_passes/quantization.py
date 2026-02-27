@@ -1709,6 +1709,7 @@ def _register_qconv_weight_prepack_pass(
             new_conv_node = graph.call_function(
                 torch.ops.onednn.qconv_pointwise.default, args=new_args
             )
+            # pyrefly: ignore [missing-attribute]
             conv_node.replace_all_uses_with(new_conv_node)
             new_conv_node.meta.update(conv_node.meta)
 
@@ -2052,6 +2053,7 @@ def _register_qlinear_weight_prepack_pass(
                     if bias:
                         output_add_node_for_bias = match.output_node()
                         assert output_add_node_for_bias.target is aten.add.Tensor
+                        # pyrefly: ignore [missing-attribute]
                         output_add_node_for_bias.replace_all_uses_with(new_linear_node)
                         new_linear_node.meta.update(output_add_node_for_bias.meta)
                     else:
@@ -2565,6 +2567,7 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
             )
             new_linear_node = graph.call_function(linear_op, args=new_args)
             out_node = match.output_node()
+            # pyrefly: ignore [missing-attribute]
             out_node.replace_all_uses_with(new_linear_node)
 
             # Erase the original nodes in the reverse order
@@ -2815,6 +2818,7 @@ def _register_smooth_quant_int_mm_pattern():
                     new_linear_node = match.graph.call_function(
                         torch.ops.onednn.qlinear_pointwise.tensor, args=new_args
                     )
+                    # pyrefly: ignore [missing-attribute]
                     out_node.replace_all_uses_with(new_linear_node)
                     new_linear_node.meta.update(out_node.meta)
                 else:
@@ -2875,6 +2879,7 @@ def _register_smooth_quant_int_mm_pattern():
                                 aten.reshape.default,
                                 args=(new_out_node, out_shape),  # type: ignore[possibly-undefined]
                             )
+                    # pyrefly: ignore [missing-attribute]
                     out_node.replace_all_uses_with(new_out_node)
                     new_out_node.meta.update(out_node.meta)
                 for node in reversed(match.nodes):
@@ -3021,6 +3026,7 @@ def _register_qconv_post_op_fusion_pass(
             new_conv_node = match.graph.call_function(
                 computation_op, args=computation_args
             )
+            # pyrefly: ignore [missing-attribute]
             out_node.replace_all_uses_with(new_conv_node)
             new_conv_node.meta.update(out_node.meta)
             for node in reversed(match.nodes):
@@ -3362,6 +3368,7 @@ def _register_qlinear_post_op_fusion_pass(
             new_linear_node = match.graph.call_function(
                 computation_op, args=computation_args
             )
+            # pyrefly: ignore [missing-attribute]
             out_node.replace_all_uses_with(new_linear_node)
             new_linear_node.meta.update(out_node.meta)
             for node in reversed(match.nodes):

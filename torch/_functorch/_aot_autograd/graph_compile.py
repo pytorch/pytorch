@@ -1396,6 +1396,7 @@ def maybe_inline_graph_saved_tensors_hooks(
                     )
                 fw_outs_bw_ins_node_names.append(new_node_name)
                 n.meta = copy.copy(_n.meta)
+                # pyrefly: ignore [missing-attribute]
                 _n.replace_all_uses_with(n)
                 fw_g.erase_node(_n)
             if isinstance(n.meta["val"], torch.Tensor):
@@ -1496,6 +1497,7 @@ def maybe_inline_graph_saved_tensors_hooks(
         unpack_saved_tensor_n = _leaves[0]
 
         if not bw_g_input_used_directly:
+            # pyrefly: ignore [missing-attribute]
             bw_g_input.replace_all_uses_with(unpack_saved_tensor_n)
             bw_g.erase_node(bw_g_input)
         else:

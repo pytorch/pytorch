@@ -948,6 +948,7 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
             orig_out: new_out for orig_out, new_out in zip(g_fn_outs, g_fn_new_outs)
         }
         for orig_out, new_out in zip(g_fn_outs, g_fn_new_outs):
+            # pyrefly: ignore [missing-attribute]
             orig_out.replace_all_uses_with(new_out)
 
         return replacements, new_nodes
@@ -1041,6 +1042,7 @@ def process_collective_bucket(
         if wait_start_idx is not None:
             nodes_to_move = new_nodes[wait_start_idx:]
             for node in nodes_to_move:
+                # pyrefly: ignore [missing-attribute]
                 wait_insertion_point.prepend(node)
 
     # Preserve metadata from original collective nodes to new bucketed nodes

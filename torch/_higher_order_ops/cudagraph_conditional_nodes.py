@@ -93,6 +93,7 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
 
 @contextmanager
 def _if_body(pred: torch.Tensor) -> Generator[None, None, None]:
+    # pyrefly: ignore [missing-attribute]
     current_cuda_graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
     current_cuda_graph.begin_capture_to_if_node(pred)
     try:

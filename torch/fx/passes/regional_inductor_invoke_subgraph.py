@@ -89,6 +89,7 @@ def _compile_submod(
                 kwargs=node.kwargs,
             )
             new_node.meta = node.meta
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(new_node)
             gm.graph.erase_node(node)
 

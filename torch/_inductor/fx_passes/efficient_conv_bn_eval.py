@@ -217,6 +217,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
 
     # this node replaces the original conv + bn, and therefore
     # should replace the uses of bn_node
+    # pyrefly: ignore [missing-attribute]
     bn_node.replace_all_uses_with(new_node)
     # take care of the deletion order:
     # delete bn_node first, and then conv_node
@@ -309,6 +310,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
 
     # this node replaces the original conv + bn, and therefore
     # should replace the uses of bn_node
+    # pyrefly: ignore [missing-attribute]
     bn_node.replace_all_uses_with(new_node)
     # take care of the deletion order:
     # delete bn_node first, and then conv_node
@@ -401,6 +403,7 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         )
     # this node replaces the original conv + bn, and therefore
     # should replace the uses of bn_node
+    # pyrefly: ignore [missing-attribute]
     bn_node.replace_all_uses_with(new_node)
     # take care of the deletion order:
     # delete bn_node first, and then conv_node

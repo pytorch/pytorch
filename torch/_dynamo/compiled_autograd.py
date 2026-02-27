@@ -991,6 +991,7 @@ class AutogradCompilerInstance:
                 node.op == "call_function" and node.target in _impure_targets
             ):
                 return True
+            # pyrefly: ignore [missing-attribute]
             return node.is_impure()
 
         before = len(self.fx_tracer.graph.nodes)
@@ -1263,6 +1264,7 @@ class AutogradCompilerInstance:
 
             arg = max(input_nodes)  # last input
             if arg is not node.prev and not self.is_placeholder(arg):
+                # pyrefly: ignore [missing-attribute]
                 arg.append(getitem_node)
                 for n in hook_block:
                     getitem_node.append(n)

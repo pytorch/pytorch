@@ -187,6 +187,7 @@ def _replace_region_with_subgraph(
             subgraph_output = graph.create_node(
                 "call_function", operator.getitem, (invoke_subgraph_node, ind), {}
             )
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(subgraph_output, propagate_meta=True)
             ind += 1
 
@@ -600,6 +601,7 @@ def _replace_tuple_outputs(
                 (invoke_subgraph_node, output_index + tuple_spec[path]),  # type: ignore[index]
                 {},
             )
+        # pyrefly: ignore [missing-attribute]
         cur_node.replace_all_uses_with(subgraph_output, propagate_meta=True)
         graph.erase_node(cur_node)
         erased_nodes.add(cur_node)

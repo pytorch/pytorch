@@ -756,6 +756,7 @@ def _lower_static_weighted_ref_module(
         if not isinstance(dq_node, Node):
             raise AssertionError("Expected dq_node to be a Node")
         ref_node.replace_input_with(dq_node, dq_node.args[0])  # type: ignore[arg-type]
+        # pyrefly: ignore [missing-attribute]
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
         model.graph.erase_node(scale_node)
@@ -832,6 +833,7 @@ def _lower_static_weighted_ref_module_with_two_inputs(
                 raise AssertionError("Expected dq_node to be a Node")
             ref_node.replace_input_with(dq_node, dq_node.args[0])  # type: ignore[arg-type]
 
+        # pyrefly: ignore [missing-attribute]
         q_node.replace_all_uses_with(ref_node)
         model.graph.erase_node(q_node)
         model.graph.erase_node(scale_node)
@@ -1007,8 +1009,10 @@ def _lower_static_weighted_ref_functional(
         )
         # kwargs for func_node has been moved to kwargs for prepack op
         func_node.kwargs = {}
+        # pyrefly: ignore [missing-attribute]
         q_node.replace_all_uses_with(func_node)
         # Move func_node after output_zp_node in the graph
+        # pyrefly: ignore [missing-attribute]
         output_zp_node.append(func_node)
 
         # Clean up: Remove quantize node, and the relu node if it exists
@@ -1211,6 +1215,7 @@ def _lower_quantized_binary_op(model: GraphModule, qconfig_map: dict[str, QConfi
                 ("call_function", qbin_op, tuple(qop_node_args), {}),
                 bop_node,
             )
+            # pyrefly: ignore [missing-attribute]
             q_node.replace_all_uses_with(qop_node)
 
         # Step 3: Remove quantize node, binary op node, and relu node if any

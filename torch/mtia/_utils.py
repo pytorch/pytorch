@@ -22,6 +22,7 @@ def _get_device_index(
 
     if device is None and optional:
         # If device is None (frequent), then we can can short-circuit the logic
+        # pyrefly: ignore [missing-attribute]
         return torch._C._mtia_getDevice()
     if isinstance(device, int):
         return device
@@ -39,6 +40,7 @@ def _get_device_index(
         device_idx = -1 if device.type == "cpu" else device.index
     if device_idx is None:
         if optional:
+            # pyrefly: ignore [missing-attribute]
             device_idx = torch._C._mtia_getDevice()
         else:
             raise ValueError(

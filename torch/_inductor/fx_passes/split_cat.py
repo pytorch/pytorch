@@ -206,6 +206,7 @@ def normalize_split_base(
             args=new_args,
             kwargs=new_kwargs,  # type: ignore[arg-type]
         )
+    # pyrefly: ignore [missing-attribute]
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
     graph.erase_node(split_node)
@@ -257,6 +258,7 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
         user = next(iter(split_node.users.keys()))
         # replace the users of grand child node with the input node
         for next_user in next_users:
+            # pyrefly: ignore [missing-attribute]
             next_user.replace_input_with(user, split_input)
         # erase the split node and its child
         graph.erase_node(user)
@@ -299,6 +301,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
             args=(input,),
             kwargs={"dim": dim},
         )
+    # pyrefly: ignore [missing-attribute]
     node.replace_all_uses_with(new_node)
     new_node.meta.update(node.meta)
     graph.erase_node(node)
@@ -359,6 +362,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
             args=new_args,
             kwargs=new_kwargs,
         )
+    # pyrefly: ignore [missing-attribute]
     cat_node.replace_all_uses_with(new_cat_node)
     new_cat_node.meta.update(cat_node.meta)
     graph.erase_node(cat_node)
@@ -395,6 +399,7 @@ def normalize_stack_default(match: Match, *args, **kwargs):
             args=(tensors,),
             kwargs={"dim": dim},
         )
+    # pyrefly: ignore [missing-attribute]
     node.replace_all_uses_with(new_node)
     new_node.meta.update(node.meta)
     graph.erase_node(node)
@@ -444,6 +449,7 @@ def normalize_squeeze_default(match: Match, *args, **kwargs):
             new_squeeze_node = match.graph.call_function(
                 torch.squeeze, args=(squeeze_input,), kwargs={"dim": dim}
             )
+    # pyrefly: ignore [missing-attribute]
     squeeze_node.replace_all_uses_with(new_squeeze_node)
     new_squeeze_node.meta.update(squeeze_node.meta)
     match.graph.erase_node(squeeze_node)
@@ -469,6 +475,7 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
             torch.reshape,
             args=(reshape_input, tuple(reshape_node.meta["example_value"].shape)),
         )
+    # pyrefly: ignore [missing-attribute]
     reshape_node.replace_all_uses_with(new_reshape_node)
     new_reshape_node.meta.update(reshape_node.meta)
     match.graph.erase_node(reshape_node)
@@ -506,6 +513,7 @@ def normalize_clamp_default(match: Match, *args, **kwargs):
             args=args,
             kwargs=kwargs,
         )
+    # pyrefly: ignore [missing-attribute]
     clamp_node.replace_all_uses_with(new_clamp_node)
     new_clamp_node.meta.update(clamp_node.meta)
     match.graph.erase_node(clamp_node)
@@ -530,6 +538,7 @@ def normalize_detach_default(match: Match, *args, **kwargs):
             torch.detach,
             args=detach_node.args,
         )
+    # pyrefly: ignore [missing-attribute]
     detach_node.replace_all_uses_with(new_detach_node)
     new_detach_node.meta.update(detach_node.meta)
     match.graph.erase_node(detach_node)
@@ -648,6 +657,7 @@ def merge_splits(
                         continue
                     next_getitem = next_split_num_to_user[next_split_num]
                     new_getitem.meta.update(next_getitem.meta)
+                    # pyrefly: ignore [missing-attribute]
                     next_getitem.replace_all_uses_with(new_getitem)
                     to_remove.append(next_getitem)
                 to_remove.append(node)
@@ -982,6 +992,7 @@ class SplitCatSimplifier:
                 next_cat_input = 0
                 for input_node in user_node.all_input_nodes:
                     if input_node in split_users:
+                        # pyrefly: ignore [missing-attribute]
                         user_node.replace_input_with(
                             input_node, user_inputs_new[next_cat_input]
                         )
@@ -1120,6 +1131,7 @@ class SplitCatSimplifier:
                         cat_dim,
                         cat_dim + 1,
                     )
+            # pyrefly: ignore [missing-attribute]
             user_node.replace_all_uses_with(new_cat_node)
             new_cats.append(new_cat_node)
 
@@ -1318,6 +1330,7 @@ def merge_split_squeeze(
             new_get_item = graph.call_function(
                 operator.getitem, args=(unbind, item_index)
             )
+            # pyrefly: ignore [missing-attribute]
             squeeze.replace_all_uses_with(new_get_item)
             new_get_item.meta.update(squeeze.meta)
             graph.erase_node(squeeze)
@@ -1561,6 +1574,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
                     args=(split_input, split_sections),
                     kwargs={"dim": split_dim},
                 )
+                # pyrefly: ignore [missing-attribute]
                 split_node.replace_all_uses_with(new_split_node)
                 new_split_node.meta.update(split_node.meta)
                 # remove all unused getitem nodes
@@ -1572,15 +1586,18 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
                         to_remove.append(getitem_node)
                     # update meta data of getitem
                     elif getitem_node.args[1] == indices[0]:
+                        # pyrefly: ignore [missing-attribute]
                         cat_user.replace_all_uses_with(getitem_node)
                         getitem_node.meta.update(cat_user.meta)
                     else:
                         # update getitem index for new split node
+                        # pyrefly: ignore [missing-attribute]
                         getitem_node.update_arg(1, index_mapping[getitem_node.args[1]])
                 graph.erase_node(split_node)
                 for getitem_node in to_remove:
                     graph.erase_node(getitem_node)
                 # update the split sections of new split node
+                # pyrefly: ignore [missing-attribute]
                 new_split_node.update_arg(1, new_split_sections)
                 split_node = new_split_node
                 split_sections = new_split_sections
@@ -1669,6 +1686,7 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
                         operator.getitem,
                         args=(split_node.args[0], tuple(slice_list)),
                     )
+                    # pyrefly: ignore [missing-attribute]
                     cat_user.replace_all_uses_with(slice_node)
                     slice_node.meta.update(cat_user.meta)
 
@@ -1731,6 +1749,7 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
             args=new_args,
             kwargs=new_kwargs,  # type: ignore[arg-type]
         )
+    # pyrefly: ignore [missing-attribute]
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
     graph.erase_node(split_node)
@@ -1772,6 +1791,7 @@ def normalize_split_with_size_default_aten(match: Match, *args, **kwargs):
             args=new_args,
             kwargs=new_kwargs,  # type: ignore[arg-type]
         )
+    # pyrefly: ignore [missing-attribute]
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
     graph.erase_node(split_node)
@@ -1870,6 +1890,7 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
             result.append(cat_inputs_list[i])
             i += 1
 
+        # pyrefly: ignore [missing-attribute]
         cat_node.update_arg(0, result)
         for getitem_node in getitem_nodes:
             if len(getitem_node.users) == 0:
@@ -1929,6 +1950,7 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
                     args=(node_input, cat_node.meta["val"].shape),
                 )
             # replace the node input with the new node
+            # pyrefly: ignore [missing-attribute]
             cat_node.replace_all_uses_with(view_node)
             view_node.meta.update(cat_node.meta)
             # remove the cat node
@@ -1981,6 +2003,7 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
             args=(tensors,),
             kwargs={"dim": cat_dim},
         )
+    # pyrefly: ignore [missing-attribute]
     cat_node.replace_all_uses_with(new_cat_node)
     new_cat_node.meta.update(cat_node.meta)
     graph.erase_node(cat_node)
@@ -2038,6 +2061,7 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     # we simply check the number of users of the parent of select node
     if len(parent_of_select_node.users.keys()) != len(node.args[0]):  # type: ignore[arg-type]
         return
+    # pyrefly: ignore [missing-attribute]
     node.replace_all_uses_with(parent_of_select_node)
     graph.erase_node(node)
     for unsqueeze_node in unsqueeze_nodes:
@@ -2378,6 +2402,7 @@ def split_cat_to_slices(match: Match, split_sections: list[int], dim: int):
         # At least one node would be in the returned new_cat_args
         # case 1: if new cat args has length 1, we can remove the cat node
         if len(new_cat_args) == 1:
+            # pyrefly: ignore [missing-attribute]
             cat_node.replace_all_uses_with(new_cat_args[0])
             # remove inputs of cat_node if they have no users
             cat_inputs = cat_node.args[0]  # type: ignore[union-attr]
@@ -2394,6 +2419,7 @@ def split_cat_to_slices(match: Match, split_sections: list[int], dim: int):
                     # split and cat have the same dim
                     kwargs={"dim": split_dim},
                 )
+                # pyrefly: ignore [missing-attribute]
                 cat_node.replace_all_uses_with(new_cat_node)
                 new_cat_node.meta.update(cat_node.meta)
                 # remove the cat node
@@ -2455,6 +2481,7 @@ def unbind_cat_to_view(match: Match, unbind_input: torch.fx.Node, dim: int):
         # At least one node would be in the returned new_cat_args
         # case 1: only one node in the new cat args, don't need to cat
         if len(new_cat_args) == 1:
+            # pyrefly: ignore [missing-attribute]
             cat_node.replace_all_uses_with(new_cat_args[0])
             # remove inputs of cat_node if they have no users
             cat_inputs = cat_node.args[0]  # type: ignore[union-attr]
@@ -2474,6 +2501,7 @@ def unbind_cat_to_view(match: Match, unbind_input: torch.fx.Node, dim: int):
                 new_cat_node.meta["example_value"] = torch.cat(
                     new_cat_args_meta, dim=cat_dim
                 )  # type: ignore[arg-type]
+                # pyrefly: ignore [missing-attribute]
                 cat_node.replace_all_uses_with(new_cat_node)
                 new_cat_node.meta.update(cat_node.meta)
             # remove inputs of cat_node if they have no users
@@ -2528,6 +2556,7 @@ def reshape_cat_node_to_stack(
         torch.Tensor.view,
         args=(permute_node, *stack_shape),  # type: ignore[arg-type]
     )
+    # pyrefly: ignore [missing-attribute]
     stack_node.replace_all_uses_with(reshape_node)
     reshape_node.meta.update(stack_node.meta)
     stack_inputs = stack_node.args[0]  # type: ignore[union-attr]
@@ -2815,6 +2844,7 @@ def move_reshape_out_of_split_stack(match: Match, *args, **kwargs):
                 stack_dim,
                 split_dim,
             )
+            # pyrefly: ignore [missing-attribute]
             stack_node.replace_all_uses_with(reshape_node)
             # remove stack node
             graph.erase_node(stack_node)
@@ -2878,6 +2908,7 @@ def move_reshape_out_of_split_stack(match: Match, *args, **kwargs):
                     args=(cat_inputs,),
                     kwargs={"dim": stack_dim},
                 )
+                # pyrefly: ignore [missing-attribute]
                 stack_node.replace_all_uses_with(cat_node)
                 cat_node.meta.update(stack_node.meta)
                 graph.erase_node(stack_node)
@@ -2972,6 +3003,7 @@ def move_view_after_cat(match: Match, *args, **kwargs):
                 torch.ops.aten.reshape.default,
                 args=(permute_node, list(cat_node.meta["val"].shape)),
             )
+            # pyrefly: ignore [missing-attribute]
             cat_node.replace_all_uses_with(view_node)
             view_node.meta.update(cat_node.meta)
             graph.erase_node(cat_node)

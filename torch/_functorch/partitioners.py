@@ -895,6 +895,7 @@ def perform_fp8_activation_quantization(
             quant_bwd_input.meta.update(fwd_node.meta)
             quant_bwd_input.meta["saved_for_quantization"] = True
             quant_bwd_input.meta["dequant_type"] = dequant_type
+            # pyrefly: ignore [missing-attribute]
             bwd_input.replace_all_uses_with(quant_bwd_input)
             bwd_module.graph.erase_node(bwd_input)
     # update the bwd_inputs if quantization with scaling is used
@@ -1242,6 +1243,7 @@ def default_partition(
         # functionalization and can be safely dup'd and reordered under the
         # assumption SPMD.
         return (
+            # pyrefly: ignore [missing-attribute]
             node.is_impure(impure_random=False)
             and node.op
             not in (
@@ -1585,6 +1587,7 @@ def apply_graphsafe_rng_functionalization(
             args=(fw_node.target, *fw_node.args),  # type: ignore[arg-type]
             kwargs=fw_kwargs,
         )
+    # pyrefly: ignore [missing-attribute]
     fw_node.replace_all_uses_with(functional_fw_node)
     fw_graph.erase_node(fw_node)
 
@@ -1598,6 +1601,7 @@ def apply_graphsafe_rng_functionalization(
             args=(bw_node.target, *bw_node.args),  # type: ignore[arg-type]
             kwargs=bwd_kwargs,
         )
+        # pyrefly: ignore [missing-attribute]
         bw_node.replace_all_uses_with(rng_output)
         bw_graph.erase_node(bw_node)
 
@@ -1787,6 +1791,7 @@ def functionalize_rng_ops(
                 # Copy the meta data from the original node
                 rng_output.meta = copy.copy(fw_node.meta)
 
+                # pyrefly: ignore [missing-attribute]
                 fw_node.replace_all_uses_with(rng_output)
                 fw_graph.erase_node(fw_node)
                 fw_rng_state_outputs.append(state)
@@ -1810,6 +1815,7 @@ def functionalize_rng_ops(
                     kwargs=bw_node.kwargs,
                 )
 
+                # pyrefly: ignore [missing-attribute]
                 bw_node.replace_all_uses_with(rng_output)
                 bw_graph.erase_node(bw_node)
 

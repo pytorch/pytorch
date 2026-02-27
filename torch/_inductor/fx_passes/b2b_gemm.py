@@ -702,7 +702,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
             new_input_node = new_graph.placeholder(name="subgraph_input")
             # pyrefly: ignore [unbound-name]
             new_input_node.meta.update(new_input_anchor.meta)
-            # pyrefly: ignore [unbound-name]
+            # pyrefly: ignore [missing-attribute, unbound-name]
             new_input_anchor.replace_all_uses_with(new_input_node)
         # pyrefly: ignore [unbound-name]
         new_graph.erase_node(new_input_anchor)
@@ -718,7 +718,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
             new_input_node = new_graph.placeholder(name="subgraph_input")
             # pyrefly: ignore [unbound-name]
             new_input_node.meta.update(new_input_anchor.meta)
-            # pyrefly: ignore [unbound-name]
+            # pyrefly: ignore [missing-attribute, unbound-name]
             new_input_anchor.replace_all_uses_with(new_input_node)
         # pyrefly: ignore [unbound-name]
         new_graph.erase_node(new_input_anchor)
@@ -765,6 +765,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
             match.kwargs,
         )
         replacement.meta.update(outer_mm.meta)
+        # pyrefly: ignore [missing-attribute]
         outer_mm.replace_all_uses_with(replacement)
     # erase unnecessary nodes
     graph.erase_node(outer_mm)

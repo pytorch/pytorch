@@ -339,6 +339,7 @@ def _insert_copy_for_mutations(
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
         new_output = gm.graph.output(output_args)
+        # pyrefly: ignore [missing-attribute]
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
         new_output.name = output_node.name

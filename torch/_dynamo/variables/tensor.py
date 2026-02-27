@@ -1700,12 +1700,14 @@ class TensorVariable(VariableTracker):
             # Move each node to right after tensor_node using node.append()
             insert_point = tensor_node
             for node in nodes_to_move:
+                # pyrefly: ignore [missing-attribute]
                 insert_point.append(node)
                 insert_point = node
 
             # Replace uses of tensor with tensor_prime, but only for the users
             # that existed before we created the hook node
             for user in users_to_replace:
+                # pyrefly: ignore [missing-attribute]
                 user.replace_input_with(tensor_node, tensor_prime_node)
 
             # Update tensor to point to the tensor_prime
@@ -1783,6 +1785,7 @@ class TensorVariable(VariableTracker):
 
     def set_name_hint(self, name: str) -> None:
         if not self._is_name_set:
+            # pyrefly: ignore [missing-attribute]
             self.proxy.node._rename(name)
             self._is_name_set = True
         return None

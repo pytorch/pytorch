@@ -27,12 +27,14 @@ logger: logging.Logger = logging.getLogger("comm_fusion")
 
 def move_block_after(block: list[fx.Node], target_node: fx.Node) -> None:
     for node in block:
+        # pyrefly: ignore [missing-attribute]
         target_node.append(node)
         target_node = node
 
 
 def move_block_before(block: list[fx.Node], target_node: fx.Node) -> None:
     for node in block:
+        # pyrefly: ignore [missing-attribute]
         target_node.prepend(node)
         target_node = node
 
@@ -363,6 +365,7 @@ def _scatter_fused_allreduce_waits(
                 incorrect_order_nodes.append(user_node)
                 nodes.extend(list(user_node.users))
 
+        # pyrefly: ignore [missing-attribute]
         orig_wait.replace_all_uses_with(fused_output)
 
     last_fused_result = fused_outputs[0]

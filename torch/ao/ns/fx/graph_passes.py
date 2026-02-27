@@ -315,7 +315,9 @@ def _insert_dtype_cast_after_node(
         dtype_cast_method_dtype = torch.float16
     else:
         raise AssertionError(
+            # pyrefly: ignore [missing-attribute]
             f"dtype cast from {node_input_type_c} {node_c.format_node()} to "
+            # pyrefly: ignore [missing-attribute]
             + f"{node_input_type_a} {node_a.format_node()} needs to be implemented"
         )
 
@@ -446,6 +448,7 @@ def _copy_node_from_a_to_c(
 
     else:
         raise AssertionError(
+            # pyrefly: ignore [missing-attribute]
             f"handling of node {node_a.format_node()} with op {node_a.op} is not implemented"
         )
 
@@ -491,6 +494,7 @@ def _can_insert_copy_of_subgraph_a(
             num_non_param_args_node_a if node_a is nodes[0] else 1
         )
 
+        # pyrefly: ignore [missing-attribute]
         norm_args_kwargs = node_a.normalized_arguments(
             gm_a, normalize_to_only_use_kwargs=True
         )
@@ -627,6 +631,7 @@ def _insert_copy_of_node_a_after_input_node_c(
             raise AssertionError(f"Expected list, got {type(input_node_c)}")
         graph_c = input_node_c[0].graph
 
+    # pyrefly: ignore [missing-attribute]
     norm_args_kwargs = node_a.normalized_arguments(
         gm_a, normalize_to_only_use_kwargs=True
     )

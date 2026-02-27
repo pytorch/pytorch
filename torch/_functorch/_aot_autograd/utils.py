@@ -367,6 +367,7 @@ def unlift_tokens(
             )
             new_token_node.meta["val"] = torch.tensor([])
             new_token_node.meta["tensor_meta"] = torch.tensor([])
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(new_token_node)
             module.graph.erase_node(node)
 

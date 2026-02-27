@@ -29,6 +29,7 @@ class ProxyValue(Generic[_T]):
     def proxy(self) -> torch.fx.Proxy:
         if not isinstance(self.proxy_or_node, torch.fx.Proxy):
             raise RuntimeError(
+                # pyrefly: ignore [missing-attribute]
                 f"ProxyValue doesn't have attached Proxy object. Node: {self.proxy_or_node.format_node()}"
             )
         return self.proxy_or_node

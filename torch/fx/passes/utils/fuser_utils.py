@@ -255,11 +255,13 @@ def insert_subgm(
         with gm.graph.inserting_before(next_node):
             if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
                 # main_remapping[comp.orig_outputs[0]] = module_node
+                # pyrefly: ignore [missing-attribute]
                 orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
             else:
                 for i, orig_output in enumerate(orig_outputs):
                     # Use Proxy to record getitem access.
                     proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
+                    # pyrefly: ignore [missing-attribute]
                     orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
 
                 module_node.meta["val"] = tuple(

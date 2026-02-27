@@ -1020,6 +1020,7 @@ def get_kernel_metadata(
 
         for node in inductor_nodes:
             detailed_metadata.append(
+                # pyrefly: ignore [missing-attribute]
                 f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
             )
 

@@ -283,6 +283,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         def run_node(self, n: torch.fx.Node) -> Argument:
             self.node = n
+            # pyrefly: ignore [missing-attribute]
             self.callback.node_debug_str = n.format_node()
             return super().run_node(n)
 

@@ -1542,6 +1542,7 @@ def dispatch_trace(
         from .symbolic_shapes import is_accessor_node
 
         # Always defer to the built-in notion of impure
+        # pyrefly: ignore [missing-attribute]
         if n.is_impure():
             return True
 

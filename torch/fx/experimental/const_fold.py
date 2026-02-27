@@ -152,6 +152,7 @@ def _inline_module(
                 idx = user.args[1]
                 if not isinstance(idx, int):
                     raise AssertionError(f"Expected int index, got {type(idx)}")
+                # pyrefly: ignore [missing-attribute]
                 user.replace_all_uses_with(output_replacements[idx])
                 gm.graph.erase_node(user)
                 replacement_mapping[user] = output_replacements[idx]

@@ -1373,6 +1373,7 @@ def _remove_output_observer(
             raise AssertionError(
                 "output_obs_node must be an activation post process node"
             )
+        # pyrefly: ignore [missing-attribute]
         output_obs_node.replace_all_uses_with(node)
         model.graph.erase_node(output_obs_node)  # type: ignore[union-attr, operator]
 

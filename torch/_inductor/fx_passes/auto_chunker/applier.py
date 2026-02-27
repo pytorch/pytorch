@@ -147,8 +147,10 @@ class ChunkingApplier:
             )
 
             name = "tangent_overriden_as_one_{idx}"
+            # pyrefly: ignore [missing-attribute]
             one._rename(name)
             one.meta = copy.copy(node.meta)
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(one)
             self.overriden_tangent[node] = one
 
@@ -392,6 +394,7 @@ class ChunkingApplier:
                     )
 
             assert recovered is not node
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(recovered)
 
     def erase_original_nodes(self) -> None:

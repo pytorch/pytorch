@@ -258,6 +258,7 @@ def _deconstruct_outputs(
     for i, orig_output in enumerate(orig_outputs):
         # Use Proxy to record getitem access.
         proxy_out = torch.fx.Proxy(flatten_node)[i].node  # type: ignore[index]
+        # pyrefly: ignore [missing-attribute]
         orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
 
         node_name_map[orig_output.name] = proxy_out

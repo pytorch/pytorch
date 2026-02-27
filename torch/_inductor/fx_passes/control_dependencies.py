@@ -173,6 +173,7 @@ def preserve_node_ordering(
         ordered_node.meta.pop("eager_input_vals", None)
 
         # Replace all uses of the original node with the ordered version
+        # pyrefly: ignore [missing-attribute]
         dependent_node.replace_all_uses_with(ordered_node)
 
         # Remove the original node from the graph

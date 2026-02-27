@@ -1114,6 +1114,7 @@ class LoweringPatternEntry(PatternEntry):
         with graph.inserting_before(node):
             replacement = graph.call_function(handler, tuple(match.args), match.kwargs)
             replacement.meta.update(node.meta)
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(replacement)
         assert match.nodes[-1] is node
         match.erase_nodes()
@@ -1279,6 +1280,7 @@ class ReplacementPatternEntry(PatternEntry):
                     return
                 assert isinstance(old, torch.fx.Node)
                 if new is None:
+                    # pyrefly: ignore [missing-attribute]
                     old.replace_all_uses_with(
                         None,  # type: ignore[arg-type]
                         delete_user_cb=filter_nodes_in_newly_added_nodes,
@@ -1304,6 +1306,7 @@ class ReplacementPatternEntry(PatternEntry):
                                 new, tag_name, old.meta[tag_name], OrderedSet(args)
                             )
 
+                    # pyrefly: ignore [missing-attribute]
                     old.replace_all_uses_with(
                         new, delete_user_cb=filter_nodes_in_newly_added_nodes
                     )
@@ -1343,7 +1346,7 @@ class ReplacementPatternEntry(PatternEntry):
                     idx = maybe_getitem(user)
                     if idx is None:
                         # Output is used directly
-                        # pyrefly: ignore [bad-argument-type]
+                        # pyrefly: ignore [bad-argument-type, missing-attribute]
                         old.replace_all_uses_with(new)
                     else:
                         replace(user, new[idx])

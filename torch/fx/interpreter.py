@@ -143,6 +143,7 @@ class Interpreter:
                     node_to_last_use[n] = user
                     self.user_to_last_uses.setdefault(user, []).append(n)
 
+            # pyrefly: ignore [missing-attribute]
             for node in reversed(self.graph.nodes):
                 for n in node._input_nodes:
                     register_last_uses(n, node)

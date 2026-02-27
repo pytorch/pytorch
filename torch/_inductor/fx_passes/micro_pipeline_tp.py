@@ -79,6 +79,7 @@ class _AllGatherMatch:
     group_name: "torch.distributed.distributed_c10d.GroupName"
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
+        # pyrefly: ignore [missing-attribute]
         self.res_node.replace_all_uses_with(new_node)
 
     def erase(self) -> None:
@@ -216,6 +217,7 @@ class _ReduceScatterMatch:
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
         # Replace all uses of the result node (wait_tensor) with the fused node.
+        # pyrefly: ignore [missing-attribute]
         self.wait_tensor_node.replace_all_uses_with(new_node)
 
         # If the reduce-scatter result is saved for backward, save the fused node for backward instead.
@@ -232,6 +234,7 @@ class _ReduceScatterMatch:
                 output_node = user
                 break
         if output_node is not None:
+            # pyrefly: ignore [missing-attribute]
             output_node.replace_input_with(self.reduce_scatter_node, new_node)
 
             # Assert that now the reduce scatter node has only one user (the wait_tensor) and it's not
@@ -401,6 +404,7 @@ class _Matmul:
         if len(self.nodes) == 1:
             mm_node = self.nodes[0]
             assert mm_node.target in (aten.mm.default, aten._scaled_mm.default)
+            # pyrefly: ignore [missing-attribute]
             mm_node.replace_all_uses_with(new_node)
             graph.erase_node(mm_node)
             return
@@ -417,6 +421,7 @@ class _Matmul:
         assert mm_node.target in (aten.mm.default, aten._scaled_mm.default)
         assert output_reshape_node.target is aten.reshape.default
 
+        # pyrefly: ignore [missing-attribute]
         output_reshape_node.replace_all_uses_with(new_node)
         if len(mm_node.users) > 1:
             with graph.inserting_after(new_node):
@@ -424,6 +429,7 @@ class _Matmul:
                     aten.reshape.default,
                     args=(new_node, list(_get_tensor(mm_node).shape)),
                 )
+            # pyrefly: ignore [missing-attribute]
             mm_node.replace_all_uses_with(new_mm_node)
 
     def erase(self) -> None:
@@ -738,6 +744,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     )
     for node in nodes_to_raise:
         if order[node] > order[fused_node]:
+            # pyrefly: ignore [missing-attribute]
             fused_node.prepend(node)
 
 
@@ -996,6 +1003,7 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     )
     for node in nodes_to_raise:
         if order[node] > order[fused_node]:
+            # pyrefly: ignore [missing-attribute]
             fused_node.prepend(node)
 
     log.debug("successfully fused matmul reduce scatter")

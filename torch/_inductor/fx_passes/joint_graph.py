@@ -529,6 +529,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 )
 
                 new_node.meta.update(node.meta)
+                # pyrefly: ignore [missing-attribute]
                 node.replace_all_uses_with(new_node)
                 graph.erase_node(node)
 
@@ -606,6 +607,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
                 subgraph_graph.recompile()
 
                 invoke_quant_replacement.meta.update(first_user.meta)
+                # pyrefly: ignore [missing-attribute]
                 first_user.replace_all_uses_with(invoke_quant_replacement)
                 graph.erase_node(first_user)
 
@@ -741,6 +743,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
             )
             repl.meta.update(node.meta)
             repl.meta["val"] = repl.meta["val"].to(user_device)
+            # pyrefly: ignore [missing-attribute]
             node.replace_all_uses_with(repl)
             match.erase_nodes()
 
@@ -768,6 +771,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
             torch.ops.prims.convert_element_type.default, (arg, dtype2)
         )
         repl.meta.update(node.meta)
+        # pyrefly: ignore [missing-attribute]
         node.replace_all_uses_with(repl)
         match.erase_nodes()
 
@@ -846,6 +850,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
     node = match.output_node()
     arg_size = list(arg.meta["val"].shape)
     if definitely_equal(arg_size, size2):
+        # pyrefly: ignore [missing-attribute]
         node.replace_all_uses_with(arg)
         match.erase_nodes()
         counters["inductor"]["removed_pointless_view_pair"] += 1
@@ -868,6 +873,7 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
         if perm1[perm2[i]] != i:
             return  # bail out
     node = match.output_node()
+    # pyrefly: ignore [missing-attribute]
     node.replace_all_uses_with(arg)
     match.erase_nodes()
 

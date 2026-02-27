@@ -79,6 +79,7 @@ def _replace_with_hop_helper(
                 for get_item_node in call_func_node.users:
                     idx: int = get_item_node.args[1]  # type: ignore[assignment]
                     output_node = output_args[idx]
+                    # pyrefly: ignore [missing-attribute]
                     get_item_node._rename(output_node.name)
                     get_item_node.meta = output_node.meta
 

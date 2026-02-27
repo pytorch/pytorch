@@ -31,6 +31,7 @@ def is_impure_node_for_dce(node: fx.Node) -> bool:
     impure_random = True
     if torch._guards.TracingContext.try_get():
         impure_random = torch._inductor.config.fallback_random
+    # pyrefly: ignore [missing-attribute]
     return node.is_impure(impure_random)
 
 
