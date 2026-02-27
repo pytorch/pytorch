@@ -203,6 +203,68 @@ TEST_F(ModulesTest, ConvTranspose1d) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
 }
 
+TEST_F(ModulesTest, ConvTranspose1dSameForwardSymmetric) {
+  ConvTranspose1d model(
+      ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false).padding(
+          torch::kSame));
+  model->weight.set_data(torch::arange(18.).view({2, 3, 3}));
+  auto x = torch::arange(20.).reshape({2, 2, 5});
+  auto y = model(x);
+  auto expected = torch::tensor(
+      {{{104., 179., 212., 245., 188.},
+        {140., 242., 293., 344., 260.},
+        {176., 305., 374., 443., 332.}},
+       {{304., 509., 542., 575., 428.},
+        {460., 752., 803., 854., 620.},
+        {616., 995., 1064., 1133., 812.}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  torch::Tensor s = y.sum();
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3);
+}
+
+TEST_F(ModulesTest, ConvTranspose1dSameForwardAsymmetric) {
+  ConvTranspose1d model(
+      ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false).padding(
+          torch::kSame));
+  model->weight.set_data(torch::arange(24.).view({2, 3, 4}));
+  auto x = torch::arange(20.).reshape({2, 2, 5});
+  auto y = model(x);
+  auto expected = torch::tensor(
+      {{{233., 350., 410., 350., 263.},
+        {317., 478., 570., 482., 359.},
+        {401., 606., 730., 614., 455.}},
+       {{653., 950., 1010., 830., 603.},
+        {977., 1398., 1490., 1202., 859.},
+        {1301., 1846., 1970., 1574., 1115.}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  torch::Tensor s = y.sum();
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 4);
+}
+
+TEST_F(ModulesTest, ConvTranspose1dSameStrided) {
+  auto options = ConvTranspose1dOptions(3, 2, 3);
+  options.stride(1).padding(torch::kSame);
+  ConvTranspose1d model_valid(options);
+  ASSERT_THROWS_WITH(
+      [&] { ConvTranspose1d model_invalid(options.stride(2)); }(),
+      "padding='same' is not supported for strided convolutions");
+}
+
+TEST_F(ModulesTest, ConvTranspose1dSameOutputPadding) {
+  auto options = ConvTranspose1dOptions(3, 2, 3);
+  options.stride(1).output_padding(0).padding(torch::kSame);
+  ConvTranspose1d model_valid(options);
+  ASSERT_THROWS_WITH(
+      [&] { ConvTranspose1d model_invalid(options.output_padding(1)); }(),
+      "padding='same' only supports output_padding=0, but got 1 at dimension 0.");
+}
+
 TEST_F(ModulesTest, ConvTranspose2dEven) {
   ConvTranspose2d model(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(torch::arange(54.).view({2, 3, 3, 3}));
@@ -274,6 +336,62 @@ TEST_F(ModulesTest, ConvTranspose2dUneven) {
   ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
 }
 
+TEST_F(ModulesTest, ConvTranspose2dSameForward) {
+  ConvTranspose2d model(ConvTranspose2dOptions(3, 2, {3, 2})
+                            .stride(1)
+                            .bias(false)
+                            .padding(torch::kSame));
+  model->weight.set_data(torch::arange(36.).view({2, 3, 3, 2}));
+  auto x = torch::arange(50.).view({1, 2, 5, 5});
+  auto y = model(x);
+
+  // NOTE: The padding is symmetric on Height dimension (crop 1 on each side).
+  // The padding is asymmetric on width dimension,
+  // crop 1 on left and 0 on right.
+  auto expected = torch::tensor(
+      {{{{2180., 2264., 2348., 2432., 1276.},
+         {3751., 3889., 4027., 4165., 2183.},
+         {4441., 4579., 4717., 4855., 2543.},
+         {5131., 5269., 5407., 5545., 2903.},
+         {3928., 4028., 4128., 4228., 2208.}},
+
+        {{2924., 3056., 3188., 3320., 1732.},
+         {5047., 5257., 5467., 5677., 2957.},
+         {6097., 6307., 6517., 6727., 3497.},
+         {7147., 7357., 7567., 7777., 4037.},
+         {5392., 5540., 5688., 5836., 3024.}},
+
+        {{3668., 3848., 4028., 4208., 2188.},
+         {6343., 6625., 6907., 7189., 3731.},
+         {7753., 8035., 8317., 8599., 4451.},
+         {9163., 9445., 9727., 10009., 5171.},
+         {6856., 7052., 7248., 7444., 3840.}}}});
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  torch::Tensor s = y.sum();
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(model->weight.grad().numel(), 3 * 2 * 3 * 2);
+}
+
+TEST_F(ModulesTest, ConvTranspose2dSameStrided) {
+  auto options = ConvTranspose2dOptions(3, 2, {3, 2});
+  options.stride({1, 1}).padding(torch::kSame);
+  ConvTranspose2d model_valid(options);
+  ASSERT_THROWS_WITH(
+      [&] { ConvTranspose2d model_invalid(options.stride({1, 2})); }(),
+      "padding='same' is not supported for strided convolutions");
+}
+
+TEST_F(ModulesTest, ConvTranspose2dSameOutputPadding) {
+  auto options = ConvTranspose2dOptions(3, 2, {3, 2});
+  options.stride({1, 1}).output_padding({0, 0}).padding(torch::kSame);
+  ConvTranspose2d model_valid(options);
+  ASSERT_THROWS_WITH(
+      [&] { ConvTranspose2d model_invalid(options.output_padding({0, 1})); }(),
+      "padding='same' only supports output_padding=0, but got 1 at dimension 1.");
+}
+
 TEST_F(ModulesTest, ConvTranspose3d) {
   ConvTranspose3d model(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false));
   model->weight.set_data(torch::arange(32.).reshape({2, 2, 2, 2, 2}));
@@ -292,6 +410,47 @@ TEST_F(ModulesTest, ConvTranspose3d) {
   s.backward();
   ASSERT_EQ(s.ndimension(), 0);
   ASSERT_TRUE(model->weight.grad().numel() == 2 * 2 * 2 * 2 * 2);
+}
+
+TEST_F(ModulesTest, ConvTranspose3dSameForward) {
+  ConvTranspose3d model(
+      ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false).padding(
+          torch::kSame));
+  model->weight.set_data(torch::arange(72.).reshape({2, 3, 2, 3, 2}));
+  auto x = torch::arange(16.).reshape({1, 2, 2, 2, 2});
+  auto y = model(x);
+  // crops (left, right): 1st_dim (1, 0); 2nd_dim (1, 1); 3rd_dim (1, 0).
+  auto expected = torch::tensor(
+      {{{{3736., 1992.}, {3976., 2120.}}, {{2504., 1324.}, {2656., 1404.}}},
+       {{{5176., 2760.}, {5416., 2888.}}, {{3416., 1804.}, {3568., 1884.}}},
+       {{{6616., 3528.}, {6856., 3656.}}, {{4328., 2284.}, {4480., 2364.}}}});
+
+  ASSERT_TRUE(torch::allclose(y, expected));
+
+  torch::Tensor s = y.sum();
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_TRUE(model->weight.grad().numel() == 2 * 3 * 2 * 3 * 2);
+}
+
+TEST_F(ModulesTest, ConvTranspose3dSameStrided) {
+  auto options = ConvTranspose3dOptions(2, 2, 2);
+  options.stride({1, 1, 1}).padding(torch::kSame);
+  ConvTranspose3d model_valid(options);
+  ASSERT_THROWS_WITH(
+      [&] { ConvTranspose3d model_invalid(options.stride({1, 2, 1})); }(),
+      "padding='same' is not supported for strided convolutions");
+}
+
+TEST_F(ModulesTest, ConvTranspose3dSameOutputPadding) {
+  auto options = ConvTranspose3dOptions(2, 2, 2);
+  options.stride({1, 1, 1}).output_padding({0, 0, 0}).padding(torch::kSame);
+  ConvTranspose3d model_valid(options);
+  ASSERT_THROWS_WITH(
+      [&] {
+        ConvTranspose3d model_invalid(options.output_padding({0, 0, 3}));
+      }(),
+      "padding='same' only supports output_padding=0, but got 3 at dimension 2.");
 }
 
 TEST_F(ModulesTest, MaxPool1d) {
@@ -4658,6 +4817,15 @@ TEST_F(ModulesTest, PrettyPrintConvTranspose) {
   ASSERT_EQ(
       c10::str(ConvTranspose1d(3, 4, 5)),
       "torch::nn::ConvTranspose1d(3, 4, kernel_size=5, stride=1)");
+  {
+    auto options = ConvTranspose1dOptions(3, 4, 5);
+    ASSERT_EQ(
+        c10::str(ConvTranspose1d(options.padding(torch::kSame))),
+        "torch::nn::ConvTranspose1d(3, 4, kernel_size=5, stride=1, padding='same')");
+    ASSERT_EQ(
+        c10::str(ConvTranspose1d(options.padding(torch::kValid))),
+        "torch::nn::ConvTranspose1d(3, 4, kernel_size=5, stride=1, padding='valid')");
+  }
 
   ASSERT_EQ(
       c10::str(ConvTranspose2d(3, 4, 5)),
@@ -4665,6 +4833,15 @@ TEST_F(ModulesTest, PrettyPrintConvTranspose) {
   ASSERT_EQ(
       c10::str(ConvTranspose2d(ConvTranspose2dOptions(3, 4, 5).stride(2))),
       "torch::nn::ConvTranspose2d(3, 4, kernel_size=[5, 5], stride=[2, 2])");
+  {
+    auto options = ConvTranspose2dOptions(3, 4, std::vector<int64_t>{5, 6});
+    ASSERT_EQ(
+        c10::str(ConvTranspose2d(options.padding(torch::kSame))),
+        "torch::nn::ConvTranspose2d(3, 4, kernel_size=[5, 6], stride=[1, 1], padding='same')");
+    ASSERT_EQ(
+        c10::str(ConvTranspose2d(options.padding(torch::kValid))),
+        "torch::nn::ConvTranspose2d(3, 4, kernel_size=[5, 6], stride=[1, 1], padding='valid')");
+  }
   {
     const auto options =
         ConvTranspose2dOptions(3, 4, std::vector<int64_t>{5, 6}).stride({1, 2});
@@ -4697,6 +4874,15 @@ TEST_F(ModulesTest, PrettyPrintConvTranspose) {
         "groups=2, "
         "bias=false, "
         "padding_mode=kCircular)");
+  }
+  {
+    auto options = ConvTranspose3dOptions(3, 4, std::vector<int64_t>{5, 6, 7});
+    ASSERT_EQ(
+        c10::str(ConvTranspose3d(options.padding(torch::kSame))),
+        "torch::nn::ConvTranspose3d(3, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1], padding='same')");
+    ASSERT_EQ(
+        c10::str(ConvTranspose3d(options.padding(torch::kValid))),
+        "torch::nn::ConvTranspose3d(3, 4, kernel_size=[5, 6, 7], stride=[1, 1, 1], padding='valid')");
   }
 }
 
