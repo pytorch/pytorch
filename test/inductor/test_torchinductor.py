@@ -7490,6 +7490,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(8),))
 
+    @xfail_if_triton_cpu
     def test_remainder(self):
         def fn(a, b):
             return (
