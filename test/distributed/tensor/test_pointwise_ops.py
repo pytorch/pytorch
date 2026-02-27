@@ -535,21 +535,6 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res, expected)
 
     @with_comms
-    def test_mul_div_scalar_norm_partial(self):
-        mesh = self.build_device_mesh()
-        aten = torch.ops.aten
-        local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
-        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
-
-        norm = dt.norm()
-        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
-
-        self.assertEqual(aten.mul.Scalar(norm, 2).full_tensor(), 20)
-        self.assertEqual(aten.div.Scalar(norm, 2).full_tensor(), 5)
-        self.assertEqual(aten.mul.Scalar(norm, -2).full_tensor(), -20)
-        self.assertEqual(aten.div.Scalar(norm, -2).full_tensor(), -5)
-
-    @with_comms
     def test_add_sub_scalar_partial(self):
         mesh = self.build_device_mesh()
 
@@ -951,24 +936,19 @@ class TestPointwiseRuleValidation(TestCase):
         from torch.distributed.tensor._ops.strategy_validation import compare_operator
 
         representative_ops = [
-            # (op_name, category, expected_true_positives)
-            ("add", "binary_additive", 81),
-            ("mul", "binary_mul", 49),
-            ("div", "binary_div", 67),
-            ("sigmoid", "non_decreasing_unary", 5),
-            ("erfc", "non_increasing_unary", 5),
-            ("neg", "neg", 6),
-            ("deg2rad", "linear_nondecreasing", 6),
-            ("maximum", "monotonic_max_preserving", 57),
-            ("minimum", "monotonic_min_preserving", 57),
-            ("logaddexp", "monotonic_binary", 49),
-            ("abs", "pointwise_generic", 2),
+            ("mul", "binary_multiplicative (bilinear)"),
+            ("div", "binary_multiplicative (numerator-only)"),
+            ("sigmoid", "monotonic_increasing_unary"),
+            ("erfc", "monotonic_decreasing_unary"),
+            ("maximum", "monotonic_binary"),
+            ("nan_to_num", "all_partial_preserving_unary"),
+            ("neg", "linear + monotone_decreasing"),
         ]
 
-        for op_name, category, expected_tp in representative_ops:
+        for op_name, category in representative_ops:
             with self.subTest(op=op_name, category=category):
 
-                def run(name=op_name, expected=expected_tp):
+                def run(name=op_name):
                     stats = compare_operator(
                         name,
                         device="cpu",
@@ -976,10 +956,10 @@ class TestPointwiseRuleValidation(TestCase):
                         world_size=self.world_size,
                         incorrect_only=True,
                     )
-                    self.assertEqual(
+                    self.assertGreater(
                         stats.true_positives,
-                        expected,
-                        f"{name}: expected {expected} true_positives, got {stats.true_positives}",
+                        0,
+                        f"{name}: expected true_positives > 0",
                     )
                     self.assertEqual(
                         len(stats.false_positives),

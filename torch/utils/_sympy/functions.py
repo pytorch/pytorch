@@ -715,7 +715,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         Return seen_symbols if all atoms in all args are all unique symbols,
         else returns None. initial_set can be used to represent initial value for seen_symbols
         """
-        seen_symbols = set() if initial_set is None else initial_set
+        seen_symbols = set() if initial_set is None else initial_set.copy()
         for arg in args:
             for element in arg.atoms():
                 if not isinstance(element, sympy.core.symbol.Symbol):

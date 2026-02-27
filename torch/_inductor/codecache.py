@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
 import torch
@@ -887,6 +887,22 @@ class FxGraphHashDetails:
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
         )
+
+        # Include cudagraph annotation in cache key only when it changes
+        # behavior. When both fwd and bwd are overridden to the same value,
+        # normalize to a simple boolean (equivalent to flipping the config).
+        # When fwd and bwd differ, include the full annotation.
+        if gm is not None:
+            annotation = gm.meta.get("cudagraph_annotation")
+            if annotation is not None:
+                default = config.triton.cudagraphs
+                if annotation.fwd == annotation.bwd and annotation.fwd is not None:
+                    if annotation.fwd != default:
+                        self.cudagraph_override = annotation.fwd
+                elif (annotation.fwd is not None and annotation.fwd != default) or (
+                    annotation.bwd is not None and annotation.bwd != default
+                ):
+                    self.cudagraph_annotation = annotation
 
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
@@ -1824,7 +1840,7 @@ class AotCodeCompiler:
         *,
         device_type: str,
         additional_files: list[str],
-    ) -> list[Union[str, Weights]] | str:
+    ) -> list[str | Weights] | str:
         """
         Returns the .so path, or returns a list of files that were generated if
         config.aot_inductor.package=True.
@@ -4004,7 +4020,7 @@ class CUTLASSCodeCache:
         src_files: list[str],
         dst_file: str,
         dst_file_ext: str,
-        extra_args: Optional[list[str]] = None,
+        extra_args: list[str] | None = None,
     ) -> str:
         raise NotImplementedError
 
@@ -4221,7 +4237,7 @@ class CUDACodeCache(CUTLASSCodeCache):
         src_files: list[str],
         dst_file: str,
         dst_file_ext: str,
-        extra_args: Optional[list[str]] = None,
+        extra_args: list[str] | None = None,
     ) -> str:
         return cuda_compile_utils.cuda_compile_command(
             src_files, dst_file, dst_file_ext, extra_args=extra_args
