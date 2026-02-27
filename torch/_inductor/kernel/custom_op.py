@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import functools
 import logging
 from collections.abc import Callable
@@ -7,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import (
     Buffer,
@@ -22,7 +24,6 @@ from torch._inductor.select_algorithm import (
 )
 from torch._inductor.utils import convert_symint_to_expr
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -242,45 +243,30 @@ def _merge_config_and_runtime_kwargs(
     config_params: dict[str, Any],
     runtime_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge config parameters with runtime kwargs. Runtime kwargs take precedence.
-       If there are conflicts, log a warning and use runtime value.
+    """Merge config parameters with runtime kwargs. Config params take precedence,
+    since they represent the values being autotuned.
 
     Args:
-        config_params: Parameters from CustomOpConfig
+        config_params: Parameters from CustomOpConfig (autotuning knobs)
         runtime_kwargs: Runtime non-tensor kwargs from _extract_tensor_inputs
 
     Returns:
-        Merged kwargs dictionary with runtime values taking precedence
+        Merged kwargs dictionary with config values taking precedence
     """
-    merged_kwargs = config_params.copy()
-
-    # Check for conflicts and let runtime kwargs dominate
-    conflicts = OrderedSet(config_params.keys()).intersection(runtime_kwargs.keys())
-
-    for key in conflicts:
-        log.warning(
-            "Parameter '%s' specified both in CustomOpConfig (%s) "
-            "and at runtime (%s). Using runtime value.",
-            key,
-            config_params[key],
-            runtime_kwargs[key],
-        )
-
-    # Runtime kwargs override config params
-    merged_kwargs.update(runtime_kwargs)
-
+    merged_kwargs = runtime_kwargs.copy()
+    merged_kwargs.update(config_params)
     return merged_kwargs
 
 
 def _adapt_user_input_gen_fns(
     inputs: list[Any],
-    arg_names: list[str],
+    op_overload: torch._ops.OpOverload,
     user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]],
 ) -> dict[int, Callable[[Any], torch.Tensor]]:
     """Convert user input generators from name-based to index-based format.
     Inductor autotune's input_gen_fns expects index of arg_names as key.
     """
-
+    arg_names = [arg.name for arg in op_overload._schema.arguments]
     name_to_index = {name: i for i, name in enumerate(arg_names)}
     index_based_fns = {}
 
@@ -288,11 +274,9 @@ def _adapt_user_input_gen_fns(
         if name in name_to_index:
             index_based_fns[name_to_index[name]] = gen_fn
         else:
-            log.warning(
-                "Unknown argument name '%s' in input_gen_fns. "
-                "Available argument names: %s",
-                name,
-                list(name_to_index.keys()),
+            raise ValueError(
+                f"Unknown argument name '{name}' in input_gen_fns. "
+                f"Available argument names: {list(name_to_index.keys())}"
             )
 
     def create_internal_input_gen_fn(
@@ -320,8 +304,22 @@ def _group_ranges_by_impl(
     range_to_best_impl: dict[RangeBounds, ImplConfig],
 ) -> list[RangeImplGroup]:
     """Group ranges by implementation using semantic identity (name + kwargs)."""
+    from torch._inductor import config
+
     if not range_to_best_impl:
         return []
+
+    # Test mode: skip grouping to force torch.cond dispatch path
+    if config.test_configs.force_no_impl_grouping:
+        log.info("Test mode: skipping impl grouping, each range is separate group")
+        groups = []
+        for range_bounds, impl_config in sorted(
+            range_to_best_impl.items(), key=lambda x: x[0].start
+        ):
+            group = RangeImplGroup(impl_config)
+            group.add_range(range_bounds)
+            groups.append(group)
+        return groups
 
     # Group ranges by impl_config (uses __hash__ and __eq__ based on semantic identity)
     impl_to_group: dict[ImplConfig, RangeImplGroup] = {}
@@ -411,27 +409,24 @@ def _default_input_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:
 
 
 def _create_fallback_choice(
-    name: str,
     op_overload: torch._ops.OpOverload,
-    kwargs: dict[str, Any],
 ) -> ExternKernelChoice:
-    """Create or get existing fallback choice that calls the op eagerly.
+    """Create or reuse fallback choice that calls the op eagerly.
 
-    TODO: Automatically detect and handle out variants (has_out_variant=True)
-    for ops that support them.
+    Since kwargs are passed at bind time via maybe_append_choice rather than
+    baked into the kernel, the same ExternKernelChoice is reused across
+    compilations for the same op_overload.
     """
-    fallback_name = f"{name}_fallback"
+    fallback_name = (
+        f"{op_overload.name().replace('::', '_').replace('.', '_')}_fallback"
+    )
 
-    # Check if we already have this fallback registered
-    existing = ExternKernelChoice.get_existing(fallback_name)
+    existing = ExternKernelChoice.lookup(fallback_name)
     if existing is not None:
         return existing
 
-    def fallback_wrapper(*args: Any) -> Any:
-        return op_overload(*args, **kwargs)
-
     return ExternKernelChoice(
-        kernel=fallback_wrapper,
+        kernel=op_overload,
         name=fallback_name,
         has_out_variant=False,
         op_overload=op_overload,
@@ -496,14 +491,9 @@ def autotune_custom_op(
     # Convert user input generation functions BEFORE creating choices
     input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] = {}
     if user_input_gen_fns:
-        import inspect
-
-        arg_names = (
-            list(inspect.signature(decompositions[0]).parameters.keys())
-            if decompositions
-            else []
+        input_gen_fns = _adapt_user_input_gen_fns(
+            inputs, op_overload, user_input_gen_fns
         )
-        input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
@@ -518,6 +508,8 @@ def autotune_custom_op(
 
     # Add fallback choice that calls the op eagerly (not through inductor lowering)
     # This provides a baseline to compare decompositions against
+    from torch._inductor import config
+
     fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
 
     with V.fake_mode:
@@ -528,7 +520,7 @@ def autotune_custom_op(
     output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
     output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
 
-    fallback_choice = _create_fallback_choice(name, op_overload, fallback_kwargs)
+    fallback_choice = _create_fallback_choice(op_overload)
     fallback_choice.maybe_append_choice(
         choices=choices,
         input_nodes=list(inputs),
@@ -538,6 +530,7 @@ def autotune_custom_op(
             size=output_size,
             stride=output_stride,
         ),
+        **fallback_kwargs,
     )
 
     if not choices:
@@ -557,6 +550,31 @@ def autotune_custom_op(
         min_speedup_threshold=min_speedup_threshold,
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
+
+    # Test mode: force specific choice to win
+    force_choice = config.test_configs.force_custom_op_decomposition
+    if force_choice is True and winning_choice.gm is None:
+        # Force decomposition: pick first choice with a graph
+        for choice in choices:
+            if choice.gm is not None:
+                log.info(
+                    "Test mode: forcing decomposition %s over fallback",
+                    getattr(choice, "name", type(choice).__name__),
+                )
+                winning_choice = choice
+                selected_result = choice.output_node()
+                break
+    elif force_choice is False and winning_choice.gm is not None:
+        # Force fallback: pick first choice without a graph
+        for choice in choices:
+            if choice.gm is None:
+                log.info(
+                    "Test mode: forcing fallback %s over decomposition",
+                    getattr(choice, "name", type(choice).__name__),
+                )
+                winning_choice = choice
+                selected_result = choice.output_node()
+                break
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
     if winning_choice.gm is not None:
@@ -601,14 +619,13 @@ def autotune_custom_op(
 def _generate_dynamic_configs(
     tensor_inputs: list[Buffer],
     config_generator: Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]],
-    default_impl: Callable[..., Any],
+    op_overload: torch._ops.OpOverload,
     operation_name: str,
 ) -> list[CustomOpConfig]:
     """Generate configs dynamically based on input tensors at lowering time."""
-    import inspect
-
-    sig = inspect.signature(default_impl)
-    param_names = list(sig.parameters.keys())
+    # Get parameter names from op schema instead of impl signature
+    schema = op_overload._schema
+    param_names = [arg.name for arg in schema.arguments if not arg.kwarg_only]
 
     with V.fake_mode:
         fake_tensors = [ir_node_to_tensor(inp) for inp in tensor_inputs]
@@ -639,6 +656,7 @@ def _prepare_configs_and_decompositions(
     ],
     tensor_inputs: list[Any],
     default_impl: Callable[..., Any],
+    op_overload: torch._ops.OpOverload,
     runtime_kwargs: dict[str, Any],
     name: str,
 ) -> tuple[list[Callable], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -650,7 +668,7 @@ def _prepare_configs_and_decompositions(
     # Get configs: either generate dynamically or use static configs
     if config_generator is not None:
         configs_to_use = _generate_dynamic_configs(
-            tensor_inputs, config_generator, default_impl, name
+            tensor_inputs, config_generator, op_overload, name
         )
     else:
         assert processed_configs is not None
@@ -700,6 +718,7 @@ def _standard_lowering_fn(
             config_generator,
             tensor_inputs,
             default_impl,
+            op_overload,
             runtime_kwargs,
             name,
         )
@@ -750,9 +769,14 @@ def _lower_single_impl(
     name: str,
     config_patches: Optional[dict[str, Any]] = None,
 ) -> Any:
-    """Lower a single implementation by tracing and inlining it."""
+    """Lower a single implementation by tracing and inlining it.
+
+    Uses error_on_new_guards() during tracing to detect if the impl adds guards.
+    Returns None if the impl adds guards, signaling caller to skip this choice.
+    """
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
     from torch.fx.experimental.proxy_tensor import make_fx
+    from torch.fx.experimental.symbolic_shapes import _ShapeEnvGuardError
 
     from ..decomposition import select_decomp_table
 
@@ -761,14 +785,37 @@ def _lower_single_impl(
     def impl_wrapper(*tensors):
         return impl(*tensors, **merged_kwargs)
 
+    shape_env = V.fake_mode.shape_env
+
     with V.fake_mode:
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
-        impl_gm = make_fx(
-            impl_wrapper,
-            decomposition_table=decomposition_table,
-            tracing_mode="symbolic",
-        )(*fake_inputs)
+
+        context = (
+            shape_env.error_on_new_guards
+            if shape_env is not None
+            else contextlib.nullcontext
+        )
+        try:
+            with context():
+                impl_gm = make_fx(
+                    impl_wrapper,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="symbolic",
+                )(*fake_inputs)
+        except (_ShapeEnvGuardError, AssertionError) as e:
+            is_guard_error = isinstance(e, _ShapeEnvGuardError) or (
+                isinstance(e, AssertionError)
+                and "Guard attempted while ShapeEnv guards are frozen" in str(e)
+            )
+            if not is_guard_error:
+                raise
+            log.info(
+                "Implementation %s adds guards, skipping custom op lowering",
+                impl.__name__,
+            )
+            counters["inductor"]["custom_op_decomp_guard_skips"] += 1
+            return None
 
     log.info("Inlining implementation: %s", impl.__name__)
     ops_before = len(V.graph.operations)
@@ -814,6 +861,7 @@ def _range_based_lowering_fn(
             config_generator,
             tensor_inputs,
             default_impl,
+            op_overload,
             runtime_kwargs,
             name,
         )
@@ -883,7 +931,9 @@ def _range_based_lowering_fn(
             impl_config.impl_name,
         )
 
-    # Group ranges by implementation (more aggressive than adjacent merging)
+    # Group ranges by implementation
+    from torch.fx.experimental.symbolic_shapes import _ShapeEnvGuardError
+
     impl_groups = _group_ranges_by_impl(range_to_best_impl_map)
 
     log.info("After grouping by implementation: %d impl groups", len(impl_groups))
@@ -914,7 +964,6 @@ def _range_based_lowering_fn(
         dim_value = fake_tensors[0].size(dim_index)
 
         def build_range_predicate(ranges_list: list[RangeBounds]) -> torch.Tensor:
-            """Build OR predicate: (dim in range1) | (dim in range2) | ..."""
             predicates = []
             for rb in ranges_list:
                 end = int(rb.end) if rb.end != float("inf") else None
@@ -929,7 +978,6 @@ def _range_based_lowering_fn(
             return result  # pyrefly: ignore [bad-return]
 
         def build_nested_cond(idx: int):
-            """Recursively build nested torch.cond for impl_groups[idx:]."""
             if idx >= num_impl_groups:
                 raise RuntimeError(f"Invalid impl group index: {idx}")
 
@@ -960,22 +1008,39 @@ def _range_based_lowering_fn(
 
         return build_nested_cond(0)(*fake_tensors)
 
-    # Trace with make_fx using fake mode
     with V.fake_mode:
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
+        shape_env = V.fake_mode.shape_env
 
         log.info("Tracing torch.cond dispatch with symbolic shapes...")
 
         try:
-            dispatch_gm = make_fx(
-                dispatch_fn,
-                decomposition_table=decomposition_table,
-                tracing_mode="symbolic",
-            )(*fake_inputs)
+            context = (
+                shape_env.error_on_new_guards
+                if shape_env is not None
+                else contextlib.nullcontext
+            )
+            with context():
+                dispatch_gm = make_fx(
+                    dispatch_fn,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="symbolic",
+                )(*fake_inputs)
 
             log.info("Successfully traced torch.cond dispatch")
             log.info("Traced graph:\n%s", dispatch_gm.graph)
+
+        except (_ShapeEnvGuardError, AssertionError) as e:
+            is_guard_error = isinstance(e, _ShapeEnvGuardError) or (
+                isinstance(e, AssertionError)
+                and "Guard attempted while ShapeEnv guards are frozen" in str(e)
+            )
+            if not is_guard_error:
+                raise
+            log.info("Dispatch function adds guards, skipping custom op lowering")
+            counters["inductor"]["custom_op_decomp_guard_skips"] += 1
+            return None
 
         except Exception:
             log.exception("make_fx tracing FAILED")
@@ -1167,21 +1232,19 @@ def register_custom_op_autotuning(
     from torch._library.custom_ops import CustomOpDef
 
     # Handle both CustomOpDef and OpOverload - derive impl_fn automatically
+    # Both cases call through op_overload so fake handlers are used during tracing
     if isinstance(custom_op, CustomOpDef):
         op_overload = custom_op._opoverload
-        impl_fn = custom_op._init_fn
     elif isinstance(custom_op, torch._ops.OpOverload):
         op_overload = custom_op
-
-        # For OpOverload, the default impl just calls the op itself.
-        # When traced, this creates the op call that falls through to
-        # normal Inductor lowerings (via V.active_user_lowering_ops guard).
-        def impl_fn(*args, **kwargs):
-            return op_overload(*args, **kwargs)
     else:
         raise TypeError(
             f"custom_op must be a CustomOpDef or OpOverload, got {type(custom_op)}."
         )
+
+    # impl_fn calls through op_overload so fake handlers are used during tracing
+    def impl_fn(*args, **kwargs):
+        return op_overload(*args, **kwargs)
 
     # Validate configs and config_generator are mutually exclusive
     if configs is not None and config_generator is not None:

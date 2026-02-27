@@ -1,5 +1,4 @@
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch.fx as fx
@@ -18,7 +17,7 @@ class AugmentedGraphHelper:
     def __init__(
         self,
         graph: fx.Graph,
-        node_ancestors: Optional[dict[fx.Node, OrderedSet[fx.Node]]] = None,
+        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
     ):
         # Each node starts in its own singleton set
         self.graph = graph
