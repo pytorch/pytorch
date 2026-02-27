@@ -3044,6 +3044,29 @@ class GuardBuilder(GuardBuilderBase):
                     guard,
                 )
                 user_stack = guard.user_stack
+
+                # Exclusion guard: reject inputs matching a more specialized
+                # cache entry's static sizes. Already-dynamic dims have None
+                # in excluded_sizes and are skipped by the C++ guard.
+                excluded_sizes = metadata.get("excluded_sizes")
+                excluded_sizes_for_guard = None
+                if (
+                    excluded_sizes
+                    and any(v is not None for v in excluded_sizes)
+                    and config.stable_graph_selection_for_automatic_dynamic
+                    and not config.enable_compiler_collectives
+                ):
+                    # Only check dynamic dims (size=None) with concrete exclusions
+                    dynamic_excluded = [
+                        (d, v)
+                        for d, (s, v) in enumerate(zip(size, excluded_sizes))
+                        if s is None and v is not None
+                    ]
+                    if dynamic_excluded and not all(
+                        value.size(d) == v for d, v in dynamic_excluded
+                    ):
+                        excluded_sizes_for_guard = list(excluded_sizes)
+
                 guard_manager.add_tensor_match_guard(
                     value,
                     size,  # type: ignore[arg-type]
@@ -3053,6 +3076,7 @@ class GuardBuilder(GuardBuilderBase):
                     user_stack,
                     pytype,
                     dispatch_keys,
+                    excluded_sizes_for_guard,
                 )
 
                 # We consider TENSOR_MATCH guard to be important enough to be

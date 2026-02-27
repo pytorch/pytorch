@@ -7622,14 +7622,16 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         dynamic_shapes_cache_entry = b[0]
 
         # Step 3: Run with Step 1's inputs
-        # LRU cache will match against dynamic shape graph first
+        # The dynamic graph's exclusion guard rejects [10, 10] (the
+        # original static size), so the static graph handles it and
+        # gets LRU-promoted to the front.
         fn(x)
         c = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(
             fn._torchdynamo_orig_callable.__code__
         )
         self.assertEqual(len(c), 2)
-        self.assertEqual(c[0], dynamic_shapes_cache_entry)
-        self.assertEqual(c[1], static_shapes_cache_entry)
+        self.assertEqual(c[0], static_shapes_cache_entry)
+        self.assertEqual(c[1], dynamic_shapes_cache_entry)
 
     @expectedFailureDynamic
     def test_dynamo_disable_lru_cache_behavior(self):

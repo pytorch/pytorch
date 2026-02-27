@@ -69,7 +69,8 @@ class TensorCheck {
       const at::Tensor& v,
       c10::DispatchKeySet dispatch_key_set,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      std::vector<std::optional<int64_t>> excluded_sizes = {});
 
   TensorCheck(
       const LocalState& state,
@@ -79,7 +80,8 @@ class TensorCheck {
       at::DeviceIndex device_index,
       bool requires_grad,
       std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides);
+      std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+      std::vector<std::optional<int64_t>> excluded_sizes = {});
 
   bool check(const LocalState& state, const at::Tensor& v);
   bool check(
@@ -110,6 +112,10 @@ class TensorCheck {
   std::vector<std::optional<c10::SymInt>> strides_;
   // Not strictly required for dense tensors, but nested tensors need it.
   int64_t dim_;
+  // Per-dim excluded sizes from automatic_dynamic transitions.
+  // When a non-nullopt entry matches the input, the guard rejects it
+  // so the input falls through to the earlier, more specialized cache entry.
+  std::vector<std::optional<int64_t>> excluded_sizes_;
 };
 
 } // namespace torch::dynamo
