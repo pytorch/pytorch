@@ -2389,6 +2389,10 @@ class ExternKernelChoice:
 
 
 class TritonTemplateCaller(ir.TritonTemplateCallerBase):
+    """
+    Represents a ChoiceCaller for a TritonTemplate
+    """
+
     def __init__(
         self,
         name,
@@ -2425,6 +2429,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
         self.hint_override = hint_override
 
+        self.n_regs = None
+
     def benchmark(self, *args, out):
         assert self.bmreq is not None
         if (
@@ -2439,6 +2445,8 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def precompile(self):
         assert self.bmreq is not None
         self.bmreq.precompile()
+
+        self.n_regs = self.bmreq.n_regs
 
     def __str__(self) -> str:
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.description})"
