@@ -363,27 +363,14 @@ class FrameStateSizeEntry:
         return tuple(cls._merge_atom(x, y) for x, y in zip(xs, ys))
 
     def __ior__(self, other: Self) -> Self:
-        # Before merging sizes (which may promote a dim to auto_dynamic),
-        # record the first static size that will be lost.  For example, if
-        # self.size = (3, 4) and other.size = (5, 4), dim 0 is about to
-        # become dynamic.  We save 3 into excluded_sizes so a guard on the
-        # dynamic graph can reject inputs with size(0)==3, letting them
-        # fall through to the earlier static graph in the cache.
-        if isinstance(self.size, tuple) and isinstance(other.size, tuple):
-            if len(self.size) == len(other.size):
-                excluded: list[int | None] = [None] * len(self.size)
-                for i in range(len(self.size)):
-                    si = self.size[i]
-                    if (
-                        type(si) is int
-                        and type(other.size[i]) is int
-                        and si != other.size[i]
-                    ):
-                        excluded[i] = si
-                # Only update if there's an actual static→dynamic transition;
-                # avoid overwriting with all-Nones when dims are already dynamic.
-                if any(v is not None for v in excluded):
-                    self.excluded_sizes = tuple(excluded)
+        # Record current static sizes before merge. For dims that become
+        # dynamic, the C++ TENSOR_MATCH guard will exclude these values so
+        # inputs fall through to the earlier, more specialized cache entry.
+        # Already-dynamic dims become None and are ignored by the guard.
+        if isinstance(self.size, tuple):
+            self.excluded_sizes = tuple(
+                s if type(s) is int else None for s in self.size
+            )
         # Same idea for scalars: record the static value about to become dynamic.
         if (
             type(self.scalar) is int
