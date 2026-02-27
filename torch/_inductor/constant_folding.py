@@ -1,7 +1,7 @@
 import collections
 import typing_extensions
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,8 +34,8 @@ def clear_dont_constant_fold() -> None:
 def replace_node_with_constant(
     gm: torch.fx.GraphModule,
     node: torch.fx.Node,
-    constant: Optional[torch.Tensor] = None,
-    name: Optional[str] = None,
+    constant: torch.Tensor | None = None,
+    name: str | None = None,
 ) -> None:
     g = gm.graph
 
@@ -74,7 +74,7 @@ def replace_node_with_constant(
 
 
 def is_const_source(
-    node: torch.fx.Node, lifted_constant_names: Optional[list[str]]
+    node: torch.fx.Node, lifted_constant_names: list[str] | None
 ) -> bool:
     return node.op == "get_attr" or node.name in (lifted_constant_names or ())
 
@@ -84,8 +84,8 @@ class ConstantFolder(torch.fx.Interpreter):
         self,
         gm: torch.fx.GraphModule,
         skip_constructors: bool = False,
-        lifted_constant_names: Optional[list[str]] = None,
-        skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+        lifted_constant_names: list[str] | None = None,
+        skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
     ) -> None:
         super().__init__(gm)
         self.node_replacements: dict[torch.fx.Node, Any] = {}
@@ -320,7 +320,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
 def constant_fold(
     gm: torch.fx.GraphModule,
-    constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    constraint_fn: Callable[[torch.fx.Node], bool] | None = None,
 ) -> None:
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
@@ -349,8 +349,8 @@ def constant_fold(
 def constant_graph_tag(
     gm: torch.fx.GraphModule,
     skip_constructors: bool = True,
-    lifted_constant_names: Optional[list[str]] = None,
-    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    lifted_constant_names: list[str] | None = None,
+    skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
 ) -> None:
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(
@@ -378,8 +378,8 @@ def constant_graph_tag(
 def run_and_get_constant_graph(
     gm: torch.fx.GraphModule,
     skip_constructors: bool = True,
-    lifted_constant_names: Optional[list[str]] = None,
-    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    lifted_constant_names: list[str] | None = None,
+    skip_folding_node_fn: Callable[[torch.fx.Node], bool] | None = None,
 ) -> torch.fx.GraphModule:
     """
     Construct a GraphModule which corresponds to the part which could be
