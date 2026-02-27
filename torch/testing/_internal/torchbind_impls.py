@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 import contextlib
 from pathlib import Path
-from typing import Optional
 
 import torch
 
 
 _TORCHBIND_IMPLS_INITIALIZED = False
 
-_TENSOR_QUEUE_GLOBAL_TEST: Optional[torch.ScriptObject] = None
+_TENSOR_QUEUE_GLOBAL_TEST: torch.ScriptObject | None = None
 
 
 def init_torchbind_implementations():
