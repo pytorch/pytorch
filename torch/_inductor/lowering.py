@@ -38,6 +38,7 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     is_integer_dtype,
+    make_channels_last_strides_for,
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -111,8 +112,6 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 
 log = logging.getLogger(__name__)
 lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
-# User-registered lowerings that take priority over built-in lowerings.
-user_lowerings: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
@@ -2843,6 +2842,62 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
+def convolution_backward_xpu_constraint(fx_node, *args, **kwargs):
+    """
+    Custom layout constraint for convolution_backward on XPU.
+
+    The inductor layout optimization converts conv weights to channels-last (CL)
+    in the forward graph, but the input tensor saved for backward retains its
+    original contiguous strides.  This creates a mixed-format scenario where
+    convolution_backward receives a CL weight but a contiguous input/grad_output.
+
+    On XPU, this mixed format produces incorrect gradient results, particularly
+    when the activation spatial dimensions are 1x1 (where contiguous strides
+    (N,C,1,1)->(C,1,1,1) differ from CL strides (C,1,C,C) despite covering
+    the same memory).
+
+    This constraint detects the mixed-format case and normalises all 4-D tensor
+    inputs to have explicit channels-last strides so the XPU backend receives a
+    consistent layout.
+    """
+    # Start with the standard fx-strides constraint
+    args, kwargs = constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+    # Detect whether any 4-D tensor input is genuinely channels-last
+    # (i.e. CL but NOT also contiguous — which distinguishes the weight from
+    # ambiguous 1×1 tensors that are both contiguous and CL).
+    has_channels_last = False
+    for arg, fx_arg in zip(args, fx_node.args):
+        if not isinstance(arg, ir.IRNode):
+            continue
+        meta_val = fx_arg.meta.get("val")
+        if meta_val is None or meta_val.dim() != 4:
+            continue
+        if (
+            meta_val.is_contiguous(memory_format=torch.channels_last)
+            and not meta_val.is_contiguous()
+        ):
+            has_channels_last = True
+            break
+
+    if has_channels_last:
+        # Force every 4-D tensor arg to explicit channels-last strides.
+        # We use require_exact_strides rather than require_channels_last because
+        # the IR's stride-order check treats size-1 dimensions as don't-care,
+        # but the XPU backend relies on the actual stride values.
+        new_args = []
+        for arg, fx_arg in zip(args, fx_node.args):
+            if isinstance(arg, ir.IRNode):
+                meta_val = fx_arg.meta.get("val")
+                if meta_val is not None and meta_val.dim() == 4:
+                    cl_strides = make_channels_last_strides_for(meta_val.shape)
+                    arg = ir.ExternKernel.require_exact_strides(arg, cl_strides)
+            new_args.append(arg)
+        args = tuple(new_args)
+
+    return args, kwargs
+
+
 def sdpa_constraint(fx_node, *args, **kwargs):
     # sdpa requires dense last dimension]
 
@@ -3030,7 +3085,16 @@ make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten._grouped_mm, require_dense)
 
 # Need templated kernel. Probably impossible to write efficiently
-make_fallback(aten.convolution_backward, constrain_to_fx_strides)
+# On XPU, use a custom constraint that normalises mixed memory formats to
+# channels-last to work around incorrect results from the XPU backend when
+# the weight is channels-last but the input/grad_output are contiguous
+# (see convolution_backward_xpu_constraint for details).
+_conv_bwd_constraint = (
+    convolution_backward_xpu_constraint
+    if torch.xpu.is_available()
+    else constrain_to_fx_strides
+)
+make_fallback(aten.convolution_backward, _conv_bwd_constraint)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.miopen_rnn, require_dense)
