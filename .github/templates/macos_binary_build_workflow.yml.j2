@@ -71,7 +71,7 @@ jobs:
     steps:
       !{{ set_runner_specific_vars() }}
       !{{ setup_python(config.get("python_version", "3.10")) }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False) }}
       - name: Populate binary env
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
@@ -120,4 +120,46 @@ jobs:
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
   !{{ upload.upload_binaries(config, has_test=False, use_s3=False) }}
+{%- endfor %}
+
+{%- for lt_config in libtorch_extraction_configs %}
+  !{{ lt_config["build_name"] }}-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: !{{ lt_config["source_wheel_build_name"] }}-build
+    runs-on: !{{ macos_runner }}
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: !{{ lt_config["desired_cuda"] }}
+      LIBTORCH_VARIANT: !{{ lt_config["libtorch_variant"] }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      !{{ setup_python("3.10") }}
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: !{{ lt_config["source_wheel_build_name"] }}
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform macos \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: !{{ lt_config["build_name"] }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  !{{ upload.upload_extracted_libtorch(lt_config, use_s3=False) }}
 {%- endfor %}

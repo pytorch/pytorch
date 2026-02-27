@@ -34,6 +34,7 @@ import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.autotune_process import use_pipelined_autotuning
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
@@ -61,7 +62,7 @@ from .ir import (
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
-from .runtime.hints import ReductionHint
+from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -302,9 +303,15 @@ class MixOrderReduction:
         if len(common_reads) == 0:
             return False
 
-        g1 = cls.get_numel_rnumel(node1)
-        nrow = sympy.Max(g1[0], g1[1])
-        ncol = sympy.Min(g1[0], g1[1])
+        if cls.is_contiguous_node(node1):
+            contiguous_node, other_node = node1, node2
+        elif cls.is_contiguous_node(node2):
+            contiguous_node, other_node = node2, node1
+        else:
+            return False
+
+        g1 = cls.get_numel_rnumel(contiguous_node)
+        nrow, ncol = g1
 
         # in non strict mode, we will skip the non-critical checks
         if not config.triton.mix_order_reduction_non_strict_mode:
@@ -330,33 +337,6 @@ class MixOrderReduction:
             # Mix order reduction is less beneficial.
             if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, 4096)):
                 return False
-
-        # Determine which node is contiguous. If we can't determine this
-        # statically (e.g., due to unbacked symbols), skip the fusion.
-        eq_expr = sympy.Eq(g1[1], ncol)
-        if V.graph.sizevars.guard_or_false(eq_expr):
-            contiguous_node, other_node = (node1, node2)
-        elif V.graph.sizevars.guard_or_false(sympy.Not(eq_expr)):
-            contiguous_node, other_node = (node2, node1)
-        else:
-            # Can't statically determine which node is contiguous, skip fusion
-            return False
-
-        # We previously only check the contiguous_node has contiguous
-        # access to common_reads. But that turns out to be not enough.
-        # The contiguous node may access a buffer that's node use by
-        # other_ndoe. If that ascess is non-contiugous, generating
-        # mix-order reduction can be inefficient especially when we
-        # force XBLOCK to be 1
-        # if not all(
-        #     cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
-        # ):
-        #     return False
-        if not all(
-            cls.is_contiguous_load(dep.name, contiguous_node)
-            for dep in contiguous_node.read_writes.reads
-        ):
-            return False
 
         # Make sure a persistent reduction will be generated
         if any(
@@ -394,6 +374,14 @@ class MixOrderReduction:
         cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         return cls.can_fuse(node1, node2)
+
+    @classmethod
+    def is_contiguous_node(cls, node: BaseSchedulerNode) -> bool:
+        if not all(
+            cls.is_contiguous_load(dep.name, node) for dep in node.read_writes.reads
+        ):
+            return False
+        return True
 
     @classmethod
     def is_contiguous_load(cls, buf: str, parent_node: BaseSchedulerNode) -> bool:
@@ -2133,6 +2121,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
 class FusedMixOrderReductions(FusedSchedulerNode):
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
+        if not MixOrderReduction.is_contiguous_node(node1):
+            assert MixOrderReduction.is_contiguous_node(node2)
+            node1, node2 = node2, node1
+
         self.node1 = node1
         self.node2 = node2
         super().__init__(
@@ -2485,6 +2477,17 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
+
+        # Filter out reduction nodes if combo_kernels_pointwise_only is enabled
+        if config.combo_kernels_pointwise_only:
+            reduction_nodes = [x for x in filtered_nodes if x.is_reduction()]
+            if reduction_nodes:
+                log.debug(
+                    "ComboKernels: %d reduction nodes are filtered (pointwise_only mode)",
+                    len(reduction_nodes),
+                )
+            filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
+
         return filtered_nodes
 
     @staticmethod
@@ -2757,16 +2760,75 @@ def _replace_operation_buffer(
 
 
 def _estimate_fused_epilogue_runtime(node1, node2, epilogue_runtime) -> float:
+    template_write_bytes = node1.get_write_buffer_sizes()
+    epilogue_read_bytes = node2.get_read_buffer_sizes()
+    extra_bytes = epilogue_read_bytes - template_write_bytes
     # If no extra memory read by epilogue, assume epilogue is free
     # if extra memory is read by epilogue, add to minimum choice
-    total_read_bytes = node2.get_read_buffer_sizes()
-    template_write_bytes = node1.get_write_buffer_sizes()
-    extra_bytes = total_read_bytes - template_write_bytes
     extra_bytes_ratio = extra_bytes / template_write_bytes
 
     # Smoothly approaches 1 as extra_bytes_ratio increases
     extra_memory_ratio = extra_bytes_ratio / (1 + extra_bytes_ratio)
     return extra_memory_ratio * epilogue_runtime
+
+
+def _occupancy_before_and_after_fusion(
+    unfused_n_regs: int,
+    fused_n_regs: int,
+    fused_n_spills: int,
+    num_warps: int,
+    device_props: DeviceProperties,
+) -> tuple[int, int]:
+    if fused_n_spills >= 8:
+        return 0, -1
+
+    # # Need device info to calculate occupancy
+    regs_per_sm = device_props.regs_per_multiprocessor
+    if regs_per_sm is None:
+        return 1, 1  # Can't calculate, allow fusion
+
+    assert num_warps
+    threads_per_block = num_warps * (device_props.warp_size or 32)
+
+    regs_per_block_unfused = unfused_n_regs * threads_per_block
+    regs_per_block_fused = fused_n_regs * threads_per_block
+
+    blocks_unfused = regs_per_sm // regs_per_block_unfused
+    blocks_fused = regs_per_sm // regs_per_block_fused
+
+    return blocks_unfused, blocks_fused
+
+
+def _fuse_epilogue(
+    ms1: float,
+    ms2: float,
+    unfused_n_regs: int,
+    fused_n_regs: int,
+    fused_n_spills: int,
+    num_warps: int,
+    device_props: DeviceProperties,
+) -> bool:
+    """
+    Determine whether to fuse an epilogue into a GEMM template.
+    """
+    MIN_ACCEPTED_OCCUPANCY = 4
+    REGRESSED_OCCUPANCY_RATIO = 0.5
+
+    # Check occupancy impact
+    blocks_unfused, blocks_fused = _occupancy_before_and_after_fusion(
+        unfused_n_regs, fused_n_regs, fused_n_spills, num_warps, device_props
+    )
+
+    epilogue_dominated_with_sufficient_occupancy = ms2 > 2 * ms1 and blocks_fused > 1
+
+    # fuse if no major register spills
+    # Occupancy can decrease but if memory bound/epilogue dominated
+    # optimistically fuse
+    return blocks_fused != -1 and (
+        blocks_fused >= MIN_ACCEPTED_OCCUPANCY
+        or blocks_fused / blocks_unfused > REGRESSED_OCCUPANCY_RATIO
+        or epilogue_dominated_with_sufficient_occupancy
+    )
 
 
 @dataclasses.dataclass
@@ -2970,7 +3032,7 @@ class Scheduler:
         self.finalize_multi_template_buffers()
         if (
             config.max_autotune_gemm or config.max_autotune
-        ) and config.pipeline_max_autotune_gemm:
+        ) and use_pipelined_autotuning():
             torch._inductor.select_algorithm.PrecompileThreadPool.shutdown_instance()
 
         if config.combo_kernels:
@@ -3560,6 +3622,10 @@ class Scheduler:
         for node in self.nodes:
             node.prune_weak_deps()
 
+    def mode_requires_synchronization(self, mode: Optional[str]) -> bool:
+        """Check if store mode requires cross-thread synchronization."""
+        return mode is not None  # Currently all non-None modes need sync
+
     def topological_sort_schedule(
         self, nodes: list[BaseSchedulerNode]
     ) -> list[BaseSchedulerNode]:
@@ -3775,6 +3841,49 @@ class Scheduler:
         with dynamo_timed("benchmark_codegened_module"):
             return backend.benchmark_codegened_module(module)
 
+    def _has_layout_conflict_for_template(
+        self, multi_node: ir.MultiTemplateBuffer
+    ) -> bool:
+        """
+        Check if selecting a Triton template would cause layout conflicts.
+        Returns True if there's a conflict and we should fall back to ATen.
+        """
+        constraints = V.graph.buffer_layout_constraints
+        if not constraints:
+            return False
+
+        log.debug("Node %s has constraints %s", multi_node, constraints)
+        for inp in multi_node.inputs:
+            # pyrefly: ignore [missing-attribute]
+            inp_name = inp.get_name()
+            # View has its own fixed layout that is not constrained
+            if (
+                not getattr(inp, "layout", None)
+                or inp_name not in constraints
+                or isinstance(inp, ir.ReinterpretView)
+            ):
+                continue
+
+            layout = inp.layout
+            expected_layout = constraints[inp_name]
+            if isinstance(layout, ir.FlexibleLayout):
+                # Freeze to the expected layout to avoid conflicts
+                # pyrefly: ignore [missing-attribute]
+                inp.freeze_layout_with_exact_strides(expected_layout.stride)
+                layout = inp.layout
+
+            if isinstance(layout, ir.FixedLayout) and expected_layout != layout:
+                # Layout already frozen to a different layout - conflict
+                log.warning(
+                    "Layout conflict detected for %s: template expects %s but layout is frozen to %s",
+                    inp_name,
+                    expected_layout,
+                    layout,
+                )
+                return True
+
+        return False
+
     def finalize_multi_template_buffers(self) -> None:
         """
         Finalize a backing choice for MultiTemplateBuffers which did not already have a
@@ -3808,10 +3917,33 @@ class Scheduler:
                     min_node_unfused,
                     torch._inductor.ir.TritonTemplateCallerBase,
                 ):
+                    # Check for layout conflicts before committing to Triton template
+                    if self._has_layout_conflict_for_template(multi_node):
+                        # Fall back to first ExternKernelCaller (ATen)
+                        for choice in multi_node.choice_timings():
+                            if isinstance(
+                                choice,
+                                torch._inductor.select_algorithm.ExternKernelCaller,
+                            ):
+                                min_node_unfused = choice
+                                break
+
+                        assert isinstance(
+                            choice, torch._inductor.select_algorithm.ExternKernelCaller
+                        ), (
+                            "No extern kernel detected to fallback to when layout constraints fail for Triton templates"
+                        )
+
+                if isinstance(
+                    min_node_unfused,
+                    torch._inductor.ir.TritonTemplateCallerBase,
+                ):
+                    # pyrefly: ignore [unbound-name]
                     if config.multi_kernel_hints:
                         callers: dict[Optional[int], TritonTemplateCallerBase] = {}
                         callers[None] = min_node_unfused
 
+                        # pyrefly: ignore [unbound-name]
                         for hint in config.multi_kernel_hints:
                             timings = multi_node.choice_timings(hint_override=hint)
                             triton_timings = {
@@ -3959,17 +4091,27 @@ class Scheduler:
             if fusion_log.isEnabledFor(logging.DEBUG):
                 if ms_fused < ms1 + ms2:
                     fusion_log.debug(
-                        "can fuse (benchmark): fusing %s with %s cause %sx speedup",
+                        "can fuse (benchmark): fusing %s with %s cause %sx speedup "
+                        "(ms_fused=%.6f, ms1=%.6f, ms2=%.6f, ms1+ms2=%.6f)",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
+                        ms_fused,
+                        ms1,
+                        ms2,
+                        ms1 + ms2,
                     )
                 else:
                     fusion_log.debug(
-                        "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
+                        "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown "
+                        "(ms_fused=%.6f, ms1=%.6f, ms2=%.6f, ms1+ms2=%.6f)",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
+                        ms_fused,
+                        ms1,
+                        ms2,
+                        ms1 + ms2,
                     )
 
         if is_multi_template and any(
@@ -3982,6 +4124,9 @@ class Scheduler:
                 else node2.get_template_node()
             )
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
+            # Check for layout conflicts before committing to Triton template
+            if self._has_layout_conflict_for_template(multi_node):
+                return FusionResult.fuse(False)
 
             hint_override_best_fusion_choice: dict[
                 Optional[int], TritonTemplateCallerBase
@@ -4035,9 +4180,22 @@ class Scheduler:
             num_triton_callers = sum(
                 isinstance(c, TritonTemplateCallerBase) for c in multi_node.choices
             )
+
+            # Check for fb-specific template fusion override
+            force_fb_fusion = False
+            if config.is_fbcode():
+                try:
+                    from torch._inductor.fb.tlx_templates.fusion import (
+                        should_force_fusion,
+                    )
+
+                    force_fb_fusion = should_force_fusion(multi_node)
+                except ImportError:
+                    pass
+
             # Track if the choice timings can be retrieved async after compilation
             get_choice_timings_async = (
-                config.pipeline_max_autotune_gemm
+                use_pipelined_autotuning()
                 and not bench_epilogue
                 and num_triton_callers <= config.max_epilogue_benchmarked_choices
             )
@@ -4102,6 +4260,12 @@ class Scheduler:
                     )
 
             if len(future_choices) == 0:
+                # Check if fb-specific fusion was requested but no choices available
+                if force_fb_fusion:
+                    fusion_log.warning(
+                        "FB template fusion requested but no choices available for benchmarking. "
+                        "Proceeding without fusion. Check if template compilation succeeded."
+                    )
                 return FusionResult.fuse(False)
 
             def benchmark_when_ready() -> bool:
@@ -4114,6 +4278,13 @@ class Scheduler:
                     assert multi_node and isinstance(multi_node, ir.MultiTemplateBuffer)
                     choice_timings = multi_node.choice_timings()
                     min_choice, ms1 = multi_node.get_min_choice()
+
+                    # Some choices can fail to benchmark, inf timing
+                    future_choices = [
+                        fut_choice
+                        for fut_choice in future_choices
+                        if fut_choice[0] in choice_timings
+                    ]
 
                     future_choices = sorted(
                         future_choices,
@@ -4159,22 +4330,45 @@ class Scheduler:
                             or ms2 + ms1 > choice_timings[choice] + ms2_fused
                         )
 
-                        if (
-                            res
+                        if res and fusible_choice:
+                            choice.precompile()
                             # pyrefly: ignore [missing-attribute]
-                            and len(res.launchers) == 1
+                            assert res.launchers and choice.n_regs
                             # pyrefly: ignore [bad-index]
-                            and res.launchers[0].n_spills <= 8
-                            and fusible_choice
-                        ):
-                            ms_fused_choice = choice
-                            break
+                            compiled_kernel = res.launchers[0]
+                            # pyrefly: ignore [missing-attribute]
+                            fused_n_regs = compiled_kernel.n_regs
+                            # pyrefly: ignore [missing-attribute]
+                            fused_n_spills = compiled_kernel.n_spills
+                            should_fuse_epilogue = _fuse_epilogue(
+                                ms1,
+                                ms2,
+                                choice.n_regs,
+                                fused_n_regs,
+                                fused_n_spills,
+                                choice.bmreq.num_warps,
+                                DeviceProperties.create(device),
+                            )
+                            if should_fuse_epilogue:
+                                ms_fused_choice = choice
+                                break
 
                 if bench_epilogue:
                     log_fusion(min_ms_fused, ms1, ms2)
 
+                # Log if fb-specific template fusion is being forced
+                if force_fb_fusion:
+                    try:
+                        from torch._inductor.fb.tlx_templates.fusion import (
+                            log_fusion_forced,
+                        )
+
+                        log_fusion_forced(min_ms_fused, ms1, ms2)
+                    except ImportError:
+                        pass
+
                 if (
-                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                    not bench_epilogue or min_ms_fused < (ms1 + ms2) or force_fb_fusion
                 ) and ms_fused_choice is not None:
                     if config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
@@ -4263,6 +4457,20 @@ class Scheduler:
                                 "slow_down_ratio": ms_fused / (ms1 + ms2),
                             }
                         )
+
+                    # Check if fb-specific template fusion should be forced regardless of benchmark
+                    if config.is_fbcode():
+                        try:
+                            from torch._inductor.fb.tlx_templates.fusion import (
+                                log_fusion_forced,
+                                should_force_fusion_for_node,
+                            )
+
+                            if should_force_fusion_for_node(node1):
+                                log_fusion_forced(ms_fused, ms1, ms2)
+                                return True
+                        except ImportError:
+                            pass
 
                     return ms_fused < ms1 + ms2
 
@@ -5121,7 +5329,9 @@ class Scheduler:
             ):
                 candidates.append(
                     (
-                        V.graph.sizevars.size_hint(lhs_dep.get_numel(), fallback=0),
+                        V.graph.sizevars.optimization_hint(
+                            lhs_dep.get_numel(), fallback=0
+                        ),
                         lhs_dep,
                         rhs_dep,
                     )
@@ -5635,6 +5845,11 @@ class Scheduler:
                 # nodes.
                 read = read.normalize()
                 write = write.normalize()
+            # Operations like index_add_, scatter_add_, etc. require global
+            # synchronization - all threads must complete writes before any reads.
+            # These cannot be safely fused into the same kernel. Atomic modes and TMA stores require synchronization barriers
+            if self.mode_requires_synchronization(write.mode):
+                return False
 
             return (
                 read.index == write.index
@@ -6090,7 +6305,7 @@ class Scheduler:
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
-        candidate_symbols.union(
+        candidate_symbols.update(
             *(get_input_node_symbols(node) for _, node in input_nodes.items())
         )
 
@@ -6945,7 +7160,17 @@ class BaseScheduling:  # noqa: docstring_linter
         In this context, we verify whether node1 represents the Multi-Output Template
         and node2 corresponds to one of its outputs. If so, we further check if
         backend supports this fusion.
+
+        Delegates to ``TemplateBuffer.can_fuse_multi_output_epilogue`` which
+        TemplateBuffer subclasses may override to allow fusion of additional node types.
         """
+        template_buf = node1.get_template_node()
+        if not isinstance(template_buf, ir.TemplateBuffer):
+            return False
+        if not template_buf.is_multi_outputs_template():
+            return False
+        if template_buf.can_fuse_multi_output_epilogue(node2):
+            return True
         return False
 
     def fuse(

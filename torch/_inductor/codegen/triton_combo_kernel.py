@@ -4,7 +4,7 @@ import textwrap
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import sympy
 from sympy import Integer, Symbol
@@ -84,13 +84,12 @@ def _default_custom_combo_kernel_horizontal_partition(
         not_reduction = [n for n in group_per_dim if n not in reduction]
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
+        # Scheduling heuristic: separate long reductions (rnumel > 2048).
+        # Uses optimization_hint with fallback=1 so unbacked defaults to short reduction.
         long_reduction = [
             n
             for n in reduction
-            if (
-                V.graph.sizevars.shape_env.has_hint(n.group[-1][-1])
-                and V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
-            )
+            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -103,8 +102,10 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not node_info_map[n].features.is_reduction()
             and len(node_info_map[n].tiling) == 2
-            and V.graph.sizevars.shape_env.has_hint(node_info_map[n].tiling["x"])
-            and V.graph.sizevars.size_hint(node_info_map[n].tiling["x"]) > LARGE_NUMELS
+            and V.graph.sizevars.optimization_hint(
+                node_info_map[n].tiling["x"], fallback=1
+            )
+            > LARGE_NUMELS  # type: ignore[arg-type]
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -439,20 +440,19 @@ class ComboKernel(Kernel):
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
-        self.min_x_blocks_list: list[Union[int, str]] = []
-        self.x_numels_list: list[Union[int, str]] = []
+        self.min_x_blocks_list: list[int | str] = []
+        self.x_numels_list: list[int | str] = []
         self.y_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
-        self.dispatch_class: Optional[
+        self.dispatch_class: (
             type[
-                Union[
-                    ComboKernel.SequentialDispatch,
-                    ComboKernel.SequentialFlattenGridDispatch,
-                    ComboKernel.RoundRobinDispatch,
-                ]
+                ComboKernel.SequentialDispatch
+                | ComboKernel.SequentialFlattenGridDispatch
+                | ComboKernel.RoundRobinDispatch
             ]
-        ] = None
+            | None
+        ) = None
         self.block_args: list[str] = []
         # there following are used when autotuning is disabled
         self.block_size_1d = 1024  # Try tuning this value
@@ -568,8 +568,8 @@ class ComboKernel(Kernel):
         Kernels with no_x_dim being true has no tunable XBLOCK. They have a fixed number of X blocks.
         Grid calculation needs to make sure that they are assigned with enough number of blocks.
         """
-        min_x_blocks: Union[int, str] = 0
-        x_numels: Union[int, str] = 0
+        min_x_blocks: int | str = 0
+        x_numels: int | str = 0
         for tree in sub_kernel.range_trees:
             simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
             if tree.prefix == "x":
@@ -722,18 +722,19 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
-        triton_meta[
-            "enable_fp_fusion"
-        ] = not config.emulate_precision_casts  # pyrefly: ignore[unsupported-operation]
+        triton_meta["enable_fp_fusion"] = (
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
+            not config.emulate_precision_casts
+        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
 
         if TritonKernel._enable_pdl_codegen():
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
             triton_meta["launch_pdl"] = True
 
         mutated_args = self.get_mutated_args_sub_kernels()
@@ -785,6 +786,9 @@ class ComboKernel(Kernel):
                 )
                 @triton.jit
             """
+
+        self.triton_meta = triton_meta
+        self.inductor_meta = inductor_meta
 
         return heuristics_line
 
@@ -875,7 +879,7 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
-    def codegen_kernel(self, name: Optional[str] = None) -> str:
+    def codegen_kernel(self, name: str | None = None) -> str:
         """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
         heuristics_list, size_hints_list = [], []
@@ -996,7 +1000,7 @@ class ComboKernel(Kernel):
                         f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+                    symval_hint = V.graph.sizevars.optimization_hint(arg_sig.expr)
 
                     # Force the seed_offset to be 0 so calls to the same kernel
                     # using different seed offset will have the same benchmark harness.
@@ -1006,7 +1010,7 @@ class ComboKernel(Kernel):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    count = V.graph.sizevars.optimization_hint(arg_sig.count)
                     # for benchmark harness, we ignore arg_sig.zero_mode and always zero it
                     result.writeline(
                         f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
@@ -1116,6 +1120,8 @@ class ComboKernel(Kernel):
             call_args,
             triton=True,
             arg_types=arg_types,
+            triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
         )
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:

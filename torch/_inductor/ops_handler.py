@@ -32,7 +32,17 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
-StoreMode = Optional[Literal["atomic_add", "tma"]]
+AtomicMode = Literal[
+    "atomic_add",
+    "atomic_max",
+    "atomic_min",
+    "atomic_and",
+    "atomic_or",
+    "atomic_xor",
+    "atomic_cas",
+    "atomic_xchg",
+]
+StoreMode = Optional[Union[AtomicMode, Literal["tma"]]]
 ReductionType = Literal[
     "argmax",
     "argmin",
@@ -687,6 +697,11 @@ class OpsHandler(Generic[T]):
     def truediv(self, x0: T, x1: T) -> T:
         """True division between floats.  Integer inputs are NOT valid.  To
         do Python-style (int, int) -> float division, use int_truediv"""
+        raise NotImplementedError
+
+    def div_rn(self, x0: T, x1: T) -> T:
+        """Division with round-to-nearest rounding mode.  Used for matching
+        eager CUDA semantics where division uses IEEE round-to-nearest."""
         raise NotImplementedError
 
     def int_truediv(self, x0: T, x1: T) -> T:

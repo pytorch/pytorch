@@ -62,6 +62,20 @@
     Stream
 ```
 
+## Graphs
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    is_current_stream_capturing
+    graph_pool_handle
+    XPUGraph
+    graph
+    make_graphed_callables
+```
+
 ```{eval-rst}
 .. automodule:: torch.xpu.memory
 ```
