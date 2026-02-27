@@ -693,6 +693,85 @@ Stack (TOS at end):
         # then y = x + 1 = [3,4,5]
         self.assertEqual(sess.result, torch.tensor([3.0, 4.0, 5.0]))
 
+    def test_exception_in_bytecode(self):
+        """Test debugger stops when bytecode raises an exception.
+
+        Injects a division by zero into the bytecode and verifies:
+        1. The debugger stops at the exception
+        2. Shows the instruction that caused the exception
+        3. Allows inspection before propagating
+        """
+        from torch._dynamo.bytecode_transformation import create_instruction
+        from torch._dynamo.side_effects import SideEffects
+
+        original_codegen_update_mutated = SideEffects.codegen_update_mutated
+
+        def patched_codegen_update_mutated(self, cg, log_side_effects=False):
+            # Inject 31415/0 to cause ZeroDivisionError
+            if sys.version_info >= (3, 11):
+                div_inst = create_instruction("BINARY_OP", arg=11)  # 11 = TRUEDIV
+            else:
+                div_inst = create_instruction("BINARY_TRUE_DIVIDE")
+            cg.extend_output(
+                [
+                    create_instruction("LOAD_CONST", argval=31415),
+                    create_instruction("LOAD_CONST", argval=0),
+                    div_inst,
+                    create_instruction("POP_TOP"),
+                ]
+            )
+            return original_codegen_update_mutated(self, cg, log_side_effects)
+
+        global mylist
+        mylist = [1, 2, 3]
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            mylist.append(4)
+            return x + 1
+
+        def test_logic(sess, initial):
+            # Continue - this will run until the exception
+            output = yield "c"
+
+            # Debugger should have stopped at the exception
+            self.assertIn("Exception raised at instruction", output)
+            if sys.version_info >= (3, 11):
+                self.assertIn("BINARY_OP", output)
+            else:
+                self.assertIn("BINARY_TRUE_DIVIDE", output)
+            self.assertIn("ZeroDivisionError", output)
+            self.assertIn("division by zero", output)
+
+            # Verify we can inspect locals at the exception point
+            locals_output = yield "locals"
+            self.assertIn("x =", locals_output)  # Input tensor should be in locals
+
+            # Verify we can inspect the stack at the exception point
+            # Note: On Python 3.11 with settrace, when an exception is raised,
+            # CPython has already popped the operands from the stack before the
+            # division fails, so we can't see them.
+            stack_output = yield "stack"
+            self.assertIn("Stack", stack_output)
+            if sys.version_info >= (3, 12):
+                self.assertIn("31415", stack_output)
+                self.assertRegex(stack_output, r"\[\d+\].*\b0\b")  # constant 0
+
+            # Verify we can evaluate expressions
+            eval_output = yield "1 + 1"
+            self.assertIn("2", eval_output)
+
+            # next step should terminate and exception should be propagated
+            yield "n"
+
+        with patch.object(
+            SideEffects,
+            "codegen_update_mutated",
+            patched_codegen_update_mutated,
+        ):
+            with self.assertRaises(ZeroDivisionError):
+                InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
+
 
 if __name__ == "__main__":
     run_tests()

@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
-from .bytecode_transformation import cleaned_instructions, Instruction
+from .bytecode_transformation import convert_instruction, Instruction, instruction_size
 
 
 # Python 3.12+ has sys.monitoring for efficient instruction-level tracing
@@ -137,14 +137,24 @@ class _DebugContext:
     def _get_or_create_state(self, code: types.CodeType) -> DebuggerState:
         """Get or create debugger state for a code object."""
         if code not in self._code_states:
-            instructions = cleaned_instructions(code, safe=True)
+            # Use dis.get_instructions directly to preserve original offsets.
+            # cleaned_instructions strips EXTENDED_ARG and recalculates offsets,
+            # which would cause mismatches with offsets reported by callbacks.
+            instructions = [convert_instruction(i) for i in dis.get_instructions(code)]
 
+            # In 3.11+, instructions have inline cache entries that occupy
+            # bytecode space (e.g. BINARY_OP is 2 bytes + 2 bytes cache).
+            # dis.get_instructions only reports the instruction start offset,
+            # but sys.monitoring RAISE reports offsets within cache entries.
+            # Map the full byte range of each instruction so lookups succeed.
             offset_to_inst: dict[int, Instruction] = {}
             offset_to_index: dict[int, int] = {}
             for i, inst in enumerate(instructions):
                 if inst.offset is not None:
-                    offset_to_inst[inst.offset] = inst
-                    offset_to_index[inst.offset] = i
+                    inst_size = instruction_size(inst)
+                    for off in range(inst.offset, inst.offset + inst_size, 2):
+                        offset_to_inst[off] = inst
+                        offset_to_index[off] = i
 
             max_index = len(instructions) - 1 if instructions else 0
             max_offset = max(
@@ -280,7 +290,9 @@ class _DebugContext:
         """Print help message."""
         print("\nCommands:")
         print("  s, step     - Execute one instruction")
-        print("  c, cont     - Continue until breakpoint or next Dynamo code")
+        print(
+            "  c, cont     - Continue until breakpoint, exception, or next Dynamo code"
+        )
         print(
             "  v, verbose  - Toggle verbose mode (print each instruction before executing)"
         )
@@ -298,6 +310,7 @@ class _DebugContext:
         print("  <expr>      - Evaluate Python expression (like pdb)")
         print()
         print("Special variables: __stack__ (list of stack values, TOS at end)")
+        print("Note: Debugger stops on exceptions and shows the failing instruction.")
         print()
 
     def _get_stack_for_eval(self, state: DebuggerState) -> list[Any]:
@@ -541,6 +554,25 @@ class _DebugContext:
         """Common return handling logic."""
         print(f"\n=== {code.co_name} returned: {retval!r} ===")
 
+    def _handle_exception(
+        self, code: types.CodeType, offset: int, exception: BaseException
+    ) -> None:
+        """Common exception handling logic."""
+        state = self._code_states.get(code)
+        if state is None:
+            return
+
+        state.current_offset = offset
+        state.current_frame = self._find_frame_for_code(code)
+
+        inst = state.offset_to_inst.get(offset)
+        inst_str = inst.opname if inst else "<unknown>"
+        current_index = state.offset_to_index.get(offset, -1)
+
+        print(f"\n=== Exception raised at instruction {current_index}: {inst_str} ===")
+        print(f"=== {type(exception).__name__}: {exception} ===")
+        self._interactive_prompt(state)
+
     # =========================================================================
     # Python 3.12+ implementation using sys.monitoring
     # =========================================================================
@@ -553,6 +585,7 @@ class _DebugContext:
 
         if _HAS_SYS_MONITORING:
             # Enable INSTRUCTION and PY_RETURN events for this specific code object
+            # RAISE must be a global event (cannot be set locally)
             sys.monitoring.set_local_events(
                 self._tool_id,
                 code,
@@ -575,6 +608,17 @@ class _DebugContext:
         """Callback for INSTRUCTION events (sys.monitoring)."""
         self._handle_instruction(code, offset)
         return sys.monitoring.DISABLE
+
+    def _monitoring_raise_callback(
+        self, code: types.CodeType, offset: int, exception: BaseException
+    ) -> object:
+        """Callback for RAISE events (sys.monitoring)."""
+        # Only handle exceptions from tracked Dynamo-generated code
+        if code not in self._tracked_codes:
+            return None
+        self._handle_exception(code, offset, exception)
+        # Cannot return DISABLE for global events like RAISE
+        return None
 
     # =========================================================================
     # Python 3.11 and below implementation using sys.settrace
@@ -603,6 +647,13 @@ class _DebugContext:
 
         elif event == "return":
             self._handle_return(code, arg)
+            return self._settrace_callback
+
+        elif event == "exception":
+            # arg is (exception_type, exception_value, traceback)
+            offset = frame.f_lasti
+            exc_type, exc_value, exc_tb = arg
+            self._handle_exception(code, offset, exc_value)
             return self._settrace_callback
 
         return self._settrace_callback
@@ -637,6 +688,13 @@ class _DebugContext:
                 sys.monitoring.events.PY_RETURN,
                 self._monitoring_return_callback,
             )
+            sys.monitoring.register_callback(
+                self._tool_id,
+                sys.monitoring.events.RAISE,
+                self._monitoring_raise_callback,
+            )
+            # RAISE must be a global event (cannot be local)
+            sys.monitoring.set_events(self._tool_id, sys.monitoring.events.RAISE)
         else:
             # Python 3.11 and below: Use sys.settrace
             self._old_trace = sys.gettrace()
