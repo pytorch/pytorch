@@ -93,8 +93,8 @@ jobs:
       # from trunk. Also use a memory-intensive runner here because memory is
       # usually the bottleneck
       runner: linux.12xlarge.memory
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
