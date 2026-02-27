@@ -146,6 +146,9 @@ ARG SCCACHE_BUCKET_NAME=vllm-build-sccache
 ARG SCCACHE_REGION_NAME=us-west-2
 ARG SCCACHE_S3_NO_CREDENTIALS=0
 
+ARG torch_cuda_arch_list='8.0;8.9;9.0;10.0;12.0'
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+
 # Use sccache to speed up compilation
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=.git,target=.git \
@@ -170,9 +173,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38 \
         && sccache --show-stats; \
     fi
-
-ARG torch_cuda_arch_list='8.0 8.6 8.9 9.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 ARG vllm_target_device="cuda"
 ENV VLLM_TARGET_DEVICE=${vllm_target_device}

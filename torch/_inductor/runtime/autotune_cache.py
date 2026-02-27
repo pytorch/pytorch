@@ -286,6 +286,10 @@ class AutotuneCache:
             "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
             "triton_cache_hash": triton_cache_hash,
         }
+        # Save extra_options if present on the config. This allows third-party
+        # backends to store custom tuned options alongside the standard config.
+        if extra_options := getattr(config, "extra_options", None):
+            data["extra_options"] = extra_options
         if HAS_WARP_SPEC:
             data.update(
                 {
@@ -553,6 +557,10 @@ def _load_cached_autotuning(
 
     best_config.pop("triton_cache_hash", None)
 
+    # Extract extra_options if present. This allows third-party backends
+    # to restore custom tuned options from the cache.
+    extra_options = best_config.pop("extra_options", None)
+
     if inductor_meta.get("coordinate_descent_tuning") and best_config.pop(
         "found_by_coordesc", False
     ):
@@ -580,6 +588,9 @@ def _load_cached_autotuning(
         triton_config = Config(best_config, **config_args)
         # pyrefly: ignore [missing-attribute]
         triton_config.found_by_coordesc = True
+        # Restore extra_options (may be None if not used by backend)
+        # pyrefly: ignore [missing-attribute]
+        triton_config.extra_options = extra_options
         return triton_config
 
     matching_configs = [
@@ -595,7 +606,11 @@ def _load_cached_autotuning(
     if len(matching_configs) != 1:
         return None
 
-    return matching_configs[0]
+    matched_config = matching_configs[0]
+    # Restore extra_options (may be None if not used by backend)
+    # pyrefly: ignore [missing-attribute]
+    matched_config.extra_options = extra_options
+    return matched_config
 
 
 class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):

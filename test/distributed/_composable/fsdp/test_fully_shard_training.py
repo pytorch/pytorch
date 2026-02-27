@@ -30,11 +30,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_all_gather,
     foreach_reduce,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_common import (
-    FSDPMeshInfo,
-    HSDPMeshInfo,
-    ShardPlacementResult,
-)
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -99,13 +94,12 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
                 # Skip device check for CPU since torch.device("cpu") and
                 # torch.device("cpu", 0) are semantically equivalent but not equal
                 if device.type != "cpu":
-                    assert x.device == device, f"Expects {device} but got {x.device}"
-                    assert ys[0].device == device, (
-                        f"Expects {device} but got {ys[0].device}"
-                    )
-                    assert ys[1].device == device, (
-                        f"Expects {device} but got {ys[1].device}"
-                    )
+                    if not (x.device == device):
+                        raise AssertionError(f"Expects {device} but got {x.device}")
+                    if not (ys[0].device == device):
+                        raise AssertionError(f"Expects {device} but got {ys[0].device}")
+                    if not (ys[1].device == device):
+                        raise AssertionError(f"Expects {device} but got {ys[1].device}")
                 y = ys[0] + ys[1]
                 return x + y + 1
 
@@ -445,7 +439,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             and offload_policy.pin_memory
         ):
             return
-        assert test_device_type in ("cuda", "hpu", "xpu", "cpu"), f"{test_device_type}"
+        if test_device_type not in ("cuda", "hpu", "xpu", "cpu"):
+            raise AssertionError(f"Unexpected device type: {test_device_type}")
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(
@@ -740,7 +735,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         checkpoint_impl: str,
         module_grouping: str,
     ):
-        assert checkpoint_impl in ("composable", "utils", "wrapper")
+        if checkpoint_impl not in ("composable", "utils", "wrapper"):
+            raise AssertionError(f"Unexpected checkpoint_impl: {checkpoint_impl}")
         testing_compile = fully_shard != torch.distributed.fsdp.fully_shard
         if testing_compile and checkpoint_impl == "composable":
             return
@@ -781,7 +777,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # Apply FSDP
         fsdp_kwargs = {"reshard_after_forward": reshard_after_forward}
         if module_grouping == "mem_eff":
-            assert model_args.n_layers == 3
+            if not (model_args.n_layers == 3):
+                raise AssertionError(
+                    f"Expected n_layers == 3, got {model_args.n_layers}"
+                )
             fully_shard(model.layers[0], **fsdp_kwargs)
             fully_shard([model.layers[1], model.layers[2]], **fsdp_kwargs)
             fully_shard([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
@@ -1378,222 +1377,6 @@ class TestFullyShardNDTraining(FSDPTest):
             self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
             self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
-
-    @skip_if_lt_x_gpu(8)
-    def test_shard_placement_fn_tp_ep(self):
-        self.run_subtests(
-            {
-                "tp_degree": [1, 2],
-                "dp_replicate": [1, 2],
-                "reshard_non_layer_modules": [False, True, 2],
-            },
-            self._test_shard_placement_fn_tp_ep,
-        )
-
-    def _init_parallel_meshes(self, tp_degree, dp_replicate, ep_degree):
-        """Build the TP, DP, EP, and EFSDP meshes and mesh infos.
-
-        Returns (tp_mesh, dp_mesh, ep_mesh, efsdp_mesh, dp_mesh_info,
-        efsdp_mesh_info) or None if the configuration is not valid.
-        """
-        dp_size = self.world_size // tp_degree
-        dp_shard_size = dp_size // dp_replicate
-        if dp_shard_size < ep_degree:
-            return None
-        efsdp_size = dp_shard_size // ep_degree
-
-        # Build tp_mesh and dp_mesh
-        if dp_replicate > 1 and tp_degree > 1:
-            world_mesh = init_device_mesh(
-                device_type.type,
-                (dp_replicate, dp_shard_size, tp_degree),
-                mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
-            )
-            tp_mesh = world_mesh["tp"]
-            dp_mesh = world_mesh["dp_replicate", "dp_shard"]
-        elif dp_replicate > 1:
-            dp_mesh = init_device_mesh(
-                device_type.type,
-                (dp_replicate, dp_shard_size),
-                mesh_dim_names=("dp_replicate", "dp_shard"),
-            )
-            tp_mesh = None
-        elif tp_degree > 1:
-            world_mesh = init_device_mesh(
-                device_type.type,
-                (dp_size, tp_degree),
-                mesh_dim_names=("dp", "tp"),
-            )
-            tp_mesh = world_mesh["tp"]
-            dp_mesh = world_mesh["dp"]
-        else:
-            world_mesh = init_device_mesh(
-                device_type.type,
-                (self.world_size,),
-                mesh_dim_names=("world",),
-            )
-            tp_mesh = None
-            dp_mesh = world_mesh._unflatten(0, (self.world_size,), ("fsdp",))["fsdp"]
-
-        # Build ep/efsdp meshes and FSDP mesh infos
-        if dp_replicate > 1:
-            dp_shard_mesh = dp_mesh["dp_shard"]
-            sparse_mesh = dp_shard_mesh._unflatten(
-                0, (efsdp_size, ep_degree), ("efsdp", "ep")
-            )
-            full_sparse = dp_mesh._unflatten(
-                1, (efsdp_size, ep_degree), ("efsdp", "ep")
-            )
-            expert_hsdp_mesh = full_sparse["dp_replicate", "efsdp"]
-            efsdp_mesh_info = HSDPMeshInfo(
-                mesh=expert_hsdp_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
-            )
-            dp_mesh_info = HSDPMeshInfo(
-                mesh=dp_mesh, shard_mesh_dim=1, replicate_mesh_dim=0
-            )
-        else:
-            sparse_mesh = dp_mesh._unflatten(
-                0, (efsdp_size, ep_degree), ("efsdp", "ep")
-            )
-            efsdp_mesh_info = FSDPMeshInfo(mesh=sparse_mesh["efsdp"], shard_mesh_dim=0)
-            dp_mesh_info = FSDPMeshInfo(mesh=dp_mesh, shard_mesh_dim=0)
-
-        ep_mesh = sparse_mesh["ep"]
-        efsdp_mesh = sparse_mesh["efsdp"]
-
-        return (
-            tp_mesh,
-            dp_mesh,
-            ep_mesh,
-            efsdp_mesh,
-            dp_mesh_info,
-            efsdp_mesh_info,
-        )
-
-    def _test_shard_placement_fn_tp_ep(
-        self, tp_degree, dp_replicate, reshard_non_layer_modules
-    ):
-        ep_degree = 2
-        result = self._init_parallel_meshes(tp_degree, dp_replicate, ep_degree)
-        if result is None:
-            return
-        (
-            tp_mesh,
-            dp_mesh,
-            ep_mesh,
-            efsdp_mesh,
-            dp_mesh_info,
-            efsdp_mesh_info,
-        ) = result
-        # reshard_root as int must be a factor of every group's
-        # shard mesh size; skip configs where it is not.
-        if isinstance(reshard_non_layer_modules, int) and not isinstance(
-            reshard_non_layer_modules, bool
-        ):
-            for mi in (dp_mesh_info, efsdp_mesh_info):
-                if mi.shard_mesh_size % reshard_non_layer_modules != 0:
-                    return
-        model_args = ModelArgs(
-            n_layers=2,
-            vocab_size=256,
-            max_seq_len=32,
-            dim=64,
-            n_heads=4,
-            dropout_p=0.0,
-            num_experts=8,
-        )
-        torch.manual_seed(42)
-        model = Transformer(model_args)
-        ref_model = copy.deepcopy(model).to(device_type)
-        Transformer.parallelize(
-            model, tp_mesh=tp_mesh, use_seq_parallel=False, ep_mesh=ep_mesh
-        )
-        for block in model.layers:
-            expert_params = set(block.expert_layer.experts.parameters())
-
-            def _shard_placement_fn(
-                param,
-                _expert_params=expert_params,
-            ):
-                if param in _expert_params:
-                    return ShardPlacementResult(
-                        placement=Shard(0),
-                        mesh_info=efsdp_mesh_info,
-                    )
-                return ShardPlacementResult(
-                    placement=Shard(0),
-                    mesh_info=dp_mesh_info,
-                )
-
-            # Blocks always have DTensor expert params (from EP), so int
-            # reshard is not supported; do not pass reshard_after_forward.
-            fully_shard(
-                block,
-                mesh=dp_mesh,
-                shard_placement_fn=_shard_placement_fn,
-            )
-        # Group tok_embeddings, norm, and output together since
-        # output.weight is tied to tok_embeddings.weight
-        # These modules have no DTensor params when tp_degree == 1.
-        # With TP, root params are DTensors and int reshard is unsupported.
-        if tp_mesh is not None:
-            reshard_non_layer_modules = True
-        fully_shard(
-            [model.tok_embeddings, model.norm, model.output],
-            mesh=dp_mesh,
-            reshard_after_forward=reshard_non_layer_modules,
-        )
-        fully_shard(
-            model, mesh=dp_mesh, reshard_after_forward=reshard_non_layer_modules
-        )
-        for (name, param), (_, ref_param) in zip(
-            model.named_parameters(), ref_model.named_parameters()
-        ):
-            full_param = param.full_tensor()
-            self.assertEqual(full_param, ref_param)
-        ref_expert_params = {
-            p for b in ref_model.layers for p in b.expert_layer.experts.parameters()
-        }
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        torch.manual_seed(42 + self.rank // tp_degree)
-        inp = torch.randint(
-            0,
-            model_args.vocab_size,
-            (2, model_args.max_seq_len),
-            device=device_type.type,
-        )
-        dp_replicate_group = (
-            dp_mesh["dp_replicate"].get_group() if dp_replicate > 1 else None
-        )
-        for iter_idx in range(5):
-            ref_loss = ref_model(inp).sum()
-            loss = model(inp).sum()
-            ref_loss.backward()
-            loss.backward()
-            for param in ref_model.parameters():
-                if param.grad is None:
-                    continue
-                if param in ref_expert_params:
-                    dist.all_reduce(
-                        param.grad, op=dist.ReduceOp.SUM, group=ep_mesh.get_group()
-                    )
-                    dist.all_reduce(
-                        param.grad, op=dist.ReduceOp.AVG, group=efsdp_mesh.get_group()
-                    )
-                    if dp_replicate_group is not None:
-                        dist.all_reduce(
-                            param.grad,
-                            op=dist.ReduceOp.AVG,
-                            group=dp_replicate_group,
-                        )
-                else:
-                    dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
-            ref_optim.step()
-            optim.step()
-            ref_optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-            optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-            self.assertEqual(ref_loss, loss)
 
 
 class TestFullyShardHSDP3DTraining(FSDPTest):

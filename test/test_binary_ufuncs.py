@@ -50,7 +50,6 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
-    binary_ufuncs_and_refs,
     generate_elementwise_binary_broadcasting_tensors,
     generate_elementwise_binary_extremal_value_tensors,
     generate_elementwise_binary_large_value_tensors,
@@ -81,6 +80,8 @@ if TEST_SCIPY:
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+
+_unsigned_int_types = (torch.uint16, torch.uint32, torch.uint64)
 
 
 # TODO: update to use opinfos consistently
@@ -503,7 +504,7 @@ class TestBinaryUfuncs(TestCase):
     # NOTE: because the cross-product of all possible type promotion tests is huge, this
     #   just spot checks some handwritten cases.
     # NOTE: It may be possible to refactor this test into something simpler
-    @ops(binary_ufuncs_and_refs, dtypes=OpDTypes.none)
+    @ops(binary_ufuncs, dtypes=OpDTypes.none)
     def test_type_promotion(self, device, op):
         supported_dtypes = op.supported_dtypes(torch.device(device).type)
         make_lhs = partial(
@@ -4517,11 +4518,25 @@ class TestBinaryUfuncs(TestCase):
         _compare_helper(t, zeros, *xlog1py_fns)
         _compare_helper(t, 0.0, *xlog1py_fns)
 
-    @dtypes(*product(all_types_and(torch.bool), all_types_and(torch.bool)))
+    @dtypes(
+        *product(
+            all_types_and(torch.bool, *_unsigned_int_types),
+            all_types_and(torch.bool, *_unsigned_int_types),
+        )
+    )
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @slowTest
     def test_zeta(self, device, dtypes):
         x_dtype, q_dtype = dtypes
+        # Skip incompatible type combinations for uints
+        try:
+            torch.promote_types(x_dtype, q_dtype)
+        except RuntimeError:
+            if not {x_dtype, q_dtype}.isdisjoint(_unsigned_int_types):
+                self.skipTest(
+                    f"Type promotion not supported for {x_dtype} and {q_dtype}"
+                )
+            raise
 
         def test_helper(x, q):
             x_np = x if isinstance(x, float) else x.cpu().numpy()

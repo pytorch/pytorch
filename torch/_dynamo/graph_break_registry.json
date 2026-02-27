@@ -325,6 +325,16 @@
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "var_getattr {self} {name}",
+      "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
+      "Hints": [
+        "Simplify your `__getattribute__` implementation, ",
+        "or replace it with a targeted `@property`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
+      "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo does not support checking key existence on `nn.Module` instances that have a custom `__getattribute__` method defined.",
       "Hints": [
         "Avoid defining `__getattribute__` in your module.",
@@ -3327,6 +3337,16 @@
       ]
     }
   ],
+  "GB6604": [
+    {
+      "Gb_type": "Missing CALL_INTRINSIC_2 handler",
+      "Context": "CALL_INTRINSIC_2 operand: {inst.argval}",
+      "Explanation": "No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0276": [
     {
       "Gb_type": "Failed to make weakref to User Object",
@@ -3746,6 +3766,16 @@
       "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB5799": [
+    {
+      "Gb_type": "unsupported function.__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

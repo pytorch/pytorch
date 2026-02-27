@@ -20,7 +20,7 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -1690,7 +1690,7 @@ def merge_view_inputs(
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
     # - idx, view_tensor, where we can generate the new output with view_tensor._view_func(old_args[idx])
     #   idx corresponds to which synthetic base from the outer calling context to view
-    inner_calling_convention_meta: dict[int, Union[int, tuple[int, torch.Tensor]]] = {}
+    inner_calling_convention_meta: dict[int, int | tuple[int, torch.Tensor]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,
@@ -1855,9 +1855,9 @@ def merge_view_inputs(
             inner_calling_convention_meta[old_idx] = new_idx
 
         # post process into a list
-        post_processed_calling_convention_meta: list[
-            Union[int, tuple[int, torch.Tensor]]
-        ] = [-1 for _ in range(len(inner_calling_convention_meta))]
+        post_processed_calling_convention_meta: list[int | tuple[int, torch.Tensor]] = [
+            -1 for _ in range(len(inner_calling_convention_meta))
+        ]
         for k, v in inner_calling_convention_meta.items():
             post_processed_calling_convention_meta[k] = v
         # Quick assert: every argument in the inner calling convention should be accounted for.
@@ -1983,7 +1983,7 @@ def _backward_prologue_functional(
             OutputType.custom_function_view,
         ]
         and issubclass(info.raw_type, torch.Tensor)
-        and info.requires_grad
+        and info.requires_grad_for_backward
     ]
     # intermediate bases always require gradients, and always participate in the backward graph.
     flat_bw_args_with_grads = [
@@ -2073,17 +2073,26 @@ def _backward_prologue_functional(
                 "The grad inputs should be same number as forward output tangents"
             )
 
+        stack_traces = metadata.tangent_source_stack_traces or ()
+
         flat_processed_tangents = list(
             itertools.chain.from_iterable(
                 (
                     AOTDispatchAutograd.process_runtime_tangent(
                         t,
                         m,
+                        tangent_idx=idx,
+                        tangent_desc=desc,
+                        compile_id_str=metadata.compile_id_str,
+                        tangent_stack_trace=stack_traces[idx] if stack_traces else None,
                     )[1]
                 )
-                for t, m in zip(
-                    tangents,
-                    metadata.subclass_tangent_meta,
+                for idx, (t, m, desc) in enumerate(
+                    zip(
+                        tangents,
+                        metadata.subclass_tangent_meta,
+                        metadata.traced_tangents_descs,
+                    )
                 )
             )
         )
@@ -2106,11 +2115,19 @@ def _backward_prologue_functional(
             )
         )
     else:
+        stack_traces = metadata.tangent_source_stack_traces or ()
+
         all_args = [
             (
                 AOTDispatchAutograd.process_runtime_tangent(
                     t,
                     metadata.subclass_tangent_meta[i - tangents_start_idx],
+                    tangent_idx=i - tangents_start_idx,
+                    tangent_desc=metadata.traced_tangents_descs[i - tangents_start_idx],
+                    compile_id_str=metadata.compile_id_str,
+                    tangent_stack_trace=(
+                        stack_traces[i - tangents_start_idx] if stack_traces else None
+                    ),
                 )[0]
                 if (tangents_start_idx <= i < tangents_end_idx)
                 else t
@@ -2302,8 +2319,88 @@ class SerializableCompiledFunction:
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
     @staticmethod
+    def _raise_tangent_metadata_error(
+        expected_type: type | None,
+        expected_meta: Any,
+        runtime_type: type,
+        runtime_meta: Any,
+        orig_x: torch.Tensor,
+        tangent_idx: int | None,
+        tangent_desc: Any | None,
+        compile_id_str: str | None,
+        tangent_stack_trace: str | None,
+    ) -> RuntimeError:
+        expected_subclass_got_plain_tensor = (
+            expected_type is not None
+            and expected_type is not torch.Tensor
+            and runtime_type is torch.Tensor
+        )
+        if expected_subclass_got_plain_tensor:
+            tangent_msg = ""
+            if tangent_idx is not None:
+                tangent_msg = f" (tangent index: {tangent_idx})"
+
+            output_hint = ""
+            if tangent_desc is not None:
+                from .descriptors import PlainAOTOutput, TangentAOTInput
+
+                if isinstance(tangent_desc, TangentAOTInput) and isinstance(
+                    tangent_desc.output, PlainAOTOutput
+                ):
+                    idx = tangent_desc.output.idx
+                    output_hint = f"\n\nThe problematic output is: forward output at index {idx} (0-indexed)"
+                else:
+                    output_hint = (
+                        f"\n\nThe problematic output is: {tangent_desc.expr()}"
+                    )
+
+            graph_hint = ""
+            if compile_id_str is not None:
+                graph_hint = (
+                    f"\n\nThis error occurred in compiled graph [{compile_id_str}]."
+                )
+
+            stack_trace_hint = ""
+            if tangent_stack_trace is not None:
+                stack_trace_hint = (
+                    f"\n\nThe forward output was created here:\n{tangent_stack_trace}"
+                )
+
+            return RuntimeError(
+                f"""
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+Expected a {expected_type.__name__} tangent but got a plain Tensor{tangent_msg}.
+This happens when a compiled function returns multiple outputs that
+require gradients, but .backward() is only called on some of them.
+To fix: call .detach() on forward outputs you don't need gradients for.{output_hint}{graph_hint}{stack_trace_hint}
+
+This error is also more likely to occur if your compiled model is suffering
+from a large number of graph breaks. For more advice on finding and fixing
+graph breaks, see:
+https://docs.pytorch.org/docs/stable/user_guide/torch_compiler/compile/programming_model.graph_breaks_index.html
+
+For more info about this error, see:
+https://github.com/pytorch/pytorch/issues/172556"""
+            )
+        else:
+            return RuntimeError(
+                f"""
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+Expected: {expected_meta} (type {expected_type}),
+got: {runtime_meta} (type {runtime_type}), shape: {orig_x.shape}.
+Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
+            )
+
+    @staticmethod
     def process_runtime_tangent(
-        x: Any, meta: PlainTensorMeta | SubclassCreationMeta
+        x: Any,
+        meta: PlainTensorMeta | SubclassCreationMeta,
+        tangent_idx: int | None = None,
+        tangent_desc: Any | None = None,
+        compile_id_str: str | None = None,
+        tangent_stack_trace: str | None = None,
     ) -> tuple[Any, list[Any]]:
         if not isinstance(x, torch.Tensor):
             return x, [x]
@@ -2316,7 +2413,7 @@ class AOTDispatchAutograd:
             x = coerce_to_expected_memory_format(x, meta.memory_format)
             return x, [x]
 
-        expected_type: Optional[type] = torch.Tensor
+        expected_type: type | None = torch.Tensor
         expected_meta = None
         if isinstance(meta, SubclassCreationMeta):
             expected_type = meta.original_subclass_type
@@ -2355,18 +2452,16 @@ class AOTDispatchAutograd:
         orig_x = x
         x = maybe_coerce(x)
         if x is None:
-            raise RuntimeError(
-                f"""
-During the backward, we encountered a tensor subclass where we guessed its
-metadata incorrectly.
-
-Expected metadata: {str(expected_meta)}, expected type: {str(expected_type)}
-
-Runtime metadata: {str(runtime_meta)}, runtime type: {str(runtime_type)}
-
-shape: {str(orig_x.shape)}
-To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
-"""
+            raise AOTDispatchAutograd._raise_tangent_metadata_error(
+                expected_type,
+                expected_meta,
+                runtime_type,
+                runtime_meta,
+                orig_x,
+                tangent_idx,
+                tangent_desc,
+                compile_id_str,
+                tangent_stack_trace,
             )
 
         # Coerce to expected memory format
@@ -2445,11 +2540,17 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         pending_forwards: set[int] = set()
         saved_backward_tensor_states: dict[int, list[torch.Tensor]] = {}
 
+        # capture the compile_id at compile time for error messages
+        _compile_id = CompileContext.current_compile_id()
+        _compile_id_str = str(_compile_id) if _compile_id is not None else None
+        # store on metadata so it's accessible during backward error handling
+        fw_metadata.compile_id_str = _compile_id_str
+
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
-            maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
+            maybe_subclass_metadata: SubclassMeta | None = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
@@ -3032,3 +3133,20 @@ def make_runtime_safe(
             for meta in maybe_subclass_meta.grad_input_metas:
                 if isinstance(meta, SubclassCreationMeta):
                     meta.make_runtime_safe()
+
+
+# Register inductor_compiled_code py_impl for _AnalyzeCustomOpInputOutputMode here
+# rather than in wrap.py to avoid a circular import (wrap.py is loaded during
+# torch.__init__ before torch._dynamo is available).
+from torch._higher_order_ops.wrap import inductor_compiled_code
+
+
+@inductor_compiled_code.py_impl(_AnalyzeCustomOpInputOutputMode)
+def _inductor_compiled_code_analyze_mode(
+    mode: _AnalyzeCustomOpInputOutputMode, func: Any, inputs: Any
+) -> Any:
+    # Re-dispatch without re-entering the mode so that other modes on the
+    # stack (e.g. FakeTensorMode) still get a chance to handle the HOP.
+    # _pop_mode_temporarily keeps our mode off the stack during this call,
+    # so we won't recurse back here.
+    return inductor_compiled_code(func, inputs)
