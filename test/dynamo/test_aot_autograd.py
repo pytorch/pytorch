@@ -1820,6 +1820,95 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # Should only compile once regardless of batch size changes
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_storage_overlap_guard_with_none_source(self):
+        """
+        Test that StorageOverlap guard creation handles None sources correctly.
+
+        Regression test for issue where DDPOptimizer creates submodules with
+        intermediate values as placeholders having _dynamo_source = None.
+        When overlapping inputs occur, guard creation should skip None sources
+        instead of crashing with AttributeError.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from torch._functorch._aot_autograd.input_output_analysis import (
+            compute_overlapping_inputs,
+        )
+        from torch._functorch._aot_autograd.schemas import AOTConfig
+        from torch._guards import StorageOverlap, TracingContext
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # Create a mock source
+        mock_source = MagicMock()
+        mock_source.name = "test_source"
+
+        # Create AOTConfig with aot_autograd_arg_pos_to_source containing None
+        # This simulates DDPOptimizer intermediate values becoming placeholders
+        aot_config = AOTConfig(
+            fw_compiler=lambda x, y: x,
+            bw_compiler=lambda x, y: x,
+            partition_fn=lambda x, y, z: (x, x),
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+            is_export=False,
+            no_tangents=False,
+            dynamic_shapes=True,
+            aot_autograd_arg_pos_to_source=[mock_source, None, mock_source, None],
+            enable_log=False,
+        )
+
+        # Create overlapping tensors (aliased via storage)
+        base = torch.randn(100)
+        t0 = base[:50]  # index 0 - has source
+        t1 = base[25:75]  # index 1 - None source, overlaps with t0 and t2
+        t2 = base[50:]  # index 2 - has source, overlaps with t1
+        t3 = base[75:]  # index 3 - None source
+
+        # Set up tracing context with fake mode and shape_env for symbolic shapes
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        guards_context = MagicMock()
+        guards_context.aotautograd_guards = []
+
+        tracing_context = MagicMock()
+        tracing_context.fake_mode = fake_mode
+        tracing_context.guards_context = guards_context
+
+        # Convert to fake tensors with dynamic shapes
+        with fake_mode:
+            fake_inputs = []
+            for t in [t0, t1, t2, t3]:
+                # Use constrain_range to make the shapes symbolic
+                ft = fake_mode.from_tensor(t, symbolic_context=None)
+                fake_inputs.append(ft)
+
+            # Make shapes symbolic by marking them dynamic
+            for ft in fake_inputs:
+                torch._dynamo.mark_dynamic(ft, 0)
+
+        aliased_input_indices = [0, 1, 2, 3]
+
+        # Call compute_overlapping_inputs with our mocked setup
+        # Without the fix, this would create StorageOverlap with None sources
+        with patch.object(TracingContext, "try_get", return_value=tracing_context):
+            result = compute_overlapping_inputs(
+                aot_config, fake_inputs, aliased_input_indices
+            )
+
+        # The function should complete without error
+        self.assertIsInstance(result, set)
+
+        # Check that any StorageOverlap guards created don't have None sources
+        for guard in guards_context.aotautograd_guards:
+            if isinstance(guard, StorageOverlap):
+                for source in guard.overlapping_sources:
+                    self.assertIsNotNone(source)
+                for source in guard.non_overlapping_sources:
+                    self.assertIsNotNone(source)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

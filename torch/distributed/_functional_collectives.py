@@ -1700,6 +1700,25 @@ def all_gather_inplace(
     return tensor_list
 
 
+def broadcast_inplace(
+    tensor: torch.Tensor,
+    src: int,
+    group=None,
+    async_op: bool = False,
+    tag: str = "",
+):
+    if async_op:
+        raise AssertionError(
+            "Can't remap async version of inplace op to functional collective"
+        )
+
+    group = group or dist.group.WORLD
+    if group is None:
+        raise AssertionError("group cannot be None")
+
+    return tensor.copy_(broadcast(tensor, src, group, tag))
+
+
 from torch.distributed.distributed_c10d import (
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
@@ -1707,6 +1726,7 @@ from torch.distributed.distributed_c10d import (
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
     all_to_all_single as legacy_all_to_all_single,
+    broadcast as legacy_broadcast,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -1744,6 +1764,11 @@ def _remapped_all_gather(*args, **kwargs):
     all_gather_inplace(*args, **kwargs)
 
 
+def _remapped_broadcast(*args, **kwargs):
+    assert _are_we_tracing()
+    broadcast_inplace(*args, **kwargs)
+
+
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.
 traceable_collective_remaps = {
@@ -1754,4 +1779,5 @@ traceable_collective_remaps = {
     legacy_all_gather: _remapped_all_gather,
     legacy_reduce_scatter_base: _remapped_reducescatter,
     legacy_all_gather_base: _remapped_allgather,
+    legacy_broadcast: _remapped_broadcast,
 }
