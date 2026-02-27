@@ -101,6 +101,7 @@ flex_attention_template = TritonTemplate(
     source=load_flex_template("flex_attention")
     + load_flex_template("utilities")
     + load_flex_template("common"),
+    always_freeze_layout=True,
 )
 
 
@@ -530,6 +531,7 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=load_flex_template("flex_backwards") + load_flex_template("utilities"),
+    always_freeze_layout=True,
 )
 
 
