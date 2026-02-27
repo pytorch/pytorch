@@ -1126,7 +1126,9 @@ torch.cuda.synchronize()
             if stride is None:
                 stride = kernel_size
             input = torch.randn(n, c, d, h, w, dtype=dtype, device=device)
-            input = input.contiguous(memory_format=torch.channels_last_3d).requires_grad_()
+            input = input.contiguous(
+                memory_format=torch.channels_last_3d
+            ).requires_grad_()
             # Calculate output size considering padding
             out_d = (d + 2 * padding - kernel_size) // stride + 1
             out_h = (h + 2 * padding - kernel_size) // stride + 1
