@@ -15257,6 +15257,13 @@
     CUDA: _flash_attention_forward
   tags: nondeterministic_seeded
 
+- func: _flash_attention_forward.out(Tensor(a!) out, Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None, Tensor? page_table=None) -> (Tensor softmax_logsumexp, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+  variants: function
+  dispatch:
+    CompositeImplicitAutograd: _flash_attention_forward_out_composite
+    CUDA: _flash_attention_forward_out
+  tags: nondeterministic_seeded
+
 - func: _flash_attention_forward.quantized(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
   variants: function
   dispatch:

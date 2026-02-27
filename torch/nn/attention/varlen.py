@@ -14,7 +14,7 @@ import torch
 
 log = logging.getLogger(__name__)
 
-__all__ = ["varlen_attn", "AuxRequest"]
+__all__ = ["varlen_attn", "varlen_attn_out", "AuxRequest"]
 
 
 def _normalize_window_size(window_size: list[int] | None) -> list[int]:
@@ -259,6 +259,139 @@ def varlen_attn(
     """
     is_causal = window_size == (-1, 0)
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        is_causal,
+        scale,
+        list(window_size),
+        seqused_k,
+        page_table,
+    )
+    if return_aux is not None and return_aux.lse:
+        return out, lse
+    return out
+
+
+@torch.library.custom_op("torch_attn::_varlen_attn_out", mutates_args={"out"})
+def _varlen_attn_out(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    is_causal: bool = False,
+    scale: float | None = None,
+    window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Private custom op for variable-length attention with pre-allocated output.
+    Same as _varlen_attn but writes the attention output into the provided out tensor.
+    """
+    window_size = _normalize_window_size(window_size)
+
+    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+
+    if use_cudnn:
+        # TODO: look into this
+        raise RuntimeError("cuDNN backend does not support out variant.")
+
+    log.info("Using Flash Attention backend for varlen_attn_out")
+    softmax_lse, _, _, _ = torch.ops.aten._flash_attention_forward.out(
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        0.0,  # dropout_p hardcoded to 0.0
+        is_causal,
+        False,  # return_debug_mask
+        out,
+        scale=scale,
+        window_size_left=window_size[0],
+        window_size_right=window_size[1],
+        seqused_k=seqused_k,
+        page_table=page_table,
+    )
+
+    rng_state_ = torch.zeros(
+        (2,), dtype=torch.uint64, device=query.device
+    )  # hardcoded since dropout is hardcoded to 0
+    return softmax_lse, rng_state_
+
+
+@_varlen_attn_out.register_fake
+def _varlen_attn_out_fake(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    is_causal: bool = False,
+    scale: float | None = None,
+    window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Fake implementation for meta tensor computation and tracing.
+    """
+    total_q = query.size(0)
+    num_heads = query.size(1)
+    if torch.version.hip:
+        batch_size = cu_seq_q.size(0) - 1
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+        )
+    else:
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
+
+    rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
+
+    return logsumexp, rng_state
+
+
+def varlen_attn_out(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    *,
+    return_aux: AuxRequest | None = None,
+    scale: float | None = None,
+    window_size: tuple[int, int] = (-1, -1),
+    seqused_k: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    r"""Compute variable-length attention using Flash Attention with a pre-allocated output tensor.
+
+    Same as :func:`varlen_attn` but writes the attention output into the provided ``out`` tensor
+    instead of allocating a new one.
+
+    """
+    is_causal = window_size == (-1, 0)
+    lse, _ = torch.ops.torch_attn._varlen_attn_out(
+        out,
         query,
         key,
         value,

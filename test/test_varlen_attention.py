@@ -11,7 +11,7 @@ from torch.nn.attention import (
     list_flash_attention_impls,
     restore_flash_attention_impl,
 )
-from torch.nn.attention.varlen import varlen_attn
+from torch.nn.attention.varlen import varlen_attn, varlen_attn_out
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
@@ -238,6 +238,19 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(output.device, torch.device(device))
         self.assertEqual(output.dtype, dtype)
 
+        # varlen_attn_out should produce the same result and write into the buffer
+        with torch.no_grad():
+            q, k, v = attention_block.get_varlen_qkv(x_packed)
+            expected = varlen_attn(
+                q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len
+            )
+            out_buf = torch.empty_like(expected)
+            actual = varlen_attn_out(
+                out_buf, q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len
+            )
+            self.assertEqual(actual.data_ptr(), out_buf.data_ptr())
+            self.assertEqual(out_buf, expected)
+
         varlen_grad_out = torch.ones_like(output)
 
         varlen_grad = torch.autograd.grad(
@@ -310,6 +323,24 @@ class TestVarlenAttention(NNTestCase):
             test_utils=["test_schema", "test_faketensor"],
         )
 
+        # opcheck for _varlen_attn_out (no backward)
+        out_buf = torch.empty_like(q)
+        torch.library.opcheck(
+            torch.ops.torch_attn._varlen_attn_out,
+            (
+                out_buf,
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                shape.max_seq_len,
+                shape.max_seq_len,
+                False,
+            ),
+            test_utils=["test_schema", "test_faketensor"],
+        )
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -358,6 +389,21 @@ class TestVarlenAttention(NNTestCase):
         ) and any("torch_attn._varlen_attn_backward" in op for op in called_ops)
         if not custom_ops_called:
             raise AssertionError("custom varlen attention ops should have been called")
+
+        # Also verify _varlen_attn_out dispatches correctly under compile
+        q, k, v = attention_block.get_varlen_qkv(x_packed.detach())
+
+        def run_varlen_out(q, k, v, cu_seq, max_len):
+            out_buf = torch.empty_like(q)
+            varlen_attn_out(out_buf, q, k, v, cu_seq, cu_seq, max_len, max_len)
+            return out_buf
+
+        compiled_out = torch.compile(run_varlen_out, backend="eager", fullgraph=True)
+        with OpLoggingMode() as out_mode:
+            compiled_out(q, k, v, cu_seq, shape.max_seq_len)
+
+        if not any("torch_attn._varlen_attn_out" in op for op in out_mode.called_ops):
+            raise AssertionError("custom _varlen_attn_out op should have been called")
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -741,6 +787,23 @@ class TestVarlenAttention(NNTestCase):
 
         self.assertEqual(output_cached, output_reference)
 
+        # varlen_attn_out with seqused_k should match
+        with torch.no_grad():
+            out_buf = torch.empty_like(q_packed)
+            output_out = varlen_attn_out(
+                out_buf,
+                q_packed,
+                k_cache_packed,
+                v_cache_packed,
+                cu_seq_q,
+                cu_seq_k_cache,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+            )
+            self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
+            self.assertEqual(out_buf, output_cached)
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -843,6 +906,24 @@ class TestVarlenAttention(NNTestCase):
             )
 
         self.assertEqual(output_paged, output_reference)
+
+        # varlen_attn_out with paged KV cache should match
+        with use_fa3(), torch.no_grad():
+            out_buf = torch.empty_like(q_packed)
+            output_out = varlen_attn_out(
+                out_buf,
+                q_packed,
+                k_pages,
+                v_pages,
+                cu_seq_q,
+                None,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+                page_table=page_table,
+            )
+            self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
+            self.assertEqual(out_buf, output_paged)
 
 
 device_types = ("cuda",)
