@@ -33,7 +33,6 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import sym_or
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 
@@ -4262,10 +4261,11 @@ def nll_loss_forward(
         )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    torch._check(
-        sym_or(no_batch_dim, self.shape[0] == target.shape[0]),
-        lambda: f"size mismatch (got input: {self.shape}, target: {target.shape})",
-    )
+    if not no_batch_dim:
+        torch._check(
+            self.shape[0] == target.shape[0],
+            lambda: f"size mismatch (got input: {self.shape}, target: {target.shape})",
+        )
 
     n_classes = self.shape[-1]
 
