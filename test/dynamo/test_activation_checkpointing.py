@@ -92,7 +92,8 @@ def count_ops(
 
     # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
     if op is not None:
-        assert not isinstance(op, list)
+        if isinstance(op, list):
+            raise AssertionError("Expected op to not be a list")
         ops = [op]
     if freq is not None:
         freqs = [freq]
@@ -105,24 +106,30 @@ def count_ops(
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
             err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
-            assert actual_count == freq, err_msg
+            if actual_count != freq:
+                raise AssertionError(err_msg)
     else:
-        assert freqs_ge is not None
+        if freqs_ge is None:
+            raise AssertionError("Expected freqs_ge to not be None")
         for op, freq_ge in zip(ops, freqs_ge):
             actual_count = 0
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            assert actual_count >= freq_ge, (
-                f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
-            )
+            if actual_count < freq_ge:
+                raise AssertionError(
+                    f"In graph {gm}, expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
+                )
     return gm
 
 
 def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: set[str]):
     if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
         return_node = list(graph.nodes)[-1]
-        assert return_node.target == "output"
+        if return_node.target != "output":
+            raise AssertionError(
+                f"Expected return_node.target to be 'output', got {return_node.target}"
+            )
         for x in return_node.args[0]:
             fwd_outputs.add(str(x))
 
@@ -285,7 +292,9 @@ class ActivationCheckpointingViaTagsTests(
                         _log_export_usage=False,
                     )
                     # NOTE: this is necessary for rng to be added to the exported graph
-                    return torch.compile(gm, fullgraph=False)(*runtime_args)
+                    return torch.compile(
+                        gm, fullgraph=False, backend="aot_eager_decomp_partition"
+                    )(*runtime_args)
 
                 return runtime_wrapper
 
@@ -1714,7 +1723,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             torch.manual_seed(0)
             ref = gn(*args)
 
-            opt_gn = torch.compile(gn)
+            opt_gn = torch.compile(gn, backend="aot_eager_decomp_partition")
             torch.manual_seed(0)
             res = opt_gn(*args)
             self.assertEqual(ref, res)
@@ -1737,7 +1746,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             return torch.utils.checkpoint.checkpoint(mod, x, use_reentrant=True)
 
         x = torch.randn(4, 4).to(device)
-        opt_fn = torch.compile(fn, fullgraph=True)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager_decomp_partition")
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported, "User-inserted graph break"
         ):
@@ -1764,7 +1773,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         y = torch.randn(4, 4).to(device)
         z = torch.randn(4, 4).to(device)
         ref = fn(x, [y, z])
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
 
@@ -1854,7 +1863,9 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         mod = dist_checkpoint_wrapper(MockModule())
         x = torch.randn(4, 4)
         ref = mod(x)
-        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        opt_mod = torch.compile(
+            mod, backend="aot_eager_decomp_partition", fullgraph=True
+        )
         res = opt_mod(x)
         self.assertEqual(ref, res)
 
@@ -1867,7 +1878,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             CheckpointWrapper,
         )
 
-        cnt = CompileCounterWithBackend("eager")
+        cnt = CompileCounterWithBackend("aot_eager_decomp_partition")
 
         lin = torch.nn.Linear(1, 1)
         mod = torch.nn.Sequential(lin, lin)
@@ -1936,7 +1947,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(counter, 2)
         counter = 0
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
         opt_fn(x).sum().backward()
         # The mutation is not reapplied in the backward because the flag was on.
         self.assertEqual(counter, 1)
@@ -1963,7 +1974,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(4, 4, requires_grad=True)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager_decomp_partition", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(ref[1], res[1])
@@ -2107,7 +2118,11 @@ class GraphModule(torch.nn.Module):
                 x=input_eager.x.detach().clone().requires_grad_(True)
             )
             torch.manual_seed(0)
-            compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
+            compiled_fn = torch.compile(
+                checkpointed_forward,
+                fullgraph=True,
+                backend="aot_eager_decomp_partition",
+            )
             output_compiled = compiled_fn(input_compiled)
             output_compiled.y.sum().backward()
 

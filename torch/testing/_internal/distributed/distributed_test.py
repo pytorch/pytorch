@@ -18,7 +18,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
-from typing import Any, NamedTuple, Union
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -54,7 +54,13 @@ from torch.distributed.utils import (
     _verify_param_shape_across_processes,
 )
 from torch.nn.parallel import DistributedDataParallel
-from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars, _MixedPrecision
+from torch.nn.parallel.distributed import (
+    _BucketCapacityConfig,
+    _DEFAULT_BUCKET_CAP_MB,
+    _dump_DDP_relevant_env_vars,
+    _MB_TO_BYTES,
+    _MixedPrecision,
+)
 from torch.profiler import ExecutionTraceObserver, ProfilerActivity
 from torch.testing._internal.common_distributed import (
     captured_output,
@@ -251,7 +257,7 @@ ddp_suggest_debug_mode_str = (
 class DDPUnevenTestInput(NamedTuple):
     name: str
     model: nn.Module
-    inp: Union[torch.tensor, tuple]
+    inp: torch.Tensor | tuple
     sync_interval: int
     throw_on_early_termination: bool = False
     hook: Callable = None
@@ -10489,6 +10495,335 @@ class DistributedTest:
                 base_model.parameters(), test_model_1.parameters(), strict=True
             ):
                 self.assertEqual(i, j)
+
+
+# =============================================================================
+# Unit tests for _BucketCapacityConfig dataclass
+# These tests verify pure Python logic without requiring multi-process setup.
+# =============================================================================
+class TestBucketCapacityConfig(unittest.TestCase):
+    """Unit tests for _BucketCapacityConfig dataclass."""
+
+    def test_create_with_default_bucket_cap(self):
+        """Test _BucketCapacityConfig.create() with default bucket_cap_mb (None)."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        expected_bytes = _DEFAULT_BUCKET_CAP_MB * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.per_bucket_bytes_caps, ())
+        self.assertEqual(
+            config.first_bucket_bytes_cap, dist._DEFAULT_FIRST_BUCKET_BYTES
+        )
+        self.assertEqual(config.bucket_cap_mb, _DEFAULT_BUCKET_CAP_MB)
+
+    def test_create_with_custom_bucket_cap_mb(self):
+        """Test _BucketCapacityConfig.create() with custom bucket_cap_mb."""
+        custom_cap_mb = 100
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=custom_cap_mb,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        expected_bytes = custom_cap_mb * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.per_bucket_bytes_caps, ())
+        self.assertEqual(config.first_bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.bucket_cap_mb, custom_cap_mb)
+
+    def test_create_with_bucket_cap_mb_list(self):
+        """Test _BucketCapacityConfig.create() with bucket_cap_mb_list."""
+        cap_list = [10, 25, 50]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        expected_list = tuple(cap * _MB_TO_BYTES for cap in cap_list)
+        self.assertEqual(config.per_bucket_bytes_caps, expected_list)
+        expected_max_bytes = max(cap_list) * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_max_bytes)
+        self.assertEqual(config.first_bucket_bytes_cap, expected_max_bytes)
+        self.assertTrue(config.has_custom_per_bucket_caps)
+
+    def test_create_with_bucket_cap_mb_list_overrides_bucket_cap_mb(self):
+        """Test that bucket_cap_mb_list takes precedence over bucket_cap_mb."""
+        cap_list = [10, 25, 50]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=100,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        expected_max_bytes = max(cap_list) * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_max_bytes)
+
+    def test_create_raises_for_python_reducer_with_list(self):
+        """Test that AssertionError is raised when using bucket_cap_mb_list with Python reducer."""
+        with self.assertRaises(AssertionError) as context:
+            _BucketCapacityConfig.create(
+                bucket_cap_mb=None,
+                bucket_cap_mb_list=[10, 25, 50],
+                use_python_reducer=True,
+            )
+
+        self.assertIn("python reducer is not supported", str(context.exception))
+
+    def test_has_custom_per_bucket_caps_property(self):
+        """Test has_custom_per_bucket_caps property."""
+        config_no_list = _BucketCapacityConfig.create(
+            bucket_cap_mb=25,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+        self.assertFalse(config_no_list.has_custom_per_bucket_caps)
+
+        config_with_list = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=[10, 25],
+            use_python_reducer=False,
+        )
+        self.assertTrue(config_with_list.has_custom_per_bucket_caps)
+
+    def test_bucket_cap_mb_property(self):
+        """Test bucket_cap_mb property correctly derives MiB from bytes."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=100,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+        self.assertEqual(config.bucket_cap_mb, 100)
+
+        config_default = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+        self.assertEqual(config_default.bucket_cap_mb, _DEFAULT_BUCKET_CAP_MB)
+
+    def test_immutability(self):
+        """Test that _BucketCapacityConfig is immutable (frozen dataclass)."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=25,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        with self.assertRaises(AttributeError):
+            config.bucket_bytes_cap = 100
+
+        with self.assertRaises(AttributeError):
+            config.per_bucket_bytes_caps = (100,)
+
+
+class TestBucketCapacityConfigComputeLimits(unittest.TestCase):
+    """Unit tests for _BucketCapacityConfig.compute_bucket_size_limits()."""
+
+    def test_compute_limits_with_custom_per_bucket_caps(self):
+        """Test compute_bucket_size_limits returns custom caps when provided."""
+        cap_list = [10, 25, 50]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=True,
+        )
+
+        expected_limits = [cap * _MB_TO_BYTES for cap in cap_list]
+        self.assertEqual(limits, expected_limits)
+        self.assertEqual(rebuild_limits, expected_limits)
+
+    def test_compute_limits_static_graph_uses_maxsize(self):
+        """Test that static_graph=True uses sys.maxsize for initial bucketing."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=25,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=True,
+            find_unused_parameters=False,
+        )
+
+        self.assertEqual(limits, [sys.maxsize])
+        self.assertEqual(rebuild_limits, [])
+
+    def test_compute_limits_find_unused_false_uses_maxsize(self):
+        """Test that find_unused_parameters=False uses sys.maxsize."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=25,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=False,
+        )
+
+        self.assertEqual(limits, [sys.maxsize])
+        self.assertEqual(rebuild_limits, [])
+
+    def test_compute_limits_default_with_find_unused_true(self):
+        """Test default config with find_unused_parameters=True uses smaller first bucket."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=True,
+        )
+
+        expected_first = dist._DEFAULT_FIRST_BUCKET_BYTES
+        expected_main = _DEFAULT_BUCKET_CAP_MB * _MB_TO_BYTES
+        self.assertEqual(limits, [expected_first, expected_main])
+        self.assertEqual(rebuild_limits, [])
+
+    def test_compute_limits_custom_cap_with_find_unused_true(self):
+        """Test custom bucket_cap_mb with find_unused_parameters=True uses uniform bucket."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=100,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        limits, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=True,
+        )
+
+        expected_bytes = 100 * _MB_TO_BYTES
+        self.assertEqual(limits, [expected_bytes])
+        self.assertEqual(rebuild_limits, [])
+
+    def test_compute_limits_empty_rebuild_for_non_list_config(self):
+        """Test that rebuild_limits is empty when not using bucket_cap_mb_list."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=50,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        _, rebuild_limits = config.compute_bucket_size_limits(
+            static_graph=False,
+            find_unused_parameters=True,
+        )
+
+        self.assertEqual(rebuild_limits, [])
+
+
+class TestBucketCapacityConfigEdgeCases(unittest.TestCase):
+    """Edge case tests for _BucketCapacityConfig."""
+
+    def test_single_element_bucket_cap_mb_list(self):
+        """Test bucket_cap_mb_list with a single element."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=[50],
+            use_python_reducer=False,
+        )
+
+        self.assertEqual(config.per_bucket_bytes_caps, (50 * _MB_TO_BYTES,))
+        self.assertEqual(config.bucket_bytes_cap, 50 * _MB_TO_BYTES)
+        self.assertTrue(config.has_custom_per_bucket_caps)
+
+    def test_large_bucket_cap_mb(self):
+        """Test with large bucket_cap_mb value."""
+        large_cap = 1000
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=large_cap,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        expected_bytes = large_cap * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.first_bucket_bytes_cap, expected_bytes)
+
+    def test_small_bucket_cap_mb(self):
+        """Test with small bucket_cap_mb value."""
+        small_cap = 1
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=small_cap,
+            bucket_cap_mb_list=None,
+            use_python_reducer=False,
+        )
+
+        expected_bytes = small_cap * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+
+    def test_empty_bucket_cap_mb_list(self):
+        """Test with empty bucket_cap_mb_list (should use default)."""
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=[],
+            use_python_reducer=False,
+        )
+
+        expected_bytes = _DEFAULT_BUCKET_CAP_MB * _MB_TO_BYTES
+        self.assertEqual(config.bucket_bytes_cap, expected_bytes)
+        self.assertEqual(config.per_bucket_bytes_caps, ())
+        self.assertFalse(config.has_custom_per_bucket_caps)
+
+    def test_bucket_cap_mb_list_with_duplicates(self):
+        """Test bucket_cap_mb_list with duplicate values."""
+        cap_list = [25, 25, 25]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        expected_list = tuple(25 * _MB_TO_BYTES for _ in range(3))
+        self.assertEqual(config.per_bucket_bytes_caps, expected_list)
+        self.assertEqual(config.bucket_bytes_cap, 25 * _MB_TO_BYTES)
+
+    def test_bucket_cap_mb_list_ascending_order(self):
+        """Test bucket_cap_mb_list in ascending order."""
+        cap_list = [5, 10, 15, 20]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        self.assertEqual(config.bucket_bytes_cap, 20 * _MB_TO_BYTES)
+
+    def test_bucket_cap_mb_list_descending_order(self):
+        """Test bucket_cap_mb_list in descending order."""
+        cap_list = [100, 50, 25, 10]
+        config = _BucketCapacityConfig.create(
+            bucket_cap_mb=None,
+            bucket_cap_mb_list=cap_list,
+            use_python_reducer=False,
+        )
+
+        self.assertEqual(config.bucket_bytes_cap, 100 * _MB_TO_BYTES)
+
+
+class TestBucketCapacityConfigConstants(unittest.TestCase):
+    """Tests for module-level constants."""
+
+    def test_default_bucket_cap_mb_value(self):
+        """Test that _DEFAULT_BUCKET_CAP_MB is 25."""
+        self.assertEqual(_DEFAULT_BUCKET_CAP_MB, 25)
+
+    def test_mb_to_bytes_value(self):
+        """Test that _MB_TO_BYTES is 1024 * 1024."""
+        self.assertEqual(_MB_TO_BYTES, 1024 * 1024)
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)
