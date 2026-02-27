@@ -1569,10 +1569,13 @@ def forward(self, primals_1):
         self.assertEqual(cnt.frame_count, 1)
 
         code = run_and_get_triton_code(compiled_model, inp)
+        mm_name = "extern_kernels.mm_dtype" \
+            if device_type in (torch.float16, torch.bfloat16) \
+            else "extern_kernels.mm"
         FileCheck().check(
             "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
         ).check("torch.ops._c10d_functional.wait_tensor.default(buf0").check(
-            "extern_kernels.mm(buf0,"
+            f"{mm_name}(buf0,"
         ).run(code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

@@ -1531,12 +1531,18 @@ def should_prefer_unfused_addmm(match):
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
     def repl(inp, x1, x2, alpha, beta):
-        mm_result = x1 @ x2
+        in_dtype = inp.dtype
+        # deal with numeric loss in fp16/bf16 when decomposing addmm to mm+add
+        if in_dtype in (torch.float16, torch.bfloat16):
+            mm_result = aten.mm(x1, x2, out_dtype=torch.float32)
+        else:
+            mm_result = aten.mm(x1, x2)
         if alpha != 1:
             mm_result = alpha * mm_result
         if beta != 1:
             inp = beta * inp
-        return inp + mm_result
+        out = inp + mm_result
+        return out.to(dtype=in_dtype)
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
