@@ -318,10 +318,11 @@ class DeferredTritonCallWrapper:
             for name, arg_type in zip(arg_names, arg_types)
         ]
         param_lines.append("int32_t device_idx_")
-        stream_type = maybe_hipify_code_wrapper(
-            wrapper.device_codegen.cpp_stream_type()
+        param_lines.append(
+            maybe_hipify_code_wrapper(
+                f"{wrapper.device_codegen.cpp_stream_type()} stream_"
+            )
         )
-        param_lines.append(f"{stream_type} stream_")
         if V.graph.aot_mode:
             param_lines.append("kernels_type_& kernels_")
         param_lines.append(
