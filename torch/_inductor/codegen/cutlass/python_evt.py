@@ -2,7 +2,7 @@ import itertools
 from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from os import linesep
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
@@ -21,7 +21,7 @@ _ACCUMULATOR_ARG_NAME = "accum"
 
 
 def scaled_mm_evt(
-    scale_A_name: str, scale_B_name: str, bias_name: Optional[str], output_name: str
+    scale_A_name: str, scale_B_name: str, bias_name: str | None, output_name: str
 ) -> tuple[list[str], dict[str, Any], str]:
     evt_read_names = [scale_A_name, scale_B_name]
     var_name_to_buffer_name = {n: n for n in [scale_A_name, scale_B_name]}
@@ -57,7 +57,7 @@ class CutlassEVTOpsMixIn:
     def to_dtype(
         x: str,
         dtype: Any,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = False,
     ) -> str:
         return x
@@ -166,7 +166,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             _ACCUMULATOR_ARG_NAME: accumulator_node_name
         }
         self.removed_buffers: OrderedSet[str] = removed_buffers
-        self.cur_node: Optional[ComputedBuffer] = None
+        self.cur_node: ComputedBuffer | None = None
         self.name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
         for name in V.graph.constants:
             self.name_to_buffer[name] = V.graph.add_tensor_constant(
