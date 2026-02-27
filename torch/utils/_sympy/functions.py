@@ -1341,6 +1341,13 @@ class Identity(sympy.Function):
     def __int__(self) -> int:
         return int(self.args[0])
 
+    def _eval_evalf(self, prec):
+        # Delegate numeric evaluation so SymPy can compare wrapped constants
+        # (e.g., Identity(-6) in Min/Max simplification paths) without recursion.
+        # `prec` is in bits for _eval_evalf, so delegate through _eval_evalf
+        # (not evalf, which expects decimal digits).
+        return self.args[0]._eval_evalf(prec)
+
     def __float__(self) -> float:
         return float(self.args[0])
 
