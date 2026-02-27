@@ -38,8 +38,8 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       runner: linux.4xlarge.memory
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0;8.6'
       test-matrix: |
         { include: [
@@ -80,57 +80,6 @@ jobs:
       build-environment: ${{ needs.periodic-dynamo-benchmarks-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
-    secrets: inherit
-
-  periodic-dynamo-benchmarks-build-cuda13:
-    name: periodic-dynamo-benchmarks-build-cuda13
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-default-label-prefix
-    with:
-      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      runner: linux.4xlarge.memory
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
-      cuda-arch-list: '8.0;8.6'
-      test-matrix: |
-        { include: [
-          { config: "dynamo_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamo_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-          { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "aot_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-      build-additional-packages: "vision audio torchao"
-    secrets: inherit
-
-  periodic-dynamo-benchmarks-test-cuda13:
-    name: periodic-dynamo-benchmarks-test-cuda13
-    uses: ./.github/workflows/_linux-test.yml
-    needs: periodic-dynamo-benchmarks-build-cuda13
-    with:
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
-      docker-image: ${{ needs.periodic-dynamo-benchmarks-build-cuda13.outputs.docker-image }}
-      test-matrix: ${{ needs.periodic-dynamo-benchmarks-build-cuda13.outputs.test-matrix }}
     secrets: inherit
 
   rocm-periodic-dynamo-benchmarks-build:
@@ -191,8 +140,8 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       runner: linux.4xlarge.memory
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [

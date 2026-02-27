@@ -26,14 +26,14 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   build:
-    name: cuda12.8-py3.10-gcc11-sm80
+    name: cuda13.0-py3.10-gcc11-sm80
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -42,7 +42,7 @@ jobs:
     secrets: inherit
 
   test:
-    name: cuda12.8-py3.10-gcc11-sm80
+    name: cuda13.0-py3.10-gcc11-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     with:
