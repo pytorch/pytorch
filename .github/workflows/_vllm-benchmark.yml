@@ -28,6 +28,11 @@ on:
         type: string
         description: The list of models to benchmark. Default to all models.
         default: ''
+      compilation_config:
+        required: false
+        type: string
+        description: A JSON string for vLLM --compilation-config, applied to all benchmark tests.
+        default: ''
 
 jobs:
   benchmark:
@@ -163,6 +168,7 @@ jobs:
       - name: Setup benchmark tests
         env:
           MODELS: ${{ inputs.models }}
+          COMPILATION_CONFIG: ${{ inputs.compilation_config }}
         shell: bash
         run: |
           set -eux
@@ -178,7 +184,8 @@ jobs:
             --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
             --models "${MODELS}" \
             --device "${DEVICE_NAME}" \
-            --include-eager-mode
+            --include-eager-mode \
+            --compilation-config "${COMPILATION_CONFIG}"
           popd
 
           pushd vllm-project/vllm
