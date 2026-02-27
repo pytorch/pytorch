@@ -1,3 +1,4 @@
+#include <ATen/native/mps/kernels/Indexing.h>
 #include <c10/metal/atomic.h>
 #include <c10/metal/error.h>
 #include <c10/metal/indexing.h>
@@ -274,6 +275,88 @@ REGISTER_INDEX_OP(put_accumulate, uchar, uchar);
 REGISTER_INDEX_OP(put_accumulate, bool, bool);
 REGISTER_INDEX_OP(put_accumulate, float2, float2);
 REGISTER_INDEX_OP(put_accumulate, half2, half2);
+
+struct IndexReduceOp {
+  template <typename T>
+  static T prod(T a, T b) {
+    return c10::metal::mul(a, b);
+  }
+
+  template <typename T>
+  static T mean(T a, T b) {
+    return a + b;
+  }
+
+  template <typename T>
+  static T amin(T a, T b) {
+    return min(a, b);
+  }
+
+  template <typename T>
+  static T amax(T a, T b) {
+    return max(a, b);
+  }
+};
+
+template <typename T, typename IT, T (*ReduceOp)(T, T)>
+kernel void index_reduce(
+    device AtomicType_t<T>* self [[buffer(0)]],
+    device IT* index [[buffer(1)]],
+    device T* source [[buffer(2)]],
+    constant IndexReduceParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  uint32_t tid_ = tid;
+  long source_offset = 0;
+  long self_offset = 0;
+
+  for (int32_t dim = params.ndim - 1; dim >= 0; dim--) {
+    auto source_size = params.source_sizes[dim];
+    auto dim_idx = tid_ % source_size;
+
+    source_offset += dim_idx * params.source_strides[dim];
+
+    if (dim == params.reduce_dim) {
+      uint32_t self_dim_idx =
+          static_cast<uint32_t>(index[dim_idx * params.index_stride]);
+      self_offset += self_dim_idx * params.self_strides[dim];
+    } else {
+      self_offset += dim_idx * params.self_strides[dim];
+    }
+
+    tid_ /= source_size;
+  }
+
+  T source_elem = source[source_offset];
+
+  AtomicType<T>::atomic_binary_op(self, self_offset, source_elem, ReduceOp);
+}
+
+#define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT)                  \
+  template [[host_name("index_reduce_" #ReduceOp "_" #T "_" #IT)]] \
+  kernel void index_reduce<T, IT, IndexReduceOp::ReduceOp<T>>(     \
+      device AtomicType_t<T> * self [[buffer(0)]],                 \
+      device IT * index [[buffer(1)]],                             \
+      device T * source [[buffer(2)]],                             \
+      constant IndexReduceParams<> & params [[buffer(3)]],         \
+      uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, IT) \
+  REGISTER_INDEX_REDUCE_OP(amax, T, IT);                 \
+  REGISTER_INDEX_REDUCE_OP(mean, T, IT);                 \
+  REGISTER_INDEX_REDUCE_OP(amin, T, IT);                 \
+  REGISTER_INDEX_REDUCE_OP(prod, T, IT);
+
+#define REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(T)  \
+  REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, int); \
+  REGISTER_INDEX_REDUCE_OP_ALL_REDUCE_TYPES(T, long);
+
+REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(float);
+REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(half);
+REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(bfloat);
+REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(int);
+REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(short);
+REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(char);
+REGISTER_INDEX_REDUCE_OP_ALL_INDEX_TYPES(uchar);
 
 template <typename StridesT, typename DataT>
 kernel void kernel_index_offsets(
