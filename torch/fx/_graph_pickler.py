@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import importlib
 import io
@@ -63,6 +64,22 @@ class Options:
     node_metadata_key_filter: Optional[Callable[[str], bool]] = (
         _node_metadata_key_filter_safe
     )
+
+
+@contextlib.contextmanager
+def patch_pytree_map_over_slice():
+    if slice in pytree.SUPPORTED_NODES:
+        yield
+        return
+
+    pytree._private_register_pytree_node(
+        slice, lambda x: ([x.start, x.stop, x.step], None), lambda x, c: slice(*x)
+    )
+
+    try:
+        yield
+    finally:
+        pytree._deregister_pytree_node(slice)
 
 
 # pyrefly: ignore [invalid-inheritance]
@@ -147,7 +164,7 @@ class GraphPickler(pickle.Pickler):
         """
         Pickle an object.
         """
-        with io.BytesIO() as stream:
+        with patch_pytree_map_over_slice(), io.BytesIO() as stream:
             pickler = cls(stream, options)
             pickler.dump(obj)
             return stream.getvalue()
@@ -159,7 +176,7 @@ class GraphPickler(pickle.Pickler):
         """
         from torch._dynamo.utils import dynamo_timed
 
-        with dynamo_timed("GraphPickler.loads"):
+        with patch_pytree_map_over_slice(), dynamo_timed("GraphPickler.loads"):
             state = _UnpickleState(fake_mode)
             with io.BytesIO(data) as stream:
                 unpickler = _GraphUnpickler(stream, state)
