@@ -747,6 +747,7 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf("FA3" not in list_flash_attention_impls(), "FA3 not available")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("page_size", [32, 64, 128])
+    @parametrize("compile", [False, True])
     @parametrize(
         "actual_kv_lens",
         [
@@ -757,7 +758,9 @@ class TestVarlenAttention(NNTestCase):
             [127, 63, 33, 17],
         ],
     )
-    def test_page_table_kv_cache(self, device, dtype, page_size, actual_kv_lens):
+    def test_page_table_kv_cache(
+        self, device, dtype, page_size, compile, actual_kv_lens
+    ):
         torch.manual_seed(42)
 
         batch_size = 4
@@ -807,13 +810,17 @@ class TestVarlenAttention(NNTestCase):
 
         seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
 
+        attn_fn = varlen_attn
+        if compile:
+            attn_fn = torch.compile(varlen_attn, fullgraph=True)
+
         with use_fa3(), torch.no_grad():
-            output_paged = varlen_attn(
+            output_paged = attn_fn(
                 q_packed,
                 k_pages,
                 v_pages,
                 cu_seq_q,
-                None,  # cu_seq_k not used with page_table
+                None,
                 max_q,
                 cache_size,
                 seqused_k=seqused_k,
