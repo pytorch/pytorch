@@ -1711,7 +1711,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         f_globals: dict[str, Any],
         defaults: VariableTracker | None,
         kwdefaults: VariableTracker | None,
-        annotations: VariableTracker | None,
         closure: VariableTracker | None,
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
@@ -1729,7 +1728,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.f_globals = f_globals
         self.defaults = defaults
         self.kwdefaults = kwdefaults
-        self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: VariableTracker | None = wrapped_fn
 
@@ -1818,8 +1816,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__defaults__ = self.defaults.as_python_constant()
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.as_python_constant()
-        if self.annotations:
-            annotations = self.annotations.as_python_constant()
+        if self.dict_vt and self.dict_vt.contains("__annotations__"):
+            annotations = self.dict_vt.getitem("__annotations__").as_python_constant()
             if isinstance(annotations, tuple):
                 from itertools import pairwise
 
@@ -1839,13 +1837,14 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         # annotations should be stored in the __dict__ field
         if name == "__annotations__":
-            if not self.annotations:
-                self.annotations = variables.ConstDictVariable(
+            return self.get_dict_vt(tx).getitem_or_default(
+                name,
+                lambda: variables.ConstDictVariable(
                     {},
                     source=self.source and AttrSource(self.source, "__annotations__"),
                     mutation_type=ValueMutationNew(),
-                )
-            return self.annotations
+                ),
+            )
         elif name == "__code__":
             return self.code
         elif name == "__defaults__":
@@ -1963,14 +1962,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
-        if self.annotations:
+        if self.dict_vt and self.dict_vt.contains("__annotations__"):
+            annotations = self.dict_vt.getitem("__annotations__")
             try:
-                annotations = self.annotations.as_python_constant()
+                annotations = annotations.as_python_constant()
                 codegen.extend_output(
                     [codegen.create_load_const_unchecked(annotations)]
                 )
             except NotImplementedError:
-                codegen(self.annotations)
+                codegen(annotations)
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
@@ -2018,7 +2018,6 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
             wrapped.f_globals,
             wrapped.defaults,
             wrapped.kwdefaults,
-            wrapped.annotations,
             wrapped.closure,
             wrapped.wrapped_fn,
         )
