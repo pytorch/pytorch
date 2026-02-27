@@ -258,6 +258,29 @@ class TestWithNCCL(DistributedTestBase):
                 ),
             )
 
+    @skip_if_lt_x_gpu(2)
+    def test_functional_collectives_batched(self) -> None:
+        self._init_process_group()
+
+        def f(x):
+            if self.rank not in [0, 1]:
+                return
+            tensor = self.rank * x
+            return funcol.wait_tensor(
+                funcol.batch_p2p_ops_inplace(
+                    op_list=["isend" if self.rank == 0 else "irecv"],
+                    peer_list=[1 if self.rank == 0 else 0],
+                    tensors=[tensor],
+                    tag_list=[0],
+                    group_name="",
+                )[0]
+            )
+
+        with torch.inference_mode():
+            input = torch.ones((10), device=self.device)
+            output = f(input)
+            self.assertEqual(output, 0 * input)
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # https://github.com/pytorch/pytorch/issues/126338

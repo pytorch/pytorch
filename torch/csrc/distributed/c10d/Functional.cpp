@@ -322,6 +322,98 @@ at::Tensor broadcast(
   return broadcast_(output, src, std::move(group_name));
 }
 
+at::Tensor isend(
+    at::Tensor& input,
+    int64_t dst,
+    int64_t tag,
+    std::string group_name) {
+  auto group = c10d::resolve_process_group(group_name);
+  std::vector<at::Tensor> input_wrap = {input};
+  auto work = group->send(input_wrap, dst, tag);
+  c10d::register_work(input, work);
+  auto placeholder = at::empty({0}, input.options());
+  c10d::register_work(placeholder, work);
+  return placeholder;
+}
+
+at::Tensor irecv(
+    at::Tensor& output,
+    int64_t src,
+    int64_t tag,
+    std::string group_name) {
+  auto group = c10d::resolve_process_group(group_name);
+  std::vector<at::Tensor> output_wrap = {output};
+  auto work = group->recv(output_wrap, src, tag);
+  c10d::register_work(output, work);
+  return output;
+}
+
+std::vector<at::Tensor> batch_p2p_ops(
+    std::vector<std::string> op_list,
+    std::vector<int64_t> peer_list,
+    std::vector<int64_t> tag_list,
+    std::vector<at::Tensor> tensors,
+    std::string group_name) {
+  const uint64_t N = op_list.size();
+  TORCH_CHECK(tensors.size() == N, "");
+  TORCH_CHECK(peer_list.size() == N, "");
+  TORCH_CHECK(tag_list.size() == N, "");
+  if (N == 0)
+    return {at::Tensor()};
+  auto group = c10d::resolve_process_group(group_name);
+  auto device = tensors[0].device().type();
+  auto backend = group->getBackend(device);
+  bool should_coalesce = backend->supportsCoalescing();
+  if (should_coalesce) {
+    group->startCoalescing(device);
+  }
+  std::vector<c10::intrusive_ptr<c10d::Work>> works;
+  std::vector<at::Tensor> result_tensors;
+  works.reserve(N);
+  result_tensors.reserve(N);
+  for (uint32_t i = 0; i < N; ++i) {
+    c10::intrusive_ptr<c10d::Work> work;
+    at::Tensor t = tensors[i];
+    std::vector<at::Tensor> tt{t};
+    if (op_list[i] == "isend") {
+      work = group->send(
+          tt,
+          static_cast<int64_t>(peer_list[i]),
+          static_cast<int64_t>(tag_list[i]));
+      auto placeholder = at::empty({0}, t.options());
+      if (work) {
+        c10d::register_work(t, work);
+        c10d::register_work(placeholder, work);
+        works.push_back(std::move(work));
+      }
+      result_tensors.push_back(std::move(placeholder));
+    } else if (op_list[i] == "irecv") {
+      work = group->recv(
+          tt,
+          static_cast<int64_t>(peer_list[i]),
+          static_cast<int64_t>(tag_list[i]));
+      if (work) {
+        c10d::register_work(t, work);
+        works.push_back(std::move(work));
+      }
+      result_tensors.push_back(std::move(t));
+    } else {
+      TORCH_CHECK(false, "Unsupported async op " + op_list[i]);
+    }
+  }
+  if (should_coalesce) {
+    auto work = group->endCoalescing(device);
+    if (!work)
+      TORCH_CHECK(
+          false,
+          "The coalesced work object returned from group->endCoalescing() is empty");
+    for (auto tensor : result_tensors) {
+      c10d::register_work(tensor, work);
+    }
+  }
+  return result_tensors;
+}
+
 } // namespace c10d
 
 TORCH_LIBRARY(_c10d_functional, m) {
@@ -420,7 +512,129 @@ TORCH_LIBRARY(_c10d_functional, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, c10d::wait_tensor),
       {at::Tag::pt2_compliant_tag});
+  m.def(
+      "isend(Tensor tensor, int dst, int tag, str group_name) -> Tensor",
+      torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, c10d::isend),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "irecv(Tensor tensor, int src, int tag, str group_name) -> Tensor",
+      torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, c10d::irecv),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "batch_p2p_ops(str[] op_list, int[] peer_list,"
+      "int[] tag_list, Tensor[] tensors, str group_name)"
+      "-> Tensor[]",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::batch_p2p_ops),
+      {at::Tag::pt2_compliant_tag});
 }
+
+namespace {
+class BatchP2P : public torch::autograd::Function<BatchP2P> {
+ public:
+  static torch::autograd::Variable forward(
+      torch::autograd::AutogradContext* ctx,
+      std::vector<std::string> op_list,
+      std::vector<int64_t> peer_list,
+      std::vector<int64_t> tag_list,
+      std::vector<at::Tensor> tensors,
+      std::string group_name) {
+    auto work = c10::Dispatcher::singleton()
+                    .findSchemaOrThrow("_c10d_functional::batch_p2p_ops", "")
+                    .typed<decltype(c10d::batch_p2p_ops)>()
+                    .call(op_list, peer_list, tag_list, tensors, group_name);
+    return {at::Tensor()};
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list& grad_out_list) {
+    return {at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor()};
+  }
+};
+} // namespace
+
+namespace {
+class Isend : public torch::autograd::Function<Isend> {
+ public:
+  static torch::autograd::Variable forward(
+      torch::autograd::AutogradContext* ctx,
+      at::Tensor& input,
+      int64_t dst,
+      int64_t tag,
+      std::string group_name) {
+    ctx->saved_data["dst"] = dst;
+    ctx->saved_data["tag"] = tag;
+    ctx->saved_data["group_name"] = group_name;
+
+    auto group = c10d::resolve_process_group(group_name);
+    ctx->saved_data["src"] = group->getRank();
+    auto work = c10::Dispatcher::singleton()
+                    .findSchemaOrThrow("_c10d_functional::isend", "")
+                    .typed<decltype(c10d::isend)>()
+                    .call(input, dst, tag, group_name);
+    return at::Tensor();
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list& grad_out_list) {
+    const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
+    const int64_t src = ctx->saved_data["dst"].toInt();
+    const int64_t tag = ctx->saved_data["tag"].toInt();
+
+    DCHECK(grad_out_list.size() == 1);
+    auto& grad_out = grad_out_list[0];
+    auto out = c10::Dispatcher::singleton()
+                   .findSchemaOrThrow("_c10d_functional::irecv", "")
+                   .typed<decltype(c10d::irecv)>()
+                   .call(grad_out, src, tag, group_name);
+    return {out, at::Tensor(), at::Tensor(), at::Tensor()};
+  }
+};
+} // namespace
+
+namespace {
+class Irecv : public torch::autograd::Function<Irecv> {
+ public:
+  static torch::autograd::Variable forward(
+      torch::autograd::AutogradContext* ctx,
+      at::Tensor& input,
+      int64_t src,
+      int64_t tag,
+      std::string group_name) {
+    ctx->saved_data["src"] = src;
+    ctx->saved_data["tag"] = tag;
+    ctx->saved_data["group_name"] = group_name;
+
+    auto group = c10d::resolve_process_group(group_name);
+    ctx->saved_data["my_rank"] = group->getRank();
+    auto work = c10::Dispatcher::singleton()
+                    .findSchemaOrThrow("_c10d_functional::irecv", "")
+                    .typed<decltype(c10d::irecv)>()
+                    .call(input, src, tag, group_name);
+    return at::Tensor();
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list& grad_out_list) {
+    const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
+    const int64_t dst = ctx->saved_data["my_rank"].toInt();
+    const int64_t tag = ctx->saved_data["tag"].toInt();
+
+    DCHECK(grad_out_list.size() == 1);
+    auto& grad_out = grad_out_list[0];
+    auto out = c10::Dispatcher::singleton()
+                   .findSchemaOrThrow("_c10d_functional::isend", "")
+                   .typed<decltype(c10d::isend)>()
+                   .call(grad_out, dst, tag, group_name);
+    return {out, at::Tensor(), at::Tensor(), at::Tensor()};
+  }
+};
+} // namespace
 
 namespace {
 class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {

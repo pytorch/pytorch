@@ -82,4 +82,23 @@ C10_EXPORT at::Tensor broadcast(
     int64_t src,
     std::string group_name);
 
+C10_EXPORT at::Tensor isend(
+    at::Tensor& send_buf,
+    int64_t dst,
+    int64_t tag,
+    std::string group_name);
+
+C10_EXPORT at::Tensor irecv(
+    at::Tensor& recv_buf,
+    int64_t src,
+    int64_t tag,
+    std::string group_name);
+
+C10_EXPORT std::vector<at::Tensor> batch_p2p_ops(
+    std::vector<std::string> op_list,
+    std::vector<int64_t> peer_list,
+    std::vector<int64_t> tag_list,
+    std::vector<at::Tensor> tensors_for_op,
+    std::string group_name);
+
 } // namespace c10d

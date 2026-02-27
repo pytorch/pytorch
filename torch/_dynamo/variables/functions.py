@@ -2414,6 +2414,57 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 ],
             )
 
+        if self.fn == dist.batch_isend_irecv:
+            if not config.enable_p2p_compilation:
+                unimplemented(
+                    gb_type="P2P compilation disabled",
+                    context=f"{self.fn}",
+                    explanation="P2P compilation is disabled.",
+                    hints=[
+                        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
+                    ],
+                )
+
+            ops = list()
+            peers = list()
+            tags = list()
+            tensors = list()
+            p2p_ops = kwargs["p2p_op_list"]
+            group_var = p2p_ops.items[0].group
+
+            if not isinstance(p2p_ops, variables.ListVariable):
+                raise torch._dynamo.exc.InternalTorchDynamoError(
+                    "`P2POp` used incorrectly"
+                )
+
+            for op in p2p_ops.items:  # list of P2POpVariable
+                ops.append(op.op)
+                tensors.append(op.tensor)
+                peers.append(op.peer)
+                tags.append(op.tag)
+            new_args = tuple()
+            new_kwargs = {
+                "op_list": variables.ListVariable(ops),
+                "peer_list": variables.ListVariable(peers),
+                "tag_list": variables.ListVariable(tags),
+                "tensors": variables.ListVariable(tensors),
+                "group_name": group_var,
+            }
+            return self.replacement_var.call_function(tx, new_args, new_kwargs)
+
+        if self.fn in (dist.isend, dist.irecv):
+            if not config.enable_p2p_compilation:
+                unimplemented(
+                    gb_type="P2P compilation disabled",
+                    context=f"{self.fn}",
+                    explanation="P2P compilation is disabled.",
+                    hints=[
+                        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
+                    ],
+                )
+
+            return self.replacement_var.call_function(tx, args, kwargs)
+
         if self.fn in (
             dist.all_reduce,
             dist.reduce_scatter_tensor,

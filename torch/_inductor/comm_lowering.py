@@ -402,6 +402,83 @@ def register_comm_lowerings():
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
 
+    @register_comm_lowering(c10d.isend)  # type: ignore[misc]
+    def _isend(inp, dst, tag, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
+        # don't mark buffer as mutated
+        kernel = c10d.isend.default
+        with V.graph.fake_mode:
+            (
+                _example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                unbacked_bindings,
+            ) = ir._CollectiveKernel.process_kernel(kernel, inp, dst, tag, group_name)
+        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        for tensor_arg in tensor_args:
+            tensor_arg.realize()
+        device = tensor_args[0].get_device()
+        ir._CollectiveKernel(
+            ir.NoneLayout(device=device),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+        )
+        return inp
+
+    @register_comm_lowering(c10d.irecv)  # type: ignore[misc]
+    def _irecv(inp, src, tag, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
+        ir._CollectiveKernel.create_inplace(
+            c10d.irecv.default, inp, src, tag, group_name
+        )
+        return inp
+
+    @register_comm_lowering(c10d.batch_p2p_ops)  # type: ignore[misc]
+    def _batch_p2p_ops(op_list, peer_list, tag_list, tensors, group_name):
+        tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
+        # batch_p2p_ops has non-tensor args before tensor args in its schema
+        kernel = c10d.batch_p2p_ops.default
+        with V.graph.fake_mode:
+            (
+                _example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                unbacked_bindings,
+            ) = ir._CollectiveKernel.process_kernel(
+                kernel,
+                op_list,
+                peer_list,
+                tag_list,
+                tensors,
+                group_name,
+            )
+        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        # Only mark irecv buffers as mutated; let's avoid false dependencies
+        for op, tensor_arg in zip(op_list, tensor_args):
+            tensor_arg.realize()
+            if op == "irecv":
+                V.graph.mark_buffer_mutated(tensor_arg.get_name())
+
+        device = tensor_args[0].get_device()
+        packed = ir._CollectiveKernel(
+            ir.NoneLayout(device=device),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+        )
+        for op, t in zip(op_list, tensors):
+            if op == "irecv":
+                packed.mutation_outputs.append(
+                    ir.MutationOutput(ir.NoneLayout(device=device), t, packed)
+                )
+                packed.alias_names.append(t.get_name())
+        return tensors
+
 
 def register_symm_mem_lowerings():
     """

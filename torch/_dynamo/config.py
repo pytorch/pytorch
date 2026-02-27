@@ -782,6 +782,11 @@ Example::
 # NCCL timeout.
 enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
 
+# Allow for experimental support of compiled p2p ops
+enable_p2p_compilation = (
+    os.environ.get("TORCHDYNAMO_ENABLE_P2P_COMPILATION", "0") == "1"
+)
+
 # Enables a local, filesystem "profile" which can be used for automatic
 # dynamic decisions, analogous to profile-guided optimization.  This config
 # ONLY has an effect if torch.compiler.config.workflow_id is specified,

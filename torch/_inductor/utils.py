@@ -4370,6 +4370,9 @@ COLLECTIVE_OPS = OrderedSet(
         "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
         "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
         "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+        "torch.ops._c10d_functional.isend.default",
+        "torch.ops._c10d_functional.irecv.default",
+        "torch.ops._c10d_functional.batch_p2p_ops.default",
     ]
 )
 

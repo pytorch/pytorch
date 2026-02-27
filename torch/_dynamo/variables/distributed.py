@@ -32,6 +32,7 @@ from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from .base import VariableTracker
+from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
@@ -253,3 +254,72 @@ class BackwardHookVariable(VariableTracker):
                 {},
             ),
         )
+
+
+class P2POpVariable(VariableTracker):
+    @staticmethod
+    def can_rewrite(variable):
+        return isinstance(variable, dist.P2POp)
+
+    def __init__(
+        self,
+        op: VariableTracker,
+        peer: VariableTracker,
+        tag: VariableTracker,
+        tensor: VariableTracker,
+        pg: VariableTracker,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.op = op
+        self.peer = peer
+        self.tag = tag
+        self.tensor = tensor
+        self.group = pg
+
+    @staticmethod
+    def create(tx, value, args, kwargs, source):
+        def get_param(name, pos, default=None, transform=None):
+            if name in kwargs:
+                val = kwargs[name]
+            elif pos < len(args):
+                val = args[pos]
+            else:
+                val = default
+
+            return transform(val) if transform and val is not None else val
+
+        op_var = get_param(
+            "op", 0, transform=lambda x: ConstantVariable.create(x.get_name())
+        )
+        tensor_var = get_param("tensor", 1, transform=lambda x: x.realize())
+        peer_var = get_param("peer", 2)
+        group_var = get_param("group", 3, default=ConstantVariable.create(""))
+        tag_var = get_param("tag", 4, default=ConstantVariable.create(0))
+
+        return P2POpVariable(
+            op=op_var, tensor=tensor_var, peer=peer_var, tag=tag_var, pg=group_var
+        )
+
+    def python_type(self):
+        return torch.distributed.P2POp
+
+    def as_proxy(self):
+        return self.tensor.as_proxy()
+
+    def reconstruct(self, codegen):
+        unimplemented_v2("Cannot reconstruct P2POpVariable")
+
+    def var_getattr(self, tx, name):
+        if name == "op":
+            return self.op
+        elif name == "tensor":
+            return self.tensor
+        elif name == "tag":
+            return self.tag
+        elif name == "group":
+            return self.group
+        elif name == "peer":
+            return self.peer
+        else:
+            return super().var_getattr(tx, name)
