@@ -880,6 +880,11 @@ class FxConverter:
         )
         result_buffer = ir_node.codegen_reference()
         self.buffer_to_node[result_buffer] = fx_node
+        # For in-place mutation ops (e.g., scatter_reduce_, index_put_),
+        # update the buffer mapping for mutated inputs so downstream
+        # references to the mutated buffer see the post-mutation node.
+        for mutated_name in ir_node.get_mutation_names():
+            self.buffer_to_node[mutated_name] = fx_node
 
     def _generate_index_put_fallback(self, line: WrapperLine) -> None:
         assert isinstance(line, IndexPutFallbackLine)
@@ -914,6 +919,12 @@ class FxConverter:
         kwargs = {}
         if reduce := ir_node.kwargs.get("reduce"):
             kwargs["reduce"] = reduce
+        # Only pass kwargs that the op's schema actually accepts, since
+        # ScatterFallback stores both reduce and include_self for all
+        # scatter variants, but not all ops support them (e.g.,
+        # scatter_.value has no kwargs, scatter_reduce_.two has both).
+        schema_arg_names = {a.name for a in ir_node.op_overload._schema.arguments}
+        kwargs = {k: v for k, v in ir_node.kwargs.items() if k in schema_arg_names}
 
         self._generate_fallback_call(ir_node, args, kwargs)
 
