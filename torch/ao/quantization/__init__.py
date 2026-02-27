@@ -2,7 +2,6 @@
 
 import sys
 from collections.abc import Callable
-from typing import Optional, Union
 from typing_extensions import TypeAliasType
 
 import torch

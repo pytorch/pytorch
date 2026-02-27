@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import re
 from collections.abc import Iterable
-from typing import Union
 
 
-GlobPattern = Union[str, Iterable[str]]
+GlobPattern = str | Iterable[str]
 
 
 class GlobGroup:
@@ -27,10 +28,10 @@ class GlobGroup:
     none of the ``exclude`` patterns.
 
     Args:
-        include (Union[str, Iterable[str]]): A string or list of strings,
+        include (str | Iterable[str]): A string or list of strings,
             each representing a pattern to be matched against. A candidate
             will match if it matches *any* include pattern
-        exclude (Union[str, Iterable[str]]): A string or list of strings,
+        exclude (str | Iterable[str]): A string or list of strings,
             each representing a pattern to be matched against. A candidate
             will be excluded from matching if it matches *any* exclude pattern.
         separator (str): A string that delimits segments in candidates and
