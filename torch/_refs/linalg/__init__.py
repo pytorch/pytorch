@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 
-def _check_norm_dtype(dtype: torch.dtype | None, x_dtype: torch.dtype, fn_name: str):
+def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name: str):
     """
     Checks related to the dtype kwarg in `linalg.*norm` functions
     """
@@ -99,7 +99,7 @@ def diagonal(
 
 
 def _check_vector_norm_args(
-    x: TensorLikeType, ord: float | int = 2, dim: DimsType | None = None
+    x: TensorLikeType, ord: Union[float, int] = 2, dim: Optional[DimsType] = None
 ):
     from torch.fx.experimental.symbolic_shapes import sym_or
 
@@ -130,11 +130,11 @@ def _check_vector_norm_args(
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
-    ord: float | int = 2,
-    dim: DimsType | None = None,
+    ord: Union[float, int] = 2,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -208,11 +208,11 @@ def _inverse_permutation(perm):
 @out_wrapper(exact_dtype=True)
 def matrix_norm(
     A: TensorLikeType,
-    ord: float | str = "fro",
+    ord: Union[float, str] = "fro",
     dim: DimsType = (-2, -1),
     keepdim: bool = False,
     *,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     # shape
     check_is_matrix(A, "linalg.matrix_norm")
@@ -309,11 +309,11 @@ def matrix_norm(
 @out_wrapper(exact_dtype=True)
 def norm(
     A: TensorLikeType,
-    ord: float | str | None = None,
-    dim: DimsType | None = None,
+    ord: Optional[Union[float, str]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
-    dtype: torch.dtype | None = None,
+    dtype: Optional[torch.dtype] = None,
 ) -> TensorLikeType:
     if dim is not None:
         if isinstance(dim, Dim):
