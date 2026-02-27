@@ -175,6 +175,67 @@ def validate_nccl_dep_consistency(arch_version: str) -> None:
         )
 
 
+def _parse_linux_cudnn_versions() -> dict[str, str]:
+    """Return {cuda_short_version: cudnn_version} from install_cuda.sh."""
+    text = (REPO_ROOT / ".ci" / "docker" / "common" / "install_cuda.sh").read_text()
+    results: dict[str, str] = {}
+    func_re = re.compile(r"^function install_(\d+)\s*\{")
+    cudnn_re = re.compile(r"^\s*CUDNN_VERSION=(\S+)")
+    current_func: str | None = None
+    for line in text.splitlines():
+        m = func_re.match(line)
+        if m:
+            digits = m.group(1)
+            current_func = digits[:-1] + "." + digits[-1]
+            continue
+        if current_func is not None:
+            m = cudnn_re.match(line)
+            if m:
+                results[current_func] = m.group(1)
+                current_func = None
+    return results
+
+
+def _parse_windows_cudnn_versions() -> dict[str, str]:
+    """Return {cuda_short_version: cudnn_version} from cuda_install.bat."""
+    text = (
+        REPO_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    ).read_text()
+    results: dict[str, str] = {}
+    label_re = re.compile(r"^:cuda(\d+)\s*$")
+    cudnn_re = re.compile(
+        r"^set CUDNN_FOLDER=cudnn-windows-x86_64-([0-9.]+)_cuda\d+-archive"
+    )
+    current_label: str | None = None
+    for line in text.splitlines():
+        m = label_re.match(line)
+        if m:
+            digits = m.group(1)
+            current_label = digits[:-1] + "." + digits[-1]
+            continue
+        if current_label is not None:
+            m = cudnn_re.match(line)
+            if m:
+                results[current_label] = m.group(1)
+                current_label = None
+    return results
+
+
+def validate_cudnn_version_consistency(arch_version: str) -> None:
+    linux_versions = _parse_linux_cudnn_versions()
+    windows_versions = _parse_windows_cudnn_versions()
+    linux_ver = linux_versions.get(arch_version)
+    windows_ver = windows_versions.get(arch_version)
+    if linux_ver is None or windows_ver is None:
+        return
+    if linux_ver != windows_ver:
+        raise RuntimeError(
+            f"cuDNN version mismatch for CUDA {arch_version}: "
+            f"Linux has {linux_ver} (.ci/docker/common/install_cuda.sh) "
+            f"but Windows has {windows_ver} (.ci/pytorch/windows/internal/cuda_install.bat)"
+        )
+
+
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
         return "cuda"
@@ -468,6 +529,7 @@ def generate_libtorch_extraction_configs(
 arch_version = ""
 for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
+    validate_cudnn_version_consistency(arch_version)
 del arch_version
 
 

@@ -29,7 +29,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import fx
@@ -47,7 +47,7 @@ def tvm(
     gm: fx.GraphModule,
     example_inputs: list[torch.Tensor],
     *,
-    options: Optional[MappingProxyType[str, Any]] = None,
+    options: MappingProxyType[str, Any] | None = None,
 ) -> Callable[..., Any]:
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
@@ -79,7 +79,7 @@ def tvm(
     opt_level = options.get("opt_level", 3)
 
     if scheduler == "auto_scheduler":
-        # pyrefly: ignore [import-error, missing-import]
+        # pyrefly: ignore [missing-import]
         from tvm import auto_scheduler
 
         with (
@@ -91,7 +91,7 @@ def tvm(
         ):
             lib = relay.build(mod, target=target, params=params)
     elif scheduler == "meta_schedule":
-        # pyrefly: ignore [import-error, missing-import]
+        # pyrefly: ignore [missing-import]
         from tvm import meta_schedule as ms
 
         with tempfile.TemporaryDirectory() as work_dir:

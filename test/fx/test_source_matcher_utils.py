@@ -480,6 +480,56 @@ class TestSourceMatcher(JitTestCase):
         input_node_names = {node.name for node in module_partitions[k][0].input_nodes}
         self.assertEqual(input_node_names, {"x"})
 
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_module_partitioner_linear_relu_linear_nn_module_stack(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+                self.linear3 = torch.nn.Linear(3, 5)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = self.relu(x)
+                x = self.linear3(x)
+                return x
+
+        inputs = (torch.randn(3, 3),)
+        # strict=False does not populate source_fn_stack, so
+        # get_source_partitions should fall back to nn_module_stack.
+        gm = torch.export.export(M(), inputs, strict=False).module()
+        gm.graph.eliminate_dead_code()
+
+        module_partitions = get_source_partitions(
+            gm.graph, [torch.nn.Linear, torch.nn.ReLU]
+        )
+
+        self.assertEqual(len(module_partitions), 2)
+        self.assertEqual(len(module_partitions[torch.nn.Linear]), 3)
+        self.assertEqual(len(module_partitions[torch.nn.ReLU]), 1)
+
+        self.assertFalse(
+            check_subgraphs_connected(
+                module_partitions[torch.nn.Linear][0],
+                module_partitions[torch.nn.ReLU][0],
+            )
+        )
+        self.assertTrue(
+            check_subgraphs_connected(
+                module_partitions[torch.nn.Linear][1],
+                module_partitions[torch.nn.ReLU][0],
+            )
+        )
+        self.assertFalse(
+            check_subgraphs_connected(
+                module_partitions[torch.nn.Linear][2],
+                module_partitions[torch.nn.ReLU][0],
+            )
+        )
+
 
 instantiate_parametrized_tests(TestSourceMatcher)
 

@@ -38,7 +38,7 @@ import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 import torch._inductor.test_operators
@@ -77,7 +77,7 @@ from .variables import (
 from .variables.base import VariableTracker
 
 
-np: Optional[types.ModuleType] = None
+np: types.ModuleType | None = None
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -153,11 +153,9 @@ If you are removing an existing torch level API:
 """
 manual_torch_name_rule_map: dict[
     str,
-    Union[
-        type[TorchInGraphFunctionVariable],
-        type[SkipFunctionVariable],
-        type[UserFunctionVariable],
-    ],
+    type[TorchInGraphFunctionVariable]
+    | type[SkipFunctionVariable]
+    | type[UserFunctionVariable],
 ] = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
@@ -169,12 +167,15 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.is_initialized": TorchInGraphFunctionVariable,
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
+    "torch/distributed/device_mesh.py#__init__": SkipFunctionVariable,
     "torch.distributed.tensor._api.DTensor#from_local": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._resolve_group_name_by_ranks_and_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
+    "torch.distributed.destroy_process_group": SkipFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch._utils._chunk_or_narrow_cat": UserFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_symbolic_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
@@ -358,6 +359,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.bytecode_debugger.breakpoint": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
+    "torch._dynamo.override_cudagraphs": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.size_hint": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
@@ -368,6 +370,7 @@ manual_torch_name_rule_map: dict[
     "torch.fx.experimental.symbolic_shapes.sym_or": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_scalar": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.has_static_value": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
     "torch.set_default_device": UserFunctionVariable,
@@ -464,6 +467,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
+        "torch._C._accelerator_getAllocatorSettings",
         "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
@@ -3093,11 +3097,11 @@ class FunctionIdSet:
     added to the graph and what will cause a graph break.
     """
 
-    function_ids: Optional[set[int]] = None
-    function_names: Optional[dict[int, str]] = None
+    function_ids: set[int] | None = None
+    function_names: dict[int, str] | None = None
 
     def __init__(
-        self, lazy_initializer: Callable[[], Union[dict[int, str], set[int]]]
+        self, lazy_initializer: Callable[[], dict[int, str] | set[int]]
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
@@ -3355,7 +3359,7 @@ def _strip_init_py(s: str) -> str:
     return _as_posix_path(s)
 
 
-def _module_dir(m: types.ModuleType) -> Optional[str]:
+def _module_dir(m: types.ModuleType) -> str | None:
     # Protect against a module not exporting __file__ - this can happen for
     # frozen modules, for example.
     file = getattr(m, "__file__", None)
@@ -3697,10 +3701,10 @@ def add(import_name: str) -> None:
 @dataclasses.dataclass
 class SkipResult:
     skipped: bool
-    reason: Optional[str]
+    reason: str | None
 
 
-def check_file(filename: Optional[str], is_inlined_call: bool = False) -> SkipResult:
+def check_file(filename: str | None, is_inlined_call: bool = False) -> SkipResult:
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
@@ -3756,10 +3760,10 @@ def check_file(filename: Optional[str], is_inlined_call: bool = False) -> SkipRe
 
 @dataclasses.dataclass
 class FunctionInfo:
-    py_obj: Optional[object]
-    name: Optional[str]
+    py_obj: object | None
+    name: str | None
     filename: str
-    code: Optional[types.CodeType]
+    code: types.CodeType | None
 
 
 """
@@ -3902,7 +3906,7 @@ def is_torch_inline_allowed(filename: str) -> bool:
 
 
 @functools.cache
-def dynamo_dir() -> Optional[str]:
+def dynamo_dir() -> str | None:
     import torch._dynamo
 
     return _module_dir(torch._dynamo)
@@ -3921,7 +3925,7 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 
-def lookup_callable(obj: Callable[..., Any]) -> Optional[type[VariableTracker]]:
+def lookup_callable(obj: Callable[..., Any]) -> type[VariableTracker] | None:
     if not hashable(obj):
         return None
     # Custom allow/disallow in graph takes precedence over the general lookup.
@@ -3942,18 +3946,18 @@ E.g, the lookup result of `torch.sin` is `TorchInGraphFunctionVariable`.
 """
 
 
-def lookup(obj: Any) -> Optional[type[VariableTracker]]:
+def lookup(obj: Any) -> type[VariableTracker] | None:
     return lookup_inner(obj)
 
 
 # also takes config.dont_skip_tracing into account
 def lookup_inner(
     obj: Any,
-    name: Optional[str] = None,
-    filename: Optional[str] = None,
+    name: str | None = None,
+    filename: str | None = None,
     is_direct_call: bool = True,
-    reasons: Union[None, set[str]] = None,
-) -> Optional[type[VariableTracker]]:
+    reasons: None | set[str] = None,
+) -> type[VariableTracker] | None:
     result = _lookup_inner(
         obj,
         name=name,
@@ -3987,11 +3991,11 @@ def lookup_inner(
 
 def _lookup_inner(
     obj: Any,
-    name: Optional[str] = None,
-    filename: Optional[str] = None,
+    name: str | None = None,
+    filename: str | None = None,
     is_direct_call: bool = True,
-    reasons: Optional[set[str]] = None,
-) -> Optional[type[VariableTracker]]:
+    reasons: set[str] | None = None,
+) -> type[VariableTracker] | None:
     # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.
