@@ -260,6 +260,7 @@ def _fa3_run_forward(
     q_descale: torch.Tensor | None = None,
     k_descale: torch.Tensor | None = None,
     v_descale: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Run the FA3 forward pass by calling the C++ kernel directly.
@@ -280,6 +281,7 @@ def _fa3_run_forward(
     cu_seqlens_q = _maybe_contiguous(cu_seq_q)
     cu_seqlens_k = _maybe_contiguous(cu_seq_k)
     seqused_k = _maybe_contiguous(seqused_k)
+    page_table = _maybe_contiguous(page_table)
 
     out, softmax_lse, out_accum, softmax_lse_accum = _FA3_CUDA_FWD(
         q,
@@ -296,7 +298,7 @@ def _fa3_run_forward(
         seqused_k,  # seqused_k
         max_q,  # max_seqlen_q
         max_k,  # max_seqlen_k
-        None,  # page_table,
+        page_table,  # page_table,
         None,  # kv_batch_idx,
         None,  # leftpad_k,
         None,  # rotary_cos,
@@ -400,6 +402,7 @@ def _fa3_flash_attention_forward_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -433,6 +436,7 @@ def _fa3_flash_attention_forward_impl(
         q_descale,
         k_descale,
         v_descale,
+        page_table,
     )
     rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
     philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
@@ -457,6 +461,7 @@ def _fa3_flash_attention_forward_impl_default(
     window_size_right: int = -1,
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
 ):
     return _fa3_flash_attention_forward_impl(
@@ -479,6 +484,7 @@ def _fa3_flash_attention_forward_impl_default(
         seqused_k=seqused_k,
         alibi_slopes=alibi_slopes,
         out=out,
+        page_table=page_table,
     )
 
 

@@ -1174,7 +1174,8 @@ _flash_attention_forward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
-    const std::optional<Tensor>& _alibi_slopes
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _page_table
     ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
@@ -1182,7 +1183,10 @@ _flash_attention_forward(
   std::optional<Tensor> out = std::nullopt;
 
   std::optional<Tensor> seqused_k = _seqused_k;
-  std::optional<at::Tensor> block_table = std::nullopt;  // we are not using the block table yet
+  TORCH_CHECK(!_page_table.has_value(),
+      "page_table is not supported by the default Flash Attention 2 implementation. "
+      "Please install FA3 and activate using torch.nn.attention.activate_flash_attention_impl('FA3').");
+  std::optional<at::Tensor> block_table = std::nullopt;
   std::optional<Tensor> alibi_slopes = _alibi_slopes;
   const float softcap = 0.0;
 
