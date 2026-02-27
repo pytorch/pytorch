@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     skipLazy,
     skipMeta,
     skipXLA,
-    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -1140,10 +1139,6 @@ class TestViewOps(TestCase):
 
 
 class TestOldViewOps(TestCase):
-    @skipXPUIf(
-        True,
-        "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/2358",
-    )
     def test_ravel(self, device):
         def _test_ravel(tensors, size, nc=False):
             for src in tensors:
@@ -1304,10 +1299,6 @@ class TestOldViewOps(TestCase):
             RuntimeError, lambda: x.reshape_as(torch.rand(10, device=device))
         )
 
-    @skipXPUIf(
-        True,
-        "NotImplementedError with test_flatten,https://github.com/intel/torch-xpu-ops/issues/2358",
-    )
     def test_flatten(self, device):
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
         zero_dim_tensor = torch.tensor(123, device=device)
