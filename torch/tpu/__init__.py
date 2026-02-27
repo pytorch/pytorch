@@ -42,7 +42,7 @@ def is_available() -> bool:
     return _device_mod.is_available()
 
 
-def stream(stream: Stream | None) -> Any:  # type: ignore[arg-type]
+def stream(stream: Stream) -> Any:  # type: ignore[arg-type]
     r"""Wrap around the context manager that selects a given stream.
 
     Args:
