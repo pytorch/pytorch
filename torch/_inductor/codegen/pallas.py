@@ -3542,10 +3542,27 @@ from torch._inductor.runtime.runtime_utils import (
             )
 
             # Register and call via tpu_torch_pallas
-            code.writeline(
-                f"kernel_key = '{kernel_name_str}_' + "
-                f"'_'.join(str(s) for s in {ctx.output_params[0]}.shape)"
+            # Include all output and input shapes in the key to avoid stale
+            # cache hits when the same kernel name is compiled with different
+            # input/output ranks (e.g. broadcasting vs non-broadcasting calls).
+            shape_key_parts = []
+            for p in ctx.output_params:
+                shape_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            output_key_expr = (
+                " + 'x' + ".join(shape_key_parts) if shape_key_parts else "''"
             )
+            input_key_parts = []
+            for p in ctx.kernel_input_params:
+                input_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            input_key_expr = (
+                " + 'x' + ".join(input_key_parts) if input_key_parts else "''"
+            )
+            code.writeline(
+                f"kernel_key = '{kernel_name_str}_out_' + "
+                f"{output_key_expr}"
+                f" + '_in_' + {input_key_expr}"
+            )
+
             code.writeline(
                 f"if not tpu_torch_pallas.lookup_custom_kernel('{kernel_name_str}', kernel_key):"
             )
