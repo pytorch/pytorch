@@ -5987,6 +5987,45 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
 
     @onlyNativeDeviceTypes
+    def test_grad_scaler_step_stage(self, device):
+        device = torch.device(device)
+
+        class _PlaceHolderOptimizer(torch.optim.Optimizer):
+            def __init__(self, *args, **kwargs):
+                kwargs.setdefault("defaults", {})
+                super().__init__(*args, **kwargs)
+                self._called = False
+
+            def step(self, *args, **kwargs):
+                self._called = True
+
+        for found_inf, expected_stage in [
+            (torch.tensor([1.0], device=device), torch.amp.grad_scaler.OptState.UPDATED,),
+            (torch.tensor([0.0], device=device), torch.amp.grad_scaler.OptState.STEPPED,),
+        ]:
+            dummy_params = [torch.empty(4, 4, device=device)]
+            opt = _PlaceHolderOptimizer(dummy_params)
+            scaler = torch.amp.GradScaler(device=device.type)
+            dummy_params[0].grad = torch.randn(4, 4, device=device)
+            if found_inf.item() == 1.0:
+                dummy_params[0].grad.fill_(float('inf'))
+
+            opt_state = scaler._per_optimizer_states[id(opt)]
+            opt_state["found_inf_per_device"] = scaler._unscale_grads_(
+                opt,
+                inv_scale=torch.tensor([1.0], device=device),
+                found_inf=found_inf,
+                allow_fp16=False,
+            )
+
+            scaler._maybe_opt_step(opt, opt_state)
+            if found_inf.item() == 0.0:
+                self.assertTrue(opt._called)
+            else:
+                self.assertFalse(opt._called)
+            self.assertEqual(scaler.stage(opt), expected_stage)
+
+    @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.amp.GradScaler, device=device.type)

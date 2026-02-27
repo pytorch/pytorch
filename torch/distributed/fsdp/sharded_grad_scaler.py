@@ -244,7 +244,7 @@ class ShardedGradScaler(GradScaler):
             raise RuntimeError(
                 "unscale_() has already been called on this optimizer since the last update()."
             )
-        elif optimizer_state["stage"] is OptState.STEPPED:
+        elif optimizer_state["stage"] in (OptState.STEPPED, OptState.UPDATED):
             raise RuntimeError("unscale_() is being called after step().")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
