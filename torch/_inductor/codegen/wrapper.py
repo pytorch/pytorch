@@ -547,11 +547,12 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
-            # Note _DeviceGuard has less overhead than device, but only accepts
-            # integers
-            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
+            # Use torch.cuda.current_device() so cached compiled code works
+            # on any device, enabling FxGraphCache sharing across DDP ranks.
+            # See pytorch/pytorch#108971.
+            code.writeline("with torch.cuda._DeviceGuard(torch.cuda.current_device()):")
             code.do_indent()
-            code.writeline(V.graph.device_ops.set_device(self.device_idx))
+            code.writeline("torch.cuda.set_device(torch.cuda.current_device())")
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_enter_device_context_manager
@@ -1530,7 +1531,7 @@ class PythonWrapperCodegen(CodeGen):
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
+        self.writeline(f"{name} = get_raw_stream(torch.cuda.current_device())")
         return name
 
     def get_codegened_graph(self):

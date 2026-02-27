@@ -2583,12 +2583,52 @@ class TestFxGraphCacheHashing(TestCase):
                     pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                     pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
-                self.assertNotEqual(
+                # After #108971 fix: CUDA device ordinals are normalized to 0
+                # for cache key purposes so all DDP ranks share one cache entry.
+                self.assertEqual(
                     pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:0")),
                     pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
 
-    def test_hash_kwargs(self):
+    def test_cuda_device_normalization_for_cache_key(self):
+        """
+        Test that CUDA device ordinals are normalized in cache keys so
+        all DDP ranks produce the same hash. See pytorch/pytorch#108971.
+        """
+        from torch._inductor.codecache import (
+            _normalize_device_for_cache_key,
+            extract_tensor_metadata_for_cache_key,
+        )
+
+        self.assertEqual(
+            _normalize_device_for_cache_key(torch.device("cuda", 0)),
+            torch.device("cuda", 0),
+        )
+        self.assertEqual(
+            _normalize_device_for_cache_key(torch.device("cuda", 3)),
+            torch.device("cuda", 0),
+        )
+        self.assertEqual(
+            _normalize_device_for_cache_key(torch.device("cuda", 7)),
+            torch.device("cuda", 0),
+        )
+        self.assertEqual(
+            _normalize_device_for_cache_key(torch.device("cpu")),
+            torch.device("cpu"),
+        )
+        self.assertEqual(
+            _normalize_device_for_cache_key(torch.device("meta")),
+            torch.device("meta"),
+        )
+
+        with torch._subclasses.FakeTensorMode():
+            t0 = torch.randn(4, device="cpu")
+            t1 = torch.randn(4, device="cpu")
+            meta0 = extract_tensor_metadata_for_cache_key(t0)
+            meta1 = extract_tensor_metadata_for_cache_key(t1)
+            self.assertEqual(meta0.device, meta1.device)
+
+        def test_hash_kwargs(self):
         """
         Test the special handling of the kwargs when hashing, i.e.,
         ordering of the kwargs dict and any set arguments.
