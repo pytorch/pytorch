@@ -605,70 +605,15 @@ class _PQEntry:
     # History of (input_idx, mesh_dim, old_placement, new_placement) transitions
     # from the initial state to this state, used for debugging.
     transitions: list[tuple[int, int, Placement, Placement]] = field(compare=False)
-    # Redistribute cost from initial placements to current placements, per input.
+    # Accumulated redistribute cost per input (sum of incremental step costs).
     per_input_costs: tuple[float, ...] = field(compare=False)
+    # Current communication bytes (in GB) per input, updated as placements change.
+    per_input_comm_bytes_gb: tuple[float, ...] = field(compare=False)
 
     def __post_init__(self) -> None:
         global _pq_counter
         self.counter = _pq_counter
         _pq_counter += 1
-
-
-def _compute_redistribute_cost(
-    src_placements: tuple[Placement, ...],
-    dst_placements: tuple[Placement, ...],
-    mesh_topo: MeshTopoInfo,
-    initial_comm_bytes_gb: float,
-) -> float:
-    """Compute redistribute cost using per-dim placement transitions.
-
-    Avoids the overhead of DTensorSpec construction and _gen_transform_infos
-    planning used by redistribute_cost(). Uses the same greedy transform
-    ordering (reverse then forward pass) for correct nested shard handling.
-    """
-    if src_placements == dst_placements:
-        return 0.0
-
-    ndim = len(src_placements)
-    cost = 0.0
-    comm_bytes_gb = initial_comm_bytes_gb
-
-    # Replicate greedy transform ordering from generate_greedy_transform_infos:
-    # 1. Reverse pass: detect misaligned nested shardings and replicate first
-    # 2. Forward pass: handle remaining transitions
-    current = list(src_placements)
-    target = list(dst_placements)
-
-    src_has_shards = any(p.is_shard() for p in src_placements)
-    if src_has_shards:
-        for dim in reversed(range(ndim)):
-            cur = current[dim]
-            tgt = target[dim]
-            if tgt.is_shard():
-                shard_dim = cast(Shard, tgt).dim
-                cur_sharding = [i for i in range(dim) if current[i].is_shard(shard_dim)]
-                tgt_sharding = [i for i in range(dim) if target[i].is_shard(shard_dim)]
-                if cur_sharding != tgt_sharding:
-                    tgt = Replicate()
-            if cur != tgt:
-                step_cost, comm_bytes_gb = _compute_placement_transition_cost(
-                    cur, tgt, mesh_topo, dim, comm_bytes_gb
-                )
-                if step_cost == float("inf"):
-                    return float("inf")
-                cost += step_cost
-                current[dim] = tgt
-
-    for dim in range(ndim):
-        if current[dim] != target[dim]:
-            step_cost, comm_bytes_gb = _compute_placement_transition_cost(
-                current[dim], target[dim], mesh_topo, dim, comm_bytes_gb
-            )
-            if step_cost == float("inf"):
-                return float("inf")
-            cost += step_cost
-
-    return cost
 
 
 def _get_neighbor_placements(
@@ -730,10 +675,9 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         3D(2,2,2): S^N=512, avg 41ms, worst 392ms
 
     The step count is small (avg 0.6-2.0 pops) but per-step cost is dominated
-    by cost computation.  To minimize overhead, we call
-    _compute_placement_transition_cost directly per mesh dim (via
-    _compute_redistribute_cost) instead of going through redistribute_cost
-    (which constructs DTensorSpecs and runs _gen_transform_infos planning).
+    by cost computation.  Each transition computes an incremental cost via
+    _compute_placement_transition_cost for the single changed placement, matching
+    the per-step costs used by graph-based transform info planning.
 
     Returns None if any input has _StridedShard placement, signaling the caller
     to fall back to full expansion.
@@ -752,6 +696,12 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
             assert len(arg.strategies) == 1
             input_specs.append(arg.strategies[0].output_spec)
         elif isinstance(arg, TupleStrategy):
+            return None
+
+    # Fall back if any kwargs are tensor inputs — the PQ search only tracks
+    # positional tensor args and would miss redistribute costs for kwargs.
+    for kwarg in op_schema.kwargs_schema.values():
+        if isinstance(kwarg, (OpStrategy, TupleStrategy)):
             return None
 
     assert len(input_specs) > 0, "broken input"
@@ -784,9 +734,11 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         else:
             return fast_result
 
-    # Pre-compute mesh topology and per-input comm bytes for cost computation
+    # Pre-compute mesh topology and per-input comm bytes for cost computation.
+    # comm_bytes_gb reflects the local shard size given current placements;
+    # it's tracked per PQ entry and updated as placements change.
     mesh_topo = MeshTopoInfo.build_from_mesh(mesh)
-    per_input_comm_bytes_gb: list[float] = []
+    initial_comm_bytes_gb: list[float] = []
     for spec in input_specs:
         assert spec.tensor_meta is not None
         total_bytes = spec.tensor_meta.dtype.itemsize * math.prod(
@@ -796,18 +748,22 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         for i, p in enumerate(spec.placements):
             if p.is_shard():
                 num_shards *= mesh_topo.mesh_dim_devices[i]
-        per_input_comm_bytes_gb.append(total_bytes / num_shards / (1024**3))
+        initial_comm_bytes_gb.append(total_bytes / num_shards / (1024**3))
 
     pq: list[_PQEntry] = []
     visited: set[tuple[tuple[Placement, ...], ...]] = set()
-    cost_caches: list[dict[tuple[Placement, ...], float]] = [
-        {} for _ in range(num_inputs)
-    ]
 
     initial_per_input_costs = (0.0,) * num_inputs
+    initial_per_input_comm_bytes = tuple(initial_comm_bytes_gb)
     heapq.heappush(
         pq,
-        _PQEntry(0.0, initial_placements, [], initial_per_input_costs),
+        _PQEntry(
+            0.0,
+            initial_placements,
+            [],
+            initial_per_input_costs,
+            initial_per_input_comm_bytes,
+        ),
     )
 
     def _push_neighbor(
@@ -822,22 +778,25 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         candidate_placements = tuple(tuple(ps) for ps in new_input_placements)
         if candidate_placements in visited:
             return
-        candidate_key = candidate_placements[input_idx]
-        cached = cost_caches[input_idx].get(candidate_key)
-        if cached is not None:
-            changed_cost = cached
-        else:
-            changed_cost = _compute_redistribute_cost(
-                initial_placements[input_idx],
-                candidate_key,
-                mesh_topo,
-                per_input_comm_bytes_gb[input_idx],
-            )
-            cost_caches[input_idx][candidate_key] = changed_cost
+        step_cost, new_comm_bytes = _compute_placement_transition_cost(
+            old_placement,
+            new_placement,
+            mesh_topo,
+            mesh_dim,
+            source.per_input_comm_bytes_gb[input_idx],
+        )
+        if step_cost == float("inf"):
+            return
+        changed_cost = source.per_input_costs[input_idx] + step_cost
         new_per_input_costs = (
             source.per_input_costs[:input_idx]
             + (changed_cost,)
             + source.per_input_costs[input_idx + 1 :]
+        )
+        new_per_input_comm_bytes = (
+            source.per_input_comm_bytes_gb[:input_idx]
+            + (new_comm_bytes,)
+            + source.per_input_comm_bytes_gb[input_idx + 1 :]
         )
         new_cost = sum(new_per_input_costs)
         new_transitions = source.transitions + [
@@ -846,7 +805,11 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         heapq.heappush(
             pq,
             _PQEntry(
-                new_cost, candidate_placements, new_transitions, new_per_input_costs
+                new_cost,
+                candidate_placements,
+                new_transitions,
+                new_per_input_costs,
+                new_per_input_comm_bytes,
             ),
         )
 
@@ -905,6 +868,6 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
 
     raise AssertionError(
         f"No valid strategy found for op_schema {op_schema} "
-        f"on {mesh}). "
+        f"on {mesh}. "
         f"Explored {len(visited)} strategy combinations."
     )

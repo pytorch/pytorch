@@ -7,7 +7,7 @@ from __future__ import annotations
 import itertools
 import operator
 from collections.abc import Callable
-from typing import Optional, overload, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import overload, TYPE_CHECKING, TypeAlias, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -50,9 +50,9 @@ def chain(*iterables: Iterable[_T]) -> Iterator[_T]:
 @substitute_in_graph(itertools.accumulate, is_embedded_type=True)  # type: ignore[arg-type]
 def accumulate(
     iterable: Iterable[_T],
-    func: Optional[Callable[[_T, _T], _T]] = None,
+    func: Callable[[_T, _T], _T] | None = None,
     *,
-    initial: Optional[_T] = None,
+    initial: _T | None = None,
 ) -> Iterator[_T]:
     # call iter outside of the generator to match cypthon behavior
     iterator = iter(iterable)

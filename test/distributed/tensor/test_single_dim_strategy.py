@@ -40,6 +40,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+from torch.distributed.tensor._redistribute import use_min_cost_redistribution_plan
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
@@ -263,7 +264,8 @@ class TestExpandPlaceholder(TestCase):
                 op_schema.args_meta,
                 op_schema.kwargs_meta,
             )
-            assert isinstance(strategy, TupleStrategy)
+            if not isinstance(strategy, TupleStrategy):
+                raise AssertionError(f"Expected TupleStrategy, got {type(strategy)}")
             return strategy
 
         # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
@@ -290,7 +292,8 @@ class TestExpandPlaceholder(TestCase):
         )
         self.assertEqual(len(tuple_strategy.children), 2)
         for child_i, child in enumerate(tuple_strategy.children):
-            assert isinstance(child, OpStrategy)
+            if not isinstance(child, OpStrategy):
+                raise AssertionError(f"Expected OpStrategy, got {type(child)}")
             self.assertEqual(len(child.strategies), expected_num_strategies[child_i])
 
             # _select_min_cost_strategy can have multiple min-cost strategies,
@@ -348,7 +351,8 @@ class TestExpandPlaceholder(TestCase):
             strategy = expanded_strategy_fn(
                 torch.ops.aten.cat.default, op_schema.args_meta, op_schema.kwargs_meta
             )
-            assert isinstance(strategy, OpStrategy)
+            if not isinstance(strategy, OpStrategy):
+                raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
             return strategy
 
         # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
@@ -462,7 +466,8 @@ class TestExpandPlaceholder(TestCase):
         strategy = expanded_strategy_fn(
             torch.ops.aten.matmul.default, op_schema.args_meta, op_schema.kwargs_meta
         )
-        assert isinstance(strategy, OpStrategy)
+        if not isinstance(strategy, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
 
         # For a 3D mesh with 8 single-dim strategies per mesh dim
         # (3 sharding + 4 per-input linearity + 1 implicit replicate),
@@ -474,7 +479,8 @@ class TestExpandPlaceholder(TestCase):
         for op_spec in strategy.strategies:
             output_spec = op_spec.output_spec
             input_specs = op_spec.input_specs
-            assert input_specs is not None
+            if input_specs is None:
+                raise AssertionError("Expected input_specs to not be None")
 
             # Verify tensor_meta is populated for output spec
             self.assertIsNotNone(
@@ -1292,29 +1298,32 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         self.assertEqual(len(pq_strategy.strategies), 1)
         pq_cost = sum(chain.from_iterable(pq_strategy.strategies[0].redistribute_cost))
 
-        # Full expansion reference
-        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-            mesh,
-            op_schema,
-            _SingleDimStrategyInfo(mm_single_dim_strategy),
-            output_meta,
-        )
-        ref_strategy = expanded_strategy_fn(
-            torch.ops.aten.mm.default,
-            op_schema.args_meta,
-            op_schema.kwargs_meta,
-        )
+        # Full expansion reference using graph-based (min-cost) redistribution
+        # planning. PQ's Dijkstra search over all per-dim transition orderings
+        # finds the globally optimal ordering (accounting for comm_bytes updates),
+        # which can be strictly cheaper than even the graph-based planner.
+        with use_min_cost_redistribution_plan():
+            expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                mesh,
+                op_schema,
+                _SingleDimStrategyInfo(mm_single_dim_strategy),
+                output_meta,
+            )
+            ref_strategy = expanded_strategy_fn(
+                torch.ops.aten.mm.default,
+                op_schema.args_meta,
+                op_schema.kwargs_meta,
+            )
         ref_min_cost = min(
             sum(chain.from_iterable(s.redistribute_cost))
             for s in ref_strategy.strategies
         )
 
-        self.assertAlmostEqual(
+        self.assertLessEqual(
             pq_cost,
-            ref_min_cost,
-            places=5,
+            ref_min_cost + 1e-9,
             msg=(
-                f"PQ cost {pq_cost} != ref min cost {ref_min_cost} for "
+                f"PQ cost {pq_cost} > ref min cost {ref_min_cost} for "
                 f"left={left_placements}, right={right_placements}"
             ),
         )

@@ -1983,7 +1983,7 @@ def _backward_prologue_functional(
             OutputType.custom_function_view,
         ]
         and issubclass(info.raw_type, torch.Tensor)
-        and info.requires_grad
+        and info.requires_grad_for_backward
     ]
     # intermediate bases always require gradients, and always participate in the backward graph.
     flat_bw_args_with_grads = [

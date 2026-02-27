@@ -19,88 +19,88 @@ from torch.testing._internal.jit_utils import JitTestCase
 class TestIsinstance(JitTestCase):
     def test_int(self):
         def int_test(x: Any):
-            assert torch.jit.isinstance(x, int)
-            assert not torch.jit.isinstance(x, float)
+            assert torch.jit.isinstance(x, int)  # noqa: S101
+            assert not torch.jit.isinstance(x, float)  # noqa: S101
 
         x = 1
         self.checkScript(int_test, (x,))
 
     def test_float(self):
         def float_test(x: Any):
-            assert torch.jit.isinstance(x, float)
-            assert not torch.jit.isinstance(x, int)
+            assert torch.jit.isinstance(x, float)  # noqa: S101
+            assert not torch.jit.isinstance(x, int)  # noqa: S101
 
         x = 1.0
         self.checkScript(float_test, (x,))
 
     def test_bool(self):
         def bool_test(x: Any):
-            assert torch.jit.isinstance(x, bool)
-            assert not torch.jit.isinstance(x, float)
+            assert torch.jit.isinstance(x, bool)  # noqa: S101
+            assert not torch.jit.isinstance(x, float)  # noqa: S101
 
         x = False
         self.checkScript(bool_test, (x,))
 
     def test_list(self):
         def list_str_test(x: Any):
-            assert torch.jit.isinstance(x, List[str])
-            assert not torch.jit.isinstance(x, List[int])
-            assert not torch.jit.isinstance(x, Tuple[int])
+            assert torch.jit.isinstance(x, List[str])  # noqa: S101
+            assert not torch.jit.isinstance(x, List[int])  # noqa: S101
+            assert not torch.jit.isinstance(x, Tuple[int])  # noqa: S101
 
         x = ["1", "2", "3"]
         self.checkScript(list_str_test, (x,))
 
     def test_list_tensor(self):
         def list_tensor_test(x: Any):
-            assert torch.jit.isinstance(x, List[torch.Tensor])
-            assert not torch.jit.isinstance(x, Tuple[int])
+            assert torch.jit.isinstance(x, List[torch.Tensor])  # noqa: S101
+            assert not torch.jit.isinstance(x, Tuple[int])  # noqa: S101
 
         x = [torch.tensor([1]), torch.tensor([2]), torch.tensor([3])]
         self.checkScript(list_tensor_test, (x,))
 
     def test_dict(self):
         def dict_str_int_test(x: Any):
-            assert torch.jit.isinstance(x, Dict[str, int])
-            assert not torch.jit.isinstance(x, Dict[int, str])
-            assert not torch.jit.isinstance(x, Dict[str, str])
+            assert torch.jit.isinstance(x, Dict[str, int])  # noqa: S101
+            assert not torch.jit.isinstance(x, Dict[int, str])  # noqa: S101
+            assert not torch.jit.isinstance(x, Dict[str, str])  # noqa: S101
 
         x = {"a": 1, "b": 2}
         self.checkScript(dict_str_int_test, (x,))
 
     def test_dict_tensor(self):
         def dict_int_tensor_test(x: Any):
-            assert torch.jit.isinstance(x, Dict[int, torch.Tensor])
+            assert torch.jit.isinstance(x, Dict[int, torch.Tensor])  # noqa: S101
 
         x = {2: torch.tensor([2])}
         self.checkScript(dict_int_tensor_test, (x,))
 
     def test_tuple(self):
         def tuple_test(x: Any):
-            assert torch.jit.isinstance(x, Tuple[str, int, str])
-            assert not torch.jit.isinstance(x, Tuple[int, str, str])
-            assert not torch.jit.isinstance(x, Tuple[str])
+            assert torch.jit.isinstance(x, Tuple[str, int, str])  # noqa: S101
+            assert not torch.jit.isinstance(x, Tuple[int, str, str])  # noqa: S101
+            assert not torch.jit.isinstance(x, Tuple[str])  # noqa: S101
 
         x = ("a", 1, "b")
         self.checkScript(tuple_test, (x,))
 
     def test_tuple_tensor(self):
         def tuple_tensor_test(x: Any):
-            assert torch.jit.isinstance(x, Tuple[torch.Tensor, torch.Tensor])
+            assert torch.jit.isinstance(x, Tuple[torch.Tensor, torch.Tensor])  # noqa: S101
 
         x = (torch.tensor([1]), torch.tensor([[2], [3]]))
         self.checkScript(tuple_tensor_test, (x,))
 
     def test_optional(self):
         def optional_test(x: Any):
-            assert torch.jit.isinstance(x, Optional[torch.Tensor])
-            assert not torch.jit.isinstance(x, Optional[str])
+            assert torch.jit.isinstance(x, Optional[torch.Tensor])  # noqa: S101
+            assert not torch.jit.isinstance(x, Optional[str])  # noqa: S101
 
         x = torch.ones(3, 3)
         self.checkScript(optional_test, (x,))
 
     def test_optional_none(self):
         def optional_test_none(x: Any):
-            assert torch.jit.isinstance(x, Optional[torch.Tensor])
+            assert torch.jit.isinstance(x, Optional[torch.Tensor])  # noqa: S101
             # assert torch.jit.isinstance(x, Optional[str])
             # TODO: above line in eager will evaluate to True while in
             #       the TS interpreter will evaluate to False as the
@@ -111,28 +111,28 @@ class TestIsinstance(JitTestCase):
 
     def test_list_nested(self):
         def list_nested(x: Any):
-            assert torch.jit.isinstance(x, List[Dict[str, int]])
-            assert not torch.jit.isinstance(x, List[List[str]])
+            assert torch.jit.isinstance(x, List[Dict[str, int]])  # noqa: S101
+            assert not torch.jit.isinstance(x, List[List[str]])  # noqa: S101
 
         x = [{"a": 1, "b": 2}, {"aa": 11, "bb": 22}]
         self.checkScript(list_nested, (x,))
 
     def test_dict_nested(self):
         def dict_nested(x: Any):
-            assert torch.jit.isinstance(x, Dict[str, Tuple[str, str, str]])
-            assert not torch.jit.isinstance(x, Dict[str, Tuple[int, int, int]])
+            assert torch.jit.isinstance(x, Dict[str, Tuple[str, str, str]])  # noqa: S101
+            assert not torch.jit.isinstance(x, Dict[str, Tuple[int, int, int]])  # noqa: S101
 
         x = {"a": ("aa", "aa", "aa"), "b": ("bb", "bb", "bb")}
         self.checkScript(dict_nested, (x,))
 
     def test_tuple_nested(self):
         def tuple_nested(x: Any):
-            assert torch.jit.isinstance(
+            assert torch.jit.isinstance(  # noqa: S101
                 x, Tuple[Dict[str, Tuple[str, str, str]], List[bool], Optional[str]]
             )
-            assert not torch.jit.isinstance(x, Dict[str, Tuple[int, int, int]])
-            assert not torch.jit.isinstance(x, Tuple[str])
-            assert not torch.jit.isinstance(x, Tuple[List[bool], List[str], List[int]])
+            assert not torch.jit.isinstance(x, Dict[str, Tuple[int, int, int]])  # noqa: S101
+            assert not torch.jit.isinstance(x, Tuple[str])  # noqa: S101
+            assert not torch.jit.isinstance(x, Tuple[List[bool], List[str], List[int]])  # noqa: S101
 
         x = (
             {"a": ("aa", "aa", "aa"), "b": ("bb", "bb", "bb")},
@@ -143,21 +143,21 @@ class TestIsinstance(JitTestCase):
 
     def test_optional_nested(self):
         def optional_nested(x: Any):
-            assert torch.jit.isinstance(x, Optional[List[str]])
+            assert torch.jit.isinstance(x, Optional[List[str]])  # noqa: S101
 
         x = ["a", "b", "c"]
         self.checkScript(optional_nested, (x,))
 
     def test_list_tensor_type_true(self):
         def list_tensor_type_true(x: Any):
-            assert torch.jit.isinstance(x, List[torch.Tensor])
+            assert torch.jit.isinstance(x, List[torch.Tensor])  # noqa: S101
 
         x = [torch.rand(3, 3), torch.rand(4, 3)]
         self.checkScript(list_tensor_type_true, (x,))
 
     def test_tensor_type_false(self):
         def list_tensor_type_false(x: Any):
-            assert not torch.jit.isinstance(x, List[torch.Tensor])
+            assert not torch.jit.isinstance(x, List[torch.Tensor])  # noqa: S101
 
         x = [1, 2, 3]
         self.checkScript(list_tensor_type_false, (x,))
@@ -165,9 +165,9 @@ class TestIsinstance(JitTestCase):
     def test_in_if(self):
         def list_in_if(x: Any):
             if torch.jit.isinstance(x, List[int]):
-                assert True
+                assert True  # noqa: S101
             if torch.jit.isinstance(x, List[str]):
-                assert not True
+                assert not True  # noqa: S101
 
         x = [1, 2, 3]
         self.checkScript(list_in_if, (x,))
@@ -175,9 +175,9 @@ class TestIsinstance(JitTestCase):
     def test_if_else(self):
         def list_in_if_else(x: Any):
             if torch.jit.isinstance(x, Tuple[str, str, str]):
-                assert True
+                assert True  # noqa: S101
             else:
-                assert not True
+                assert not True  # noqa: S101
 
         x = ("a", "b", "c")
         self.checkScript(list_in_if_else, (x,))
@@ -187,7 +187,7 @@ class TestIsinstance(JitTestCase):
             count = 0
             while torch.jit.isinstance(x, List[Dict[str, int]]) and count <= 0:
                 count = count + 1
-            assert count == 1
+            assert count == 1  # noqa: S101
 
         x = [{"a": 1, "b": 2}, {"aa": 11, "bb": 22}]
         self.checkScript(list_in_while_loop, (x,))
@@ -205,8 +205,8 @@ class TestIsinstance(JitTestCase):
                 str_cat = ""
                 for val in obj.values():
                     str_cat = str_cat + val
-                assert "111222" == str_cat
-            assert hit
+                assert "111222" == str_cat  # noqa: S101
+            assert hit  # noqa: S101
 
         x = [torch.rand(3, 3), torch.rand(4, 3)]
         self.checkScript(type_refinement, (x,))
@@ -215,7 +215,7 @@ class TestIsinstance(JitTestCase):
 
     def test_list_no_contained_type(self):
         def list_no_contained_type(x: Any):
-            assert torch.jit.isinstance(x, List)
+            assert torch.jit.isinstance(x, List)  # noqa: S101
 
         x = ["1", "2", "3"]
 
@@ -237,7 +237,7 @@ class TestIsinstance(JitTestCase):
 
     def test_tuple_no_contained_type(self):
         def tuple_no_contained_type(x: Any):
-            assert torch.jit.isinstance(x, Tuple)
+            assert torch.jit.isinstance(x, Tuple)  # noqa: S101
 
         x = ("1", "2", "3")
 
@@ -259,7 +259,7 @@ class TestIsinstance(JitTestCase):
 
     def test_optional_no_contained_type(self):
         def optional_no_contained_type(x: Any):
-            assert torch.jit.isinstance(x, Optional)
+            assert torch.jit.isinstance(x, Optional)  # noqa: S101
 
         x = ("1", "2", "3")
 
@@ -281,7 +281,7 @@ class TestIsinstance(JitTestCase):
 
     def test_dict_no_contained_type(self):
         def dict_no_contained_type(x: Any):
-            assert torch.jit.isinstance(x, Dict)
+            assert torch.jit.isinstance(x, Dict)  # noqa: S101
 
         x = {"a": "aa"}
 
@@ -303,19 +303,19 @@ class TestIsinstance(JitTestCase):
 
     def test_tuple_rhs(self):
         def fn(x: Any):
-            assert torch.jit.isinstance(x, (int, List[str]))
-            assert not torch.jit.isinstance(x, (List[float], Tuple[int, str]))
-            assert not torch.jit.isinstance(x, (List[float], str))
+            assert torch.jit.isinstance(x, (int, List[str]))  # noqa: S101
+            assert not torch.jit.isinstance(x, (List[float], Tuple[int, str]))  # noqa: S101
+            assert not torch.jit.isinstance(x, (List[float], str))  # noqa: S101
 
         self.checkScript(fn, (2,))
         self.checkScript(fn, (["foo", "bar", "baz"],))
 
     def test_nontuple_container_rhs_throws_in_eager(self):
         def fn1(x: Any):
-            assert torch.jit.isinstance(x, [int, List[str]])
+            assert torch.jit.isinstance(x, [int, List[str]])  # noqa: S101
 
         def fn2(x: Any):
-            assert not torch.jit.isinstance(x, {List[str], Tuple[int, str]})
+            assert not torch.jit.isinstance(x, {List[str], Tuple[int, str]})  # noqa: S101
 
         err_highlight = "must be a type or a tuple of types"
 
