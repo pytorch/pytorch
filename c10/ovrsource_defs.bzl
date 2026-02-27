@@ -16,11 +16,21 @@ cuda_supported_platforms = [
     "ovr_config//os:windows-cuda",
 ]
 
+# rocktenn apparently has its own copy of glog that comes with libmp.dll, so we
+# had better not try to use glog from c10 lest the glog symbols not be eliminated.
+C10_USE_GLOG = native.read_config("c10", "use_glog", "1") == "1"
+
+# If you don't use any functionality that relies on static initializer in c10 (the
+# most notable ones are the allocators), you can turn off link_whole this way.
+# In practice, this is only used by rocktenn as well.
+C10_LINK_WHOLE = native.read_config("c10", "link_whole", "1") == "1"
+
 def define_c10_ovrsource(name, is_mobile):
+    pp_flags = []
     if is_mobile:
-        pp_flags = ["-DC10_MOBILE=1"]
-    else:
-        pp_flags = []
+        pp_flags.append("-DC10_MOBILE=1")
+    if C10_USE_GLOG:
+        pp_flags.append("-DC10_USE_GLOG")
 
     oxx_static_library(
         name = name,
@@ -31,6 +41,7 @@ def define_c10_ovrsource(name, is_mobile):
             "util/*.cpp",
         ]),
         compatible_with = cpu_supported_platforms,
+        link_whole = C10_LINK_WHOLE,
         compiler_flags = select({
             "DEFAULT": [],
             "ovr_config//compiler:cl": [
@@ -77,6 +88,7 @@ def define_c10_ovrsource(name, is_mobile):
             "//arvr/third-party/gflags:gflags",
             "//third-party/cpuinfo:cpuinfo",
             "//third-party/fmt:fmt",
+            # For some godforsaken reason, this is always required even when not C10_USE_GLOG
             "//third-party/glog:glog",
         ],
     )
