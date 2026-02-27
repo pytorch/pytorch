@@ -3797,7 +3797,12 @@ class Scheduler:
         for inp in multi_node.inputs:
             # pyrefly: ignore [missing-attribute]
             inp_name = inp.get_name()
-            if not getattr(inp, "layout", None) or inp_name not in constraints:
+            # View has its own fixed layout that is not constrained
+            if (
+                not getattr(inp, "layout", None)
+                or inp_name not in constraints
+                or isinstance(inp, ir.ReinterpretView)
+            ):
                 continue
 
             layout = inp.layout

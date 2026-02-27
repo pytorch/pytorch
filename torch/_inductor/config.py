@@ -1042,7 +1042,14 @@ class aten_distributed_optimizations:
     # Method for estimating collective runtime
     # "analytical": Use bandwidth formulas (default)
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
+    # In deterministic mode, this setting is ignored and "analytical" is used.
     collective_estimator: Literal["analytical", "benchmark"] = "analytical"
+
+    # Method for estimating compute (ATen op) runtime
+    # "analytical": Use roofline model estimates (deterministic, no GPU sync)
+    # "benchmark": Use GPU benchmarking (more accurate, requires GPU sync)
+    # In deterministic mode, this setting is ignored and "analytical" is used.
+    compute_estimator: Literal["analytical", "benchmark"] = "benchmark"
 
     # Maximum memory increase above baseline for prefetch operations
     # Uses minimum of absolute cap and ratio of baseline
@@ -2519,6 +2526,11 @@ class eager_numerics:
     )
 
     disable_ftz: bool = False
+
+    # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
+    # Triton bundles its own libdevice.10.bc which may use different polynomial
+    # coefficients than CUDA's version, causing ~1 ULP differences in pow.
+    use_pytorch_libdevice: bool = False
 
 
 # Mode to emulate PyTorch eager numerics when doing lower precision compute
