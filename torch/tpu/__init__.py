@@ -4,7 +4,6 @@ This package introduces support for the TPU backend.
 The TPU support is mainly provided by the torch_tpu package.
 """
 
-import torch
 from typing import Any
 
 
@@ -55,7 +54,7 @@ def stream(stream: Stream | None) -> Any:  # type: ignore[arg-type]
     return _device_mod.stream(stream)
 
 
-def current_stream(device: torch.device = None) -> Stream:  # type: ignore[return-value]
+def current_stream(device: int | None = None) -> Stream:  # type: ignore[return-value]
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:

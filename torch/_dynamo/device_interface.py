@@ -589,7 +589,7 @@ class TpuInterface(DeviceInterface):
     current_device = staticmethod(torch.tpu.current_device)
     device_count = staticmethod(torch.tpu.device_count)
     stream = staticmethod(torch.tpu.stream)  # type: ignore[assignment]
-    current_stream = staticmethod(torch.tpu.current_stream)
+    current_stream = staticmethod(torch.tpu.current_stream)  # type: ignore[assignment]
     set_stream = staticmethod(torch.tpu.set_stream)  # type: ignore[assignment]
 
     @staticmethod
