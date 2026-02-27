@@ -4,7 +4,7 @@ import inspect
 import logging
 import threading
 from collections.abc import Callable, Generator, Iterable
-from typing import Any, Optional, Union
+from typing import Any
 
 from torch.utils._exposed_in import exposed_in
 
@@ -296,11 +296,11 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
 @exposed_in("torch.library")
 def triton_op(
     name: str,
-    fn: Optional[Callable] = None,
+    fn: Callable | None = None,
     /,
     *,
-    mutates_args: Union[str, Iterable[str]],
-    schema: Optional[str] = None,
+    mutates_args: str | Iterable[str],
+    schema: str | None = None,
 ) -> Callable:
     """Create a custom operator whose implementation is backed by 1+ triton kernels.
 

@@ -178,3 +178,13 @@ For `topic: fuzzer` issues:
 - `oncall: cpu inductor` - CPU/MKLDNN issues
 - `oncall: export` - Export-specific issues
 - `oncall: distributed` - Distributed training issues
+
+### CPU Inductor Routing
+
+Route to `oncall: cpu inductor` (not generic `oncall: pt2`) when the issue is specific to CPU backend in inductor:
+- Title or body mentions `[CPU]`, `cpu`, or `MKLDNN`
+- CPU-specific codegen bugs (e.g., float16 handling on CPU)
+- Issues that only reproduce on CPU, not CUDA
+- MKLDNN-specific kernel issues
+
+Example: "[Inductor][CPU][float16] LayerNorm outputs NaN" → `oncall: cpu inductor`, NOT `oncall: pt2`

@@ -3,9 +3,10 @@ import dataclasses
 import hashlib
 import inspect
 import re
+import types
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, ForwardRef, Optional, Union
+from typing import Annotated, Any, ForwardRef, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -81,7 +82,7 @@ def _staged_schema():
                         "map<",
                         ">",
                     )
-                elif o == Union:
+                elif o is Union or o is types.UnionType:
                     if level != 0:
                         raise AssertionError(
                             f"Optional is only supported at the top level, got level={level}"
@@ -134,10 +135,10 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> tuple[dict[str, Any], str, Optional[str], str, int]:
+        def dump_field(f) -> tuple[dict[str, Any], str, str | None, str, int]:
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
-            cpp_default: Optional[str] = None
+            cpp_default: str | None = None
             if typing.get_origin(f.type) is not Annotated:
                 raise AssertionError(
                     f"Field {f.name} must be annotated with an integer id."
@@ -752,13 +753,13 @@ class _Commit:
     additions: dict[str, Any]
     subtractions: dict[str, Any]
     base: dict[str, Any]
-    checksum_head: Optional[str]
+    checksum_head: str | None
     cpp_header: str
     cpp_header_path: str
     enum_converter_header: str
     enum_converter_header_path: str
-    thrift_checksum_head: Optional[str]
-    thrift_checksum_real: Optional[str]
+    thrift_checksum_head: str | None
+    thrift_checksum_real: str | None
     thrift_checksum_next: str
     thrift_schema: str
     thrift_schema_path: str
