@@ -167,6 +167,7 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.is_initialized": TorchInGraphFunctionVariable,
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
+    "torch/distributed/device_mesh.py#__init__": SkipFunctionVariable,
     "torch.distributed.tensor._api.DTensor#from_local": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._resolve_group_name_by_ranks_and_tag": TorchInGraphFunctionVariable,
@@ -3821,39 +3822,12 @@ def _force_inline() -> Iterator[None]:
         _force_inline_flag = old_val
 
 
-def check_verbose(
-    obj: Any, is_inlined_call: bool = False, frame: Optional[Any] = None
-) -> SkipResult:
+def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
     if _force_inline_flag:
         return SkipResult(
             False,
             "don't skip because we're inside _force_inline() context",
         )
-
-    # For eval frame callback (not inlined calls), allow tracing inbuilt
-    # nn.Module.forward methods when the module has hooks. Any hook can cause
-    # a graph break (via @torch._dynamo.disable, print, unsupported ops, etc.),
-    # which skips the entire _call_impl frame. By allowing forward to be traced,
-    # Dynamo can capture the module's operations in a new graph after the break.
-    if (
-        not is_inlined_call
-        and frame is not None
-        and isinstance(obj, types.CodeType)
-        and obj.co_name == "forward"
-    ):
-        from .utils import nnmodule_has_hooks
-
-        module = frame.f_locals.get("self")
-        if (
-            module is not None
-            and isinstance(module, torch.nn.Module)
-            and module.__class__.__module__.startswith(("torch.nn.", "torch.ao."))
-            and nnmodule_has_hooks(module, check_forward_hooks=True)
-        ):
-            return SkipResult(
-                False,
-                "inbuilt nn.Module.forward allowed - module has hooks",
-            )
 
     if isinstance(
         obj,
@@ -3915,8 +3889,8 @@ def check_verbose(
         )
 
 
-def check(obj: Any, is_inlined_call: bool = False, frame: Optional[Any] = None) -> bool:
-    return check_verbose(obj, is_inlined_call, frame).skipped
+def check(obj: Any, is_inlined_call: bool = False) -> bool:
+    return check_verbose(obj, is_inlined_call).skipped
 
 
 # skip common third party libs

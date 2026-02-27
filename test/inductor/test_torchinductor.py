@@ -14277,14 +14277,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
 
+        x = torch.randn(2, 3, device=self.device, requires_grad=True)
+        _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
+        self.assertEqual(len(codes), 2)
         if config.cpp_wrapper:
-            # arg type List[int] is not yet supported by custom_op_wrapper
-            pass
+            FileCheck().check(
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__fused_rms_norm("
+            ).run(codes[0])
         else:
-            x = torch.randn(2, 3, device=self.device, requires_grad=True)
-            _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
-            self.assertEqual(len(codes), 2)
-            FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
+            FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(codes[0])
 
     def test_lite_regional_compile_flex_attention(self):
         if self.device != GPU_TYPE or self.device == "mps":
