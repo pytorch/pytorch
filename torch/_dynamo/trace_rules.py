@@ -360,6 +360,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch._dynamo.override_cudagraphs": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.is_nested_int": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.size_hint": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
