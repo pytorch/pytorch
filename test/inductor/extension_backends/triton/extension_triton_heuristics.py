@@ -12,9 +12,11 @@ class ExtensionCachingAutotuner(triton_heuristics.CachingAutotuner):
         self,
         cfg: triton_heuristics.Config,
     ) -> dict[str, Any]:
-        assert EXTENSION_TRITON_META_FIELD in self.triton_meta
+        if EXTENSION_TRITON_META_FIELD not in self.triton_meta:
+            raise AssertionError
         compile_meta = super()._create_compile_meta(cfg)
-        assert EXTENSION_TRITON_META_FIELD in compile_meta
+        if EXTENSION_TRITON_META_FIELD not in compile_meta:
+            raise AssertionError
         return compile_meta
 
 

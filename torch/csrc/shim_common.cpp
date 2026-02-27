@@ -696,3 +696,52 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     *ret_new_tensor = torch::aot_inductor::new_tensor_handle(std::move(tensor));
   });
 }
+
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob_v2(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor,
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter_callback)(void* data, void* ctx),
+    void* deleter_ctx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    c10::Device device(static_cast<c10::DeviceType>(device_type), device_index);
+    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+        static_cast<c10::ScalarType>(dtype));
+    at::Tensor tensor;
+    if (data != nullptr) {
+      if (deleter_callback != nullptr) {
+        // Combine the two-arg C callback and its context into a single-arg
+        // C++ callable that at::for_blob().deleter() expects.
+        auto wrapped_deleter = [deleter_callback, deleter_ctx](void* data) {
+          deleter_callback(data, deleter_ctx);
+        };
+        tensor = at::for_blob(data, sizes)
+                     .strides(strides)
+                     .storage_offset(storage_offset)
+                     .deleter(wrapped_deleter)
+                     .options(options)
+                     .make_tensor();
+      } else {
+        tensor = at::for_blob(data, sizes)
+                     .strides(strides)
+                     .storage_offset(storage_offset)
+                     .options(options)
+                     .make_tensor();
+      }
+    } else {
+      tensor = at::empty_strided(sizes, strides, options);
+    }
+    *ret_new_tensor = torch::aot_inductor::new_tensor_handle(std::move(tensor));
+  });
+}

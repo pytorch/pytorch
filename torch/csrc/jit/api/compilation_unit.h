@@ -1,10 +1,11 @@
 #pragma once
-#include <ATen/core/class_type.h>
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/name_mangler.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <torch/csrc/Export.h>
 
@@ -22,12 +23,6 @@
 #include <vector>
 
 namespace torch::jit {
-
-using ::c10::ClassType;
-using ::c10::ClassTypePtr;
-using ::c10::fmap;
-using ::c10::IValue;
-using ::c10::TupleType;
 
 struct Def;
 struct Property;
