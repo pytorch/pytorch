@@ -438,7 +438,10 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     def _test_multiple_optimizers(self, sharding_strategy: ShardingStrategy):
         ddp_model = self._get_ddp_transformer(find_unused_params=True)
         ddp_param_groups = self._get_param_groups(ddp_model)
-        assert len(ddp_param_groups) == 3, f"{len(ddp_param_groups)}"
+        if not (len(ddp_param_groups) == 3):
+            raise AssertionError(
+                f"Expected 3 param groups, got {len(ddp_param_groups)}"
+            )
         (
             fsdp_model,
             _,
@@ -452,7 +455,10 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             cpu_offload=None,
         )
         fsdp_param_groups = self._get_param_groups(fsdp_model)
-        assert len(fsdp_param_groups) == 3, f"{len(fsdp_param_groups)}"
+        if not (len(fsdp_param_groups) == 3):
+            raise AssertionError(
+                f"Expected 3 param groups, got {len(fsdp_param_groups)}"
+            )
         ddp_optims = []
         fsdp_optims = []
         # For the transformer model, every parameter is either a weight or a
@@ -483,7 +489,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             if not handle:
                 continue
             flat_param = handle.flat_param
-            assert flat_param._params is not None
+            if flat_param._params is None:
+                raise AssertionError("Expected flat_param._params to not be None")
             has_weight = False
             has_bias = False
             for param, fqn in zip(flat_param._params, flat_param._fqns):
@@ -492,10 +499,11 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                 elif "bias" in fqn and param.numel() > 0:
                     has_bias = True
             has_both |= has_weight and has_bias
-        assert has_both, (
-            f"Rank {self.rank} does not have a `FlatParameter` with both a "
-            "weight and a bias in its shard, meaning that this test is vacuous"
-        )
+        if not has_both:
+            raise AssertionError(
+                f"Rank {self.rank} does not have a `FlatParameter` with both a "
+                "weight and a bias in its shard, meaning that this test is vacuous"
+            )
 
         # Run one iteration to generate gradients
         def run_iter():
@@ -793,10 +801,10 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         def check_parameter_parity(
             ddp_model: DDP, fsdp_model: FSDP, between_fwd_and_bwd: bool
         ):
-            assert self.rank in (
-                0,
-                1,
-            ), f"Expects world size of 2 but got {self.world_size}"
+            if self.rank not in (0, 1):
+                raise AssertionError(
+                    f"Expects world size of 2 but got {self.world_size}"
+                )
             for (n1, p1), (n2, p2) in zip(
                 ddp_model.module.named_parameters(),
                 fsdp_model.named_parameters(),
@@ -1031,7 +1039,8 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
         )
         # Check that writing back with mismatched shape errors
         fsdp = fsdp_model.module  # for brevity
-        assert self.rank in (0, 1), f"Expects world size of 2 but got {self.world_size}"
+        if self.rank not in (0, 1):
+            raise AssertionError(f"Expects world size of 2 but got {self.world_size}")
         with self.assertRaisesRegex(RuntimeError, "Cannot writeback"):
             # Change the gradient to a new one with 1 added to each dimension
             # to force a shape mismatch when writing back
@@ -1173,9 +1182,8 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
                     clean_tensor_name(tup[0]) for tup in self.named_parameters()
                 ]
                 params = [tup[1] for tup in self.named_parameters()]
-                assert param_shapes[0] is not None and param_shapes[1] is not None, (
-                    "`param_sizes` should be set"
-                )
+                if not (param_shapes[0] is not None and param_shapes[1] is not None):
+                    raise AssertionError("`param_sizes` should be set")
                 assert_equal_fn(
                     param_names,
                     [

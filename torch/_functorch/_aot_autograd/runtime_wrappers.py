@@ -1983,7 +1983,7 @@ def _backward_prologue_functional(
             OutputType.custom_function_view,
         ]
         and issubclass(info.raw_type, torch.Tensor)
-        and info.requires_grad
+        and info.requires_grad_for_backward
     ]
     # intermediate bases always require gradients, and always participate in the backward graph.
     flat_bw_args_with_grads = [
@@ -3133,3 +3133,20 @@ def make_runtime_safe(
             for meta in maybe_subclass_meta.grad_input_metas:
                 if isinstance(meta, SubclassCreationMeta):
                     meta.make_runtime_safe()
+
+
+# Register inductor_compiled_code py_impl for _AnalyzeCustomOpInputOutputMode here
+# rather than in wrap.py to avoid a circular import (wrap.py is loaded during
+# torch.__init__ before torch._dynamo is available).
+from torch._higher_order_ops.wrap import inductor_compiled_code
+
+
+@inductor_compiled_code.py_impl(_AnalyzeCustomOpInputOutputMode)
+def _inductor_compiled_code_analyze_mode(
+    mode: _AnalyzeCustomOpInputOutputMode, func: Any, inputs: Any
+) -> Any:
+    # Re-dispatch without re-entering the mode so that other modes on the
+    # stack (e.g. FakeTensorMode) still get a chance to handle the HOP.
+    # _pop_mode_temporarily keeps our mode off the stack during this call,
+    # so we won't recurse back here.
+    return inductor_compiled_code(func, inputs)

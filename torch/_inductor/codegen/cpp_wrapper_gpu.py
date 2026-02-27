@@ -5,7 +5,7 @@ import dataclasses
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import Self
 
 import sympy
@@ -66,7 +66,7 @@ TRITON_SIGNATURE_TO_CPP = {
 }
 
 
-def signature_is_tma_desc(sig: Optional[str]) -> bool:
+def signature_is_tma_desc(sig: str | None) -> bool:
     """Check if a Triton signature represents a TMA descriptor."""
     if not sig:
         return False
@@ -251,10 +251,9 @@ class DeferredTritonCallWrapper:
     kernel_name: str
     kernel_name_to_body: dict[str, str]
     arg_types: list[Any]
-    triton_meta: Optional[dict[str, Any]] = None
-    inductor_meta: Optional[dict[str, Any]] = None
-    # Maps TMA descriptor arg names to their underlying tensor names
-    tma_tensor_args: Optional[dict[str, str]] = None
+    triton_meta: dict[str, Any] | None = None
+    inductor_meta: dict[str, Any] | None = None
+    tma_tensor_args: dict[str, str] | None = None
 
     def _get_tma_args(self) -> dict[str, str]:
         """Get mapping of TMA descriptor arg names to their signature types."""
@@ -267,12 +266,9 @@ class DeferredTritonCallWrapper:
         }
 
     def _get_cpp_param_type(
-        self, name: str, arg_type: Any, signature: Optional[dict[str, str]] = None
+        self, name: str, arg_type: Any, signature: dict[str, str] | None = None
     ) -> str:
         """Get the C++ parameter declaration for a given arg type."""
-        if isinstance(arg_type, UnwrapUnspecArg):
-            return f"const {name}_type_& {name}"
-
         if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
             # TMA descriptors need non-const references since their fields
             # are passed as void* pointers to kernel launch args
@@ -293,8 +289,8 @@ class DeferredTritonCallWrapper:
         prefix: IndentedBuffer,
         wrapper: CppWrapperGpu,
         arg_names: list[str],
-        arg_types: Optional[list[Any]] = None,
-        signature: Optional[dict[str, str]] = None,
+        arg_types: list[Any] | None = None,
+        signature: dict[str, str] | None = None,
     ) -> None:
         """Write the wrapper function signature including template and parameters."""
         if arg_types is None:
@@ -923,9 +919,9 @@ class CppWrapperGpu(CppWrapperCpu):
     @staticmethod
     def create(
         is_subgraph: bool,
-        subgraph_name: Optional[str],
-        parent_wrapper: Optional[PythonWrapperCodegen],
-        partition_signatures: Optional[GraphPartitionSignature] = None,
+        subgraph_name: str | None,
+        parent_wrapper: PythonWrapperCodegen | None,
+        partition_signatures: GraphPartitionSignature | None = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -1003,9 +999,9 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         kernel_body: str,
-        metadata: Optional[str] = None,
+        metadata: str | None = None,
         gpu: bool = True,
-        cpp_definition: Optional[str] = None,
+        cpp_definition: str | None = None,
     ):
         if gpu:
             self._kernel_name_to_body[kernel_name] = kernel_body
@@ -1147,12 +1143,12 @@ static struct TritonKernelCompileInit {{
 
     def generate_args_decl(
         self,
-        code: Union[IndentedBuffer, Self],
+        code: IndentedBuffer | Self,
         call_args,
         arg_types,
         arg_signatures,
         is_triton_kernel=True,
-        scratch_spaces: Optional[dict[str, int]] = None,
+        scratch_spaces: dict[str, int] | None = None,
     ):
         """
         Generates any declarations of args to pass into a kernel call, and then returns the arg names.

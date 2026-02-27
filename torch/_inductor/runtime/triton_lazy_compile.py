@@ -154,13 +154,14 @@ def run_triton_kernel_with_autotune(
 
     from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 
-    cubin_path = cached_params.get(get_cpp_wrapper_cubin_path_name())
-    if cubin_path is None:
-        raise RuntimeError(f"cubin path not found in cached params for {kernel_name}")
-
-    mangled_name = cached_params.get("mangled_name", "")
-    num_warps = cached_params.get("num_warps", 4)
-    shared_mem = cached_params.get("shared_mem", 0)
+    cubin_path_name = get_cpp_wrapper_cubin_path_name()
+    for key in (cubin_path_name, "mangled_name", "num_warps", "shared_mem"):
+        if key not in cached_params:
+            raise RuntimeError(f"{key} not found in cached params for {kernel_name}")
+    cubin_path = cached_params[cubin_path_name]
+    mangled_name = cached_params["mangled_name"]
+    num_warps = cached_params["num_warps"]
+    shared_mem = cached_params["shared_mem"]
 
     config = config_to_dict(launcher.config) if launcher.config else {}
     xblock = config.get("XBLOCK", 128)

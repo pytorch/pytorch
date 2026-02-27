@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Generic, Literal, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -108,9 +108,9 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
-_KernelType = Union[
-    CompiledKernel, StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel
-]
+_KernelType = (
+    CompiledKernel | StaticallyLaunchedCudaKernel | StaticallyLaunchedXpuKernel
+)
 _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
@@ -4124,7 +4124,7 @@ class GridExpr:
     @classmethod
     def from_meta_lazy(
         cls,
-        inductor_meta: Optional[dict[str, Any]],
+        inductor_meta: dict[str, Any] | None,
         kernel_name: str,
     ) -> GridExpr:
         """Factory method for lazy compile mode."""
