@@ -58,6 +58,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
+    has_free_unbacked_symbols,
     IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
@@ -2974,7 +2975,9 @@ class ExpandView(BaseView):
                 old_size[i]
             ):
                 pass
-            else:
+            elif not has_free_unbacked_symbols(
+                old_size
+            ) and not has_free_unbacked_symbols(new_size):
                 # Sanity check: Expect broadcast compatibility
                 #
                 # NB: new_size[i] == old_size[i] is expected to already be
