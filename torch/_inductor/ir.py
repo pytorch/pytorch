@@ -2181,6 +2181,9 @@ class WelfordReduction(MultiOutputReduction):
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ) -> Sequence[TensorBox]:
         assert reduction_type in ("welford_reduce", "welford_combine")
+        assert not config.mtia.disable_welford_reduction, (
+            "welford reduction usage is explicitly disabled, please check you config"
+        )
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
