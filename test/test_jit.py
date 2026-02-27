@@ -104,10 +104,10 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
-    GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
+    GRAPH_EXECUTOR, suppress_warnings, ProfilingMode, \
     TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
-    skipIfCrossRef, skipIfTorchDynamo
+    skipIfCrossRef, skipIfSandcastle, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -1786,7 +1786,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
-    @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
+    @skipIfSandcastle("gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
     def test_cpp(self):
@@ -5718,7 +5718,7 @@ a")
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_batchnorm_fuser_cpu(self):
         code = '''
@@ -5748,7 +5748,7 @@ a")
 
     @slowTest
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_fuser_double_float_codegen(self):
         fns = ['log', 'log10', 'log1p', 'log2', 'lgamma', 'exp', 'expm1', 'erf',
@@ -5799,7 +5799,7 @@ a")
             test_dispatch(fn, lookup_c_equivalent_fn(fn) + 'f(', torch.float, binary=True)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
+    @skipIfSandcastle("NYI: fuser support for Sandcastle")
     @enable_cpu_fuser
     def test_fuser_double_literal_precision(self):
         code = '''
@@ -13642,7 +13642,7 @@ dedent """
             self.checkScript(test_oct, (n,))
             self.checkScript(test_hex, (n,))
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
+    @skipIfSandcastle("NYI: TemporaryFileName support for Sandcastle")
     def test_get_set_state(self):
         class Root(torch.jit.ScriptModule):
             __constants__ = ['number']
@@ -15372,7 +15372,7 @@ dedent """
             return 1
         self.assertEqual(fun(), 1)
 
-    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
+    @skipIfSandcastle("NYI: TemporaryFileName support for Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)
         tester = self

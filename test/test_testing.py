@@ -20,7 +20,7 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
+    IS_JETSON, IS_MACOS, IS_WINDOWS, TestCase, run_tests, slowTest, skipIfMeta, skipIfSandcastle,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
     TEST_WITH_ROCM, decorateIf
 )
@@ -172,7 +172,7 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, True)
 
-    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+    @skipIfSandcastle("Skipping because doesn't work on sandcastle")
     @dtypes(torch.complex64, torch.complex128)
     def test_isclose_complex(self, device, dtype):
         tests = (
@@ -525,7 +525,7 @@ instantiate_device_type_tests(TestTesting, globals())
 class TestFrameworkUtils(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
-    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
+    @skipIfSandcastle("Skipping because doesn't work on sandcastle")
     def test_filtering_env_var(self):
         # Test environment variable selected device type test generator.
         test_filter_file_template = """\
@@ -1227,7 +1227,7 @@ class TestAssertCloseSparseCOO(TestCase):
                 fn()
 
 
-@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSR testing")
+@skipIfMeta("Not all sandcastle jobs support CSR testing")
 class TestAssertCloseSparseCSR(TestCase):
     def test_matching(self):
         crow_indices = (0, 1, 2)
@@ -1285,7 +1285,7 @@ class TestAssertCloseSparseCSR(TestCase):
                 fn()
 
 
-@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support CSC testing")
+@skipIfMeta("Not all sandcastle jobs support CSC testing")
 class TestAssertCloseSparseCSC(TestCase):
     def test_matching(self):
         ccol_indices = (0, 1, 2)
@@ -1343,7 +1343,7 @@ class TestAssertCloseSparseCSC(TestCase):
                 fn()
 
 
-@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support BSR testing")
+@skipIfMeta("Not all sandcastle jobs support BSR testing")
 class TestAssertCloseSparseBSR(TestCase):
     def test_matching(self):
         crow_indices = (0, 1, 2)
@@ -1401,7 +1401,7 @@ class TestAssertCloseSparseBSR(TestCase):
                 fn()
 
 
-@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Not all sandcastle jobs support BSC testing")
+@skipIfMeta("Not all sandcastle jobs support BSC testing")
 class TestAssertCloseSparseBSC(TestCase):
     def test_matching(self):
         ccol_indices = (0, 1, 2)

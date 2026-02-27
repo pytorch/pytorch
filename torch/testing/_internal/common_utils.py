@@ -5504,6 +5504,34 @@ def xfail_inherited_tests(tests):
     return deco
 
 
+def skipIfSandcastle(reason):
+    """
+    Decorator to skip the test if run in sandcastle
+    """
+    return skipIfSandcastleOr(True, reason)
+
+
+def skipIfSandcastleOr(condition, reason):
+    """
+    Decorator to skip the test if run in sandcastle and condition matches
+    """
+    return unittest.skipIf(IS_SANDCASTLE or condition, reason)  # noqa: F821
+
+
+def skipIfMeta(reason):
+    """
+    Decorator to skip the test if run on Meta infrastructure
+    """
+    return skipIfMetaOr(True, reason)
+
+
+def skipIfMetaOr(condition, reason):
+    """
+    Decorator to skip the test if run on Meta infrastructure and condition matches
+    """
+    return skipIfSandcastleOr(IS_FBCODE or condition, reason)  # noqa: F821
+
+
 def skip_but_pass_in_sandcastle_if(condition, reason):
     """
     Similar to unittest.skipIf, however in the sandcastle environment it just
