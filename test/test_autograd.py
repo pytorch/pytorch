@@ -3732,13 +3732,12 @@ class TestAutograd(TestCase):
         leaf.grad_dtype = None  # Allow any dtype
         self.assertIsNone(leaf.grad_dtype)
 
-        # get/set grad_dtype is only allowed on leaf tensors
+        # grad_dtype can be read from non-leaf tensors
         non_leaf = leaf * 2
         self.assertFalse(non_leaf.is_leaf)
-        with self.assertRaisesRegex(
-            RuntimeError, "grad_dtype can only be accessed on leaf tensors"
-        ):
-            _ = non_leaf.grad_dtype
+        # Should not raise when reading grad_dtype on non-leaf tensor
+        self.assertEqual(non_leaf.grad_dtype, non_leaf.dtype)
+        # But setting grad_dtype on non-leaf tensor should fail
         with self.assertRaisesRegex(
             RuntimeError, "grad_dtype can only be set on leaf tensors"
         ):

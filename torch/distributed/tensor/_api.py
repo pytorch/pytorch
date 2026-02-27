@@ -108,7 +108,9 @@ class _ToTorchTensor(torch.autograd.Function):
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to pollute the Tensor
         # object stored in the _local_tensor of this DTensor.
-        return local_tensor.view_as(local_tensor)
+        local_tensor = local_tensor.view_as(local_tensor)
+        local_tensor.grad_dtype = input.grad_dtype
+        return local_tensor
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor | None):  # type: ignore[override]
@@ -231,6 +233,7 @@ class _FromTorchTensor(torch.autograd.Function):
             # pyrefly: ignore [unexpected-keyword]
             requires_grad=input.requires_grad,
         )
+        dist_tensor.grad_dtype = input.grad_dtype
         return dist_tensor
 
     @staticmethod

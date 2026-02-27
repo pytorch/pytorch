@@ -3211,8 +3211,6 @@ static PyObject* THPVariable_get_grad_dtype(THPVariable* self, void* unused) {
     return handle_torch_function_getter(self, "grad_dtype");
   }
   const auto& var = THPVariable_Unpack(self);
-  TORCH_CHECK(
-      !var.grad_fn(), "grad_dtype can only be accessed on leaf tensors.");
   if (!var.grad_dtype().has_value()) {
     Py_RETURN_NONE;
   } else {

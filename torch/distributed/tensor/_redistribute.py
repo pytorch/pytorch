@@ -1711,13 +1711,17 @@ class Redistribute(torch.autograd.Function):
             target_spec = current_spec
 
         # pyrefly: ignore [bad-argument-type]
-        return dtensor.DTensor(
+        dist_tensor = dtensor.DTensor(
             # pyrefly: ignore [bad-argument-count]
             output,
             target_spec,
             # pyrefly: ignore [unexpected-keyword]
             requires_grad=input.requires_grad,
         )
+        # set grad_dtype to backward_dtype
+        if backward_dtype is not None:
+            dist_tensor.grad_dtype = backward_dtype
+        return dist_tensor
 
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
