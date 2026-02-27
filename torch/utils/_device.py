@@ -60,7 +60,6 @@ def _device_constructors():
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
     def __init__(self, device) -> None:
-        # pyrefly: ignore [read-only]
         self.device = torch.device(device)
         self.prev_mode: Optional[DeviceContext] = None
 

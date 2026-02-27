@@ -112,9 +112,12 @@ class TestFSDPCheckpoint(FSDPTest):
             return self.ffn(x)
 
     def _verify_parity(self, losses, outputs, models):
-        assert losses
-        assert outputs
-        assert models
+        if not losses:
+            raise AssertionError("Expected losses to be non-empty")
+        if not outputs:
+            raise AssertionError("Expected outputs to be non-empty")
+        if not models:
+            raise AssertionError("Expected models to be non-empty")
         for l, o in zip(losses[1:], outputs[1:]):
             self.assertEqual(losses[0], l)
             self.assertEqual(outputs[0], o)

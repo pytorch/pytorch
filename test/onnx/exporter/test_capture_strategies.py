@@ -32,7 +32,8 @@ class ExportStrategiesTest(common_utils.TestCase):
 
         result = strategy_cls()(model, (a, b), kwargs=None, dynamic_shapes=None)
         ep = result.exported_program
-        assert ep is not None
+        if ep is None:
+            raise AssertionError("ep is None")
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
     def test_draft_export_on_data_dependent_model(self):
@@ -53,7 +54,8 @@ class ExportStrategiesTest(common_utils.TestCase):
             expected_warning = "1 issue(s) found during export, and it was not able to soundly produce a graph."
             self.assertIn(expected_warning, str(cm.output))
         ep = result.exported_program
-        assert ep is not None
+        if ep is None:
+            raise AssertionError("ep is None")
         torch.testing.assert_close(ep.module()(a, b), model(a, b))
 
 

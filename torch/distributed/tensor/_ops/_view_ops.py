@@ -782,6 +782,11 @@ register_op_strategy_map(
     strict_view=True,
 )
 register_op_strategy_map(
+    aten.view_copy.default,
+    Tensor.view,
+    schema_info=RuntimeSchemaInfo(1),
+)
+register_op_strategy_map(
     aten.reshape.default, torch.reshape, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
@@ -795,6 +800,9 @@ register_op_strategy_map(
 )
 register_op_strategy_map(
     aten.expand.default, Tensor.expand, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.expand_copy.default, Tensor.expand, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
     aten.permute.default, torch.permute, schema_info=RuntimeSchemaInfo(1)
