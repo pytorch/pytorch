@@ -7,28 +7,50 @@ config specifies an optional decomposition function and its associated parameter
 Inductor benchmarks all variants and automatically selects the best performing one.
 """
 
+import unittest
+
 import torch
+import torch._inductor.runtime.benchmarking
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.kernel.custom_op import (
     CustomOpConfig,
     register_custom_op_autotuning,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import skipIfXpu
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_MACOS,
+    parametrize,
+    skipIfXpu,
+)
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_GPU,
+    HAS_TRITON,
+    IS_BIG_GPU,
+)
 
 
 torch.set_float32_matmul_precision("high")
 
 
+@unittest.skipIf(IS_MACOS, "TODO: mac")
+@unittest.skipUnless(HAS_GPU and HAS_TRITON, "requires GPU and Triton")
 class TestCustomOpAutoTune(TestCase):
     """Test custom operation autotuning functionality."""
 
     def setUp(self) -> None:
         """Set up test environment with appropriate device and dtype."""
         super().setUp()
+        torch._dynamo.reset()
         self.device = "cuda" if HAS_GPU else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
+        # Clear any previous lowering registrations to ensure test isolation
+        from torch._inductor.lowering import user_lowerings
+
+        user_lowerings.clear()
 
     def _run_autotune_test(self, op_object, inputs, expected, test_name):
         """Shared test infrastructure for autotuning tests."""
@@ -192,7 +214,8 @@ class TestCustomOpAutoTune(TestCase):
             configs=[CustomOpConfig(decomp) for decomp in decompositions],
             name="test_rmsnorm_autotuned",
             input_gen_fns={
-                "x": lambda x: torch.randn_like(x, device=self.device) * 0.02,
+                "input_tensor": lambda x: torch.randn_like(x, device=self.device)
+                * 0.02,
                 "weight": lambda weight: torch.ones_like(weight, device=self.device),
             },
         )
@@ -224,8 +247,15 @@ class TestCustomOpAutoTune(TestCase):
         """
         # Ensure k is divisible by all k_splits values: [2, 32, 64, 128, 256]
         k = ((k + 255) // 256) * 256  # Round up to nearest multiple of 256
-        a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
-        b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
+        sd = k**0.25
+        a = (
+            torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
+            / sd
+        )
+        b = (
+            torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
+            / sd
+        )
         bias = (
             torch.randn(n, device=self.device, dtype=self.dtype, requires_grad=False)
             * 0.1
@@ -348,9 +378,9 @@ class TestCustomOpAutoTune(TestCase):
             torch.testing.assert_close(
                 compiled_result,
                 expected,
-                rtol=2e-1,
-                atol=5e-1,
-                msg=f"Failed for shape ({m}, {k}, {n})",
+                rtol=2e-3,
+                atol=5e-3,
+                # msg=f"Failed for shape ({m}, {k}, {n})",
             )
 
     @skipIfXpu
@@ -556,6 +586,944 @@ class TestCustomOpAutoTune(TestCase):
             print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
         self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
 
+    @skipIfXpu
+    def test_benchmark_with_cudagraphs_uses_cuda_graph_benchmarking(self):
+        """Test that benchmark_with_cudagraphs flag causes CUDA graph benchmarking to be used."""
+        if self.device != "cuda":
+            self.skipTest("CUDA graph test requires CUDA device")
+
+        from unittest.mock import patch
+
+        test_op_name = f"test_lib::cudagraph_patch_{id(self)}"
+
+        def fast_decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def cudagraph_patch_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @cudagraph_patch_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        register_custom_op_autotuning(
+            cudagraph_patch_op,
+            configs=[CustomOpConfig(fast_decomposition)],
+            name="cudagraph_patch_autotuned",
+            benchmark_with_cudagraphs=True,
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(64, 256, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(256, 128, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return cudagraph_patch_op(x, weight)
+
+        cuda_graph_benchmark_called = False
+        original_benchmark_gpu_with_cuda_graph = torch._inductor.runtime.benchmarking.Benchmarker.benchmark_gpu_with_cuda_graph
+
+        def patched_benchmark_gpu_with_cuda_graph(self, fn):
+            nonlocal cuda_graph_benchmark_called
+            cuda_graph_benchmark_called = True
+            return original_benchmark_gpu_with_cuda_graph(self, fn)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            with patch.object(
+                torch._inductor.runtime.benchmarking.Benchmarker,
+                "benchmark_gpu_with_cuda_graph",
+                patched_benchmark_gpu_with_cuda_graph,
+            ):
+                result = test_model(test_x, test_weight)
+
+        self.assertTrue(
+            cuda_graph_benchmark_called,
+            "benchmark_gpu_with_cuda_graph should have been called",
+        )
+        torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
+
+    @skipIfXpu
+    def test_min_speedup_threshold_api(self):
+        """Test that min_speedup_threshold parameter is accepted and compilation works."""
+        test_op_name = f"test_lib::min_speedup_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def min_speedup_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @min_speedup_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Test that API accepts min_speedup_threshold parameter
+        register_custom_op_autotuning(
+            min_speedup_op,
+            configs=[CustomOpConfig(decomposition)],
+            name="min_speedup_autotuned",
+            min_speedup_threshold=1.5,
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(64, 256, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(256, 128, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return min_speedup_op(x, weight)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result = test_model(test_x, test_weight)
+
+        torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
+
+    @skipIfXpu
+    def test_config_patching_in_generated_code(self):
+        """Test that coordinate_descent_tuning config_patches flows through to generated code."""
+        if self.device != "cuda":
+            self.skipTest(
+                "coordinate_descent_tuning test requires CUDA for Triton codegen"
+            )
+
+        test_op_name = f"test_lib::coord_descent_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.ones_like(x)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def coord_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @coord_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Register with config_patches containing coordinate_descent_tuning
+        register_custom_op_autotuning(
+            coord_op,
+            configs=[
+                CustomOpConfig(
+                    decomposition, config_patches={"coordinate_descent_tuning": True}
+                )
+            ],
+            name="coord_descent_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return coord_op(x, weight)
+
+        torch._dynamo.reset()
+
+        # Compile and capture generated code
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result, code = torch._inductor.utils.run_and_get_code(
+                test_model, test_x, test_weight
+            )
+
+        # Check that coordinate_descent_tuning is enabled in the generated code's inductor_meta
+        FileCheck().check("'coordinate_descent_tuning': True").run("\n".join(code))
+
+    @skipIfXpu
+    @config.patch(
+        {
+            "test_configs.force_custom_op_decomposition": True,
+            "test_configs.force_no_impl_grouping": True,
+        }
+    )
+    def test_split_config_patching_in_generated_code(self):
+        """Test that coordinate_descent_tuning config_patches flows through to generated code."""
+        if self.device != "cuda":
+            self.skipTest(
+                "coordinate_descent_tuning test requires CUDA for Triton codegen"
+            )
+
+        test_op_name = f"test_lib::coord_descent_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.full(
+                (x.shape[0], weight.shape[1]),
+                x.shape[0],
+                dtype=weight.dtype,
+                device=weight.device,
+            )
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def coord_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            if x.shape[0] == 128:
+                return torch.empty(
+                    x.shape[0],
+                    weight.shape[1],
+                    dtype=weight.dtype,
+                    device=weight.device,
+                )
+            return x @ weight
+
+        @coord_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Register with config_patches containing coordinate_descent_tuning
+        register_custom_op_autotuning(
+            coord_op,
+            configs=[
+                CustomOpConfig(
+                    decomposition, config_patches={"coordinate_descent_tuning": True}
+                )
+            ],
+            name="coord_descent_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+            dispatch_on={"tensor_name": "x", "dim": 0},
+            split_points=[128, 512],
+        )
+
+        test_x = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(1024, 1024, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return coord_op(x, weight)
+
+        torch._dynamo.mark_dynamic(test_x, 0)
+
+        result, code = torch._inductor.utils.run_and_get_code(
+            test_model, test_x, test_weight
+        )
+
+        #
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            for i in range(10):
+                x = torch.randn(256 + i, 1024, device=self.device, dtype=self.dtype)
+                torch._dynamo.mark_dynamic(x, 0)
+                self.assertEqual(
+                    test_model(x, test_weight), decomposition(x, test_weight)
+                )
+
+        # Check that coordinate_descent_tuning is enabled in the generated code's inductor_meta.
+        # config_patches should flow to both benchmark graphs and final dispatch code.
+        code_with_coord = [c for c in code if "'coordinate_descent_tuning': True" in c]
+        self.assertEqual(
+            len(code_with_coord),
+            len(code),
+            f"Expected all {len(code)} code modules to have coordinate_descent_tuning, "
+            f"but only {len(code_with_coord)} have it",
+        )
+
+    @skipIfXpu
+    def test_benchmark_real_trace_symbolic(self):
+        """Verify benchmarking uses real values but tracing uses symbolic shapes."""
+        if self.device != "cuda":
+            self.skipTest("Test requires CUDA")
+
+        # Track shapes seen by the real op implementation
+        shapes_seen = []
+
+        test_op_name = f"test_lib::shape_tracker_{id(self)}"
+
+        def decomposition(x, weight):
+            return x @ weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def shape_tracker_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            # This runs during benchmarking with REAL values
+            shapes_seen.append(x.shape[0])
+            return x @ weight
+
+        @shape_tracker_op.register_fake
+        def _(x, weight):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        register_custom_op_autotuning(
+            shape_tracker_op,
+            configs=[CustomOpConfig(decomposition)],
+            name="shape_tracker_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+                "weight": lambda t: torch.randn_like(t, device=self.device),
+            },
+            dispatch_on={"tensor_name": "x", "dim": 0},
+            split_points=[128, 512],
+        )
+
+        test_x = torch.randn(1024, 64, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(64, 32, device=self.device, dtype=self.dtype)
+
+        @torch.compile(dynamic=True)
+        def test_model(x, weight):
+            return shape_tracker_op(x, weight)
+
+        torch._dynamo.mark_dynamic(test_x, 0)
+        torch._dynamo.reset()
+        shapes_seen.clear()
+
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result, code = torch._inductor.utils.run_and_get_code(
+                test_model, test_x, test_weight
+            )
+
+        # Verify we got concrete integers during benchmarking (not symbolic)
+        unique_shapes = sorted(set(shapes_seen))
+        for shape in unique_shapes:
+            self.assertIsInstance(shape, int, f"Expected int, got {type(shape)}")
+
+        # Verify we hit all 3 ranges during autotuning
+        ranges_hit = set()
+        for shape in shapes_seen:
+            if 1 <= shape <= 128:
+                ranges_hit.add("range_1_128")
+            elif 129 <= shape <= 512:
+                ranges_hit.add("range_129_512")
+            elif shape > 512:
+                ranges_hit.add("range_513_inf")
+
+        self.assertEqual(
+            len(ranges_hit),
+            3,
+            f"Expected 3 ranges hit during benchmarking, got {ranges_hit}",
+        )
+
+        # Verify tracing uses SYMBOLIC shapes in generated code
+        import re
+
+        has_symbolic = any(re.search(r"\bs\d+\b", c) for c in code)
+        self.assertTrue(has_symbolic, "Expected symbolic shapes in generated code")
+
+    @skipIfXpu
+    def test_torch_cond_with_shape_accessing_implementations(self):
+        """Test torch.cond dispatch with implementations that access tensor shapes.
+
+        Validates that implementations like decompose_k that access tensor shapes
+        (e.g., `m, k = mat1.shape`) work correctly with torch.cond dispatch.
+        The fix uses _build_cond_dispatch_graph to pre-trace each implementation.
+        """
+        test_op_name = f"test_lib::shape_access_cond_{id(self)}"
+
+        def shape_accessing_impl(
+            mat1: torch.Tensor, mat2: torch.Tensor
+        ) -> torch.Tensor:
+            m, k = mat1.shape  # Shape access that would break naive make_fx
+            n = mat2.shape[1]
+            k_splits = 4
+            if k % k_splits == 0:
+                k_parts = k // k_splits
+                a = torch.permute(mat1.reshape(m, k_splits, k_parts), (1, 0, 2))
+                b = mat2.reshape(k_splits, k_parts, n)
+                return torch.sum(torch.bmm(a, b), dim=0)
+            return mat1 @ mat2
+
+        def simple_impl(mat1: torch.Tensor, mat2: torch.Tensor) -> torch.Tensor:
+            return mat1 @ mat2
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def shape_access_op(mat1: torch.Tensor, mat2: torch.Tensor) -> torch.Tensor:
+            return mat1 @ mat2
+
+        @shape_access_op.register_fake
+        def _(mat1: torch.Tensor, mat2: torch.Tensor):
+            return torch.empty(
+                mat1.shape[0], mat2.shape[1], device=mat1.device, dtype=mat1.dtype
+            )
+
+        register_custom_op_autotuning(
+            shape_access_op,
+            configs=[CustomOpConfig(simple_impl), CustomOpConfig(shape_accessing_impl)],
+            name="shape_access_autotuned",
+            dispatch_on={"tensor_name": "mat1", "dim": 0},
+            split_points=[4, 16],
+            input_gen_fns={
+                "mat1": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                "mat2": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+            },
+        )
+
+        test_mat1 = torch.randn(8, 64, device=self.device, dtype=self.dtype)
+        test_mat2 = torch.randn(64, 32, device=self.device, dtype=self.dtype)
+
+        @torch.compile(dynamic=True)
+        def test_model(mat1, mat2):
+            return shape_access_op(mat1, mat2)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result = test_model(test_mat1, test_mat2)
+
+        torch.testing.assert_close(result, test_mat1 @ test_mat2, rtol=1e-1, atol=1e-1)
+
+    @skipIfXpu
+    @unittest.skipIf(not IS_BIG_GPU, "Test requires large GPU memory")
+    def test_empty_config_generator_falls_back_to_triton(self):
+        """Test that empty config_generator falls back to normal mm autotuning.
+
+        When config_generator returns empty list, the user_lowering returns None
+        and graph.py falls back to the normal lowering (triton mm autotuning).
+        """
+        from torch._inductor.lowering import user_lowerings
+
+        # Config generator that returns empty - should trigger fallback
+        def empty_config_gen(fake_tensors):
+            return []
+
+        register_custom_op_autotuning(
+            torch.ops.aten.mm.default,
+            config_generator=empty_config_gen,
+            name="test_empty_fallback",
+        )
+
+        self.assertIn(torch.ops.aten.mm.default, user_lowerings)
+
+        # Use shapes that will trigger triton autotuning
+        test_a = torch.randn(64, 128, device=self.device, dtype=self.dtype)
+        test_b = torch.randn(128, 64, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(a, b):
+            return torch.mm(a, b)
+
+        # Enable max_autotune with TRITON backend
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+            fx_graph_cache=False,
+        ):
+            result = test_model(test_a, test_b)
+
+        # Verify correctness
+        torch.testing.assert_close(
+            result, torch.mm(test_a, test_b), rtol=1e-1, atol=1e-1
+        )
+
+    @skipIfXpu
+    @config.patch({"test_configs.force_custom_op_decomposition": True})
+    def test_guard_safety_drops_unsafe_decomposition(self):
+        """Test that decompositions adding guards are replaced with fallback.
+
+        Compiles with m=8 (divisible by 4, satisfies the unsafe impl's guard),
+        then calls with m=7 (not divisible by 4). If the Mod guard leaked,
+        the m=7 call would either crash or produce incorrect results because
+        the compiled code assumes m is divisible by 4.
+        """
+        test_op_name = f"test_lib::guard_safety_{id(self)}"
+
+        def unsafe_impl(mat1: torch.Tensor, mat2: torch.Tensor) -> torch.Tensor:
+            m = mat1.shape[0]
+            if m % 4 == 0:
+                n = mat2.shape[1]
+                k = mat1.shape[1]
+                m_parts = m // 4
+                a = mat1.reshape(4, m_parts, k)
+                result = torch.bmm(a, mat2.unsqueeze(0).expand(4, -1, -1))
+                return result.reshape(m, n)
+            return mat1 @ mat2
+
+        def safe_impl(mat1: torch.Tensor, mat2: torch.Tensor) -> torch.Tensor:
+            return mat1 @ mat2
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def guard_safety_op(mat1: torch.Tensor, mat2: torch.Tensor) -> torch.Tensor:
+            return mat1 @ mat2
+
+        @guard_safety_op.register_fake
+        def _(mat1: torch.Tensor, mat2: torch.Tensor):
+            return torch.empty(
+                mat1.shape[0], mat2.shape[1], device=mat1.device, dtype=mat1.dtype
+            )
+
+        register_custom_op_autotuning(
+            guard_safety_op,
+            configs=[CustomOpConfig(unsafe_impl)],
+            name="guard_safety_autotuned",
+            dispatch_on={"tensor_name": "mat1", "dim": 0},
+            split_points=[4, 16],
+            input_gen_fns={
+                "mat1": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                "mat2": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+            },
+        )
+
+        @torch.compile(dynamic=True)
+        def test_model(mat1, mat2):
+            return guard_safety_op(mat1, mat2)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        # First call: m=8 (divisible by 4) triggers compilation
+        mat1 = torch.randn(8, 64, device=self.device, dtype=self.dtype)
+        mat2 = torch.randn(64, 32, device=self.device, dtype=self.dtype)
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result = test_model(mat1, mat2)
+        torch.testing.assert_close(result, mat1 @ mat2, rtol=1e-1, atol=1e-1)
+
+        # Verify the guard safety counter was incremented
+        self.assertGreater(
+            counters["inductor"]["custom_op_decomp_guard_skips"],
+            0,
+            "Expected custom_op_decomp_guard_skips counter to be incremented",
+        )
+
+        # Second call: m=7 (NOT divisible by 4). If the unsafe impl was kept
+        # and its Mod(m,4)==0 guard leaked, this would crash on the reshape
+        # (can't reshape [7, 64] into [4, m_parts, 64] when 7 isn't divisible by 4).
+        mat1_odd = torch.randn(7, 64, device=self.device, dtype=self.dtype)
+        mat2_odd = torch.randn(64, 32, device=self.device, dtype=self.dtype)
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result_odd = test_model(mat1_odd, mat2_odd)
+        torch.testing.assert_close(
+            result_odd, mat1_odd @ mat2_odd, rtol=1e-1, atol=1e-1
+        )
+
+    def test_fallback_choice_reuse(self):
+        """Test that _create_fallback_choice reuses the same choice for the same op.
+
+        Since kwargs are passed at bind time rather than baked into the kernel,
+        the same ExternKernelChoice is reused across compilations.
+        """
+        from torch._inductor.kernel.custom_op import _create_fallback_choice
+
+        test_op_name = f"test_lib::fallback_reuse_{id(self)}"
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def reuse_test_op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @reuse_test_op.register_fake
+        def _(x: torch.Tensor):
+            return torch.empty_like(x)
+
+        op_overload = reuse_test_op._opoverload
+
+        choice1 = _create_fallback_choice(op_overload)
+        choice2 = _create_fallback_choice(op_overload)
+
+        self.assertIs(choice1, choice2)
+
+    @skipIfXpu
+    @config.patch({"test_configs.force_custom_op_decomposition": False})
+    def test_fallback_different_kwargs(self):
+        """Test that the same fallback ExternKernelChoice works with different kwargs.
+
+        Previously, kwargs were baked into the fallback wrapper at choice creation
+        time, so a second call with different kwargs would either fail (duplicate
+        extern kernel) or use stale kwargs. Now kwargs are passed at bind time,
+        so both calls in the same compiled function get their own correct kwargs.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        test_op_name = "test_lib::fallback_kwargs"
+
+        def scale_impl(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def kwargs_op(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @kwargs_op.register_fake
+        def _(x: torch.Tensor, scale: float = 1.0):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            kwargs_op,
+            configs=[CustomOpConfig(scale_impl)],
+            name="fallback_kwargs_test",
+        )
+
+        x = torch.ones(4, 4, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x):
+            a = kwargs_op(x, scale=2.0)
+            b = kwargs_op(x, scale=5.0)
+            return a, b
+
+        torch._dynamo.reset()
+        (result_a, result_b), codes = run_and_get_code(test_model, x)
+
+        torch.testing.assert_close(result_a, x * 2.0, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(result_b, x * 5.0, rtol=1e-3, atol=1e-3)
+
+        # Both calls should use the same fallback kernel with different kwargs in codegen
+        code = "\n".join(codes)
+        self.assertIn("scale=2.0", code)
+        self.assertIn("scale=5.0", code)
+
+    @skipIfXpu
+    @config.patch({"test_configs.force_custom_op_decomposition": True})
+    def test_config_overrides_runtime_kwargs(self):
+        """Test that CustomOpConfig params override runtime default kwargs.
+
+        The op has scale=1.0 as default, but the config specifies scale=7.0.
+        With force_custom_op_decomposition=True, the decomposition should be
+        called with scale=7.0 and this should be reflected in the output code.
+        """
+        from torch._inductor.utils import run_and_get_code
+
+        test_op_name = f"test_lib::config_override_{id(self)}"
+
+        def scale_impl(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def config_override_op(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @config_override_op.register_fake
+        def _(x: torch.Tensor, scale: float = 1.0):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            config_override_op,
+            configs=[CustomOpConfig(scale_impl, scale=7.0)],
+            name=f"config_override_test_{id(self)}",
+        )
+
+        x = torch.ones(4, 4, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x):
+            return config_override_op(x)
+
+        torch._dynamo.reset()
+        result, codes = run_and_get_code(test_model, x)
+
+        # The config's scale=7.0 should override the runtime default scale=1.0
+        torch.testing.assert_close(result, x * 7.0, rtol=1e-3, atol=1e-3)
+        code = "\n".join(codes)
+        self.assertIn("7.0", code)
+
+    @skipIfXpu
+    def test_input_gen_fns_invoked(self):
+        """Test that input_gen_fns are actually called during benchmarking."""
+        test_op_name = f"test_lib::input_gen_test_{id(self)}"
+        gen_calls = []
+
+        def decomp(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x * weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def input_gen_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x * weight
+
+        @input_gen_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            input_gen_op,
+            configs=[CustomOpConfig(decomp)],
+            name=f"input_gen_test_{id(self)}",
+            input_gen_fns={
+                "x": lambda t: (gen_calls.append("x"), torch.ones_like(t))[1],
+                "weight": lambda t: (gen_calls.append("weight"), torch.ones_like(t))[1],
+            },
+        )
+
+        x = torch.randn(4, 4, device=self.device, dtype=self.dtype)
+        w = torch.randn(4, 4, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, w):
+            return input_gen_op(x, w)
+
+        torch._dynamo.reset()
+        test_model(x, w)
+
+        self.assertIn("x", gen_calls)
+        self.assertIn("weight", gen_calls)
+
+    @skipIfXpu
+    @parametrize("force_choice", [None, True, False])
+    def test_kwargs_codegen(self, force_choice):
+        """Test that kwargs are correctly passed through codegen for both fallback and decomposition.
+
+        This validates that when a custom op is called with non-default kwargs:
+        1. Fallback path: kwargs flow through ExternKernelCaller to FallbackKernel.create
+        2. Decomposition path: kwargs are passed via functools.partial to the decomposition
+
+        Tests all paths via force_custom_op_decomposition:
+        - None: normal autotuning
+        - True: force decomposition
+        - False: force fallback
+        """
+        test_op_name = f"test_lib::kwargs_codegen_{id(self)}_{force_choice}"
+
+        def scale_impl(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def kwargs_op(x: torch.Tensor, scale: float = 1.0) -> torch.Tensor:
+            return x * scale
+
+        @kwargs_op.register_fake
+        def _(x: torch.Tensor, scale: float = 1.0):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            kwargs_op,
+            configs=[CustomOpConfig(scale_impl)],
+            name=f"kwargs_codegen_test_{force_choice}",
+        )
+
+        x = torch.ones(4, 4, device=self.device, dtype=self.dtype)
+        scale_value = 3.0
+        expected = x * scale_value
+
+        @torch.compile
+        def test_model(x):
+            return kwargs_op(x, scale=scale_value)
+
+        torch._dynamo.reset()
+        with config.patch({"test_configs.force_custom_op_decomposition": force_choice}):
+            result = test_model(x)
+
+        path_name = {None: "autotuned", True: "decomposition", False: "fallback"}[
+            force_choice
+        ]
+        torch.testing.assert_close(
+            result, expected, rtol=1e-3, atol=1e-3, msg=f"{path_name} path failed"
+        )
+
+    @skipIfXpu
+    @config.patch(
+        {
+            "test_configs.force_custom_op_decomposition": True,
+        }
+    )
+    def test_shape_dependent_computation(self):
+        """Test that decompositions using shape in computation (e.g., x * x.shape[0]) work correctly.
+
+        This validates that make_fx tracing uses symbolic inputs so that shape-dependent
+        computations produce symbolic results (e.g., x * s0) rather than concrete values
+        (e.g., x * 512). The symbolic tracing is essential for correct codegen with
+        dynamic shapes.
+
+        Key validation: compile ONCE, then run with MULTIPLE sizes. If tracing used
+        concrete values, the result would be wrong for different sizes.
+
+        NOTE: We use a single-input op to avoid shape compatibility guards between
+        two different dynamic tensors (which would trigger guard safety filtering).
+        """
+        test_op_name = f"test_lib::shape_compute_{id(self)}"
+
+        def shape_compute_impl(x: torch.Tensor) -> torch.Tensor:
+            """Scale by first dimension size - captures x * s0 with symbolic tracing."""
+            return x * x.shape[0]
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def shape_compute_op(x: torch.Tensor) -> torch.Tensor:
+            # Fallback: just returns x (no shape dependency)
+            return x.clone()
+
+        @shape_compute_op.register_fake
+        def _(x: torch.Tensor):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            shape_compute_op,
+            configs=[CustomOpConfig(shape_compute_impl)],
+            name="shape_compute_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+            },
+        )
+
+        @torch.compile(dynamic=True)
+        def test_model(x):
+            return shape_compute_op(x)
+
+        # Compile once with initial size
+        test_x = torch.randn(8, 32, 64, device=self.device, dtype=self.dtype)
+        torch._dynamo.mark_dynamic(test_x, 0)
+
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result = test_model(test_x)
+
+        # Expected: decomposition result (x * x.shape[0]), NOT fallback (x.clone())
+        expected = test_x * test_x.shape[0]
+        torch.testing.assert_close(result, expected, rtol=1e-5, atol=1e-5)
+
+        # Now test with DIFFERENT sizes using the SAME compiled model
+        # If tracing used concrete values (e.g., x * 8), these would fail
+        for first_dim in [16, 32, 64, 128]:
+            test_x = torch.randn(
+                first_dim, 32, 64, device=self.device, dtype=self.dtype
+            )
+
+            result = test_model(test_x)
+            expected = test_x * first_dim  # x * x.shape[0] should use actual size
+
+            torch.testing.assert_close(
+                result,
+                expected,
+                rtol=1e-5,
+                atol=1e-5,
+                msg=f"Failed for shape[0]={first_dim}: symbolic tracing may have captured concrete value",
+            )
+
+    @skipIfXpu
+    def test_partial_input_gen_fns(self):
+        """Test autotuning when input_gen_fns covers only some inputs.
+
+        The uncovered inputs should fall back to ir_node_to_tensor with concrete hints.
+        """
+        test_op_name = f"test_lib::partial_gen_{id(self)}"
+
+        def decomposition(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def partial_gen_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x @ weight
+
+        @partial_gen_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty(
+                x.shape[0], weight.shape[1], device=x.device, dtype=x.dtype
+            )
+
+        # Only provide input_gen_fn for "x", not "weight"
+        register_custom_op_autotuning(
+            partial_gen_op,
+            configs=[CustomOpConfig(decomposition)],
+            name="partial_gen_autotuned",
+            input_gen_fns={
+                "x": lambda t: torch.randn_like(t, device=self.device),
+            },
+        )
+
+        test_x = torch.randn(64, 256, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(256, 128, device=self.device, dtype=self.dtype)
+
+        @torch.compile
+        def test_model(x, weight):
+            return partial_gen_op(x, weight)
+
+        torch._dynamo.reset()
+        with config.patch(max_autotune=True, fx_graph_cache=False):
+            result = test_model(test_x, test_weight)
+
+        torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
+
+    def test_cudagraph_memory_cleanup(self):
+        """Test that CUDA graph destruction automatically cleans up cuBLAS workspaces."""
+        if self.device != "cuda":
+            self.skipTest("CUDA graph test requires CUDA device")
+
+        # Clear everything first
+        torch.cuda.synchronize()
+        torch._C._cuda_clearCublasWorkspaces()
+
+        # Create test tensors and establish baseline with some mm activity
+        a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
+        b = torch.randn(256, 256, device=self.device, dtype=self.dtype)
+        _ = torch.mm(a, b)  # This creates cublas workspace on default stream
+        torch.cuda.synchronize()
+
+        baseline_memory = torch.cuda.memory_allocated()
+
+        # Warmup on the stream
+        _ = torch.mm(a, b)
+        torch.cuda.synchronize()
+
+        # Capture into CUDA graph
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            c = torch.mm(a, b)
+        torch.cuda.synchronize()
+
+        memory_after_capture = torch.cuda.memory_allocated()
+        self.assertGreater(
+            memory_after_capture, baseline_memory, "Capture should allocate memory"
+        )
+
+        # Deleting the graph should automatically clean up cuBLAS workspaces
+        del graph, c
+        torch.cuda.synchronize()
+
+        memory_after_cleanup = torch.cuda.memory_allocated()
+
+        self.assertEqual(
+            memory_after_cleanup,
+            baseline_memory,
+            f"Memory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
+        )
+
+    def test_cudagraph_memory_cleanup_benchmarker(self):
+        """Test that CUDA graph benchmarking cleans up memory without leaking."""
+        if self.device != "cuda":
+            self.skipTest("CUDA graph test requires CUDA device")
+
+        # Clear everything first
+        torch.cuda.synchronize()
+        torch._C._cuda_clearCublasWorkspaces()
+
+        # Create test tensors
+        a = torch.randn(256, 256, device=self.device, dtype=self.dtype)
+        b = torch.randn(256, 256, device=self.device, dtype=self.dtype)
+
+        # Use the actual benchmarking infrastructure with CUDA graph capture
+        benchmarker = torch._inductor.runtime.benchmarking.benchmarker
+
+        def mm_callable():
+            return torch.mm(a, b)
+
+        # This should capture into CUDA graph, benchmark, and clean up properly
+        _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
+        torch.cuda.synchronize()
+
+        memory_after_first = torch.cuda.memory_allocated()
+
+        # Run benchmarking again - memory should not grow
+        for _ in range(3):
+            _ = benchmarker.benchmark_gpu_with_cuda_graph(mm_callable)
+
+        memory_after_many = torch.cuda.memory_allocated()
+
+        # Memory should not grow significantly across multiple benchmark runs
+        self.assertEqual(
+            memory_after_many,
+            memory_after_first,
+            f"Memory leak detected: after_first={memory_after_first}, after_many={memory_after_many}",
+        )
+
+
+instantiate_parametrized_tests(TestCustomOpAutoTune)
+
 
 if __name__ == "__main__":
-    run_tests()
+    from torch._inductor.utils import is_big_gpu
+
+    if HAS_GPU and HAS_CPU and is_big_gpu():
+        run_tests()

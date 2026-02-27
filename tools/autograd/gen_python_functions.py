@@ -617,9 +617,10 @@ def load_deprecated_signatures(
         }
         schema_args_by_name = {a.name: a for a in schema.arguments.flat_all}
         for name in call_args:
-            assert name in schema_args_by_name or name in known_constants, (
-                f"deprecation definition: Unrecognized value {name}"
-            )
+            if name not in schema_args_by_name and name not in known_constants:
+                raise AssertionError(
+                    f"deprecation definition: Unrecognized value {name}"
+                )
 
         # Map deprecated signature arguments to their aten signature and test
         # if the types and alias annotation match.
@@ -684,9 +685,10 @@ def load_deprecated_signatures(
                     function=pair.function,
                 )
             )
-        assert any_schema_found, (
-            f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
-        )
+        if not any_schema_found:
+            raise AssertionError(
+                f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+            )
 
     return results
 
@@ -1369,10 +1371,11 @@ def emit_single_dispatch(
                 and f.func.kind() == SchemaKind.inplace
             ):
                 # note(crcrpar): `_foreach_pow.ScalarAndTensor` does NOT have its in-place
-                # variant and it unlikely to have it in the future. Thus it's safe to have the following assert.
-                assert self_arg is not None and is_tensor_list_type(
-                    self_arg.argument.type
-                )
+                # variant and it unlikely to have it in the future. Thus it's safe to have the following check.
+                if self_arg is None or not is_tensor_list_type(self_arg.argument.type):
+                    raise AssertionError(
+                        "Expected self_arg to be a tensor list type for inplace foreach"
+                    )
                 return_stmt = """PyObject* self_tensorlist = _r.args[0];
 Py_INCREF(self_tensorlist);
 return self_tensorlist;

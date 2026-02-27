@@ -128,7 +128,8 @@ def check_file(filename: str) -> LintMessage | None:
 
     if has_changes:
         try:
-            assert original_lines is not None
+            if original_lines is None:
+                raise AssertionError("original_lines is None")
             original = b"".join(original_lines).decode("utf-8")
             replacement = b"".join(lines).decode("utf-8")
         except Exception as err:

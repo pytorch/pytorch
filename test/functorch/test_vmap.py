@@ -454,7 +454,8 @@ class TestVmapAPI(TestCase):
             return OrderedDict([("sin", y), ("cos", t.cos())])
 
         out = vmap(f)(x)
-        assert isinstance(out, OrderedDict)
+        if not isinstance(out, OrderedDict):
+            raise AssertionError(f"Expected OrderedDict, got {type(out)}")
         expected = f(x)
         self.assertEqual(out["sin"], expected["sin"])
         self.assertEqual(out["cos"], expected["cos"])
@@ -1162,41 +1163,62 @@ class TestVmapAPI(TestCase):
         def func1(x, y, z, w):
             with torch.autocast(dtype=amp_dtype, device_type=device):
                 e_float16 = torch.matmul(x, y)
-                assert e_float16.dtype == amp_dtype, e_float16.dtype
+                if e_float16.dtype != amp_dtype:
+                    raise AssertionError(
+                        f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
+                    )
                 f_float16 = torch.matmul(z, e_float16)
-                assert f_float16.dtype == amp_dtype, f_float16.dtype
+                if f_float16.dtype != amp_dtype:
+                    raise AssertionError(
+                        f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
+                    )
             return torch.matmul(w, f_float16.float())
 
         expected = func1(a_float32, b_float32, c_float32, d_float32)
         out = vmap(func1)(a_float32, b_float32, c_float32, d_float32)
-        assert expected.allclose(out)
+        if not expected.allclose(out):
+            raise AssertionError("Expected func1 output to be close to vmap output")
 
         # Case 2, autocast decorator inside vmapped function
         @torch.autocast(dtype=amp_dtype, device_type=device)
         def func2(x, y, z, w):
             e_float16 = torch.matmul(x, y)
-            assert e_float16.dtype == amp_dtype, e_float16.dtype
+            if e_float16.dtype != amp_dtype:
+                raise AssertionError(
+                    f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
+                )
             f_float16 = torch.matmul(z, e_float16)
-            assert f_float16.dtype == amp_dtype, f_float16.dtype
+            if f_float16.dtype != amp_dtype:
+                raise AssertionError(
+                    f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
+                )
             return torch.matmul(w, f_float16)
 
         expected = func2(a_float32, b_float32, c_float32, d_float32)
         out = vmap(func2)(a_float32, b_float32, c_float32, d_float32)
-        assert expected.allclose(out)
+        if not expected.allclose(out):
+            raise AssertionError("Expected func2 output to be close to vmap output")
 
         # Case 3, autocast is outside vmapped function
         def func3(x, y, z, w):
             e_float16 = torch.matmul(x, y)
-            assert e_float16.dtype == amp_dtype, e_float16.dtype
+            if e_float16.dtype != amp_dtype:
+                raise AssertionError(
+                    f"Expected dtype {amp_dtype}, got {e_float16.dtype}"
+                )
             f_float16 = torch.matmul(z, e_float16)
-            assert f_float16.dtype == amp_dtype, f_float16.dtype
+            if f_float16.dtype != amp_dtype:
+                raise AssertionError(
+                    f"Expected dtype {amp_dtype}, got {f_float16.dtype}"
+                )
             return torch.matmul(w, f_float16)
 
         with torch.autocast(dtype=amp_dtype, device_type=device):
             expected = func3(a_float32, b_float32, c_float32, d_float32)
             out = vmap(func3)(a_float32, b_float32, c_float32, d_float32)
 
-        assert expected.allclose(out)
+        if not expected.allclose(out):
+            raise AssertionError("Expected func3 output to be close to vmap output")
 
     @unittest.skip("Somehow, vmap and autocast do not work on CPU")
     def test_vmap_autocast_cpu(self):
@@ -1281,14 +1303,19 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0, return_nt=False):
     if isinstance(in_dims, int):
         in_dims = (in_dims,) * len(inputs)
     bdim_sizes = [inp.size(dim) for inp, dim in zip(inputs, in_dims) if dim is not None]
-    assert all(bdim_size == bdim_sizes[0] for bdim_size in bdim_sizes)
+    if not all(bdim_size == bdim_sizes[0] for bdim_size in bdim_sizes):
+        raise AssertionError(f"Expected all bdim sizes to be equal, got {bdim_sizes}")
     bdim_size = bdim_sizes[0]
     results = tuple(op(*slice_inputs(inputs, in_dims, i)) for i in range(bdim_size))
 
-    assert len(results) > 0
+    if len(results) == 0:
+        raise AssertionError("Expected at least one result")
     op_has_single_return = not isinstance(results[0], tuple)
     if op_has_single_return:
-        assert all(isinstance(result, torch.Tensor) for result in results)
+        if not all(isinstance(result, torch.Tensor) for result in results):
+            raise AssertionError(
+                "Expected all results to be torch.Tensor for single-return op"
+            )
         if isinstance(out_dims, int):
             out_dims = (out_dims,) * 1
         if return_nt:
@@ -1296,9 +1323,11 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0, return_nt=False):
         else:
             return torch.stack(results, dim=out_dims[0])
 
-    assert all(isinstance(result, tuple) for result in results)
+    if not all(isinstance(result, tuple) for result in results):
+        raise AssertionError("Expected all results to be tuples")
     num_returns = len(results[0])
-    assert all(len(result) == num_returns for result in results)
+    if not all(len(result) == num_returns for result in results):
+        raise AssertionError(f"Expected all results to have {num_returns} elements")
     if isinstance(out_dims, int):
         out_dims = (out_dims,) * num_returns
     if return_nt:
@@ -2084,7 +2113,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
         x = torch.randn(B0, 2, 5, 7)
 
         def foo(x):
-            assert x.stride() == (7 * 5, 7, 1)
+            if x.stride() != (7 * 5, 7, 1):
+                raise AssertionError(f"Expected stride (35, 7, 1), got {x.stride()}")
             return x
 
         vmap(foo)(x)
@@ -2092,7 +2122,10 @@ class TestVmapOperators(Namespace.TestVmapBase):
         x = torch.randn(2, B0, 5, 7).movedim(1, 0)
 
         def bar(x):
-            assert x.stride() == (7 * 5 * B0, 7, 1)
+            if x.stride() != (7 * 5 * B0, 7, 1):
+                raise AssertionError(
+                    f"Expected stride ({7 * 5 * B0}, 7, 1), got {x.stride()}"
+                )
             return x
 
         vmap(bar)(x)
@@ -2444,7 +2477,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         # is_contiguous on empty tensor is True
         def bar(x):
-            assert x.is_contiguous()
+            if not x.is_contiguous():
+                raise AssertionError("Expected tensor to be contiguous")
             return x
 
         vmap(bar)(torch.randn(B0, 0, 3))
@@ -3304,9 +3338,11 @@ class TestVmapOperators(Namespace.TestVmapBase):
         x = torch.tensor([1 + 1j, 2 + 1j])
 
         def foo(x):
-            assert not x.is_conj()
+            if x.is_conj():
+                raise AssertionError("Expected x to not be conj")
             y = x.conj()
-            assert y.is_conj()
+            if not y.is_conj():
+                raise AssertionError("Expected y to be conj")
             return y
 
         res = vmap(foo)(x)
@@ -3682,7 +3718,8 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                     allow_unused=True,
                 )
                 outputs = tuple(out for out in outputs if out is not None)
-                assert len(outputs) > 0
+                if len(outputs) == 0:
+                    raise AssertionError("Expected at least one non-None output")
                 return outputs
 
             self._vmap_test(
@@ -4634,7 +4671,8 @@ class TestVmapOperatorsOpInfo(TestCase):
             return U @ diag_S @ Vh
 
         opinfos = [op for op in op_db if op.name == "linalg.svd"]
-        assert len(opinfos) > 0
+        if len(opinfos) == 0:
+            raise AssertionError("Expected at least one opinfo for linalg.svd")
 
         for op in opinfos:
             self.opinfo_vmap_test(
@@ -4661,7 +4699,8 @@ class TestVmapOperatorsOpInfo(TestCase):
             return Q @ diag_L @ Qh
 
         opinfos = [op for op in op_db if op.name == "linalg.eigh"]
-        assert len(opinfos) > 0
+        if len(opinfos) == 0:
+            raise AssertionError("Expected at least one opinfo for linalg.eigh")
 
         for op in opinfos:
             self.opinfo_vmap_test(
@@ -5325,7 +5364,10 @@ class TestRandomness(TestCase):
             return torch.ones([batch_size, 3, 3, 14, 14], device=device)
         if batched_input == "last":
             return torch.ones([3, 3, 14, 14, batch_size], device=device)
-        assert batched_input == "none"
+        if batched_input != "none":
+            raise AssertionError(
+                f"Expected batched_input to be 'none', got '{batched_input}'"
+            )
         return torch.ones([3, 3, 14, 14], device=device)
 
     def _assert_all_slices_equal(self, tensor):
@@ -5337,7 +5379,10 @@ class TestRandomness(TestCase):
         slices_equal = vmap(vmap(lambda x, y: (x == y).all(), (0, None)), (None, 0))(
             tensor, tensor
         )
-        assert slices_equal.shape == (B0, B0)
+        if slices_equal.shape != (B0, B0):
+            raise AssertionError(
+                f"Expected shape ({B0}, {B0}), got {slices_equal.shape}"
+            )
         slices_equal.diagonal().zero_()
         self.assertEqual(slices_equal, torch.zeros_like(slices_equal))
 
@@ -5366,7 +5411,10 @@ class TestRandomness(TestCase):
                 return 0
             if batched_string == "last":
                 return -1
-            assert batched_string == "none"
+            if batched_string != "none":
+                raise AssertionError(
+                    f"Expected batched_string to be 'none', got '{batched_string}'"
+                )
             return None
 
         batched_strings = batched_strings + (
@@ -5500,7 +5548,10 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(vmap_result)
             return
 
-        assert randomness == "same"
+        if randomness != "same":
+            raise AssertionError(
+                f"Expected randomness to be 'same', got '{randomness}'"
+            )
         self._assert_all_slices_equal(vmap_result)
 
     @parametrize("randomness", ["error", "same", "different"])
@@ -5530,7 +5581,10 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(vmap_result)
             return
 
-        assert randomness == "same"
+        if randomness != "same":
+            raise AssertionError(
+                f"Expected randomness to be 'same', got '{randomness}'"
+            )
         self._assert_all_slices_equal(vmap_result)
 
     @parametrize("randomness", ["error", "same", "different"])
@@ -5579,7 +5633,10 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(vmap_result)
             return
 
-        assert randomness == "same"
+        if randomness != "same":
+            raise AssertionError(
+                f"Expected randomness to be 'same', got '{randomness}'"
+            )
         self._assert_all_slices_equal(vmap_result)
 
     @parametrize("randomness", ["error", "same", "different"])
@@ -5623,7 +5680,10 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(vmap_result)
             return
 
-        assert randomness == "same"
+        if randomness != "same":
+            raise AssertionError(
+                f"Expected randomness to be 'same', got '{randomness}'"
+            )
         self._assert_all_slices_equal(vmap_result)
 
     @parametrize("randomness", ["error", "same", "different"])
@@ -5673,7 +5733,10 @@ class TestRandomness(TestCase):
                     self.assertEqual(expected, vmap_result)
                 return
 
-            assert randomness == "same"
+            if randomness != "same":
+                raise AssertionError(
+                    f"Expected randomness to be 'same', got '{randomness}'"
+                )
             if batched_input != "none":
                 passed = passed[0]
             expected = op(passed, 0)
@@ -5870,7 +5933,12 @@ class TestRandomness(TestCase):
                 self._assert_all_slices_unique(vmap_result)
                 self.assertEqual(vmap_result, expected)
             else:
-                assert batched_input == "none" and batched_other == "none"
+                if batched_input != "none" or batched_other != "none":
+                    raise AssertionError(
+                        f"Expected batched_input='none' and batched_other='none', "
+                        f"got batched_input='{batched_input}' and "
+                        f"batched_other='{batched_other}'"
+                    )
                 expected = op(input, other, always_batched)
                 self._assert_all_slices_equal(vmap_result)
                 for i in range(B0):
@@ -5957,7 +6025,8 @@ class TestRandomness(TestCase):
                 )
 
             ret = input.flatten(start_idx, end_idx)
-            assert ret.dim() == final_size
+            if ret.dim() != final_size:
+                raise AssertionError(f"Expected dim {final_size}, got {ret.dim()}")
             return ret
 
         def op(input, _):
@@ -6280,8 +6349,14 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
     # Creates an NT matching another NT's number of components and
     # shape / ragged structure for all dims specified to be -1.
     def _nt_from_similar(self, other, dims):
-        assert len(dims) == other.dim()
-        assert dims[0] == -1 or dims[0] == other.size(0)
+        if len(dims) != other.dim():
+            raise AssertionError(
+                f"Expected len(dims) == other.dim(), got {len(dims)} != {other.dim()}"
+            )
+        if dims[0] != -1 and dims[0] != other.size(0):
+            raise AssertionError(
+                f"Expected dims[0] to be -1 or {other.size(0)}, got {dims[0]}"
+            )
 
         ret_sizes = []
         for t in other.unbind():
@@ -6335,7 +6410,8 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
 
     def test_nt_acts_as_dense_in_vmap(self, device):
         def f(x):
-            assert not x.is_nested
+            if x.is_nested:
+                raise AssertionError("Expected x to not be nested inside vmap")
             return x
 
         x = self._create_nt([5, None, 3], device=device)

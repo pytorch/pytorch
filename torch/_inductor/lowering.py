@@ -9,7 +9,6 @@ import logging
 import math
 import operator
 import os
-import textwrap
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Collection, Iterable, Sequence
@@ -112,6 +111,8 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 
 log = logging.getLogger(__name__)
 lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
+# User-registered lowerings that take priority over built-in lowerings.
+user_lowerings: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
@@ -300,7 +301,9 @@ def is_boolean_type(x: Any) -> TypeGuard[Union[TensorBox, bool]]:
 
 
 def get_promoted_dtype(
-    *args: Any, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    *args: Any,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    return_compute_dtype: bool = False,
 ) -> torch.dtype:
     def construct_input(inp: Any) -> Any:
         if isinstance(inp, (Number, sympy.Basic)):
@@ -311,8 +314,10 @@ def get_promoted_dtype(
             return torch.zeros([1] * dim, dtype=inp.get_dtype())
 
     inps = [construct_input(arg) for arg in args]
-    _, dtype = elementwise_dtypes(*inps, type_promotion_kind=type_promotion_kind)
-    return dtype
+    compute_dtype, result_dtype = elementwise_dtypes(
+        *inps, type_promotion_kind=type_promotion_kind
+    )
+    return compute_dtype if return_compute_dtype else result_dtype
 
 
 def get_overloads(aten_fn):
@@ -349,7 +354,7 @@ def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
         x.get_size()
     ):
         return x
-    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
     cur_device = x.get_device()
     if (
         cur_device is not None
@@ -735,6 +740,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if not isinstance(input, (list, tuple)):
                 broadcast_inputs.append([input] * len(a_list_input))
             else:
+                # pyrefly: ignore [bad-argument-type]
                 broadcast_inputs.append(input)
 
         groups = group_foreach_args(zip(*broadcast_inputs))
@@ -1178,7 +1184,7 @@ def expand(x, sizes):
         return x
 
     if not free_unbacked_symbols(x.get_size()):
-        x_size_product = V.graph.sizevars.size_hint_or_throw(
+        x_size_product = V.graph.sizevars.guarding_hint_or_throw(
             sympy_product(x.get_size())
         )
         # TODO: It would be better to realize the input if any of its sizes
@@ -1188,7 +1194,7 @@ def expand(x, sizes):
         if x_size_product > 0 and not free_unbacked_symbols(sizes):
             # maybe realize input before broadcasting it
             x.mark_reuse(
-                V.graph.sizevars.size_hint_or_throw(sympy_product(sizes))
+                V.graph.sizevars.guarding_hint_or_throw(sympy_product(sizes))
                 // x_size_product
             )
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -1247,13 +1253,16 @@ def repeat(x, repeats):
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
 
+    # TODO Laith is there better check
     if not free_unbacked_symbols(old_size) and not free_unbacked_symbols(new_size):
-        old_size_product = V.graph.sizevars.size_hint_or_throw(sympy_product(old_size))
+        old_size_product = V.graph.sizevars.guarding_hint_or_throw(
+            sympy_product(old_size)
+        )
         if old_size_product > 0:
             # maybe realize the input but skip for unbacked symints since it'll
             # choke on the size hint.
             x.mark_reuse(
-                V.graph.sizevars.size_hint_or_throw(sympy_product(new_size))
+                V.graph.sizevars.guarding_hint_or_throw(sympy_product(new_size))
                 // old_size_product
             )
 
@@ -1749,6 +1758,8 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     scale_loader = scale.make_loader()
     zero_point_loader = zero_point.make_loader()
 
+    device = input.get_device()
+
     def inner_fn(idx):
         input = input_loader(idx)
         _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
@@ -1757,6 +1768,9 @@ def quantized_decomposed_quantize_per_tensor_tensor(
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
+        if device and device.type == "cpu":
+            val = ops.fma(input, ops.reciprocal(_scale), _zero_point)
+            return ops.round_to_int(val, dtype)
         val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
         clamped = ops.minimum(ops.maximum(val, qmin), qmax)
@@ -1960,14 +1974,16 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
     if offset_negative:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
-                original_shape[dim1] + offset, original_shape[dim2]
+                original_shape[dim1] + offset,
+                original_shape[dim2],
             ),
             0,  # type: ignore[arg-type]
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
-                original_shape[dim1], original_shape[dim2] - offset
+                original_shape[dim1],
+                original_shape[dim2] - offset,
             ),
             0,  # type: ignore[arg-type]
         )
@@ -2133,9 +2149,9 @@ def unfold(x, dimension, size, step):
     sizevars.check_lt(0, step)  # type: ignore[arg-type]
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
-    if sizevars.size_hint_or_throw(dim_size) > 0:
+    if sizevars.guarding_hint_or_throw(dim_size) > 0:
         x.mark_reuse(
-            sizevars.size_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
+            sizevars.guarding_hint_or_throw(CeilDiv(new_dim_size * size, dim_size))
         )
 
     out_size = [*sizes[:dim], new_dim_size, *sizes[dim + 1 :], size]
@@ -2790,10 +2806,7 @@ def constrain_to_fake_tensor(arg, fake_arg):
     if isinstance(fake_arg, FakeScriptObject):
         return arg
     if isinstance(arg, ir.IRNode):
-        meta_stride_expr = [
-            s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
-        ]
-        return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
+        return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
     if isinstance(arg, dict):
         return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
     elif isinstance(arg, (tuple, list)):
@@ -3663,7 +3676,6 @@ def empty_strided(
 ):
     assert isinstance(size, (list, tuple))
     assert isinstance(stride, (list, tuple, type(None)))
-    assert_nyi(not pin_memory, "pin_memory")
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     # pyrefly: ignore [bad-argument-type]
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
@@ -3686,6 +3698,7 @@ def empty_strided(
         dtype=dtype,
         size=size,
         stride=stride,
+        is_pinned=pin_memory or False,
     )
     return pointwise
 
@@ -3710,7 +3723,7 @@ def new_empty_strided(
 
 @register_lowering(prims.copy_strided.default)
 def copy_strided(x, stride):
-    stride = [V.graph.sizevars.size_hint_or_throw(s) for s in stride]
+    stride = V.graph.sizevars.guarding_hints_or_throw(stride)
     stride_order = sorted(range(len(stride)), key=stride.__getitem__)
     return ir.ExternKernel.require_stride_order(x, stride_order)
 
@@ -4731,13 +4744,13 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode, *, dilation=None
             + 2 * (stride[i] - 1),
             stride[i],
         )
-        if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
+        if V.graph.sizevars.guard_or_false(
+            sympy.Ge((x_alt - 1) * stride[i] - x - padding[i], 0)
+        ):
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
-            V.graph.sizevars.check_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
-        if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
+        if V.graph.sizevars.guard_or_false(sympy.Eq(x_out, x_alt)):
             # ceil mode is actually a no-op, lets guard on that
-            V.graph.sizevars.check_equals(x_out, x_alt)
             ceil_mode = False
         else:
             x_out = x_alt
@@ -5618,14 +5631,6 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallback_avg_pool2d = fallback_handler(
-    aten.avg_pool2d.default, add_to_fallback_set=False
-)
-fallback_avg_pool3d = fallback_handler(
-    aten.avg_pool3d.default, add_to_fallback_set=False
-)
-
-
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
 def avg_pool2d(
     x,
@@ -5668,6 +5673,13 @@ def avg_pool3d(
         divisor_override,
         dim=3,
     )
+
+
+fallbacks_avg_poolnd = [
+    fallback_handler(aten.avg_pool1d.default, add_to_fallback_set=False),
+    fallback_handler(aten.avg_pool2d.default, add_to_fallback_set=False),
+    fallback_handler(aten.avg_pool3d.default, add_to_fallback_set=False),
+]
 
 
 def _avg_poolnd(
@@ -5714,17 +5726,27 @@ def _avg_poolnd(
 
     new_size = list(batch) + list(h_out)
     dtype = x.get_dtype()
+    # compute in higher-precision until scaling
+    output_dtype = get_promoted_dtype(
+        x,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        return_compute_dtype=True,
+    )
+
+    def fn_inner(idx, reduction_idx):
+        prefix = idx[:-dim]
+        bh = idx[-dim:]
+        ih = reduction_idx
+        ih = [bh[i] * stride[i] + ih[i] - padding[i] for i in range(dim)]
+        return x_loader([*prefix, *ih])
 
     window_size = functools.reduce(operator.mul, kernel_size)
-    if window_size > 25:
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        if dim == 2:
-            fallback = fallback_avg_pool2d
-        elif dim == 3:
-            fallback = fallback_avg_pool3d
-        else:
-            raise ValueError(f"Unknown dim: {dim}")
 
+    if window_size > 25 and any(
+        V.graph.sizevars.statically_known_true(sympy.Ne(k, s))
+        for k, s in zip(kernel_size, stride)
+    ):
+        fallback = fallbacks_avg_poolnd[dim - 1]
         return fallback(
             x,
             kernel_size,
@@ -5735,36 +5757,39 @@ def _avg_poolnd(
             divisor_override,
         )
 
-    def fn_sum(idx, loader):
-        prefix = idx[:-dim]
-        b = idx[-dim:]
-        total = None
-        for ih in itertools.product(*[range(kernel_size[i]) for i in range(dim)]):
-            inp = [b[i] * stride[i] + ih[i] - padding[i] for i in range(dim)]
-            val = loader([*prefix, *inp])
-            if total is None:
-                total = val
-            else:
-                total = ops.add(val, total)
-        return total
+    # TODO: remove this when #100331 is merged. We only do this
+    # for window_size <=25 to avoid performance regressions compared
+    # to the previous algorithm which unrolled manually for <=25
+    context = (
+        config.patch(unroll_reductions_threshold=25)
+        if window_size <= 25
+        else contextlib.nullcontext()
+    )
+
+    device = x.get_device()
+    assert device is not None
+
+    with context:
+        rv = Reduction.create(
+            reduction_type="sum",
+            input_node=x,
+            device=device,
+            dst_dtype=output_dtype,
+            src_dtype=dtype,
+            inner_fn=fn_inner,
+            ranges=new_size,
+            reduction_ranges=kernel_size,
+        )
+    if hasattr(rv.data, "data") and isinstance(rv.data.data, Reduction):
+        # Only realize if reduction isn't unrolled
+        rv.realize()
 
     if not had_padding or divisor_override:
         divisor = divisor_override if divisor_override else window_size
-        if dtype.is_floating_point:
-            scale = 1 / divisor
-
-            def fn(idx):
-                return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
-
-        else:
-
-            def fn(idx):
-                # C style integer division as done in native/cpu/AvgPoolKernel.cpp
-                return ops.truncdiv(fn_sum(idx, x_loader), ops.constant(divisor, dtype))
-
+        result = div_prim(rv, divisor)
     else:
 
-        def fn(idx):
+        def fn_count(idx):
             bh = idx[-dim:]
 
             divide_factors = []
@@ -5776,20 +5801,17 @@ def _avg_poolnd(
                     hend = sympy.Min(hend, h[i])
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
-            divide_factor = functools.reduce(ops.mul, divide_factors)
-            if dtype.is_floating_point:
-                return ops.truediv(fn_sum(idx, x_loader), divide_factor)
-            # C style integer division as done in native/cpu/AvgPoolKernel.cpp
-            return ops.truncdiv(fn_sum(idx, x_loader), divide_factor)
+            return functools.reduce(ops.mul, divide_factors)
 
-    rv = Pointwise.create(
-        device=x.get_device(),
-        dtype=dtype,
-        inner_fn=fn,
-        ranges=new_size,
-    )
-    # TODO(jansel): should we force these to be realized?
-    return rv
+        divide_factor = Pointwise.create(
+            device=x.get_device(),
+            dtype=dtype,
+            inner_fn=fn_count,
+            ranges=new_size,
+        )
+        result = div_prim(rv, divide_factor)
+
+    return to_dtype(result, dtype)
 
 
 fallback_avg_pool2d_backward = fallback_handler(
@@ -6270,6 +6292,15 @@ def _make_reduction_inner(
 
 def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
     def inner(x, axis=None, keepdims=False, *, dtype=None):
+        # For argmax/argmin on boolean tensors, cast to int32 first to ensure
+        # correct comparison in Triton. See https://github.com/pytorch/pytorch/issues/174069
+        # Only apply on Triton backend; MPS handles bool comparisons natively.
+        if (
+            reduction_type in ("argmax", "argmin")
+            and x.get_dtype() == torch.bool
+            and is_triton(x)
+        ):
+            x = to_dtype(x, torch.int32)
         kwargs = _make_reduction_inner(
             x,
             axis=axis,
@@ -6962,9 +6993,13 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
     This is computed as: fma(value, tensor1 * tensor2, self)
 
-    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types
-    or AMD GPUs, we fall back to regular arithmetic since libdevice.fma doesn't support
-    integers and AMD has different FMA semantics.
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
+    we fall back to regular arithmetic since FMA doesn't support integers.
+
+    For floating-point types, we use mul_rn (round-to-nearest multiplication)
+    to force rounding of the product before the FMA. This prevents Triton's
+    compiler from fusing the multiplication with the FMA, matching eager's
+    rounding behavior.
 
     When emulate_precision_casts is False, we return NotImplemented to use the
     decomposition instead.
@@ -6996,7 +7031,12 @@ def addcmul(self, tensor1, tensor2, *, value=1):
 
         # Match eager order: self + value * (tensor1 * tensor2)
         # Compute tensor1 * tensor2 first
-        t1_times_t2 = ops.mul(t1_val, t2_val)
+        if use_fma:
+            # Use mul_rn to force rounding of the product, preventing Triton
+            # from fusing t1*t2 with the subsequent FMA
+            t1_times_t2 = ops.mul_rn(t1_val, t2_val)
+        else:
+            t1_times_t2 = ops.mul(t1_val, t2_val)
 
         # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
         if isinstance(value, sympy.Basic):
@@ -7813,15 +7853,8 @@ def prepare_softmax_online(x, dim):
         #
         # TODO: does inference need split online_softmax_reduce?
 
-        warnings.warn(
-            textwrap.dedent(
-                """
-            Online softmax is disabled on the fly since Inductor decides to
-            split the reduction. Cut an issue to PyTorch if this is an
-            important use case and you want to speed it up with online
-            softmax.
-            """
-            )
+        log.debug(
+            "Online softmax is disabled on the fly since Inductor decides to split the reduction."
         )
         amax = reduce_amax(x, dim, keepdims=True)
         exp = lowerings[aten.exp](sub(x, amax))

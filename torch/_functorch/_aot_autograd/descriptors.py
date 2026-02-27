@@ -578,7 +578,10 @@ class TangentAOTInput(DifferentiableAOTInput):
     output: DifferentiableAOTOutput
 
     def __post_init__(self) -> None:
-        assert isinstance(self.output, DifferentiableAOTOutput)
+        if not isinstance(self.output, DifferentiableAOTOutput):
+            raise AssertionError(
+                f"expected output to be DifferentiableAOTOutput, got {type(self.output)}"
+            )
 
     def expr(self) -> str:
         return f"__output_tangent({self.output.expr()})"
@@ -645,7 +648,10 @@ class GradAOTOutput(DifferentiableAOTOutput):
     grad_of: DifferentiableAOTInput
 
     def __post_init__(self) -> None:
-        assert isinstance(self.grad_of, DifferentiableAOTInput)
+        if not isinstance(self.grad_of, DifferentiableAOTInput):
+            raise AssertionError(
+                f"expected grad_of to be DifferentiableAOTInput, got {type(self.grad_of)}"
+            )
 
     def expr(self) -> str:
         return f"__grad({self.grad_of.expr()})"

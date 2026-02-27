@@ -483,6 +483,18 @@ bool check_all_tensors_on_device(sdp_params const& params, bool debug) {
   return true;
 }
 
+bool check_cudnn_dropout(sdp_params const& params, bool debug) {
+  if (params.dropout * 16.0 != std::floor(params.dropout * 16.0)) {
+    if (debug) {
+      TORCH_WARN("cuDNN dropout probability resolution is limited to 1/16."
+                 "Use a dropout probability that is a multiple of 1/16 to "
+                 "select the cuDNN backend");
+    }
+    return false;
+  }
+  return true;
+}
+
 bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto s_q = params.query.sym_size(2);
   const auto s_k = params.key.sym_size(2);
@@ -502,10 +514,19 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
     return false;
   }
   auto head_dim_limit = 128;
+  // Hopper: head_dim<=256 support with cuDNN >= 9.10.0
   if (cudnn_version >= 91000) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     if (dprops->major == 9 && !dprops->minor) {
       head_dim_limit = 256;
+    }
+  }
+  // Blackwell GPUs: B200, GB200 (SM 10.0), B300, GB300 (SM 10.3)
+  // Special case allowed by cuDNN frontend to support DeepSeek dimensions
+  if (cudnn_version >= 91100) {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    if (dprops->major == 10 && d_qk == 192 && d_v == 128) {
+      head_dim_limit = 192;
     }
   }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
@@ -749,7 +770,8 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_cudnn_deterministic,
           check_dtypes_low_precision,
           check_attn_mask_shape,
-          check_cudnn_hardware_support
+          check_cudnn_hardware_support,
+          check_cudnn_dropout
           );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {

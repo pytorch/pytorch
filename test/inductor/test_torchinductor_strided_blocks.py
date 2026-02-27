@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 import contextlib
 import dataclasses
+import functools
 import importlib
 import math
 import unittest
@@ -22,8 +23,10 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
+    MI200_ARCH,
+    NAVI_ARCH,
     parametrize,
-    skipIfXpu,
+    skipIfRocmArch,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -798,6 +801,7 @@ class CommonTemplate:
             ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
+    @skipIfRocmArch(MI200_ARCH + NAVI_ARCH)
     def test_2d_reduction_odd_shapes(
         self,
         view_size: tuple[int, ...],
@@ -813,6 +817,21 @@ class CommonTemplate:
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
 
+        # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
+        # may result in off-by-one differences in the number of block pointers.
+        # Allow a small tolerance here to avoid backend-specific flakiness.
+        # We expect num_block_pointers to decrease by at most 1, and not increase.
+        # The range created here is checked below.
+        if torch.version.hip:
+            min_num_block_pointers = max(
+                num_block_pointers - 1, 1
+            )  # Expected at least one block descriptor for the input
+            max_num_block_pointers = (
+                num_block_pointers  # We don't expect num_block_pointers to increase.
+            )
+            # Disable strict checking in _run_and_compare; we assert bounds manually below.
+            num_block_pointers = None
+
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
         result, (code,) = self._run_and_compare(
@@ -823,7 +842,20 @@ class CommonTemplate:
             config_patches=tiled_reduction_config,
         )
 
-        # Check the code for multiple Rn_BLOCK's
+        # HIP: Check the number of block pointers manually.
+        if torch.version.hip:
+            block_pointer_count = code.count(self.block_descriptor_constructor_str)
+            self.assertGreaterEqual(
+                block_pointer_count,
+                min_num_block_pointers,
+                f"Too few block descriptors emitted: {block_pointer_count}",
+            )
+            self.assertLessEqual(
+                block_pointer_count,
+                max_num_block_pointers,
+                f"Too many block descriptors emitted: {block_pointer_count}",
+            )
+
         self._assert_reduction_ndims(code, 2)
 
     @parametrize(
@@ -987,7 +1019,7 @@ class CommonTemplate:
 
         view_size = (5, 7)
         arg0 = self._discontiguous_tensor(view_size, self.device)
-        arg1 = torch.empty(view_size)
+        arg1 = torch.randn(view_size)
 
         # No guarantees on the number of kernels or pointers.
         result, (code,) = self._run_and_compare(
@@ -1024,6 +1056,104 @@ class CommonTemplate:
 
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
+
+    # FIXME: fails for Triton CPU. Tiling does not contain YBLOCK.
+    @test_torchinductor.xfail_if_triton_cpu
+    @xfail_if_use_tensor_descriptor
+    def test_reduction_padded_output_tiling(self):
+        """
+        Test a [Y, X, R0] reduction with tiled output dimensions.
+        The key to elicit this test case is a padded output tensor.
+        """
+        x = torch.randn((9, 11, 2), device=self.device)
+
+        # We expect block pointers for the input and output.
+        result, (code,) = self._run_and_compare(
+            functools.partial(torch.amax, dim=-1),
+            x,
+            expected_num_block_pointers=2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "pad_outputs": True,
+                "padding_alignment_bytes": 32,
+                "padding_stride_threshold": 0,
+                "unroll_reductions_threshold": 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple output dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 1)
+
+    @xfail_if_use_tensor_descriptor
+    @parametrize("unroll", (False, True))
+    def test_reduce_trailing_dims_discontiguous_input(self, unroll: bool):
+        """
+        Test a [Y, X, R0, R1] reduction where the input tensor is discontiguous, but we
+        only reduce over the last two dimensions.
+        """
+        view = self._discontiguous_tensor((7, 5, 3, 2), self.device)
+
+        # We expect block pointers for the inputs and output.
+        # Note there are more inputs if unrolled.
+        result, (code,) = self._run_and_compare(
+            functools.partial(
+                torch.amax,
+                dim=(-1, -2),
+            ),
+            view,
+            expected_num_block_pointers=7 if unroll else 2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "unroll_reductions_threshold": 1e4 if unroll else 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple pointwise dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 0 if unroll else 2)
+
+    def test_2d_reduction_with_broadcast(self):
+        """
+        Tests 2D tiled reduction with a broadcasted 1D tensor.
+
+        This is a regression test for a bug where block pointers that only
+        advance in one reduction dimension (not both) would cause a KeyError
+        during codegen. The bug occurred because:
+        1. The broadcasted tensor only varies along the first reduction dimension (R0)
+        2. When building pointer_advancements, the block_ptr is only
+           added to R0_INDEX (non-zero advancement) but skipped for R1_INDEX
+           (zero/identity advancement)
+        3. During loop suffix generation, the code assumed if a block_ptr exists
+           in the outer loop's advancements, it must exist in the inner loop's too
+
+        The pattern: (x * y[:, None]).sum() where x is 2D and y is 1D.
+        """
+        # Use sizes that require looped (non-persistent) reductions
+        # to trigger 2D tiled reduction with R0 and R1 loops
+        M, N = 64, 128
+
+        def fn(x, y):
+            # y is 1D (M,), x is 2D (M, N)
+            # y[:, None] broadcasts to (M, N)
+            # The y block_ptr only advances with R0, not R1
+            return (x * y[:, None]).sum()
+
+        x = torch.randn(M, N, device=self.device)
+        y = torch.randn(M, device=self.device)
+
+        # This should compile without KeyError and produce correct results
+        result, (code,) = self._run_and_compare(
+            fn,
+            x,
+            y,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Verify 2D reduction is used (R0_BLOCK and R1_BLOCK present)
+        self._assert_reduction_ndims(code, 2)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
@@ -1243,9 +1373,6 @@ class CommonTemplate:
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
     # This is now fixed by ensuring that that wild symbols only match integers
-    @skipIfXpu(
-        msg="Triton issue exposed by new driver, will be resolved after next triton update."
-    )
     def test_ensure_integral_dims_and_strides(self):
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)

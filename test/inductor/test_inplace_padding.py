@@ -241,7 +241,8 @@ class InplacePaddingTest(TestCase):
 
         expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
         actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
-        assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+        if not same(expect, actual, tol=1e-2):
+            raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
         # We may disable inplace_padding via env-var to test perf.
         self.assertEqual(num_inplace_padding(), int(inductor_config.inplace_padding))
@@ -254,7 +255,9 @@ class InplacePaddingTest(TestCase):
 
     # Enable Max-Autotune to repro this test failure:
     #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
+    @requires_cuda_with_enough_memory(2e10)
     @inductor_config.patch(max_autotune=True)
+    @serialTest()
     def test_linear_and_cel_max_autotune(self):
         self.test_linear_and_cel()
 

@@ -269,13 +269,15 @@ class TestLazyGraphModule(TestCase):
 
         wrapped_forward = torch._dynamo.disable(gm.forward)
         got_inner_forward = torch._dynamo.eval_frame.innermost_fn(wrapped_forward)
-        assert hasattr(got_inner_forward, "__self__")
+        if not hasattr(got_inner_forward, "__self__"):
+            raise AssertionError("Expected got_inner_forward to have '__self__'")
 
         wrapped_lazy_forward = torch._dynamo.disable(lazy_gm.forward)
         got_lazy_inner_forward = torch._dynamo.eval_frame.innermost_fn(
             wrapped_lazy_forward
         )
-        assert hasattr(got_lazy_inner_forward, "__self__")
+        if not hasattr(got_lazy_inner_forward, "__self__"):
+            raise AssertionError("Expected got_lazy_inner_forward to have '__self__'")
 
     def test_to_folder_class(self):
         class TestModule(torch.nn.Module):

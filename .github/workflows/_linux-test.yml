@@ -116,6 +116,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          checkout-mode: treeless
 
       - name: Setup Python
         if: contains(matrix.runner, 'b200')
@@ -177,7 +178,7 @@ jobs:
         id: install-nvidia-driver
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         with:
-          driver-version: ${{ matrix.config == 'legacy_nvidia_driver' && '525.105.17' || '580.82.07' }}
+          driver-version: '580.82.07'
         if: ${{ !contains(matrix.runner, 'b200') }}
 
       - name: Setup GPU_FLAG for docker run
@@ -293,6 +294,17 @@ jobs:
           env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
+      # Allow the test results to be uploaded S3 right after they finish, which are
+      # then used in the test insight dashboard
+      - name: Authenticate with AWS
+        if: ${{ contains(matrix.runner, 'b200') || steps.check-tpu.outputs.has_tpu == 'true' }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
+          aws-region: us-east-1
+
       - name: Test
         id: test
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
@@ -336,9 +348,17 @@ jobs:
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
+          # Use offline mode by default, only enable online mode to refresh the models
+          # from HF when the PR has a special ci-refresh-hf-cache label. This label is
+          # automatically added to the vLLM pinned commit hash update, which effectively
+          # refreshes the cache daily
+          TRANSFORMERS_OFFLINE: ${{ contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache') && '0' || '1' }}
+          HF_DATASETS_OFFLINE: ${{ contains(steps.keep-going.outputs.labels, 'ci-refresh-hf-cache') && '0' || '1' }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+          TORCH_TPU: ${{ steps.check-tpu.outputs.has_tpu == 'true' && '1' || '' }}
+          TORCH_TPU_TEXT_FILE: /var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt
         run: |
           set -x
 
@@ -376,6 +396,11 @@ jobs:
           if [[ ! -d "${HF_CACHE}" ]]; then
             export HF_CACHE="${RUNNER_TEMP}/hf_cache"
             mkdir -p "${HF_CACHE}"
+
+            # When there is no cache directory, e.g. benchmark, the job has no
+            # way but to reach out to HF if needed
+            export TRANSFORMERS_OFFLINE=0
+            export HF_DATASETS_OFFLINE=0
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux
@@ -400,6 +425,9 @@ jobs:
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_SESSION_TOKEN \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
@@ -424,9 +452,13 @@ jobs:
             -e HUGGING_FACE_HUB_TOKEN \
             -e VLLM_TEST_HUGGING_FACE_TOKEN \
             -e HF_CACHE \
+            -e TRANSFORMERS_OFFLINE \
+            -e HF_DATASETS_OFFLINE \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
             -e ARTIFACTS_FILE_SUFFIX \
+            -e TORCH_TPU \
+            -e TORCH_TPU_TEXT_FILE \
             ${TPU_DOCKER_FLAGS:-} \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
@@ -456,7 +488,7 @@ jobs:
               (sleep 300 && python3 -m pip install -r .ci/docker/requirements-ci.txt)"
           fi
 
-          docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+          docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && (if [ -n \"\$TORCH_TPU\" ] && [ -f .ci/docker/common/install_torch_tpu.sh ]; then bash .ci/docker/common/install_torch_tpu.sh; fi) && ${TEST_COMMAND}"
 
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload

@@ -41,7 +41,7 @@ static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp
   if (!exp_scalar.isComplex() && exp_scalar.to<float>() == .5) {
     return lib.exec_unary_kernel(iter, "sqrt");
   }
-  if (exp_scalar.isComplex()) {
+  if (exp_scalar.isComplex() || c10::isComplexType(iter.common_dtype())) {
     return lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, ScalarType::ComplexFloat);
   }
   lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, ScalarType::Float);
@@ -49,6 +49,16 @@ static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp
 
 static void erfcx_kernel(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "erfcx");
+}
+
+static void polygamma_kernel(TensorIteratorBase& iter, int64_t order) {
+  if (order == 0) {
+    return lib.exec_unary_kernel(iter, "digamma");
+  } else if (order == 1) {
+    return lib.exec_unary_kernel(iter, "trigamma");
+  } else {
+    return lib.exec_unary_kernel(iter, "polygamma", order, kInt);
+  }
 }
 
 REGISTER_UNARY_TI_DISPATCH(exp);
@@ -77,10 +87,13 @@ REGISTER_UNARY_TI_DISPATCH(log10);
 REGISTER_UNARY_TI_DISPATCH(log2);
 REGISTER_UNARY_TI_DISPATCH(log);
 REGISTER_UNARY_TI_DISPATCH(log1p);
+REGISTER_UNARY_TI_DISPATCH(lgamma);
+REGISTER_UNARY_TI_DISPATCH(digamma);
 REGISTER_UNARY_TI_DISPATCH(bitwise_not);
 REGISTER_UNARY_TI_DISPATCH(round);
 REGISTER_UNARY_TI_DISPATCH(sigmoid);
 REGISTER_DISPATCH(special_erfcx_stub, erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, round_decimals_kernel);
 REGISTER_DISPATCH(pow_tensor_scalar_stub, pow_tensor_scalar_kernel);
+REGISTER_DISPATCH(polygamma_stub, polygamma_kernel);
 } // namespace at::native

@@ -41,7 +41,8 @@ class QuantizePerTensorBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks both quantization and dequantization."""
 
     def init(self, C, M, N, dtype, mode):
-        assert mode in ("Q", "D")
+        if mode not in ("Q", "D"):
+            raise AssertionError(f"mode must be 'Q' or 'D', but got '{mode}'")
         self.input = torch.rand(C, M, N)
         self.dtype = dtype
         self.op = nnq.Quantize(scale=1.0, zero_point=0, dtype=dtype)
@@ -78,7 +79,8 @@ class QuantizePerChannelBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks both quantization and dequantization."""
 
     def init(self, C, M, N, dtype, axis, mode):
-        assert mode in ("Q", "D")
+        if mode not in ("Q", "D"):
+            raise AssertionError(f"mode must be 'Q' or 'D', but got '{mode}'")
         self.input = torch.rand(C, M, N)
         self.op = torch.quantize_per_channel
 

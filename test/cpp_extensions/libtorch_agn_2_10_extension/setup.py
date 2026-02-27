@@ -16,6 +16,11 @@ from torch.utils.cpp_extension import (
 ROOT_DIR = Path(__file__).parent
 CSRC_DIR = ROOT_DIR / "csrc"
 
+# Include csrc from previous versions for forward compatibility testing
+PREV_CSRC_DIRS = [
+    ROOT_DIR.parent / "libtorch_agn_2_9_extension" / "csrc",
+]
+
 
 class clean(distutils.command.clean.clean):
     def run(self):
@@ -40,20 +45,30 @@ def get_extension():
     extra_compile_args = {
         "cxx": [
             "-DTORCH_TARGET_VERSION=0x020a000000000000",
+            "-DSTABLE_LIB_NAME=libtorch_agn_2_10",
         ],
     }
     if not IS_WINDOWS:
         extra_compile_args["cxx"].append("-fdiagnostics-color=always")
 
+    # Collect sources from this version and all previous versions
     sources = list(CSRC_DIR.glob("**/*.cpp"))
+    for prev_dir in PREV_CSRC_DIRS:
+        sources.extend(prev_dir.glob("**/*.cpp"))
 
     extension = CppExtension
     # allow including <cuda_runtime.h>
     if torch.cuda.is_available():
         extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
-        extra_compile_args["nvcc"] = ["-O2", "-DUSE_CUDA"]
+        extra_compile_args["nvcc"] = [
+            "-O2",
+            "-DUSE_CUDA",
+            "-DSTABLE_LIB_NAME=libtorch_agn_2_10",
+        ]
         extension = CUDAExtension
         sources.extend(CSRC_DIR.glob("**/*.cu"))
+        for prev_dir in PREV_CSRC_DIRS:
+            sources.extend(prev_dir.glob("**/*.cu"))
 
     return [
         extension(

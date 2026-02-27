@@ -31,7 +31,8 @@ def _compile_submod(
 
     # We use the first user for compile configs and inputs
     sub_node = subgraph_users[0]
-    assert _needs_inductor_compile(sub_node)
+    if not _needs_inductor_compile(sub_node):
+        raise AssertionError("sub_node does not need inductor compile")
     compile_config = sub_node.meta["custom"]["nested_region_config"]
     if sub_node.meta.get("partitioner_tag") == "is_forward":
         compile_fn = compile_config.fw_compiler
@@ -57,7 +58,8 @@ def _compile_submod(
 
     def get_compiled_fn():
         context = torch._guards.TracingContext.get()
-        assert context.fake_mode is not None
+        if context.fake_mode is None:
+            raise AssertionError("context.fake_mode is None")
 
         context = torch._guards.TracingContext(context.fake_mode)
 
@@ -73,7 +75,8 @@ def _compile_submod(
             return compiled_fn
 
     compiled_fn = get_compiled_fn()
-    assert isinstance(compiled_fn, AOTCompiledArtifact)
+    if not isinstance(compiled_fn, AOTCompiledArtifact):
+        raise AssertionError(f"Expected AOTCompiledArtifact, got {type(compiled_fn)}")
 
     # _dummy_wrapper is to make call_function happy
     compiled_submod = _dummy_wrapper(compiled_fn)
@@ -123,9 +126,11 @@ def _compile_invoke_subgraph_nodes_with_inductor(gm):
     ):
         if not _needs_inductor_compile(node):
             continue
-        assert node.args[0].op == "get_attr"
+        if node.args[0].op != "get_attr":
+            raise AssertionError(f"Expected get_attr, got {node.args[0].op}")
         subgraph_name = node.args[0].target
-        assert isinstance(subgraph_name, str)
+        if not isinstance(subgraph_name, str):
+            raise AssertionError(f"Expected str, got {type(subgraph_name)}")
         subgraphs.add(subgraph_name)
         map_subgraph_to_nodes[subgraph_name].append(node)
 

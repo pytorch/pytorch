@@ -62,6 +62,7 @@ def should_pad_params_encoder(
         tf32=False
         if mat1.dtype != torch.float32
         else bool(
-            torch.backends.cuda.matmul.allow_tf32 or torch.backends.mkldnn.allow_tf32
+            torch.backends.cuda.matmul.fp32_precision == "tf32"
+            or torch.backends.mkldnn.fp32_precision == "tf32"
         ),
     )

@@ -21,6 +21,10 @@ class OpKernel_prim_listpack : public OpKernel {
       case Type::Kind::TensorList:
         type_ = c10::TensorType::get();
         break;
+      case Type::Kind::NestedTensorList:
+        // For List[List[Tensor]], each element is a List[Tensor]
+        type_ = c10::ListType::create(c10::TensorType::get());
+        break;
       case Type::Kind::SymIntList:
         type_ = c10::IntType::get();
         break;
@@ -60,8 +64,8 @@ C10_REGISTER_TYPED_CLASS(
 REGISTER_PRIM_KERNEL("prim.ListUnpack", prim_listunpack, {
   RECORD_USER_SCOPE("nativert::OpKernel_prim_listunpack");
   auto inputListRef = KernelInput(0).toListRef();
-  for (size_t i = 0; i < inputListRef.size(); ++i) {
-    KernelOutput(i) = inputListRef[i];
+  for (const auto& [i, ivalue] : c10::enumerate(inputListRef)) {
+    KernelOutput(i) = ivalue;
   }
 })
 
@@ -98,6 +102,7 @@ class OpKernel_variadic_concat : public OpKernel {
         return;
       }
       auto& out_t = KernelOutput(0).toTensor();
+      fastResizeToZero(out_t);
       at::cpu::cat_outf(inputs, dim, out_t);
     }
   }
@@ -142,6 +147,7 @@ class OpKernel_variadic_stack : public OpKernel {
         return;
       }
       auto& out_t = out.toTensor();
+      fastResizeToZero(out_t);
       at::native::_stack_out_cpu(inputs, dim, out_t);
     }
   }

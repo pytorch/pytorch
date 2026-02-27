@@ -147,6 +147,7 @@ _f8_f8_bf16_rowwise_grouped_mm_cuda(
 // 2d-2d and 2d-3d cases
 // scaling=rowwise
 // only being called for rocm
+#ifdef USE_ROCM
 Tensor&
 _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& mat_a,
@@ -155,8 +156,15 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& scale_b,
       const std::optional<Tensor>& offs,
       Tensor& out) {
-  TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+  bool is_gfx942 = at::detail::getCUDAHooks().isGPUArch({"gfx942"});
+
+  if (is_gfx942) {
+    TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_b to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+  } else {
+    TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  }
 
 #if defined(USE_MSLK) && defined(USE_ROCM)
   mslk::gemm::f8f8bf16_rowwise_grouped_mm(
@@ -173,6 +181,7 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
   return out;
 
 }
+#endif // USE_ROCM
 
 // Dispatch f8 x f8 -> bf16 row-wise scaled to rocm/cuda
 Tensor&

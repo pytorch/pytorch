@@ -120,7 +120,7 @@ class TestSparseProp(TestCase):
                 x_meta1, y_meta1 = (x.ccol_indices(), y.ccol_indices())
                 x_meta2, y_meta2 = (x.row_indices(), y.row_indices())
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"Unexpected layout: {x.layout}")
             self.assertEqual(x_meta1, y_meta1, exact_layout=True)
             self.assertEqual(x_meta2, y_meta2, exact_layout=True)
             self.assertEqual(x.values(), y.values(), exact_layout=True)

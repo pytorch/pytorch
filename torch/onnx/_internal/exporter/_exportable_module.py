@@ -191,5 +191,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
             An ONNXProgram object containing the exported model and metadata.
         """
         result = torch.onnx.export(self, **kwargs)
-        assert result is not None
+        if result is None:
+            raise AssertionError("result must be non-None")
         return result

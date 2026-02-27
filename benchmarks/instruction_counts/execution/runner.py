@@ -42,9 +42,16 @@ class CorePool:
     """
 
     def __init__(self, min_core_id: int, max_core_id: int) -> None:
-        assert min_core_id >= 0
-        assert max_core_id >= min_core_id
-        assert max_core_id < CPU_COUNT
+        if min_core_id < 0:
+            raise AssertionError(f"min_core_id must be >= 0, got {min_core_id}")
+        if max_core_id < min_core_id:
+            raise AssertionError(
+                f"max_core_id ({max_core_id}) must be >= min_core_id ({min_core_id})"
+            )
+        if max_core_id >= CPU_COUNT:
+            raise AssertionError(
+                f"max_core_id ({max_core_id}) must be < CPU_COUNT ({CPU_COUNT})"
+            )
 
         self._min_core_id: int = min_core_id
         self._max_core_id: int = max_core_id
@@ -160,12 +167,14 @@ class Runner:
             result: Union[WorkerOutput, WorkerFailure] = job.result
             if isinstance(result, WorkerOutput):
                 self._results[job.work_order] = result
-                assert job.cpu_list is not None
+                if job.cpu_list is None:
+                    raise AssertionError("job.cpu_list must not be None")
                 self._core_pool.release(job.cpu_list)
                 self._durations[job.work_order] = job.duration
 
             else:
-                assert isinstance(result, WorkerFailure)
+                if not isinstance(result, WorkerFailure):
+                    raise AssertionError(f"expected WorkerFailure, got {type(result)}")
                 raise WorkerFailed(cmd=job.proc.cmd, wrapped_trace=result.failure_trace)
         self._currently_processed = None
         self._active_jobs.clear()
