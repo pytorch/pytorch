@@ -20,6 +20,8 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 
+#if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
+
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
     constexpr int name = val;           \
@@ -990,6 +992,115 @@ at::Tensor reduce_scatter_out(
   return output;
 }
 } // namespace
+#elif defined(CUDART_VERSION) && CUDART_VERSION < 12030
+namespace {
+at::Tensor multimem_all_reduce_(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "multimem_all_reduce_: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor multimem_one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_one_shot_all_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor multimem_one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "multimem_one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor multimem_all_gather_out(
+    const at::Tensor& input,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_all_gather_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "one_shot_all_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce_copy_out(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "one_shot_all_reduce_copy_out: requires CUDA 12.3+.");
+  return out;
+}
+
+at::Tensor one_shot_all_reduce(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor one_shot_all_reduce_copy(
+    const at::Tensor& input,
+    const at::Tensor& local_input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "one_shot_all_reduce_copy: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor two_shot_all_reduce_(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name) {
+  TORCH_CHECK(false, "two_shot_all_reduce_: requires CUDA 12.3+.");
+  return input;
+}
+
+at::Tensor two_shot_all_reduce_out(
+    at::Tensor input,
+    std::string reduce_op,
+    std::string group_name,
+    at::Tensor output) {
+  TORCH_CHECK(false, "two_shot_all_reduce_out: requires CUDA 12.3+.");
+  return output;
+}
+
+at::Tensor reduce_scatter_out(
+    at::Tensor input,
+    std::string group_name,
+    bool split_last_dim,
+    at::Tensor output) {
+  TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
+  return output;
+}
+
+at::Tensor multimem_one_shot_reduce_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t root,
+    std::string group_name,
+    at::Tensor out) {
+  TORCH_CHECK(false, "multimem_one_shot_reduce_out: requires CUDA 12.3+.");
+  return out;
+}
+
+} // namespace
+#endif // #if defined(CUDART_VERSION) && CUDART_VERSION < 12030
 
 namespace {
 

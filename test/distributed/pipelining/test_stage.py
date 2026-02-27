@@ -118,7 +118,10 @@ class StageTest(MultiProcContinuousTest):
         submod_keys = stage.submod.state_dict().keys()
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
-        assert all(k in old_keys for k in submod_keys)
+        if not all(k in old_keys for k in submod_keys):
+            raise AssertionError(
+                f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -169,7 +172,10 @@ class StageTest(MultiProcContinuousTest):
         submod_keys = stage.submod.state_dict().keys()
         # Confirm keys are consistent with original model
         old_keys = mod.state_dict().keys()
-        assert all(k in old_keys for k in submod_keys)
+        if not all(k in old_keys for k in submod_keys):
+            raise AssertionError(
+                f"Some keys not found in old_keys: {[k for k in submod_keys if k not in old_keys]}"
+            )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
