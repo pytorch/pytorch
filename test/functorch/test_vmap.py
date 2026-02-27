@@ -229,6 +229,20 @@ class TestVmapAPI(TestCase):
         self.assertEqual(output.shape, (2, 5, 7, 3))
         self.assertEqual(output, x.view(2, 1, 1, 3) * y.view(5, 1, 3) * z)
 
+    def test_nested_with_different_map_dim_dynamo(self):
+        if not TEST_WITH_TORCHDYNAMO:
+            self.skipTest("Requires TorchDynamo")
+
+        def fn(x, y):
+            return vmap(lambda x: vmap(lambda y: x * y)(y))(x)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(5, 3)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        output = opt_fn(x, y)
+        self.assertEqual(output.shape, (2, 5, 3))
+        self.assertEqual(output, x.view(2, 1, 3) * y)
+
     def test_noop_in_inner_vmap(self):
         x = torch.randn(3)
         y = torch.randn(5)
@@ -2507,6 +2521,25 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
             with self.assertRaisesRegex(RuntimeError, msg):
                 vmap(f)(torch.randn(3, 3))
+
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    def test_vmap_compile_add(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return vmap(torch.add, in_dims=1, out_dims=1)(x, x)
+
+        x = torch.randn(4, 8)
+        self.assertEqual(f(x), x + x)
+
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    def test_vmap_compile_movedim_outdim(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return vmap(torch.add, in_dims=2, out_dims=1)(x, x)
+
+        x = torch.randn(2, 3, 4)
+        expected = (x + x).movedim(2, 1)
+        self.assertEqual(f(x), expected)
 
     def test_unsqueeze(self):
         op = torch.unsqueeze

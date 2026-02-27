@@ -58,13 +58,21 @@ def doesnt_support_saved_tensors_hooks(f: Callable[_P, _R]) -> Callable[_P, _R]:
     return fn
 
 
+def _is_compiling() -> bool:
+    try:
+        from torch.compiler import is_compiling
+    except Exception:
+        return False
+    return is_compiling()
+
+
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
     flat_in_dims: list[int | None], flat_args: list[Any]
 ) -> int:
     batch_sizes = [
         arg.size(in_dim)
-        for in_dim, arg in zip(flat_in_dims, flat_args)
+        for in_dim, arg in zip(flat_in_dims, flat_args, strict=True)
         if in_dim is not None
     ]
     if len(batch_sizes) == 0:
@@ -169,10 +177,22 @@ def _create_batched_inputs(
     args_spec: TreeSpec,
 ) -> tuple[Any, ...]:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
-    batched_inputs = [
-        arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
-        for in_dim, arg in zip(flat_in_dims, flat_args)
-    ]
+    if _is_compiling() and vmap_level == 0:
+        # Compile path avoids BatchedTensor dispatch by normalizing batch dims
+        # with functional view ops (movedim) that are trace-friendly.
+        batched_inputs = []
+        for in_dim, arg in zip(flat_in_dims, flat_args, strict=True):
+            if in_dim is None:
+                batched_inputs.append(arg)
+            elif in_dim == 0:
+                batched_inputs.append(arg)
+            else:
+                batched_inputs.append(torch.ops.aten.movedim.default(arg, in_dim, 0))
+    else:
+        batched_inputs = [
+            arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
+            for in_dim, arg in zip(flat_in_dims, flat_args, strict=True)
+        ]
     return tree_unflatten(batched_inputs, args_spec)
 
 
@@ -200,6 +220,13 @@ def _maybe_remove_batch_dim(
             f"Tensors, got type {type(batched_output)}. "
             "Did you mean to set out_dims= to None for output?"
         )
+
+    if _is_compiling() and vmap_level == 0:
+        # Compile path mirrors eager semantics by adjusting the batch dim with
+        # view ops instead of BatchedTensor wrappers.
+        if out_dim == 0:
+            return batched_output
+        return torch.ops.aten.movedim.default(batched_output, 0, out_dim)
 
     return _remove_batch_dim(batched_output, vmap_level, batch_size, out_dim)
 
