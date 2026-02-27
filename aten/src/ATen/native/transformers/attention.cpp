@@ -734,7 +734,9 @@ Tensor scaled_dot_product_attention(
   // _batch_norm_impl_index in Normalization.cpp) to make the output depend
   // on all inputs so that backward() produces correctly-shaped zero
   // gradients instead of None.
-  if (query_.sym_numel() == 0 || key.sym_numel() == 0 || value.sym_numel() == 0) {
+  if (TORCH_GUARD_OR_FALSE(query_.sym_numel().sym_eq(0)) ||
+      TORCH_GUARD_OR_FALSE(key.sym_numel().sym_eq(0)) ||
+      TORCH_GUARD_OR_FALSE(value.sym_numel().sym_eq(0))) {
     auto output_shape = query_.sym_sizes().vec();
     output_shape[output_shape.size() - 1] = value.sym_size(-1);
     auto out = at::zeros_symint(output_shape, query_.options());
