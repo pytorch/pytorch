@@ -3,6 +3,7 @@
 
 
 import copy
+from typing import cast
 
 import torch
 from torch._ops import OpOverload
@@ -16,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     OpStrategy,
     PlacementList,
     RuntimeSchemaInfo,
+    TupleStrategy,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
 from torch.distributed.tensor._ops.single_dim_strategy import (
@@ -472,6 +474,68 @@ def baddbmm_single_dim_strategy(
 def scaled_mm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _scaled_mm_like_strategy("mk,kn->mn", mesh, op_schema)
+
+
+@register_op_strategy(
+    aten.einsum.default, schema_info=RuntimeSchemaInfo(needs_pytree=True)
+)
+def einsum_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Sharding strategy for torch.einsum operator.
+
+    This handles einsum operations with DTensor inputs, supporting
+    various sharding patterns for batch dimensions, contracting dimensions,
+    and free dimensions based on the einsum equation.
+
+    The needs_pytree=True flag is crucial because einsum accepts
+    variable-length operands as torch.einsum(equation, *operands).
+
+    Note: This strategy is optimized for einsum with up to 2 tensor operands.
+    For 3+ operands, raises NotImplementedError to trigger fallback to
+    CompositeImplicitAutograd decomposition, which decomposes the operation
+    into pairwise operations (typically bmm), each handled by their respective
+    optimized strategies.
+
+    See gen_einsum_strategies() in _einsum_strategy.py for details on supported
+    sharding patterns.
+    """
+    # einsum signature: einsum(equation, *operands)
+    # args_schema: [equation_str, TupleStrategy(OpStrategy1, OpStrategy2, ...)]
+    equation = cast(str, op_schema.args_schema[0])
+    tensor_operands = cast(TupleStrategy, op_schema.args_schema[1])
+
+    # Check number of operands
+    num_operands = len(tensor_operands.children)
+    if num_operands > 2:
+        # For 3+ operands, fall back to CompositeImplicitAutograd decomposition.
+        # The decomposition will break down the N-operand einsum into pairwise
+        # operations (e.g., bmm), each of which will use its own optimized strategy.
+        raise NotImplementedError(
+            f"Einsum strategy is optimized for up to 2 operands (got {num_operands}). "
+            f"Falling back to decomposition which will use optimized strategies "
+            f"(e.g., bmm_strategy) for each pairwise operation."
+        )
+
+    # Extract input strategies (following mm_strategy pattern)
+    input_strategies = [cast(OpStrategy, child) for child in tensor_operands.children]
+    mesh = input_strategies[0].mesh
+
+    # Generate all possible strategies for einsum
+    strategy = gen_einsum_strategies(equation, mesh, linearity=False)
+
+    # Associate costs for each strategy (following mm_strategy pattern)
+    for strtg in strategy.strategies:
+        if strtg.input_specs is None:
+            raise AssertionError(
+                f"Expected input_specs to be not None, got {strtg.input_specs}"
+            )
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategies[i], strtg.input_specs[i])
+            for i in range(num_operands)
+        ]
+        strtg.redistribute_cost = redistribute_cost
+
+    return strategy
 
 
 def _scaled_dot_product_flash_attention_base_strategies(
