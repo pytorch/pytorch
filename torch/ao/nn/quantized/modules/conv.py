@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
-from typing import ClassVar, Literal, Optional
+from typing import ClassVar, Literal
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -384,10 +384,10 @@ class Conv1d(_ConvNd):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn1d
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU1d
-    _NNI_CONV_ADD_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _NNI_CONV_ADD_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = nniqat.ConvBn1d
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = nni.ConvReLU1d
+    _NNI_CONV_ADD_MODULE: ClassVar[type[nn.Module] | None] = None
+    _NNI_CONV_ADD_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -430,7 +430,7 @@ class Conv1d(_ConvNd):
     def _get_name(self):
         return "QuantizedConv1d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         if self.padding_mode == "zeros":
             self._packed_params = torch.ops.quantized.conv1d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups
@@ -518,8 +518,8 @@ class Conv2d(_ConvNd):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn2d
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU2d
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = nniqat.ConvBn2d
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = nni.ConvReLU2d
     _NNI_CONV_ADD_MODULE: ClassVar[type[nni.ConvAdd2d]] = nni.ConvAdd2d
     _NNI_CONV_ADD_RELU_MODULE: ClassVar[type[nni.ConvAddReLU2d]] = nni.ConvAddReLU2d
 
@@ -562,7 +562,7 @@ class Conv2d(_ConvNd):
     def _get_name(self):
         return "QuantizedConv2d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         if self.padding_mode == "zeros":
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups
@@ -648,10 +648,10 @@ class Conv3d(_ConvNd):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn3d
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU3d
-    _NNI_CONV_ADD_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _NNI_CONV_ADD_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = nniqat.ConvBn3d
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = nni.ConvReLU3d
+    _NNI_CONV_ADD_MODULE: ClassVar[type[nn.Module] | None] = None
+    _NNI_CONV_ADD_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -694,7 +694,7 @@ class Conv3d(_ConvNd):
     def _get_name(self):
         return "QuantizedConv3d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         if self.padding_mode == "zeros":
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups
@@ -960,7 +960,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     def _get_name(self):
         return "QuantizedConvTranspose1d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
             w,
             b,
@@ -1083,7 +1083,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     def _get_name(self):
         return "QuantizedConvTranspose2d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
             w,
             b,
@@ -1208,7 +1208,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     def _get_name(self):
         return "QuantizedConvTranspose3d"
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose3d_prepack(
             w,
             b,

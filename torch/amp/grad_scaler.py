@@ -5,7 +5,7 @@ import inspect
 import warnings
 from collections import abc, defaultdict
 from enum import Enum
-from typing import Any, cast, Optional, overload, TYPE_CHECKING, Union
+from typing import Any, cast, overload, TYPE_CHECKING
 
 import torch
 
@@ -147,13 +147,13 @@ class GradScaler:
 
             self._init_scale = init_scale
             # self._scale will be lazily initialized during the first call to scale()
-            self._scale: Optional[torch.Tensor] = None
+            self._scale: torch.Tensor | None = None
             self._growth_factor = growth_factor
             self._backoff_factor = backoff_factor
             self._growth_interval = growth_interval
             self._init_growth_tracker = 0
             # self._growth_tracker will be lazily initialized during the first call to scale()
-            self._growth_tracker: Optional[torch.Tensor] = None
+            self._growth_tracker: torch.Tensor | None = None
             self._per_optimizer_states: dict[int, dict[str, Any]] = defaultdict(
                 _refresh_per_optimizer_state
             )
@@ -192,8 +192,8 @@ class GradScaler:
 
     def scale(
         self,
-        outputs: Union[torch.Tensor, Iterable[torch.Tensor]],
-    ) -> Union[torch.Tensor, Iterable[torch.Tensor]]:
+        outputs: torch.Tensor | Iterable[torch.Tensor],
+    ) -> torch.Tensor | Iterable[torch.Tensor]:
         """
         Multiplies ('scales') a tensor or list of tensors by the scale factor.
 
@@ -221,7 +221,7 @@ class GradScaler:
             _MultiDeviceReplicator
         ] = []  # holds a reference that can be overwritten by apply_scale
 
-        def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
+        def apply_scale(val: torch.Tensor | Iterable[torch.Tensor]):
             if isinstance(val, torch.Tensor):
                 if len(stash) == 0:
                     if self._scale is None:
@@ -366,15 +366,15 @@ class GradScaler:
         optimizer_state: dict[str, Any],
         *args: Any,
         **kwargs: Any,
-    ) -> Optional[float]:
-        retval: Optional[float] = None
+    ) -> float | None:
+        retval: float | None = None
         if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
             retval = optimizer.step(*args, **kwargs)
         return retval
 
     def step(
         self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any
-    ) -> Optional[float]:
+    ) -> float | None:
         """Invoke ``unscale_(optimizer)`` followed by parameter update, if gradients are not infs/NaN.
 
         :meth:`step` carries out the following two operations:
@@ -413,7 +413,7 @@ class GradScaler:
                 "step() has already been called since the last update()."
             )
 
-        retval: Optional[float] = None
+        retval: float | None = None
 
         if getattr(optimizer, "_step_supports_amp_scaling", False):
             # This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.
@@ -481,7 +481,7 @@ class GradScaler:
 
         return retval
 
-    def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
+    def update(self, new_scale: float | torch.Tensor | None = None) -> None:
         """Update the scale factor.
 
         If any optimizer steps were skipped the scale is multiplied by ``backoff_factor``
@@ -558,7 +558,7 @@ class GradScaler:
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
 
-    def _get_scale_async(self) -> Optional[torch.Tensor]:
+    def _get_scale_async(self) -> torch.Tensor | None:
         return self._scale
 
     def get_scale(self) -> float:
