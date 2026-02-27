@@ -5223,7 +5223,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 )
                 with dynamo_timed("invoke_subgraph_stamp_out"):
                     return invoke_subgraph_cache.stamp_out_cached_subgraph(
-                        tx, fn_args_vt, kwargs, match
+                        tx, flat, match
                     )
 
         # Snapshot guards before tracing for auto-cache delta computation

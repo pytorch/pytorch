@@ -406,15 +406,13 @@ def save_cache_entry(
 
 def stamp_out_cached_subgraph(
     tx: InstructionTranslator,
-    fn_args_vt: Any,
-    kwargs: dict[str, Any],
+    flat: FlattenedArgs,
     cached: Any,
 ) -> Any:
     from torch._dynamo.variables.builder import VariableBuilder
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
     from torch._dynamo.variables.tensor import TensorVariable
 
-    flat = flatten_args_kwargs(tx, fn_args_vt, kwargs)
     flat_proxies = flat.flat_proxies
     new_arg_sources = flat.arg_sources
 
