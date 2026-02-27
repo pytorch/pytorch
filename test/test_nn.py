@@ -7797,6 +7797,25 @@ def add_test(test, decorator=None):
         else:
             add(cuda_test_name, with_tf32_off)
 
+def test_conv3d_initialization_consistency(self):
+        # Create a Conv3d layer
+        m = torch.nn.Conv3d(3, 6, kernel_size=3)
+        
+        # Test Default initialization
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_default = m.weight.clone().detach()
+        
+        # Test Channels Last 3D initialization
+        m.to(memory_format=torch.channels_last_3d)
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_channels_last = m.weight.clone().detach()
+        
+        # Check if they are identical across memory formats
+        self.assertTrue(torch.allclose(weights_default, weights_channels_last), 
+                        "Conv3d initialization is inconsistent between memory formats")
+
 for test_params in module_tests + get_new_module_tests():
     # TODO: CUDA is not implemented yet
     if 'constructor' not in test_params:
