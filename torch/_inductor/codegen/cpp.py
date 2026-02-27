@@ -746,6 +746,18 @@ class CppOverrides(OpOverrides):
         return csevar
 
     @staticmethod
+    def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
+        assert isinstance(x, CppCSEVariable)
+        if src_dtype is None:
+            src_dtype = x.dtype
+        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
+        csevar = V.kernel.cse.generate(V.kernel.compute, expr)
+        csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
+        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
+        return csevar
+
+    @staticmethod
     def to_dtype_bitcast(x, dtype, src_dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
         return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
@@ -1656,6 +1668,22 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
+        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
+        return csevar
+
+    @staticmethod
+    def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
+        assert dtype in [
+            torch.uint8,
+            torch.int8,
+            torch.int32,
+        ], f"{__name__} does not support {dtype}"
+        assert isinstance(x, CppCSEVariable)
+        src_dtype = x.dtype
+        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
+        csevar = V.kernel.cse.generate(V.kernel.compute, expr)
+        csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
         if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
@@ -2574,7 +2602,13 @@ class CppKernel(Kernel):
     def create_cse_var(self, *args, **kwargs):
         return CppCSEVariable(*args, **kwargs)
 
-    def get_to_dtype_expr(self, src, dtype, src_dtype):
+    def get_to_dtype_expr(self, src, dtype, src_dtype, rounding=False):
+        if (
+            rounding
+            and dtype in [torch.int8, torch.uint8]
+            and src_dtype in [torch.float, torch.double]
+        ):
+            return f"c10::convert<{DTYPE_TO_CPP[dtype]}>(std::round({src}))"
         return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({src})"
 
     def cache_dtype_convert(self, dst, dst_dtype, src, src_dtype):
@@ -3480,10 +3514,10 @@ class CppVecKernel(CppKernel):
         cond = f"({cond}).all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
-    def get_to_dtype_expr(self, src, dtype, src_dtype):
+    def get_to_dtype_expr(self, src, dtype, src_dtype, rounding=False):
         assert isinstance(src, CppCSEVariable)
         if not src.is_vec:
-            return super().get_to_dtype_expr(src, dtype, src_dtype)
+            return super().get_to_dtype_expr(src, dtype, src_dtype, rounding)
         src_cpp_type = DTYPE_TO_CPP[src_dtype]
         src_num_vectors = self._get_num_vectors(src_dtype)
         dst_cpp_type = DTYPE_TO_CPP[dtype]
@@ -3494,10 +3528,22 @@ class CppVecKernel(CppKernel):
         elif src_dtype == torch.bool and dtype != torch.bool:
             expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
         elif src_dtype != dtype:
-            if src_num_vectors == dst_num_vectors == 1:
-                expr = f"at::vec::convert<{dst_cpp_type}>({src})"
+            expr = ""
+            if (
+                rounding
+                and src_dtype in [torch.float, torch.double]
+                and dtype in [torch.int8, torch.uint8]
+            ):
+                expr = "at::vec::round_convert"
             else:
-                expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+                expr = "at::vec::convert"
+            if src_num_vectors == dst_num_vectors == 1:
+                expr = expr + f"<{dst_cpp_type}>({src})"
+            else:
+                expr = (
+                    expr
+                    + f"<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+                )
         return expr
 
 
