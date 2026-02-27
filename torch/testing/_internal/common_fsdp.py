@@ -14,7 +14,7 @@ from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import wraps
-from typing import Any, cast, no_type_check, Optional, Union
+from typing import Any, cast, no_type_check
 from unittest import mock
 
 import torch
@@ -337,10 +337,10 @@ class TransformerWithSharedParams(FSDPTestModel):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         add_bn: bool = True,
-    ) -> Union[nn.Module, FSDP]:
+    ) -> nn.Module | FSDP:
         """
         Initializes a :class:`TransformerWithSharedParams` instance.
 
@@ -466,7 +466,7 @@ class NestedWrappedModule(FSDPTestModel):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
     ) -> nn.Module:
         """
@@ -514,7 +514,7 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
     ):
         """
@@ -596,7 +596,7 @@ class NonUniformReqGradNWM(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
     ):
         """
@@ -721,7 +721,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode = DEVICEInitMode.DEVICE_AFTER,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         delay_after_loss_ms: int = 0,
         delay_before_reduction_ms: int = 0,
@@ -841,7 +841,7 @@ class MixtureOfExperts(NestedWrappedModule):
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        fsdp_kwargs: Optional[dict[str, Any]] = None,
+        fsdp_kwargs: dict[str, Any] | None = None,
         deterministic: bool = False,
         delay_before_free_ms: int = 0,
     ):
@@ -892,7 +892,7 @@ class MLP(nn.Module):
     def __init__(
         self,
         dim: int,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         *,
         bias: bool = True,
         with_buffer: bool = False,
@@ -980,7 +980,7 @@ class DoubleLinear(nn.Module):
 
     def forward(
         self, x: torch.Tensor
-    ) -> Union[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         if self.use_second_linear:
             return self.relu(self.lin1(x)), self.relu(self.lin2(x))
         return self.relu(self.lin1(x))
@@ -1271,12 +1271,12 @@ class FSDPTestMixin:
         num_steps: int,
         autocast: bool,
         lr: float = 0.01,
-        fsdp_cpu_offload: Optional[CPUOffload] = None,
+        fsdp_cpu_offload: CPUOffload | None = None,
         save_model: bool = False,
-        mixed_precision: Optional[MixedPrecision] = None,
+        mixed_precision: MixedPrecision | None = None,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
-        sharded_grad_scaler_kwargs: Optional[dict[str, Any]] = None,
+        sharded_grad_scaler_kwargs: dict[str, Any] | None = None,
     ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
@@ -1361,19 +1361,19 @@ class FSDPTestMixin:
         model_class: type[FSDPTestModel],
         fsdp_init_mode: FSDPInitMode,
         device_init_mode: DEVICEInitMode,
-        ref_init_fn: Optional[Callable] = None,
+        ref_init_fn: Callable | None = None,
         num_iters: int = 2,
         save_model: bool = True,
         cpu_offload: CPUOffload = CPUOffload(),
-        backward_prefetch: Optional[BackwardPrefetch] = None,
-        sharding_strategy: Optional[ShardingStrategy] = None,
-        mixed_precision: Optional[MixedPrecision] = None,
+        backward_prefetch: BackwardPrefetch | None = None,
+        sharding_strategy: ShardingStrategy | None = None,
+        mixed_precision: MixedPrecision | None = None,
         forward_prefetch: bool = False,
         use_orig_params: bool = False,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
-        init_kwargs: Optional[dict[str, Any]] = None,
-        sharded_grad_scaler_kwargs: Optional[dict[str, Any]] = None,
+        init_kwargs: dict[str, Any] | None = None,
+        sharded_grad_scaler_kwargs: dict[str, Any] | None = None,
         **fsdp_kwargs,
     ):
         """
@@ -1664,7 +1664,7 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
         return self.__class__.pg
 
 
-def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
+def compiled_fsdp_test(compile_compute_on_module: type | None = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
         torch.distributed.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
         if compile_compute_on_module is None or isinstance(

@@ -35,6 +35,7 @@ from torch._ops import OpOverload
 from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
+from torch.distributed.tensor._decompositions import DecompShardingStrategy
 from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._op_schema import (
     DTensorSpec,
@@ -124,6 +125,7 @@ class ComparisonStats:
     total_samples: int = 0
     total_combinations: int = 0
     skip_reasons: dict[str, int] = field(default_factory=dict)
+    no_dtensor_support: bool = False
     # Per aten op variant breakdown (e.g. "aten.min.dim" -> 5)
     true_positives_by_op: dict[str, int] = field(default_factory=dict)
 
@@ -1047,13 +1049,7 @@ def _query_dtensor_rules(
         # seed (Shard(0) on the first input). Rules requiring other input
         # placements (e.g., Shard(1), Partial, or sharding on non-first inputs)
         # will not be found, so this under-reports DTensor's capabilities.
-        try:
-            from torch.distributed.tensor._decompositions import DecompShardingStrategy
-        except ImportError:
-            DecompShardingStrategy = None  # type: ignore[assignment, misc]
-        if DecompShardingStrategy is not None and DecompShardingStrategy.has_decomp(
-            aten_op
-        ):
+        if DecompShardingStrategy.has_decomp(aten_op):
             try:
                 mesh = init_device_mesh("cpu", (world_size,))
                 args_schema = []
@@ -1214,7 +1210,7 @@ def _compare_rules(
     _assert_keys_normalized(ground_truth_valid, input_shapes, output_shape)
     _assert_keys_normalized(dtensor_rules, input_shapes, output_shape)
 
-    op_str = str(aten_op) if aten_op else "(unknown)"
+    op_str = str(aten_op)
     for combo_key in ground_truth_valid:
         if combo_key in dtensor_rules:
             stats.true_positives += 1
@@ -1299,7 +1295,7 @@ def _print_discrepancy_section(
         lambda: defaultdict(list)
     )
     for d in discrepancies:
-        op_str = str(d.aten_op) if d.aten_op else "(unknown)"
+        op_str = str(d.aten_op)
         key = (d.input_placements, d.output_placement)
         by_op[op_str][key].append(d)
 
@@ -1327,16 +1323,14 @@ def _print_comparison_summary(
     # Per aten op variant breakdown
     fp_by_op: dict[str, set[ComboKey]] = defaultdict(set)
     for d in stats.false_positives:
-        op_str = str(d.aten_op) if d.aten_op else "(unknown)"
+        op_str = str(d.aten_op)
         fp_by_op[op_str].add((d.input_placements, d.output_placement))
     fn_by_op: dict[str, set[ComboKey]] = defaultdict(set)
     for d in stats.false_negatives:
-        op_str = str(d.aten_op) if d.aten_op else "(unknown)"
+        op_str = str(d.aten_op)
         fn_by_op[op_str].add((d.input_placements, d.output_placement))
 
-    all_ops = sorted(
-        set(stats.true_positives_by_op) | set(fp_by_op) | set(fn_by_op)
-    )
+    all_ops = sorted(set(stats.true_positives_by_op) | set(fp_by_op) | set(fn_by_op))
     if len(all_ops) > 1:
         for op_str in all_ops:
             tp = stats.true_positives_by_op.get(op_str, 0)
@@ -1354,6 +1348,37 @@ def _print_comparison_summary(
         stats.false_negatives,
         show_repro,
     )
+
+
+def _has_dtensor_support(aten_op: OpOverload) -> bool:
+    """Check if an aten op has any DTensor sharding strategy registered."""
+    propagator = DTensor._op_dispatcher.sharding_propagator
+    if aten_op in propagator.op_single_dim_strategy_funcs:
+        return True
+    if aten_op in propagator.op_strategy_funcs:
+        return True
+    return DecompShardingStrategy.has_decomp(aten_op)
+
+
+def _discover_aten_op(
+    opinfos: list[opinfo_core.OpInfo],
+    device: str,
+    dtype: torch.dtype,
+) -> OpOverload | None:
+    """Discover the aten op dispatched by the first valid sample."""
+    for opinfo in opinfos:
+        try:
+            samples = list(opinfo.sample_inputs(device, dtype))
+        except Exception:
+            continue
+        for sample in samples:
+            tensors = extract_tensors_from_sample(sample)
+            if not tensors or any(0 in t.shape for _, t in tensors):
+                continue
+            aten_op, _, _ = get_aten_op_for_sample(opinfo.op, sample, opinfo.name)
+            if aten_op is not None:
+                return aten_op
+    return None
 
 
 def compare_operator(
@@ -1384,6 +1409,12 @@ def compare_operator(
     opinfos = get_opinfo_by_name(op_name)
 
     stats = ComparisonStats()
+
+    aten_op = _discover_aten_op(opinfos, device, dtype)
+    if aten_op is None or not _has_dtensor_support(aten_op):
+        stats.no_dtensor_support = True
+        return stats
+
     total_samples = 0
     total_combinations = 0
     skip_reasons: dict[str, int] = defaultdict(int)
@@ -1718,6 +1749,13 @@ if __name__ == "__main__":
                     incorrect_only=args.incorrect_only,
                 )
                 elapsed = time.time() - op_start
+
+                if stats.no_dtensor_support:
+                    print(
+                        f"\n[{i + 1}/{len(op_names)}] {display}"
+                        f" — skipped: no DTensor support"
+                    )
+                    continue
 
                 if stats.total_samples == 0 and stats.skip_reasons:
                     reasons = ", ".join(
