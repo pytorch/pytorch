@@ -6,7 +6,7 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 import contextlib
 import dataclasses
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -91,9 +91,8 @@ def _extract_tangent_source_stack_traces(
 def _create_graph(
     f: Callable[..., Any],
     args: list[torch.Tensor],
-    args_descs: Optional[
-        list[AOTInput]
-    ] = None,  # keep compat with old clients; maybe we should split into two impls
+    args_descs: list[AOTInput]
+    | None = None,  # keep compat with old clients; maybe we should split into two impls
     *,
     aot_config: AOTConfig,
 ) -> torch.fx.GraphModule:
@@ -198,7 +197,7 @@ def aot_dispatch_base_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> tuple[torch.fx.GraphModule, list[FxValue], list[AOTInput], Optional[SubclassMeta]]:
+) -> tuple[torch.fx.GraphModule, list[FxValue], list[AOTInput], SubclassMeta | None]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -425,7 +424,7 @@ def aot_dispatch_autograd_graph(
     torch.fx.GraphModule,
     tuple[list[Any], list[Any]],
     tuple[list[AOTInput], list[AOTInput]],
-    Optional[SubclassMeta],
+    SubclassMeta | None,
 ]:
     # NB: flat_fn here is the original user function (as far as
     # aot_module_simplified is concerned)

@@ -29,6 +29,7 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
+from .mm_common import load_kernel_template
 
 
 if TYPE_CHECKING:
@@ -59,6 +60,29 @@ def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
         meta["GROUPS"],
     )
 
+
+# =============================================================================
+# Depthwise conv1d (groups == in_channels == out_channels)
+# Uses direct element-wise multiply-accumulate instead of implicit GEMM.
+# Channels-last (NLC) layout with 3D tiling: BLOCK_N x BLOCK_L x BLOCK_C.
+# =============================================================================
+
+
+@SymbolicGridFn
+def depthwise_conv1d_grid(n, c, l, meta, *, cdiv):
+    return (
+        cdiv(n, meta["BLOCK_N"]),
+        cdiv(l, meta["BLOCK_L"]),
+        cdiv(c, meta["BLOCK_C"]),
+    )
+
+
+depthwise_conv1d_template = TritonTemplate(
+    name="depthwise_conv1d",
+    grid=depthwise_conv1d_grid,
+    source=load_kernel_template("triton_depthwise_conv"),
+    cache_codegen_enabled_for_template=True,
+)
 
 LOOP_BODY_2D = """
         idx_x_h = i - PADDING_H + idx_y_h * STRIDE_H
@@ -361,16 +385,24 @@ def conv_layout(
     groups: int,
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
+    # We use guard_int_seq rather than size_hints because the output shape
+    # depends on these values — if they ever contained symbols, size_hints
+    # would silently substitute a hint that could be wrong, producing an
+    # incorrect layout. guard_int_seq will install a proper guard instead.
+    # Note: stride and padding are already guarded via guard_int_seq in
+    # convolution() above, but we guard all four here so conv_layout is
+    # self-contained and doesn't rely on callers.
+    guard = V.graph.sizevars.guard_int_seq
     with V.graph.fake_mode:
         output = torch.ops.aten.convolution(
-            ir.ir_node_to_tensor(x, guard_shape=True),
-            ir.ir_node_to_tensor(weight, guard_shape=True),
-            ir.ir_node_to_tensor(bias, guard_shape=True),
-            V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
+            ir.ir_node_to_tensor(x),
+            ir.ir_node_to_tensor(weight),
+            ir.ir_node_to_tensor(bias),
+            guard(stride),
+            guard(padding),
+            guard(dilation),
             transposed,
-            V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
+            guard(output_padding),
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -494,8 +526,10 @@ def convolution(
             return True
 
         layout = conv_layout(x, weight, None, **kwargs)
+        # TODO: This does not guard on the stride order decision,
+        # shall we use optimization_hint to handle unbacked?
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.guarding_hints_or_throw(layout.stride)
         )
         return req_stride_order == ir.NHWC_STRIDE_ORDER
 
@@ -536,8 +570,10 @@ def convolution(
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
+        # TODO: This does not guard on the stride order decision,
+        # shall we use optimization_hint to handle unbacked?
         req_stride_order = ir.get_stride_order(
-            V.graph.sizevars.size_hints(layout.stride)
+            V.graph.sizevars.guarding_hints_or_throw(layout.stride)
         )
         x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
@@ -588,6 +624,22 @@ def convolution(
             and groups == 1
         ):
             choices.append(aten_conv1x1_via_mm.bind(args, layout))
+
+        is_depthwise = groups > 1 and in_chan == 1 and out_chan == groups
+        if is_depthwise and ndim == 1:
+            depthwise_configs = V.choices.get_depthwise_conv_configs(device_type)
+            for cfg in depthwise_configs:
+                depthwise_conv1d_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(x, weight),
+                    layout=layout,
+                    KERNEL_SIZE=kernel_shape[0],
+                    CONV_STRIDE=stride[0],
+                    PADDING=padding[0],
+                    num_stages=cfg.num_stages,
+                    num_warps=cfg.num_warps,
+                    **cfg.kwargs,
+                )
 
         conv_configs = V.choices.get_conv_configs(device_type)
 

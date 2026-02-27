@@ -4,7 +4,7 @@ import logging
 import math
 import os
 import pathlib
-from typing import Any, Optional, Union
+from typing import Any
 
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
@@ -36,9 +36,7 @@ class MultiKernelState:
     def define_kernel(
         self,
         kernels: list[Any],
-        kernel_shape_keys: Optional[
-            list[Union[None, tuple[tuple[int, ...], ...]]]
-        ] = None,
+        kernel_shape_keys: list[None | tuple[tuple[int, ...], ...]] | None = None,
     ) -> str:
         """
         Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".

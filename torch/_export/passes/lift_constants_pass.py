@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 import logging
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._export.verifier import SpecViolationError
@@ -35,7 +35,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: dict[
-            Union[int, torch.Tensor, FakeScriptObject, torch.utils._pytree.TreeSpec],
+            int | torch.Tensor | FakeScriptObject | torch.utils._pytree.TreeSpec,
             list[Any],
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
@@ -114,7 +114,7 @@ def _get_first_fqn(
     return fqns[0] if fqns else None
 
 
-def _unused_constant(node: torch.fx.Node) -> Optional[list[torch.fx.Node]]:
+def _unused_constant(node: torch.fx.Node) -> list[torch.fx.Node] | None:
     """
     If there is a tensor constant created while tracing, here is how the graph
     looks like:

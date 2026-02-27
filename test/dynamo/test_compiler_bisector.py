@@ -44,7 +44,8 @@ class TestCompilerBisector(TestCase):
         import_module("torch._inductor.compile_fx")
 
         def bad_exp_decomp(self, rate=1, generator=None):
-            assert generator is None
+            if generator is not None:
+                raise AssertionError("Expected generator to be None")
             torch._check(
                 not utils.is_complex_dtype(self.dtype)
                 and not utils.is_integer_dtype(self.dtype)
@@ -103,7 +104,8 @@ class TestCompilerBisector(TestCase):
         # similar setup to test_joint_graph (see below)
         def pass_fn(graph: torch.fx.Graph):
             nodes = graph.find_nodes(op="call_function", target=operator.add)
-            assert len(nodes) == 1
+            if len(nodes) != 1:
+                raise AssertionError(f"Expected 1 node, got {len(nodes)}")
             args = list(nodes[0].args)
             args[1] = 2
             nodes[0].args = tuple(args)
@@ -135,7 +137,8 @@ class TestCompilerBisector(TestCase):
             nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.aten.add.Tensor
             )
-            assert len(nodes) == 1
+            if len(nodes) != 1:
+                raise AssertionError(f"Expected 1 node, got {len(nodes)}")
             args = list(nodes[0].args)
             args[1] = 2
             nodes[0].args = tuple(args)

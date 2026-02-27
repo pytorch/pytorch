@@ -299,9 +299,7 @@ class ShardedTensor(ShardedTensorBase):
         if self._init_rrefs:
             with _sharded_tensor_lock:
                 global _sharded_tensor_current_id, _sharded_tensor_map
-                # pyrefly: ignore [bad-assignment]
                 self._sharded_tensor_id = _sharded_tensor_current_id
-                # pyrefly: ignore [unsupported-operation]
                 _sharded_tensor_map[self._sharded_tensor_id] = weakref.ref(self)
                 _sharded_tensor_current_id += 1
 
