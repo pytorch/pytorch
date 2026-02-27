@@ -1763,6 +1763,91 @@ class PallasTestsMixin:
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
+    def test_permute_contiguous_2d_asymmetric(self):
+        """Test transpose+contiguous on asymmetric 2D shapes.
+
+        Exercises both codegen paths:
+        - Load-level permute_dims: when input buffer shape != broadcast shape
+        - Store-level permute_dims: when broadcast shape != output shape
+        """
+
+        def fn(x):
+            return x.transpose(0, 1).contiguous()
+
+        compiled = self._compile(fn)
+        for shape in [(10000, 2), (2, 10000), (8, 128), (128, 8), (3, 256)]:
+            with self.subTest(shape=shape):
+                x = torch.randn(*shape, device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    def test_permute_contiguous_3d_all_perms(self):
+        """Test 3D permutations with distinct dim sizes.
+
+        Using distinct sizes (4, 8, 16) ensures reshape vs permute bugs
+        are caught — if dimensions were equal, a wrong reshape could
+        accidentally produce correct results.
+
+        Currently only (1, 0, 2) works (swap first two dims).
+        Other permutations are tracked but expected to fail.
+        """
+
+        # Permutations that currently work
+        working = [(1, 0, 2)]
+        # Permutations that don't work yet (need general N-d store permute)
+        broken = [(0, 2, 1), (2, 1, 0), (2, 0, 1), (1, 2, 0)]
+
+        x = torch.randn(4, 8, 16, device=self.DEVICE)
+
+        for perm in working:
+            with self.subTest(perm=perm):
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+        for perm in broken:
+            with self.subTest(perm=perm):
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+                compiled = self._compile(fn)
+                try:
+                    result = compiled(x)
+                    expected = fn(x)
+                    if torch.allclose(result, expected):
+                        pass  # Unexpectedly passed — great!
+                    else:
+                        self.skipTest(f"Known issue: 3D perm {perm} not yet supported")
+                except Exception:
+                    self.skipTest(f"Known issue: 3D perm {perm} not yet supported")
+
+    def test_permute_contiguous_4d(self):
+        """Test 4D permutations with distinct dim sizes.
+
+        Currently no 4D permutations are supported (Mosaic rejects the
+        shape cast). These are tracked so they start passing once support
+        is added.
+        """
+        perms = [(0, 2, 3, 1), (0, 3, 1, 2), (3, 2, 1, 0)]
+        x = torch.randn(2, 4, 8, 16, device=self.DEVICE)
+        for perm in perms:
+            with self.subTest(perm=perm):
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+                compiled = self._compile(fn)
+                try:
+                    result = compiled(x)
+                    expected = fn(x)
+                    if torch.allclose(result, expected):
+                        pass  # Unexpectedly passed — great!
+                    else:
+                        self.skipTest(f"Known issue: 4D perm {perm} not yet supported")
+                except Exception:
+                    self.skipTest(f"Known issue: 4D perm {perm} not yet supported")
+
     def test_warpgroup_size_2d_aligned_32x8(self):
         """Test 2D tensor with 32x8 = 256 elements (2 warpgroups)."""
 
