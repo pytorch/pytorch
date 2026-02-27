@@ -269,7 +269,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   }
   if (M > 0) {
     LayerNormBackwardKernel(
-        input_buffer.is_cuda() ? kCUDA : kCPU,
+        input_buffer.device().type(),
         grad_buffer,
         input_buffer,
         mean,

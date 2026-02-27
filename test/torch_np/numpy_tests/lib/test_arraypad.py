@@ -570,7 +570,10 @@ class TestConstant(TestCase):
     def test_pad_empty_dimension(self):
         arr = np.zeros((3, 0, 2))
         result = np.pad(arr, [(0,), (2,), (1,)], mode="constant")
-        assert result.shape == (3, 4, 4)
+        if result.shape != (3, 4, 4):
+            raise AssertionError(
+                f"Expected result.shape == (3, 4, 4), got {result.shape}"
+            )
 
 
 if __name__ == "__main__":

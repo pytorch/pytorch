@@ -243,7 +243,8 @@ def unzip(p: Path) -> Path:
 
     Returns the path to the unzipped directory.
     """
-    assert p.is_file()
+    if not p.is_file():
+        raise AssertionError(f"{p} is not a file")
     unzipped_dir = p.with_name("unzipped-" + p.stem)
     print(f"Extracting {p} to {unzipped_dir}")
 

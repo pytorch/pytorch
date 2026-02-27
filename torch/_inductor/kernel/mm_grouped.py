@@ -25,6 +25,7 @@ from ..utils import (
     has_free_symbols,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
+    use_nv_universal_gemm_template,
     use_triton_template,
 )
 from .mm_common import (
@@ -253,8 +254,8 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         else:
             return None
 
-    end_hint = V.graph.sizevars.size_hint(end)
-    noffs_hint = V.graph.sizevars.size_hint(offs_box.get_size()[0])
+    end_hint = V.graph.sizevars.optimization_hint(end)
+    noffs_hint = V.graph.sizevars.optimization_hint(offs_box.get_size()[0])
     offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
         end_hint / noffs_hint
     )
@@ -421,6 +422,24 @@ def _tuned_grouped_mm_common(
                 **kwargs,
                 **asdict(config),
             )
+
+    if (
+        is_nonzero
+        and a_is_2d
+        and not b_is_2d
+        and offs is not None
+        and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b, offs, g)
+    ):
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
+            add_nv_universal_grouped_gemm_choices,
+        )
+
+        add_nv_universal_grouped_gemm_choices(
+            choices,
+            layout,
+            input_nodes,
+            accumulator_type=torch.float32,
+        )
 
     input_gen_fns = {}
     if offs is not None:

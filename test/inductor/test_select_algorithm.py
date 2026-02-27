@@ -35,6 +35,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_LINUX,
     MI200_ARCH,
@@ -71,9 +72,8 @@ def patches(fn):
     def wrapped(*args, **kwargs):
         counters.clear()
         torch.manual_seed(12345)
-        assert not torch.backends.cuda.matmul.allow_tf32, (
-            "correctness testing is allergic to tf32"
-        )
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
+            raise AssertionError("correctness testing is allergic to tf32")
         return fn(*args, **kwargs)
 
     return wrapped
@@ -85,6 +85,11 @@ class TestSelectAlgorithm(TestCase):
         if not is_big_gpu():
             return self.skipTest("Need a big GPU to run max_autotune=True")
         # Clear preprocessing functions to ensure clean state
+        select_algorithm.clear_preprocessing_fns()
+
+    def tearDown(self):
+        super().tearDown()
+        V.choices_handler = None
         select_algorithm.clear_preprocessing_fns()
 
     @patches
@@ -520,6 +525,53 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @patches
+    def test_convolution_depthwise_conv1d(self):
+        @torch.compile
+        def foo(x, w, b):
+            return aten.convolution(
+                x,
+                w,
+                b,
+                stride=(1,),
+                padding=(4,),
+                dilation=(1,),
+                transposed=False,
+                output_padding=(0,),
+                groups=128,
+            )
+
+        foo(
+            torch.randn(2, 128, 202, device=GPU_TYPE),
+            torch.randn(128, 1, 9, device=GPU_TYPE),
+            torch.randn(128, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @patches
+    def test_convolution_depthwise_conv1d_no_bias(self):
+        @torch.compile
+        def foo(x, w):
+            return aten.convolution(
+                x,
+                w,
+                None,
+                stride=(2,),
+                padding=(1,),
+                dilation=(1,),
+                transposed=False,
+                output_padding=(0,),
+                groups=64,
+            )
+
+        foo(
+            torch.randn(4, 64, 100, device=GPU_TYPE),
+            torch.randn(64, 1, 3, device=GPU_TYPE),
+        )
+        if not torch.version.hip:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
     def test_TritonTemplateCaller_str(self):
         """
         Make sure str(TritonTemplateCaller) does not raise exceptions.
@@ -582,6 +634,7 @@ class TestExternKernelCaller(TestCase):
         expected = torch.mm(a, b)
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
 
+    @skipIfRocmArch(MI200_ARCH)
     @patches
     def test_extern_kernel_caller_hash_key_deduplication(self):
         def fn(a, b, c, d):
@@ -808,6 +861,7 @@ class TestTemplateRender(TestCase):
         )
 
         XBLOCK = 32
+        custom_triton_meta = {"foo": "bar"}
 
         def add_override(a, b, alpha=None):
             layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
@@ -819,6 +873,7 @@ class TestTemplateRender(TestCase):
                 num_stages=1,
                 num_warps=2,
                 XBLOCK=XBLOCK,
+                triton_meta=custom_triton_meta,
             )
             return autotune_select_algorithm("add", choices, [a, b], layout)
 
@@ -841,8 +896,13 @@ class TestTemplateRender(TestCase):
             b = torch.zeros((XBLOCK,), device=GPU_TYPE)
 
             _result, kernels = run_and_get_kernels(add, a, b)
-            assert len(kernels) == 1
-            assert hook_identifier in kernels[0]
+            if len(kernels) != 1:
+                raise AssertionError
+            if hook_identifier not in kernels[0]:
+                raise AssertionError
+            FileCheck().check("triton_meta=").check(str(custom_triton_meta)).run(
+                kernels[0]
+            )
 
 
 if __name__ == "__main__":

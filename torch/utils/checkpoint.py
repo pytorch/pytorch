@@ -1016,7 +1016,6 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
             def logging_mode():
                 with LoggingTensorMode(), \
                      capture_logs(True, python_tb=True, script_tb=True, cpp_tb=cpp_tb) as logs_and_tb:
-                    # pyrefly: ignore [bad-assignment]
                     self.logs, self.tbs = logs_and_tb
                     yield logs_and_tb
             return logging_mode()
@@ -1573,9 +1572,17 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
+    from torch.overrides import _get_current_function_mode_stack
+    from torch.utils._device import DeviceContext
+
     # recompute_fn should respect the device context of the original forward
-    fwd_default_device = torch.get_default_device()
-    device_ctx = torch.device(fwd_default_device)
+    device_ctx = next(
+        filter(
+            lambda mode: isinstance(mode, DeviceContext),
+            reversed(_get_current_function_mode_stack()),
+        ),
+        contextlib.nullcontext(),
+    )
 
     def recompute_fn(*inputs) -> None:
         kwargs, *args = inputs

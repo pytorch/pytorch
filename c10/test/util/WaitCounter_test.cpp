@@ -22,30 +22,18 @@ class MockWaitCounterBackend
 
   intptr_t start(std::chrono::steady_clock::time_point now) noexcept override {
     startCount_.fetch_add(1);
-    lastStartTime_ = now;
     return reinterpret_cast<intptr_t>(this);
   }
 
   void stop(std::chrono::steady_clock::time_point now, intptr_t ctx) noexcept
       override {
     stopCount_.fetch_add(1);
-    lastStopTime_ = now;
     EXPECT_EQ(ctx, reinterpret_cast<intptr_t>(this));
-  }
-
-  std::chrono::steady_clock::time_point lastStartTime() const {
-    return lastStartTime_;
-  }
-
-  std::chrono::steady_clock::time_point lastStopTime() const {
-    return lastStopTime_;
   }
 
  private:
   std::atomic<int>& startCount_;
   std::atomic<int>& stopCount_;
-  std::chrono::steady_clock::time_point lastStartTime_;
-  std::chrono::steady_clock::time_point lastStopTime_;
 };
 
 class MockWaitCounterBackendFactory

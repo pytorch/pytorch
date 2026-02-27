@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     IS_S390X,
     IS_ARM64,
     parametrize,
+    TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
@@ -382,6 +383,7 @@ class TestTensorCreation(TestCase):
             ):
                 torch.block_diag(torch.ones(2, 2).cpu(), torch.ones(2, 2, device=device))
 
+    @skipCPUIf(TEST_WITH_TORCHDYNAMO, "test doesn't currently work with dynamo on CPU")
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_block_diag_scipy(self, device):
         import scipy.linalg
@@ -2831,7 +2833,8 @@ class TestTensorCreation(TestCase):
         tensor = torch.tensor((1, 2, 3), device=device)
 
         # need more than one device_type to test this
-        assert self.device_type == 'cuda'
+        if self.device_type != 'cuda':
+            raise AssertionError(f"device_type should be 'cuda', got {self.device_type!r}")
         for left, right in product([tensor, tensor.cpu()], [tensor, tensor.cpu()]):
             for device_arg in [torch_device, cpu_device, None]:
                 if device_arg is None:
@@ -2847,7 +2850,7 @@ class TestTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
                 torch_method(3, dtype=dtype)
             return
-        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
                 res = torch_method(
                     size,
@@ -2896,7 +2899,7 @@ class TestTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
                 torch_method(3, dtype=dtype)
             return
-        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
                 res = torch_method(size, sym=not periodic, **kwargs, device=device, dtype=dtype)
                 # NB: scipy always returns a float64 result

@@ -148,7 +148,7 @@ namespace at::sparse_csr {
 
 // Implements RAII object to manage checking sparse tensor invariants:
 class CheckSparseTensorInvariants {
-  bool old_state;
+  std::optional<bool> old_state;
 
  public:
   CheckSparseTensorInvariants(bool state)

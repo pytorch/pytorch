@@ -81,8 +81,14 @@ class TestMultiheadAttentionNN(NNTestCase):
 
         def _batchmatmul(a, b):  # batchmatmul over 4 dim matrix
             """Numpy-based batch matrix multiply over 4 dim matrix"""
-            assert a.shape[0] == b.shape[0]
-            assert a.shape[1] == b.shape[1]
+            if a.shape[0] != b.shape[0]:
+                raise AssertionError(
+                    f"Expected a.shape[0] == b.shape[0], got {a.shape[0]} vs {b.shape[0]}"
+                )
+            if a.shape[1] != b.shape[1]:
+                raise AssertionError(
+                    f"Expected a.shape[1] == b.shape[1], got {a.shape[1]} vs {b.shape[1]}"
+                )
             retval = np.zeros(
                 (a.shape[0], a.shape[1], a.shape[2], b.shape[3]), dtype=np.float32
             )

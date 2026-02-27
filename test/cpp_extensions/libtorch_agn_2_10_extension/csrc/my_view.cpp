@@ -8,12 +8,12 @@ Tensor my_view(Tensor t, torch::headeronly::HeaderOnlyArrayRef<int64_t> size) {
   return view(t, size);
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("my_view(Tensor t, int[] size) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(
-    libtorch_agn_2_10,
+    STABLE_LIB_NAME,
     CompositeExplicitAutograd,
     m) {
   m.impl("my_view", TORCH_BOX(&my_view));

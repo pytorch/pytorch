@@ -823,6 +823,7 @@ if _enabled:
 
         @property
         def original_name(self):
+            # pyrefly: ignore [unnecessary-comparison]
             if type(self) is str(self._c._type().name()):
                 return ""
             return str(self._c._type().name())
@@ -1790,7 +1791,8 @@ class _ScriptProfile:
 
 
 def _unwrap_optional(x):
-    assert x is not None, "Unwrapping null optional"
+    if x is None:
+        raise AssertionError("Unwrapping null optional")
     return x
 
 

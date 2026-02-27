@@ -272,7 +272,11 @@ def construct_version_maps(
             continue
         upgrader_ranges = torch._C._get_upgrader_ranges(op_name)
         upgrader_entries = sorted_version_map[op_name]
-        assert len(upgrader_ranges) == len(upgrader_entries)
+        if len(upgrader_ranges) != len(upgrader_entries):
+            raise AssertionError(
+                f"upgrader_ranges and upgrader_entries length mismatch for {op_name}: "
+                f"{len(upgrader_ranges)} != {len(upgrader_entries)}"
+            )
         for idx, upgrader_entry in enumerate(upgrader_entries):
             upgrader_name = upgrader_entry.upgrader_name
             bytecode_function_index = upgrader_bytecode_function_to_index_map[

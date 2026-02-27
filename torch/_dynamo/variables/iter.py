@@ -16,7 +16,7 @@ handling of iterator operations during code transformation and optimization.
 import itertools
 import sys
 from collections.abc import Callable, Sequence
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -114,10 +114,6 @@ class ItertoolsVariable(VariableTracker):
                 )
 
             def retrieve_const_key(key: VariableTracker) -> Any:
-                from ..utils import specialize_symnode
-
-                # Unwrap LazyVariableTracker to get the underlying variable
-                key = specialize_symnode(key)
                 if isinstance(key, variables.SymNodeVariable):
                     return key.evaluate_expr()
                 elif key.is_python_constant():
@@ -162,7 +158,6 @@ class ItertoolsVariable(VariableTracker):
 
             result = []
             try:
-                # pyrefly: ignore [unbound-name]
                 for k, v in itertools.groupby(seq, key=keyfunc):
                     result.append(
                         variables.TupleVariable(
@@ -269,7 +264,7 @@ class IteratorVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
-            return variables.ConstantVariable.create(True)
+            return variables.CONSTANT_VARIABLE_TRUE
         return super().call_obj_hasattr(tx, name)
 
     def call_method(
@@ -343,8 +338,8 @@ class RepeatIteratorVariable(IteratorVariable):
 class CountIteratorVariable(IteratorVariable):
     def __init__(
         self,
-        item: Union[int, VariableTracker] = 0,
-        step: Union[int, VariableTracker] = 1,
+        item: int | VariableTracker = 0,
+        step: int | VariableTracker = 1,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -433,7 +428,7 @@ class ZipVariable(IteratorVariable):
         args = []
 
         def get_item(
-            it: Union[list[VariableTracker], VariableTracker],
+            it: list[VariableTracker] | VariableTracker,
         ) -> VariableTracker:
             if isinstance(it, list):
                 if old_index >= len(it):

@@ -88,27 +88,43 @@ class TestIsSubDType(TestCase):
     def test_nondtype_nonscalartype(self):
         # See gh-14619 and gh-9505 which introduced the deprecation to fix
         # this. These tests are directly taken from gh-9505
-        assert not np.issubdtype(np.float32, "float64")
-        assert not np.issubdtype(np.float32, "f8")
-        assert not np.issubdtype(np.int32, "int64")
+        if np.issubdtype(np.float32, "float64"):
+            raise AssertionError("np.float32 should not be subtype of float64")
+        if np.issubdtype(np.float32, "f8"):
+            raise AssertionError("np.float32 should not be subtype of f8")
+        if np.issubdtype(np.int32, "int64"):
+            raise AssertionError("np.int32 should not be subtype of int64")
         # for the following the correct spellings are
         # np.integer, np.floating, or np.complexfloating respectively:
-        assert not np.issubdtype(np.int8, int)  # np.int8 is never np.int_
-        assert not np.issubdtype(np.float32, float)
-        assert not np.issubdtype(np.complex64, complex)
-        assert not np.issubdtype(np.float32, "float")
-        assert not np.issubdtype(np.float64, "f")
+        if np.issubdtype(np.int8, int):  # np.int8 is never np.int_
+            raise AssertionError("np.int8 should not be subtype of int")
+        if np.issubdtype(np.float32, float):
+            raise AssertionError("np.float32 should not be subtype of float")
+        if np.issubdtype(np.complex64, complex):
+            raise AssertionError("np.complex64 should not be subtype of complex")
+        if np.issubdtype(np.float32, "float"):
+            raise AssertionError("np.float32 should not be subtype of 'float'")
+        if np.issubdtype(np.float64, "f"):
+            raise AssertionError("np.float64 should not be subtype of 'f'")
 
         # Test the same for the correct first datatype and abstract one
         # in the case of int, float, complex:
-        assert np.issubdtype(np.float64, "float64")
-        assert np.issubdtype(np.float64, "f8")
-        assert np.issubdtype(np.int64, "int64")
-        assert np.issubdtype(np.int8, np.integer)
-        assert np.issubdtype(np.float32, np.floating)
-        assert np.issubdtype(np.complex64, np.complexfloating)
-        assert np.issubdtype(np.float64, "float")
-        assert np.issubdtype(np.float32, "f")
+        if not np.issubdtype(np.float64, "float64"):
+            raise AssertionError("np.float64 should be subtype of float64")
+        if not np.issubdtype(np.float64, "f8"):
+            raise AssertionError("np.float64 should be subtype of f8")
+        if not np.issubdtype(np.int64, "int64"):
+            raise AssertionError("np.int64 should be subtype of int64")
+        if not np.issubdtype(np.int8, np.integer):
+            raise AssertionError("np.int8 should be subtype of np.integer")
+        if not np.issubdtype(np.float32, np.floating):
+            raise AssertionError("np.float32 should be subtype of np.floating")
+        if not np.issubdtype(np.complex64, np.complexfloating):
+            raise AssertionError("np.complex64 should be subtype of np.complexfloating")
+        if not np.issubdtype(np.float64, "float"):
+            raise AssertionError("np.float64 should be subtype of 'float'")
+        if not np.issubdtype(np.float32, "f"):
+            raise AssertionError("np.float32 should be subtype of 'f'")
 
 
 @xpassIfTorchDynamo_np  # (
@@ -152,22 +168,26 @@ class TestScalarTypeNames(TestCase):
 
     def test_names_are_unique(self):
         # none of the above may be aliases for each other
-        assert len(set(self.numeric_types)) == len(self.numeric_types)
+        if len(set(self.numeric_types)) != len(self.numeric_types):
+            raise AssertionError("numeric_types contains duplicates")
 
         # names must be unique
         names = [t.__name__ for t in self.numeric_types]
-        assert len(set(names)) == len(names)
+        if len(set(names)) != len(names):
+            raise AssertionError("numeric_type names are not unique")
 
     @parametrize("t", numeric_types)
     def test_names_reflect_attributes(self, t):
         """Test that names correspond to where the type is under ``np.``"""
-        assert getattr(np, t.__name__) is t
+        if getattr(np, t.__name__) is not t:
+            raise AssertionError(f"np.{t.__name__} is not {t}")
 
     @skipIfTorchDynamo()  # XXX: weird, some names are not OK
     @parametrize("t", numeric_types)
     def test_names_are_undersood_by_dtype(self, t):
         """Test the dtype constructor maps names back to the type"""
-        assert np.dtype(t.__name__).type is t
+        if np.dtype(t.__name__).type is not t:
+            raise AssertionError(f"np.dtype({t.__name__!r}).type is not {t}")
 
 
 if __name__ == "__main__":

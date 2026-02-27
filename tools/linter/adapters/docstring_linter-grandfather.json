@@ -71,7 +71,7 @@
     "def CppWrapperCpuArrayRef.generate_return()": 128,
     "def CppWrapperCpuArrayRef.write_wrapper_decl()": 208
   },
-  "torch/_inductor/codegen/cuda/gemm_template.py": {
+  "torch/_inductor/codegen/cutlass/gemm_template.py": {
     "class CUTLASS2xGemmTemplate": 268
   },
   "torch/_inductor/codegen/debug_utils.py": {

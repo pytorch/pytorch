@@ -4,7 +4,7 @@ import dataclasses
 import logging
 import textwrap
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
@@ -45,9 +45,7 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 class CuteDSLKernelWrapper:
     """Wrapper to provide .run() interface for CuteDSL kernels"""
 
-    def __init__(
-        self, kernel_fn: Callable[..., Any], kernel_path: Optional[str] = None
-    ):
+    def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
         kernel_code_log.info("CuteDSL kernel path: %s", kernel_path)
@@ -72,9 +70,9 @@ class CuteDSLSubgraphInfo:
     """Minimal subgraph info for CuteDSL kernels."""
 
     body: IndentedBuffer
-    template_mask: Optional[str] = None
-    template_out: Optional[str] = None
-    cse: Optional[CSE[Any]] = None
+    template_mask: str | None = None
+    template_out: str | None = None
+    cse: CSE[Any] | None = None
 
     def __post_init__(self):
         self.only_copy_if_non_none_fields = ("cse",)
@@ -97,7 +95,7 @@ class CuteDSLTemplateKernel(Kernel):
         kernel_name: str,
         input_nodes: list[Buffer],
         output_node: Buffer,
-        subgraphs: Optional[list[Buffer]] = None,
+        subgraphs: list[Buffer] | None = None,
     ) -> None:
         # Call parent Kernel constructor
         super().__init__()
@@ -109,9 +107,9 @@ class CuteDSLTemplateKernel(Kernel):
 
         # Template attributes
         self.body: IndentedBuffer = IndentedBuffer()
-        self.template_mask: Optional[str] = None
-        self.template_out: Optional[str] = None
-        self.template_indices: Optional[list[Any]] = None
+        self.template_mask: str | None = None
+        self.template_out: str | None = None
+        self.template_indices: list[Any] | None = None
         self.render_hooks: dict[str, Any] = {}
 
         # TODO Additional attributes needed by template system
@@ -404,8 +402,8 @@ class CuteDSLTemplateKernel(Kernel):
     def modification(
         self,
         subgraph_number: int,
-        output_name: Optional[str],
-        mask: Optional[str] = None,
+        output_name: str | None,
+        mask: str | None = None,
         **fixed_inputs,
     ) -> str:
         """Generate CuteDSL code for a subgraph modification."""
@@ -469,7 +467,7 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         kernel,
         subgraph_number: int,
         fixed_inputs: dict[str, Any],
-        mask: Optional[str],
+        mask: str | None,
     ):
         cutedsl_ops = CuteDSLOpOverrides()
         super().__init__(cutedsl_ops)

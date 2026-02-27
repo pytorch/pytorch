@@ -77,13 +77,29 @@ ConvConfig = BaseConfig
 
 
 @dataclasses.dataclass
+class DepthwiseConvConfig:
+    """
+    Configuration for depthwise conv1d Triton template.
+    Uses BLOCK_N x BLOCK_L x BLOCK_C tiling (channels-last NLC layout).
+    Matches the hand-written NLC kernel from depthwise_conv1d_benchmark.py.
+    """
+
+    block_n: int
+    block_l: int
+    block_c: int
+    num_stages: int
+    num_warps: int
+
+
+@dataclasses.dataclass
 class BlackwellGPUGemmConfig(GemmConfig):
     """
     Gemm configuration used for templates with features explicitly
     targeting Nvidia Blackwell GPUs
     """
 
-    epilogue_subtile: bool = dataclasses.field(kw_only=True, default=False)
+    # epilogue_subtile must be a power of 2 (1 means no subtiling)
+    epilogue_subtile: int = dataclasses.field(kw_only=True, default=1)
     warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
     flatten: bool = dataclasses.field(kw_only=True, default=True)
 
@@ -332,7 +348,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 4,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -342,7 +358,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -352,7 +368,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 2,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -362,7 +378,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -372,7 +388,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 4,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -382,7 +398,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -392,7 +408,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -403,7 +419,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -413,31 +429,62 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 8,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            # Include subtile=4. Always required for testing.
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                4,
+                8,
+                epilogue_subtile=4,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                128,
+                128,
+                128,
+                4,
+                8,
+                epilogue_subtile=4,
                 warp_specialize=True,
                 flatten=True,
             ),
         ]
 
         self.blackwell_persistent_addmm_configs: list[BaseConfig] = [
+            # Include each subtiling factor for testing.
             BlackwellGPUGemmConfig(
                 256,
                 128,
                 64,
                 2,
                 4,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
-            # Ensure we can test at least 1 non-subtiled version.
             BlackwellGPUGemmConfig(
                 256,
                 128,
                 64,
                 2,
                 4,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                2,
+                4,
+                epilogue_subtile=4,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -576,7 +623,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 num_warps=c.num_warps,
                 hint_override=c.hint_override,
                 group_m=8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             )
@@ -599,13 +646,84 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
         self.conv_configs: list[BaseConfig] = [
+            # BLOCK_K=16 configs
             ConvConfig(64, 256, 16, 2, 4),
             ConvConfig(256, 64, 16, 2, 4),
             ConvConfig(1024, 16, 16, 1, 8),
+            # BLOCK_K=32 configs
             ConvConfig(128, 128, 32, 2, 8),
             ConvConfig(64, 64, 32, 2, 4),
             ConvConfig(64, 256, 32, 2, 8),
             ConvConfig(256, 64, 32, 2, 8),
+            # BLOCK_K=64 configs
+            ConvConfig(128, 128, 64, 3, 8),
+            ConvConfig(64, 128, 64, 4, 4),
+            ConvConfig(128, 64, 64, 4, 4),
+            ConvConfig(256, 128, 64, 2, 8),
+            ConvConfig(128, 256, 64, 2, 8),
+            # BLOCK_K=128 configs - optimal when IN_C=128 (single iteration over channels)
+            ConvConfig(128, 128, 128, 2, 8),
+            ConvConfig(128, 128, 128, 3, 8),
+            ConvConfig(64, 128, 128, 4, 4),
+            ConvConfig(256, 128, 128, 2, 8),
+            ConvConfig(128, 256, 128, 2, 8),
+        ]
+
+        # Depthwise conv1d configs: BLOCK_N x BLOCK_L x BLOCK_C tiling
+        # Derived from autotuning results on H100 for depthwise conv1d
+        # channels-last (NLC) layout with shape x=[3072, 128, 202]
+        # Matches _nlc_autotune_configs from depthwise_conv1d_benchmark.py
+        self.depthwise_conv_configs: list[DepthwiseConvConfig] = [
+            # BLOCK_C=32, BLOCK_L=32
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=32, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=32, block_c=32, num_stages=5, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=32, block_c=32, num_stages=4, num_warps=4
+            ),
+            # BLOCK_C=32, BLOCK_L=64
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=32, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=64, block_c=32, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=32, BLOCK_L=256
+            DepthwiseConvConfig(
+                block_n=16, block_l=256, block_c=32, num_stages=5, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=256, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=256, block_c=32, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=64
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=64, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=64, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=64, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=128
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=128, num_stages=3, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=128, num_stages=3, num_warps=4
+            ),
         ]
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -973,6 +1091,21 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             self.preprocess_mm_configs, configs=self.conv_configs, op_name="conv"
         )
 
+    def get_depthwise_conv_configs(self) -> list[TritonConfig]:
+        """Return TritonConfig list for depthwise conv1d autotuning."""
+        return [
+            TritonConfig(
+                {
+                    "BLOCK_N": cfg.block_n,
+                    "BLOCK_L": cfg.block_l,
+                    "BLOCK_C": cfg.block_c,
+                },
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+            )
+            for cfg in self.depthwise_conv_configs
+        ]
+
     # Flex attn helpers
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
@@ -1194,7 +1327,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
                 default_config = FlexConfig(64, 64, 3, 4)
-            if capability >= (12, 0):
+            # here we are using sm_120_default_flex_config on THOR as well
+            if capability >= (11, 0):
                 default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
                 )
@@ -1236,6 +1370,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             capability_class = "float32"
         elif major == 12:
             capability_class = "sm12x"
+        elif major == 11:
+            capability_class = "sm11x"
         elif major >= 10:
             capability_class = "sm10x"
         elif capability == (9, 0):
@@ -1266,11 +1402,18 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                     64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
                 )
             ),
+            "sm11x": lambda h: (
+                FlexBwDConfig(32, 128, 128, 32, 3, 4)
+                if h < 64
+                else FlexBwDConfig(
+                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
+                )
+            ),
             "sm12x": lambda h: (
                 FlexBwDConfig(32, 128, 128, 32, 3, 4)
                 if h < 64
                 else FlexBwDConfig(
-                    64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
+                    64, 64, 64, 64, 1 if h >= 128 else 2, 4
                 )
             ),
         }
@@ -1305,6 +1448,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexDecodeConfig(64, 1, 2)
             else:
                 default_config = FlexDecodeConfig(64, 3, 2)
+        if capability == (11, 0):
+            default_config = FlexDecodeConfig(16, 1, 2)
         else:
             default_config = FlexDecodeConfig(64, 1, 2)
 
@@ -1675,7 +1820,10 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             FlexConfig(128, 32, 2, 16),
             FlexConfig(128, 32, 2, 8),
         ]
-        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = []
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            FlexBwDConfig(32, 32, 32, 32, 2, 4),
+            FlexBwDConfig(64, 64, 64, 64, 2, 4),
+        ]
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
 
         if not bool(os.getenv("CI")):
@@ -1742,7 +1890,7 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             if head_dim == 64:
                 default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             elif head_dim == 128:
-                default_config = FlexBwDConfig(64, 128, 64, 128, 1, 8)
+                default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
             else:
                 default_config = FlexBwDConfig(64, 64, 64, 64, 1, 8)
         else:  # modest hardware or extremely large head_dim
@@ -1808,7 +1956,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         assert isinstance(kernel_inputs, MMKernelInputs)
         m, n, k = kernel_inputs.mnk_symbolic()
         # Calculate allow_tf32
-        allow_tf32 = torch.backends.cuda.matmul.allow_tf32 and (
+        allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32" and (
             not inductor_config.force_same_precision
             or ((m % 16) == 0 and (n % 16) == 0 and (k % 8) == 0)
         )
@@ -2088,7 +2236,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             for num_stages in [2, 3, 4, 5, 6]:
                 # AutoWS doesn't work with num_warps < 4
                 for num_warps in [4, 8]:
-                    for EPILOGUE_SUBTILE in [True, False]:
+                    for EPILOGUE_SUBTILE in [1, 2, 4]:
                         configs.append(
                             BlackwellGPUGemmConfig(
                                 block_m=BLOCK_M,

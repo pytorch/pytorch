@@ -20,25 +20,33 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 
 import functools
 import inspect
+import types
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_member_type,
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
     MemberType,
+    should_hoist,
 )
 from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
 from ..eval_frame import skip_code
-from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
+from ..exc import (
+    raise_observed_exception,
+    unimplemented,
+    UnsafeScriptObjectError,
+    Unsupported,
+)
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
@@ -138,7 +146,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
                 )
 
         if ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
+            return VariableTracker.build(tx, obj)
 
         source = AttrSource(self.source, name) if self.source else None
         return VariableTracker.build(tx, obj, source)
@@ -170,17 +178,20 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
         var_args = TupleVariable(list(args))
         var_kwargs = ConstDictVariable(
-            {ConstantVariable(k): v for k, v in kwargs.items()}
+            {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
         )
+        constant_args = var_args.as_python_constant()
+        constant_kwargs = var_kwargs.as_python_constant()
         opaque_obj = self.value(  # pyrefly: ignore[not-callable]
-            *(var_args.as_python_constant()),
-            **(var_kwargs.as_python_constant()),
+            *constant_args, **constant_kwargs
         )
         fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
             tx.output.fake_mode, opaque_obj
         )
 
-        return TorchScriptObjectVariable.create(opaque_obj, fake_script_obj)
+        return TorchScriptObjectVariable.create(
+            opaque_obj, fake_script_obj, (constant_args, constant_kwargs)
+        )
 
 
 class TorchScriptObjectVariable(UserDefinedObjectVariable):
@@ -191,20 +202,60 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return issubclass(user_cls, torch.ScriptObject) or is_opaque_type(user_cls)
 
     @staticmethod
-    def create(proxy: Proxy, value: Any, **options: Any) -> "TorchScriptObjectVariable":
-        return TorchScriptObjectVariable(proxy, value, **options)
+    def create(
+        proxy: Proxy, value: Any, ctor_args_kwargs: Any = None, **options: Any
+    ) -> "TorchScriptObjectVariable":
+        return TorchScriptObjectVariable(proxy, value, ctor_args_kwargs, **options)
 
     def __init__(
-        self, proxy: Proxy, value: Any, source: Optional[Source] = None, **kwargs: Any
+        self,
+        proxy: Proxy,
+        value: Any,
+        ctor_args_kwargs: Any = None,
+        source: Source | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
         self.proxy = proxy
         if isinstance(self.proxy, torch.fx.Proxy):
             self.proxy.node.meta["example_value"] = value
         self.source = source
+        # If the OpaqueObject is sourceless, then this is
+        # the constant (args, kwargs) that Dynamo used to construct it.
+        self.ctor_args_kwargs = ctor_args_kwargs
 
     def as_proxy(self) -> Proxy:
+        if not isinstance(self.proxy, torch.fx.Proxy):
+            # If we have a hoisted value type, then lazily lift it to be a graph
+            # input when as_proxy() is called.
+            assert is_opaque_value_type(type(self.proxy))
+            if should_hoist(type(self.proxy)):
+                from torch._dynamo.symbolic_convert import InstructionTranslator
+
+                tx = InstructionTranslator.current_tx()
+                # if any kwargs (synthetic_graph_input doesn't support them yet)
+                # not a graph break because hard error more explicit here
+                # (and opaque objects are really just used for compile)
+                if self.ctor_args_kwargs[1]:
+                    raise RuntimeError(
+                        "NYI: hoisted opaque objects that accept kwargs, please pass as args"
+                    )
+                hoisted_vt = tx.output.synthetic_graph_input(
+                    type(self.proxy), self.ctor_args_kwargs[0]
+                )
+                self.proxy = hoisted_vt.as_proxy()
+
         return self.proxy
+
+    def __str__(self) -> str:
+        value = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        return f"{self.__class__.__name__}({value})"
+
+    __repr__ = __str__
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -224,6 +275,13 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 name,
             )
             if member_type is None:
+                # Special case: __bool__ and __len__ are used for truthiness checks.
+                # If they're not registered and the real object doesn't have them,
+                # raise ObservedAttributeError so the caller can fall back to
+                # treating the object as truthy (Python default behavior
+                if name in ("__bool__", "__len__") and not hasattr(real_obj, name):
+                    raise_observed_exception(AttributeError, tx)
+
                 unimplemented(
                     gb_type="Attempted to access unregistered member on an OpaqueObject",
                     context=f"value={real_obj}, attr={name}",
@@ -235,7 +293,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
-                if inspect.ismethod(value):
+                if inspect.ismethod(value) or isinstance(
+                    value, types.MethodWrapperType
+                ):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
@@ -244,7 +304,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             elif member_type == MemberType.INLINED:
                 value = getattr(real_obj, name)
-                if inspect.ismethod(value) and self.source is None:
+                if (
+                    inspect.ismethod(value)
+                    or isinstance(value, types.MethodWrapperType)
+                ) and self.source is None:
                     # When we don't have a source, fall back to call_method
                     # which creates a proxy node.
                     return LambdaVariable(
@@ -339,14 +402,20 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
-                args_const = [x.as_python_constant() for x in args]
-                kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+                def get_real_value(x: VariableTracker) -> Any:
+                    # For TorchScriptObjectVariable, get the real object directly
+                    if isinstance(x, TorchScriptObjectVariable):
+                        return x.get_real_value()
+                    return x.as_python_constant()
+
+                args_const = [get_real_value(x) for x in args]
+                kwargs_const = {k: get_real_value(v) for k, v in kwargs.items()}
 
                 method = getattr(real_obj, name)
 
                 if name == "__setattr__":
                     method(*args_const, **kwargs_const)
-                    return real_obj  # pyrefly: ignore[bad-return]
+                    return real_obj
 
                 constant_val = method(*args_const, **kwargs_const)
 
@@ -399,6 +468,36 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return super().as_python_constant()
 
     def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(
-            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+        try:
+            hash(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+            return True
+        except TypeError:
+            return False
+
+    def get_python_hash(self) -> int:
+        real_obj = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
         )
+        return hash(real_obj)
+
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, TorchScriptObjectVariable):
+            return False
+        real_self = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        real_other = (
+            other.value.real_obj
+            if isinstance(other.value, FakeScriptObject)
+            else other.value
+        )
+        return real_self == real_other
+
+    def get_real_value(self) -> Any:
+        if isinstance(self.value, FakeScriptObject):
+            return self.value.real_obj
+        return self.as_python_constant()

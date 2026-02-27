@@ -1,0 +1,447 @@
+diff --git a/test/dynamo/cpython/3_13/test_class.py b/test/dynamo/cpython/3_13/test_class.py
+index d2df6228ec4..316fda7d7db 100644
+--- a/test/dynamo/cpython/3_13/test_class.py
++++ b/test/dynamo/cpython/3_13/test_class.py
+@@ -1,6 +1,25 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_class.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
++
++# ======= END DYNAMO PATCH =======
++
+ "Test the functionality of Python classes implementing operators."
+ 
+ import unittest
++from test import support
+ from test.support import cpython_only, import_helper, script_helper
+ 
+ testmeths = [
+@@ -134,8 +153,9 @@ for method in testmeths:
+ AllTests = type("AllTests", (object,), d)
+ del d, statictests, method, method_template
+ 
+-class ClassTests(unittest.TestCase):
++class ClassTests(CPythonTestCase):
+     def setUp(self):
++        super().setUp()
+         callLst[:] = []
+ 
+     def assertCallStack(self, expected_calls):
+@@ -273,7 +293,8 @@ class ClassTests(unittest.TestCase):
+ 
+         # List/dict operations
+ 
+-        class Empty: pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Empty: pass
+ 
+         try:
+             1 in Empty()
+@@ -417,18 +438,19 @@ class ClassTests(unittest.TestCase):
+ 
+     def testGetSetAndDel(self):
+         # Interfering tests
+-        class ExtraTests(AllTests):
+-            @trackCall
+-            def __getattr__(self, *args):
+-                return "SomeVal"
++        with torch._dynamo.error_on_graph_break(False):
++            class ExtraTests(AllTests):
++                @trackCall
++                def __getattr__(self, *args):
++                    return "SomeVal"
+ 
+-            @trackCall
+-            def __setattr__(self, *args):
+-                pass
++                @trackCall
++                def __setattr__(self, *args):
++                    pass
+ 
+-            @trackCall
+-            def __delattr__(self, *args):
+-                pass
++                @trackCall
++                def __delattr__(self, *args):
++                    pass
+ 
+         testme = ExtraTests()
+ 
+@@ -450,9 +472,10 @@ class ClassTests(unittest.TestCase):
+         from test.support import import_helper
+         _testlimitedcapi = import_helper.import_module('_testlimitedcapi')
+ 
+-        class A:
+-            def __init__(self):
+-                self.attr = 1
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                def __init__(self):
++                    self.attr = 1
+ 
+         a = A()
+         self.assertEqual(_testlimitedcapi.object_hasattrstring(a, b"attr"), 1)
+@@ -473,16 +496,17 @@ class ClassTests(unittest.TestCase):
+ 
+     def testBadTypeReturned(self):
+         # return values of some method are type-checked
+-        class BadTypeClass:
+-            def __int__(self):
+-                return None
+-            __float__ = __int__
+-            __complex__ = __int__
+-            __str__ = __int__
+-            __repr__ = __int__
+-            __bytes__ = __int__
+-            __bool__ = __int__
+-            __index__ = __int__
++        with torch._dynamo.error_on_graph_break(False):
++            class BadTypeClass:
++                def __int__(self):
++                    return None
++                __float__ = __int__
++                __complex__ = __int__
++                __str__ = __int__
++                __repr__ = __int__
++                __bytes__ = __int__
++                __bool__ = __int__
++                __index__ = __int__
+         def index(x):
+             return [][x]
+ 
+@@ -493,21 +517,24 @@ class ClassTests(unittest.TestCase):
+         # Test correct errors from hash() on objects with comparisons but
+         #  no __hash__
+ 
+-        class C0:
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class C0:
++                pass
+ 
+         hash(C0()) # This should work; the next two should raise TypeError
+ 
+-        class C2:
+-            def __eq__(self, other): return 1
++        with torch._dynamo.error_on_graph_break(False):
++            class C2:
++                def __eq__(self, other): return 1
+ 
+         self.assertRaises(TypeError, hash, C2())
+ 
+     def testPredefinedAttrs(self):
+         o = object()
+ 
+-        class Custom:
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Custom:
++                pass
+ 
+         c = Custom()
+ 
+@@ -557,8 +584,9 @@ class ClassTests(unittest.TestCase):
+     def testSFBug532646(self):
+         # Test for SF bug 532646
+ 
+-        class A:
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                pass
+         A.__call__ = A()
+         a = A()
+ 
+@@ -575,20 +603,23 @@ class ClassTests(unittest.TestCase):
+         def booh(self):
+             raise AttributeError("booh")
+ 
+-        class A:
+-            a = property(booh)
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                a = property(booh)
+         try:
+             A().a # Raised AttributeError: A instance has no attribute 'a'
+         except AttributeError as x:
+             if str(x) != "booh":
+                 self.fail("attribute error for A().a got masked: %s" % x)
+ 
+-        class E:
+-            __eq__ = property(booh)
++        with torch._dynamo.error_on_graph_break(False):
++            class E:
++                __eq__ = property(booh)
+         E() == E() # In debug mode, caused a C-level assert() to fail
+ 
+-        class I:
+-            __init__ = property(booh)
++        with torch._dynamo.error_on_graph_break(False):
++            class I:
++                __init__ = property(booh)
+         try:
+             # In debug mode, printed XXX undetected error and
+             #  raises AttributeError
+@@ -610,19 +641,21 @@ class ClassTests(unittest.TestCase):
+ 
+     def testHashComparisonOfMethods(self):
+         # Test comparison and hash of methods
+-        class A:
+-            def __init__(self, x):
+-                self.x = x
+-            def f(self):
+-                pass
+-            def g(self):
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                def __init__(self, x):
++                    self.x = x
++                def f(self):
++                    pass
++                def g(self):
++                    pass
++                def __eq__(self, other):
++                    return True
++                def __hash__(self):
++                    raise TypeError
++        with torch._dynamo.error_on_graph_break(False):
++            class B(A):
+                 pass
+-            def __eq__(self, other):
+-                return True
+-            def __hash__(self):
+-                raise TypeError
+-        class B(A):
+-            pass
+ 
+         a1 = A(1)
+         a2 = A(1)
+@@ -650,8 +683,9 @@ class ClassTests(unittest.TestCase):
+ 
+     def testSetattrWrapperNameIntern(self):
+         # Issue #25794: __setattr__ should intern the attribute name
+-        class A:
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                pass
+ 
+         def add(self, other):
+             return 'summa'
+@@ -669,15 +703,17 @@ class ClassTests(unittest.TestCase):
+             A() + 1
+ 
+     def testSetattrNonStringName(self):
+-        class A:
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                pass
+ 
+         with self.assertRaises(TypeError):
+             type.__setattr__(A, b'x', None)
+ 
+     def testTypeAttributeAccessErrorMessages(self):
+-        class A:
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                pass
+ 
+         error_msg = "type object 'A' has no attribute 'x'"
+         with self.assertRaisesRegex(AttributeError, error_msg):
+@@ -686,19 +722,20 @@ class ClassTests(unittest.TestCase):
+             del A.x
+ 
+     def testObjectAttributeAccessErrorMessages(self):
+-        class A:
+-            pass
+-        class B:
+-            y = 0
+-            __slots__ = ('z',)
+-        class C:
+-            __slots__ = ("y",)
+-
+-            def __setattr__(self, name, value) -> None:
+-                if name == "z":
+-                    super().__setattr__("y", 1)
+-                else:
+-                    super().__setattr__(name, value)
++        with torch._dynamo.error_on_graph_break(False):
++            class A:
++                pass
++            class B:
++                y = 0
++                __slots__ = ('z',)
++            class C:
++                __slots__ = ("y",)
++
++                def __setattr__(self, name, value) -> None:
++                    if name == "z":
++                        super().__setattr__("y", 1)
++                    else:
++                        super().__setattr__(name, value)
+ 
+         error_msg = "'A' object has no attribute 'x'"
+         with self.assertRaisesRegex(AttributeError, error_msg):
+@@ -738,8 +775,9 @@ class ClassTests(unittest.TestCase):
+         # bpo-31506: Improves the error message logic for object_new & object_init
+ 
+         # Class without any method overrides
+-        class C:
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class C:
++                pass
+ 
+         error_msg = r'C.__init__\(\) takes exactly one argument \(the instance to initialize\)'
+ 
+@@ -759,11 +797,12 @@ class ClassTests(unittest.TestCase):
+             object.__init__(C(), 42)
+ 
+         # Class with both `__init__` & `__new__` method overridden
+-        class D:
+-            def __new__(cls, *args, **kwargs):
+-                super().__new__(cls, *args, **kwargs)
+-            def __init__(self, *args, **kwargs):
+-                super().__init__(*args, **kwargs)
++        with torch._dynamo.error_on_graph_break(False):
++            class D:
++                def __new__(cls, *args, **kwargs):
++                    super().__new__(cls, *args, **kwargs)
++                def __init__(self, *args, **kwargs):
++                    super().__init__(*args, **kwargs)
+ 
+         error_msg =  r'object.__new__\(\) takes exactly one argument \(the type to instantiate\)'
+ 
+@@ -777,9 +816,10 @@ class ClassTests(unittest.TestCase):
+             object.__new__(D, 42)
+ 
+         # Class that only overrides __init__
+-        class E:
+-            def __init__(self, *args, **kwargs):
+-                super().__init__(*args, **kwargs)
++        with torch._dynamo.error_on_graph_break(False):
++            class E:
++                def __init__(self, *args, **kwargs):
++                    super().__init__(*args, **kwargs)
+ 
+         error_msg = r'object.__init__\(\) takes exactly one argument \(the instance to initialize\)'
+ 
+@@ -790,20 +830,24 @@ class ClassTests(unittest.TestCase):
+             object.__init__(E(), 42)
+ 
+     def testClassWithExtCall(self):
+-        class Meta(int):
+-            def __init__(*args, **kwargs):
+-                pass
++        with torch._dynamo.error_on_graph_break(False):
++            class Meta(int):
++                def __init__(*args, **kwargs):
++                    pass
+ 
+-            def __new__(cls, name, bases, attrs, **kwargs):
+-                return bases, kwargs
++                def __new__(cls, name, bases, attrs, **kwargs):
++                    return bases, kwargs
+ 
+         d = {'metaclass': Meta}
+ 
+-        class A(**d): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class A(**d): pass
+         self.assertEqual(A, ((), {}))
+-        class A(0, 1, 2, 3, 4, 5, 6, 7, **d): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class A(0, 1, 2, 3, 4, 5, 6, 7, **d): pass
+         self.assertEqual(A, (tuple(range(8)), {}))
+-        class A(0, *range(1, 8), **d, foo='bar'): pass
++        with torch._dynamo.error_on_graph_break(False):
++            class A(0, *range(1, 8), **d, foo='bar'): pass
+         self.assertEqual(A, (tuple(range(8)), {'foo': 'bar'}))
+ 
+     def testClassCallRecursionLimit(self):
+@@ -824,20 +868,35 @@ class ClassTests(unittest.TestCase):
+     def testMetaclassCallOptimization(self):
+         calls = 0
+ 
+-        class TypeMetaclass(type):
+-            def __call__(cls, *args, **kwargs):
+-                nonlocal calls
+-                calls += 1
+-                return type.__call__(cls, *args, **kwargs)
++        with torch._dynamo.error_on_graph_break(False):
++            class TypeMetaclass(type):
++                def __call__(cls, *args, **kwargs):
++                    nonlocal calls
++                    calls += 1
++                    return type.__call__(cls, *args, **kwargs)
+ 
+-        class Type(metaclass=TypeMetaclass):
+-            def __init__(self, obj):
+-                self._obj = obj
++            class Type(metaclass=TypeMetaclass):
++                def __init__(self, obj):
++                    self._obj = obj
+ 
+         for i in range(100):
+             Type(i)
+         self.assertEqual(calls, 100)
+ 
++    def test_specialization_class_call_doesnt_crash(self):
++        # gh-123185
++
++        with torch._dynamo.error_on_graph_break(False):
++            class Foo:
++                def __init__(self, arg):
++                    pass
++
++        for _ in range(8):
++            try:
++                Foo()
++            except:
++                pass
++
+ 
+ from _testinternalcapi import has_inline_values
+ 
+@@ -856,7 +915,8 @@ class WithAttrs:
+         self.d = 4
+ 
+ 
+-class TestInlineValues(unittest.TestCase):
++@skipIfTorchDynamo("CPython only")
++class TestInlineValues(CPythonTestCase):
+ 
+     def test_flags(self):
+         self.assertEqual(Plain.__flags__ & Py_TPFLAGS_MANAGED_DICT, Py_TPFLAGS_MANAGED_DICT)
+@@ -895,7 +955,8 @@ class TestInlineValues(unittest.TestCase):
+             self.assertEqual(getattr(obj, f"a{i}"), i)
+ 
+     def test_many_attributes(self):
+-        class C: pass
++        with torch._dynamo.error_on_graph_break(False):
++            class C: pass
+         c = C()
+         self.assertTrue(has_inline_values(c))
+         self.set_100(c)
+@@ -1001,5 +1062,5 @@ class TestInlineValues(unittest.TestCase):
+         self.assertFalse(out, msg=out.decode('utf-8'))
+         self.assertFalse(err, msg=err.decode('utf-8'))
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()

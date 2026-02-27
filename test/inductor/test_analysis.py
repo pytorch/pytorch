@@ -24,7 +24,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
-    skipIfXpu,
     TEST_XPU,
     TestCase,
 )
@@ -394,9 +393,6 @@ class TestAnalysis(TestCase):
         verify_triton(comp_omni)
 
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
-    @skipIfXpu(
-        msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5491"
-    )
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",

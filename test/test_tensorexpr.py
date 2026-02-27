@@ -977,11 +977,15 @@ class TestTensorExprFuser(BaseTestClass):
             x = torch.tensor([np.nan]).to(dtype=data_type)
             y = torch.tensor([1.0]).to(dtype=data_type)
 
-        assert np.isnan(warmup_and_run_forward(tmin, x, y).float().item())
-        assert np.isnan(warmup_and_run_forward(tmin, y, x).float().item())
+        if not np.isnan(warmup_and_run_forward(tmin, x, y).float().item()):
+            raise AssertionError("expected nan for tmin(x, y)")
+        if not np.isnan(warmup_and_run_forward(tmin, y, x).float().item()):
+            raise AssertionError("expected nan for tmin(y, x)")
         self.assertLastGraphAllFused()
-        assert np.isnan(warmup_and_run_forward(tmax, x, y).float().item())
-        assert np.isnan(warmup_and_run_forward(tmax, y, x).float().item())
+        if not np.isnan(warmup_and_run_forward(tmax, x, y).float().item()):
+            raise AssertionError("expected nan for tmax(x, y)")
+        if not np.isnan(warmup_and_run_forward(tmax, y, x).float().item()):
+            raise AssertionError("expected nan for tmax(y, x)")
         self.assertLastGraphAllFused()
 
     def test_double_intrinsics(self):
@@ -1401,7 +1405,8 @@ class TestTensorExprFuser(BaseTestClass):
             try:
                 res = test(x, y, z)
             except RuntimeError as e:
-                assert "The size of tensor a (4) must match" in e.args[0]
+                if "The size of tensor a (4) must match" not in e.args[0]:
+                    raise AssertionError(f"unexpected error message: {e.args[0]}") from None
 
             # Changing a static dimension fails guards.
             # x, y, z = [torch.rand(4, 7).cuda() for _ in range(3)]
@@ -1478,7 +1483,8 @@ class TestTensorExprFuser(BaseTestClass):
                 scripted = torch.jit.script(test)
                 out = warmup_and_run_forward(scripted, a)
                 self.assertLastGraphAllFused()
-                assert torch.allclose(out, 2 * a, atol=_atol, rtol=_rtol)
+                if not torch.allclose(out, 2 * a, atol=_atol, rtol=_rtol):
+                    raise AssertionError("output does not match expected")
 
     def test_mask(self):
         def test(x):
@@ -1490,7 +1496,8 @@ class TestTensorExprFuser(BaseTestClass):
                 scripted = torch.jit.script(test)
                 out = warmup_and_run_forward(scripted, x)
                 self.assertLastGraphAllFused()
-                assert torch.equal(out, test(x))
+                if not torch.equal(out, test(x)):
+                    raise AssertionError("output does not match expected")
 
     def test_simple_add(self):
         val = torch._C._jit_get_te_generate_block_code()

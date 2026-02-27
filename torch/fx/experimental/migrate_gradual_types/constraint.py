@@ -133,9 +133,11 @@ class BinConstraintT(BinaryConstraint):
     """
 
     def __init__(self, lhs, rhs, op):
-        assert (isinstance(lhs, (TVar, TensorType, int)) or lhs == Dyn) and (
-            isinstance(rhs, (TVar, TensorType, int)) or rhs == Dyn
-        )
+        if not (
+            (isinstance(lhs, (TVar, TensorType, int)) or lhs == Dyn)
+            and (isinstance(rhs, (TVar, TensorType, int)) or rhs == Dyn)
+        ):
+            raise AssertionError(f"Invalid types: lhs={type(lhs)}, rhs={type(rhs)}")
         super().__init__(lhs, rhs, op)
 
 
@@ -145,8 +147,10 @@ class BinConstraintD(BinaryConstraint):
     """
 
     def __init__(self, lhs, rhs, op):
-        assert is_algebraic_expression(lhs) or is_dim(lhs) or is_bool_expr(lhs)
-        assert is_algebraic_expression(rhs) or is_dim(rhs) or is_bool_expr(rhs)
+        if not (is_algebraic_expression(lhs) or is_dim(lhs) or is_bool_expr(lhs)):
+            raise AssertionError(f"Invalid lhs type: {type(lhs)}")
+        if not (is_algebraic_expression(rhs) or is_dim(rhs) or is_bool_expr(rhs)):
+            raise AssertionError(f"Invalid rhs type: {type(rhs)}")
 
         super().__init__(lhs, rhs, op)
 
@@ -191,9 +195,12 @@ class DGreatestUpperBound(Constraint):
         :param rhs1: dimension variable 1
         :param rhs2: dimension variable 2
         """
-        assert is_dim(res)
-        assert is_dim(rhs1)
-        assert is_dim(rhs2)
+        if not is_dim(res):
+            raise AssertionError(f"Expected dimension for res, got {type(res)}")
+        if not is_dim(rhs1):
+            raise AssertionError(f"Expected dimension for rhs1, got {type(rhs1)}")
+        if not is_dim(rhs2):
+            raise AssertionError(f"Expected dimension for rhs2, got {type(rhs2)}")
 
         self.res = res
         self.rhs1 = rhs1
@@ -246,10 +253,14 @@ class IndexSelect(Constraint):
             index: location of the dimensions to replace in the input
             output: variable to store the result
         """
-        assert isinstance(input_var, TVar)
-        assert isinstance(output, TVar)
-        assert isinstance(dim_replace, DVar) or dim_replace == Dyn
-        assert isinstance(index, int)
+        if not isinstance(input_var, TVar):
+            raise AssertionError(f"Expected TVar, got {type(input_var)}")
+        if not isinstance(output, TVar):
+            raise AssertionError(f"Expected TVar, got {type(output)}")
+        if not (isinstance(dim_replace, DVar) or dim_replace == Dyn):
+            raise AssertionError(f"Expected DVar or Dyn, got {type(dim_replace)}")
+        if not isinstance(index, int):
+            raise AssertionError(f"Expected int, got {type(index)}")
 
         self.input_var = input_var
         self.tensor_size = tensor_size
@@ -289,10 +300,14 @@ class Transpose(Constraint):
             index2: dimension 2
             output: output that stores result
         """
-        assert isinstance(input_var, TVar)
-        assert isinstance(output, TVar)
-        assert isinstance(index1, int)
-        assert isinstance(index2, int)
+        if not isinstance(input_var, TVar):
+            raise AssertionError(f"Expected TVar, got {type(input_var)}")
+        if not isinstance(output, TVar):
+            raise AssertionError(f"Expected TVar, got {type(output)}")
+        if not isinstance(index1, int):
+            raise AssertionError(f"Expected int, got {type(index1)}")
+        if not isinstance(index2, int):
+            raise AssertionError(f"Expected int, got {type(index2)}")
 
         self.input_var = input_var
         self.tensor_size = tensor_size
@@ -331,7 +346,8 @@ class GetItem(Constraint):
         :param res: dimension variable to carry the item we get
         :param input_var: a tensor variable from which we will get item
         """
-        assert isinstance(res, DVar)
+        if not isinstance(res, DVar):
+            raise AssertionError(f"Expected DVar, got {type(res)}")
 
         self.res = res
         self.tensor_size = tensor_size
@@ -364,7 +380,8 @@ class GetItemTensor(Constraint):
         :param res: tensor variable to carry the item we get
         :param input_var: a tensor variable from which we will get item
         """
-        assert isinstance(res, TVar)
+        if not isinstance(res, TVar):
+            raise AssertionError(f"Expected TVar, got {type(res)}")
 
         self.res = res
         self.tensor_size = tensor_size
@@ -530,10 +547,14 @@ class CalcProduct(Constraint):
         :param flattened: variable to store the product
         :param dims_to_flatten: the type which we will flatten
         """
-        assert isinstance(dims_to_flatten, list)
-        assert isinstance(flattened, TVar)
-        assert isinstance(start, int)
-        assert isinstance(end, int)
+        if not isinstance(dims_to_flatten, list):
+            raise AssertionError(f"Expected list, got {type(dims_to_flatten)}")
+        if not isinstance(flattened, TVar):
+            raise AssertionError(f"Expected TVar, got {type(flattened)}")
+        if not isinstance(start, int):
+            raise AssertionError(f"Expected int, got {type(start)}")
+        if not isinstance(end, int):
+            raise AssertionError(f"Expected int, got {type(end)}")
 
         self.start = start
         self.end = end

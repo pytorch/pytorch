@@ -67,7 +67,7 @@ struct DescriptorDeleter {
 // function.
 template <typename T, miopenStatus_t (*ctor)(T**), miopenStatus_t (*dtor)(T*)>
 // NOLINTNEXTLINE(bugprone-exception-escape)
-class TORCH_HIP_CPP_API Descriptor {
+class TORCH_CUDA_CPP_API Descriptor {
  public:
   // Use desc() to access the underlying descriptor pointer in
   // a read-only fashion.  Most client code should use this.
@@ -93,7 +93,7 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
-class TORCH_HIP_CPP_API TensorDescriptor : public Descriptor<
+class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
                                                miopenTensorDescriptor,
                                                &miopenCreateTensorDescriptor,
                                                &miopenDestroyTensorDescriptor> {
@@ -123,7 +123,7 @@ private:
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d);
 
-class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
+class TORCH_CUDA_CPP_API FilterDescriptor : public Descriptor<
                                                miopenTensorDescriptor,
                                                &miopenCreateTensorDescriptor,
                                                &miopenDestroyTensorDescriptor> {
@@ -143,7 +143,7 @@ private:
   }
 };
 
-struct TORCH_HIP_CPP_API ConvolutionDescriptor
+struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     : public Descriptor<
           miopenConvolutionDescriptor,
           &miopenCreateConvolutionDescriptor,
@@ -159,7 +159,7 @@ struct TORCH_HIP_CPP_API ConvolutionDescriptor
 };
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
-struct TORCH_HIP_CPP_API DropoutDescriptor
+struct TORCH_CUDA_CPP_API DropoutDescriptor
     : public Descriptor<
           miopenDropoutDescriptor,
           &miopenCreateDropoutDescriptor,
@@ -175,7 +175,7 @@ struct TORCH_HIP_CPP_API DropoutDescriptor
     }
 };
 
-struct TORCH_HIP_CPP_API RNNDescriptor
+struct TORCH_CUDA_CPP_API RNNDescriptor
   : public Descriptor<miopenRNNDescriptor,
                       &miopenCreateRNNDescriptor,
                       &miopenDestroyRNNDescriptor>

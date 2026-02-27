@@ -50,7 +50,8 @@ if IS_ROCM and not IS_MEM_LEAK_CHECK:
         for line in lines:
             if " gfx" in line:
                 count += 1
-        assert count > 0  # there must be at least 1 GPU
+        if count == 0:
+            raise AssertionError("There must be at least 1 GPU")
         # Limiting to 8 GPUs(PROCS)
         NUM_PROCS = min(count, 8)
     except subprocess.CalledProcessError:
@@ -131,9 +132,10 @@ def get_duration(
 
     if included:
         return included_classes_duration
-    assert excluded, (
-        f"TestRun {test} is not full file but doesn't have included or excluded classes"
-    )
+    if not excluded:
+        raise AssertionError(
+            f"TestRun {test} is not full file but doesn't have included or excluded classes"
+        )
     if file_duration is None:
         return None
     return file_duration - excluded_classes_duration
@@ -147,9 +149,8 @@ def shard(
 ) -> None:
     # Modifies sharded_jobs in place
     if len(sharded_jobs) == 0:
-        assert len(pytest_sharded_tests) == 0, (
-            "No shards provided but there are tests to shard"
-        )
+        if len(pytest_sharded_tests) != 0:
+            raise AssertionError("No shards provided but there are tests to shard")
         return
 
     round_robin_index = 0
@@ -167,7 +168,8 @@ def shard(
     def _shard_serial(
         tests: Sequence[ShardedTest], sharded_jobs: list[ShardJob]
     ) -> None:
-        assert estimated_time_limit is not None, "Estimated time limit must be provided"
+        if estimated_time_limit is None:
+            raise AssertionError("Estimated time limit must be provided")
         new_sharded_jobs = sharded_jobs
         for test in tests:
             if (

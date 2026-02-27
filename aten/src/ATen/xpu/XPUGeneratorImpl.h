@@ -16,6 +16,7 @@ struct XPUGeneratorState : public c10::intrusive_ptr_target {
   uint64_t philox_offset_per_thread_;
   uint32_t offset_intragraph_;
   bool capturing_{};
+  std::unordered_set<xpu::XPUGraph*> registered_graphs_;
   at::TensorBase seed_extragraph_{};
   at::TensorBase offset_extragraph_{};
 
@@ -28,6 +29,11 @@ struct XPUGeneratorState : public c10::intrusive_ptr_target {
         offset_intragraph_(offset_intragraph) {}
 
   void increase(uint64_t increment);
+  void register_graph(xpu::XPUGraph* graph);
+  void unregister_graph(xpu::XPUGraph* graph);
+  void capture_prologue();
+  uint64_t capture_epilogue();
+  void replay_prologue(uint64_t wholegraph_increment);
 
   c10::intrusive_ptr<XPUGeneratorState> clone();
 };
@@ -49,12 +55,16 @@ struct TORCH_XPU_API XPUGeneratorImpl : public GeneratorImpl {
   uint64_t seed() override;
   void set_state(const c10::TensorImpl& new_state) override;
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
+  void graphsafe_set_state(
+      const c10::intrusive_ptr<GeneratorImpl>& state) override;
+  c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const override;
 
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;
 
+  void register_graph(xpu::XPUGraph* graph);
+  void unregister_graph(xpu::XPUGraph* graph);
   PhiloxXpuState philox_xpu_state(uint64_t increment);
-  // will remove once all ops are refactored to use philox_xpu_state.
   std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
   static c10::DeviceType device_type();
 

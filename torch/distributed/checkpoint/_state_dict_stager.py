@@ -265,8 +265,13 @@ class StateDictStager:
         This method clears the internal storage cache, allowing garbage collection
         of cached CPU storages. Any pinned memory associated with cached storages
         will be automatically unpinned through weak reference finalizers.
+
+        It also clears the _deepcopy_dispatch dict to break the reference cycle
+        created by closures that capture self. Without this, it may
+        cause memory leaks.
         """
         self._cached_storage_mapping.clear()
+        self._deepcopy_dispatch.clear()
 
     @torch.no_grad()
     def deepcopy_with_tensor_offload(self, x, memo=None, _nil=[], non_blocking=False):  # noqa: B006

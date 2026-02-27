@@ -41,11 +41,11 @@ if(env_cxx_standard GREATER -1)
   message(
     WARNING
       "C++ standard version definition detected in environment variable."
-      "PyTorch requires -std=c++17. Please remove -std=c++ settings in your environment."
+      "PyTorch requires -std=c++20. Please remove -std=c++ settings in your environment."
   )
 endif()
 set(CMAKE_CXX_STANDARD
-    17
+    20
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
@@ -56,11 +56,11 @@ set(CMAKE_C_STANDARD
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-# --- [ Check that minimal gcc version is 9.3+
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.3)
+# --- [ Check that minimal gcc version is 11.3+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.3)
   message(
     FATAL_ERROR
-      "GCC-9.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
+      "GCC-11.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
   )
 endif()
 
@@ -373,7 +373,7 @@ option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG
        "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
 cmake_dependent_option(
-  USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
+  USE_CCACHE "Attempt using [S]CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(
   DEBUG_CUDA
@@ -405,6 +405,11 @@ option(USE_MIMALLOC "Use mimalloc" OFF)
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
 if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
   set(USE_MIMALLOC ON)
+  # Disable OPT flags for mimalloc on aarch64 as it breaks ARMv8.0
+  # See https://github.com/pytorch/pytorch/issues/174344
+  if(CPU_AARCH64)
+    set(MI_NO_OPT_ARCH ON)
+  endif()
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
   # https://github.com/pytorch/pytorch/issues/138994
@@ -415,20 +420,23 @@ endif()
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
+  find_program(SCCACHE_EXECUTABLE sccache)
   if(CCACHE_PROGRAM)
-    set(CMAKE_C_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "C compiler launcher")
-    set(CMAKE_CXX_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "CXX compiler launcher")
-    set(CMAKE_CUDA_COMPILER_LAUNCHER
-        "${CCACHE_PROGRAM}"
-        CACHE STRING "CUDA compiler launcher")
+    foreach(LANG CXX C CUDA)
+      set(CMAKE_${LANG}_COMPILER_LAUNCHER
+          "${CCACHE_PROGRAM}"
+          CACHE STRING "${LANG} compiler launcher")
+    endforeach()
+  elseif(SCCACHE_EXECUTABLE)
+    foreach(LANG CXX C CUDA)
+      set(CMAKE_${LANG}_COMPILER_LAUNCHER
+          "${SCCACHE_EXECUTABLE}"
+          CACHE STRING "${LANG} compiler launcher")
+    endforeach()
   else()
     message(
       STATUS
-        "Could not find ccache. Consider installing ccache to speed up compilation."
+        "Could not find neither ccache nor sccache. Consider installing ccache to speed up compilation."
     )
   endif()
 endif()
@@ -940,8 +948,8 @@ cmake_dependent_option(
   OFF)
 
 
-IF(USE_ROCM AND "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Setting USE_MSLK for gfx942 to ON by default, doing ROCM build")
+IF(USE_ROCM AND ("gfx942" IN_LIST PYTORCH_ROCM_ARCH OR "gfx950" IN_LIST PYTORCH_ROCM_ARCH))
+  message(WARNING "Setting USE_MSLK for gfx942/gfx950 to ON by default, doing ROCM build")
   set(USE_MSLK_DEFAULT ON)
 elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
   message(STATUS "Setting USE_MSLK to ON by default , doing CUDA build for SM100a")
@@ -1184,6 +1192,10 @@ if(NOT MSVC)
   if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
     append_cxx_flag_if_supported("-Wno-dangling-reference" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-error=dangling-reference" CMAKE_CXX_FLAGS)
+  endif()
+  # needed for compat with newer versions of clang that use C++20 mangling rules
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18)
+    append_cxx_flag_if_supported("-fclang-abi-compat=17" CMAKE_CXX_FLAGS)
   endif()
 else()
   # Define export functions for AOTI.

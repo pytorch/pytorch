@@ -21,7 +21,8 @@ class ScribeUploader:
         self.category = category
 
     def format_message(self, field_dict):
-        assert "time" in field_dict, "Missing required Scribe field 'time'"
+        if "time" not in field_dict:
+            raise AssertionError("Missing required Scribe field 'time'")
         message = defaultdict(dict)
         for field, value in field_dict.items():
             if field in self.schema["normal"]:

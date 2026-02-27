@@ -197,7 +197,8 @@ def split_module(
         elif node.op == "get_attr":
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)  # type: ignore[arg-type]
             base_mod_env[node.name].meta = node.meta.copy()
-            assert isinstance(node.target, str)
+            if not isinstance(node.target, str):
+                raise AssertionError(f"Expected str target, got {type(node.target)}")
             attr_val = _get_attr_from_qualname(m, node.target)
             base_mod_attrs[node.target] = attr_val  # type: ignore[index]
         return base_mod_env, base_mod_attrs
@@ -327,18 +328,28 @@ def split_module(
 
         if node.op == "call_function" and node.target in GLOBAL_STATE_NODES:
             if node.target is torch._C._set_grad_enabled:
-                assert len(node.args) == 1
-                assert isinstance(node.args[0], bool)
+                if len(node.args) != 1:
+                    raise AssertionError(
+                        f"Expected 1 arg for _set_grad_enabled, got {len(node.args)}"
+                    )
+                if not isinstance(node.args[0], bool):
+                    raise AssertionError(f"Expected bool arg, got {type(node.args[0])}")
                 active_grad = node
                 grad_regions[active_grad] = set({split_callback(node)})
             elif node.target is torch.amp._enter_autocast:
                 # Should all be python constants
-                assert all(not isinstance(arg, Node) for arg in node.args)
+                if not all(not isinstance(arg, Node) for arg in node.args):
+                    raise AssertionError(
+                        "Expected all args to be python constants, not Nodes"
+                    )
                 active_autocasts.add(node)
                 autocast_regions[node] = set({split_callback(node)})
                 autocast_exits[node] = None
             elif node.target is torch.amp._exit_autocast:
-                assert len(node.args) == 1
+                if len(node.args) != 1:
+                    raise AssertionError(
+                        f"Expected 1 arg for _exit_autocast, got {len(node.args)}"
+                    )
                 autocast_regions[node.args[0]].add(split_callback(node))
                 active_autocasts.remove(node.args[0])
                 autocast_exits[node.args[0]] = node
@@ -349,7 +360,8 @@ def split_module(
         for a in active_autocasts:
             autocast_regions[a].add(split_callback(node))
 
-    assert all(v is not None for v in autocast_exits.values()), "autocast must exit"
+    if not all(v is not None for v in autocast_exits.values()):
+        raise AssertionError("autocast must exit")
 
     # pyrefly: ignore [bad-assignment]
     autocast_regions = {k: sorted(v) for k, v in autocast_regions.items()}
@@ -379,10 +391,11 @@ def split_module(
 
         if assert_monotonically_increasing:
             pid = split_callback(node)
-            assert highest_partition <= pid, (
-                "autocast or set_grad_enabled require monotonically increasing partitions:"
-                f"highest: {highest_partition}, this node's: {pid}"
-            )
+            if highest_partition > pid:
+                raise AssertionError(
+                    "autocast or set_grad_enabled require monotonically increasing "
+                    f"partitions: highest: {highest_partition}, this node's: {pid}"
+                )
             highest_partition = pid
 
         # do not capture cross-partition dependencies for global state nodes as they will be
@@ -417,7 +430,8 @@ def split_module(
     # Enter prelude
     for regions_mapping in [autocast_regions, grad_regions]:
         for node, regions in regions_mapping.items():
-            assert len(regions) > 0
+            if len(regions) == 0:
+                raise AssertionError("Expected at least one region for node")
             # pyrefly: ignore [bad-index]
             partitions[str(regions[0])].environment[node] = node
             # pyrefly: ignore [bad-index, index-error]
@@ -463,7 +477,10 @@ def split_module(
                 return placeholder
 
             if orig_node.op == "get_attr":
-                assert isinstance(orig_node.target, str)
+                if not isinstance(orig_node.target, str):
+                    raise AssertionError(
+                        f"Expected str target, got {type(orig_node.target)}"
+                    )
 
                 orig_attr = _get_attr_from_qualname(m, orig_node.target)
                 if isinstance(orig_attr, torch.nn.Module):
@@ -502,8 +519,14 @@ def split_module(
                     qualname = f"{partition.submod_name}.{target}"
                     qualname_map[qualname] = node.target
 
-            assert isinstance(gathered_args, tuple)
-            assert isinstance(gathered_kwargs, dict)
+            if not isinstance(gathered_args, tuple):
+                raise AssertionError(
+                    f"Expected tuple for gathered_args, got {type(gathered_args)}"
+                )
+            if not isinstance(gathered_kwargs, dict):
+                raise AssertionError(
+                    f"Expected dict for gathered_kwargs, got {type(gathered_kwargs)}"
+                )
             name = node.name if keep_original_node_name else None
             new_node = partition.graph.create_node(
                 op=node.op,
@@ -520,12 +543,14 @@ def split_module(
     for regions_mapping in [autocast_regions]:
         for node in reversed(regions_mapping):
             regions = regions_mapping[node]
-            assert len(regions) > 0
+            if len(regions) == 0:
+                raise AssertionError("Expected at least one region")
             # pyrefly: ignore [bad-index, index-error]
             for r in regions[:-1]:
                 partition = partitions[str(r)]
                 exit_node = autocast_exits[node]
-                assert exit_node is not None, "Missing exit node"
+                if exit_node is None:
+                    raise AssertionError("Missing exit node")
                 new_node = partition.graph.create_node(
                     op=exit_node.op,
                     target=exit_node.target,

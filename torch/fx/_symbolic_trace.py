@@ -443,7 +443,10 @@ class Tracer(TracerBase):
                         f"cannot create constant arg for {a} of type {type(a)}."
                     )
                 qualname = self.get_fresh_qualname(base_name)
-                assert isinstance(qualname, str)
+                if not isinstance(qualname, str):
+                    raise AssertionError(
+                        f"Expected qualname to be str, got {type(qualname)}"
+                    )
                 self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
@@ -455,7 +458,10 @@ class Tracer(TracerBase):
 
             # TODO: binary search
             qualname = self.get_fresh_qualname(f"_{a.__class__.__name__}_constant_")
-            assert isinstance(qualname, str)
+            if not isinstance(qualname, str):
+                raise AssertionError(
+                    f"Expected qualname to be str, got {type(qualname)}"
+                )
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
@@ -503,7 +509,8 @@ class Tracer(TracerBase):
             path = self.submodule_paths.get(mod)
             if path is None:
                 raise NameError("module is not installed as a submodule")
-            assert isinstance(path, str)
+            if not isinstance(path, str):
+                raise AssertionError(f"Expected path to be str, got {type(path)}")
             return path
         # O(N^2) fallback in the case that we didn't store the submodule
         # paths.
@@ -568,7 +575,8 @@ class Tracer(TracerBase):
                     "call_module", module_qualified_name, args, kwargs
                 )
             key, _ = self.module_stack.popitem(last=True)
-            assert key == module_key, f" Unexpected key {key}"
+            if key != module_key:
+                raise AssertionError(f"Unexpected key {key}, expected {module_key}")
 
         return ret_val
 
@@ -726,7 +734,11 @@ class Tracer(TracerBase):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
-                assert isinstance(self.graph._codegen, _PyTreeCodeGen)  # type: ignore[has-type]
+                if not isinstance(self.graph._codegen, _PyTreeCodeGen):  # type: ignore[has-type]
+                    raise AssertionError(
+                        f"Expected _codegen to be _PyTreeCodeGen, got "
+                        f"{type(self.graph._codegen)}"
+                    )
                 self.graph._codegen.pytree_info = (
                     self.graph._codegen.pytree_info._replace(out_spec=out_spec)
                 )
@@ -779,9 +791,11 @@ class Tracer(TracerBase):
 
                 self.root = root
 
-                assert hasattr(type(root), self.traced_func_name), (
-                    f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
-                )
+                if not hasattr(type(root), self.traced_func_name):
+                    raise AssertionError(
+                        f"traced_func_name={self.traced_func_name} doesn't exist in "
+                        f"{type(root).__name__}"
+                    )
 
                 fn = getattr(type(root), self.traced_func_name)
                 self.root_module_name = root._get_name()
@@ -818,7 +832,8 @@ class Tracer(TracerBase):
 
             collect_tensor_attrs(self.root, [])
 
-            assert isinstance(fn, FunctionType)
+            if not isinstance(fn, FunctionType):
+                raise AssertionError(f"Expected FunctionType, got {type(fn)}")
 
             fn_globals = fn.__globals__  # run before it gets patched
             fn, args = self.create_args_for_root(
@@ -1176,7 +1191,8 @@ def _new_patcher():
         yield CURRENT_PATCHER
     finally:
         # Clear all the patches made by when using current patcher.
-        assert CURRENT_PATCHER is not None
+        if CURRENT_PATCHER is None:
+            raise AssertionError("CURRENT_PATCHER is None in finally block")
         CURRENT_PATCHER.revert_all_patches()
         CURRENT_PATCHER = prior_patcher
 
@@ -1193,9 +1209,10 @@ def _maybe_revert_all_patches():
     finally:
         if current_patcher is not None:
             patches_made = current_patcher.reapply_all_patches()
-        assert patches_made == patches_removed, (
-            "CURRENT_PATCHER was changed during a revert_all_patches"
-        )
+        if patches_made != patches_removed:
+            raise AssertionError(
+                "CURRENT_PATCHER was changed during a revert_all_patches"
+            )
 
 
 def _patch_wrapped_functions(patcher: _Patcher):
@@ -1274,18 +1291,23 @@ def wrap(fn_or_name: Union[str, Callable]):
         )
 
     if callable(fn_or_name):
-        assert not isinstance(fn_or_name, str)  # to make mypy happy
+        if isinstance(fn_or_name, str):  # to make mypy happy
+            raise AssertionError("Unexpected: fn_or_name is both callable and str")
         fn_name = fn_or_name.__name__
     else:
-        assert isinstance(fn_or_name, str), (
-            "fn_or_name must be a global function or string name"
-        )
+        if not isinstance(fn_or_name, str):
+            raise AssertionError(
+                f"fn_or_name must be a global function or string name, got "
+                f"{type(fn_or_name)}"
+            )
         fn_name = fn_or_name
 
     currentframe = inspect.currentframe()
-    assert currentframe is not None
+    if currentframe is None:
+        raise AssertionError("inspect.currentframe() returned None")
     f = currentframe.f_back
-    assert f is not None
+    if f is None:
+        raise AssertionError("currentframe.f_back is None")
     if f.f_code.co_name != "<module>":
         raise NotImplementedError("wrap must be called at the top level of a module")
 
@@ -1361,4 +1383,5 @@ def symbolic_trace(
 
 @wrap
 def _assert_is_none(value, msg):
-    assert value is None, msg
+    if value is not None:
+        raise AssertionError(msg)

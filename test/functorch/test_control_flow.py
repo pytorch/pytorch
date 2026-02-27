@@ -7,10 +7,18 @@ import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
-from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 from torch._higher_order_ops.associative_scan import (
     _fake_associative_scan,
     associative_scan,
+)
+from torch._higher_order_ops.cudagraph_conditional_nodes import (
+    ControlFlowOpWarmupDispatchMode,
+    CUDAGraphCaptureControlFlowOpDispatchMode,
 )
 from torch._higher_order_ops.map import _fake_map
 from torch._higher_order_ops.scan import _fake_scan, scan
@@ -34,10 +42,88 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
+    TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+
+
+@contextlib.contextmanager
+def check_cudagraphs_not_skipped(test_case):
+    counters = torch._dynamo.utils.counters
+    old_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
+    try:
+        yield
+    finally:
+        # reset before the assert, because otherwise the reset is
+        # skipped in case of assertion error
+        new_cudagraph_skips = counters["inductor"]["cudagraph_skips"]
+        counters["inductor"]["cudagraph_skips"] = old_cudagraph_skips
+        test_case.assertEqual(
+            counters["inductor"]["cudagraph_skips"], new_cudagraph_skips
+        )
+
+
+def _check_compile_cudagraph_backend(test_case, fn, args):
+    # test cudagraphs backend
+    cudagraphs_compiled_fn = torch.compile(fn, backend="cudagraphs")
+    # We run 3 times.
+    # This is what cuda graph trees does for the first 3 runs:
+    # 1) run in eager mode, for warmup.
+    # 2) do stream capture followed by graph replay.
+    # 3 and beyond) do graph replay
+    # So we need to get to iteration 3 to test all ways of running.
+    outputs = []
+    for i in range(3):
+        with check_cudagraphs_not_skipped(test_case):
+            torch.compiler.cudagraph_mark_step_begin()
+            outputs.append(
+                pytree.tree_map(
+                    lambda x: x.detach().clone() if isinstance(x, torch.Tensor) else x,
+                    cudagraphs_compiled_fn(*args),
+                )
+            )
+    eager_res = fn(*args)
+    for output in outputs:
+        test_case.assertEqual(eager_res, output)
+
+
+def _check_compile_many_backends_with_cudagraph(test_case, fn, args):
+    for backend in ["eager_no_compile", "eager", "aot_eager"]:
+        _check_compile_any_backend_with_cudagraph(test_case, fn, args, backend)
+
+
+def _check_compile_any_backend_with_cudagraph(test_case, fn, args, backend):
+    if backend == "eager_no_compile":
+        compiled_fn = fn
+    else:
+        compiled_fn = torch.compile(fn, backend=backend)
+    outputs = []
+
+    side_stream = torch.cuda.Stream()
+
+    with torch.cuda.stream(side_stream), ControlFlowOpWarmupDispatchMode():
+        warmup_output = compiled_fn(*args)
+    outputs.append(warmup_output)
+
+    graph = torch.cuda.CUDAGraph()
+    with (
+        torch.cuda.graph(graph, stream=side_stream),
+        CUDAGraphCaptureControlFlowOpDispatchMode(),
+    ):
+        captured_output = compiled_fn(*args)
+    with torch.cuda.stream(side_stream):
+        eager_res = fn(*args)
+    graph.replay()
+    outputs.append(
+        pytree.tree_map(
+            lambda x: x.clone() if isinstance(x, torch.Tensor) else x,
+            captured_output,
+        )
+    )
+    for output in outputs:
+        test_case.assertEqual(eager_res, output)
 
 
 # TODO: pull these helpers from AOTAutograd later
@@ -51,7 +137,8 @@ def from_fun(t):
     if not isinstance(t, FunctionalTensor):
         # quick sanity assert
         if isinstance(t, torch.Tensor):
-            assert not torch._is_functional_tensor(t)
+            if torch._is_functional_tensor(t):
+                raise AssertionError("Expected tensor to not be a functional tensor")
         return t
     torch._sync(t)
     return torch._from_functional_tensor(t.elem)
@@ -68,7 +155,8 @@ def to_fun_old(t):
 def from_fun_old(t):
     # quick sanity assert
     if isinstance(t, torch.Tensor):
-        assert torch._is_functional_tensor(t)
+        if not torch._is_functional_tensor(t):
+            raise AssertionError("Expected tensor to be a functional tensor")
         torch._sync(t)
         return torch._from_functional_tensor(t)
     return t
@@ -3707,9 +3795,10 @@ class AssociativeScanTests(TestCase):
         result_exp_flatten = [r for r in result_exp_flatten if r.requires_grad]
 
         # Check the result and parameter lists
-        assert len(result_flatten) == len(result_exp_flatten), (
-            "The number of elements requiring gradients is different for the results and the expected results"
-        )
+        if len(result_flatten) != len(result_exp_flatten):
+            raise AssertionError(
+                "The number of elements requiring gradients is different for the results and the expected results"
+            )
 
         grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
         expected_grads = torch.autograd.grad(
@@ -3994,7 +4083,8 @@ class AssociativeScanTests(TestCase):
             .view(10, 3)
             .t()
         )
-        assert not x.is_contiguous()
+        if x.is_contiguous():
+            raise AssertionError("Expected x to not be contiguous")
 
         kwargs = {
             "dim": 0,
@@ -5211,7 +5301,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "Combin_fn received wrong number of arguments.*",
+            "Combine_fn received wrong number of arguments.*",
         ):
             associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
 
@@ -5418,6 +5508,154 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
                 torch.randn(2, 3),
             )
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_not_nested_cudagraphs(self):
+        def true_fn(x):
+            return x.sin()
+
+        def false_fn(x):
+            return x.cos()
+
+        def f(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        x = torch.randn(4).cuda()
+        true_pred = torch.tensor(True).cuda()
+        false_pred = torch.tensor(False).cuda()
+
+        _check_compile_cudagraph_backend(self, f, [x, true_pred])
+        _check_compile_cudagraph_backend(self, f, [x, false_pred])
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, true_pred],
+        )
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, false_pred],
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_pin_memory_cudagraphs(self):
+        # Make sure that pinned host memory allocations get assigned
+        # to a private pool correctly during stream capture, even
+        # inside of conditional nodes.
+
+        # Ideally, we would call torch.Tensor.pin_memory() directly,
+        # but that is not allowed on fake tensors, so instead we call
+        # an op whose C++ implementation used pinned memory
+        # internally.
+        sizes = [3, 4, 3]
+
+        def true_fn(x):
+            return torch.split_with_sizes_copy(x, sizes)
+
+        def false_fn(x):
+            return torch.split_with_sizes_copy(2 * x, sizes)
+
+        def f(x, y):
+            return cond(y, true_fn, false_fn, [x])
+
+        x = torch.randn(10).cuda()
+        true_pred = torch.tensor(True).cuda()
+        false_pred = torch.tensor(False).cuda()
+
+        _check_compile_cudagraph_backend(self, f, [x, true_pred])
+        _check_compile_cudagraph_backend(self, f, [x, false_pred])
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, true_pred],
+        )
+        _check_compile_many_backends_with_cudagraph(
+            self,
+            f,
+            [x, false_pred],
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_triply_nested_cudagraphs(self):
+        def level3_true(x):
+            return x.sin()
+
+        def level3_false(x):
+            return x.cos()
+
+        def level2_true(x, p2):
+            return cond(p2, level3_true, level3_false, [x])
+
+        def level2_false(x, p2):
+            return cond(p2, lambda x: x + 1, lambda x: x - 1, [x])
+
+        def level1_true(x, p1, p2):
+            return cond(p1, level2_true, level2_false, [x, p2])
+
+        def level1_false(x, p1, p2):
+            return cond(p1, level2_false, level2_true, [x, p2])
+
+        def f(x, p0, p1, p2):
+            return cond(p0, level1_true, level1_false, [x, p1, p2])
+
+        x = torch.randn(4).cuda()
+
+        test_inputs = [
+            [
+                x,
+                torch.tensor(True).cuda(),
+                torch.tensor(True).cuda(),
+                torch.tensor(False).cuda(),
+            ],
+            [
+                x,
+                torch.tensor(False).cuda(),
+                torch.tensor(False).cuda(),
+                torch.tensor(True).cuda(),
+            ],
+        ]
+
+        for args in test_inputs:
+            _check_compile_cudagraph_backend(self, f, args)
+            _check_compile_many_backends_with_cudagraph(self, f, args)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+        "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+    )
+    def test_cond_traced_record_stream_reuse(self):
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        try:
+            predicate = torch.tensor(True, device="cuda")
+
+            def true_fn():
+                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
+
+            def false_fn():
+                return torch.zeros(8, device="cuda"), torch.zeros(8, device="cuda")
+
+            g = torch.cuda.CUDAGraph()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "graph_capture_record_stream_reuse:True",
+            ):
+                with torch.cuda.graph(g), CUDAGraphCaptureControlFlowOpDispatchMode():
+                    torch.cond(predicate, true_fn, false_fn, [])
+        finally:
+            torch.cuda.memory._set_allocator_settings(
+                "graph_capture_record_stream_reuse:False"
+            )
+
     def test_while_loop_nested_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
@@ -5496,7 +5734,10 @@ def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_py
         elif func_type == "functorch":
             fn = torch.func.functionalize(fn)
         else:
-            assert func_type == "no"
+            if func_type != "no":
+                raise AssertionError(
+                    f"Expected func_type to be 'no', got {func_type!r}"
+                )
         return fn, mode
 
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
@@ -5834,6 +6075,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
             f(x, torch.tensor(True), torch.tensor(True)),
         )
 
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            x_cuda = x.cuda()
+            true_pred = torch.tensor(True).cuda()
+
+            _check_compile_cudagraph_backend(
+                self,
+                f,
+                [x_cuda, true_pred, true_pred],
+            )
+            _check_compile_many_backends_with_cudagraph(
+                self,
+                f,
+                [x_cuda, true_pred, true_pred],
+            )
+
     def test_cond_functionalized(self):
         def true_fn(x):
             y = x.sin()
@@ -5846,6 +6102,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         def f(x):
             pred = x.shape[0] == 1
             return cond(pred, true_fn, false_fn, [x])
+
+        def f_(x, y):
+            return cond(y, true_fn, false_fn, [x])
 
         example_inputs = (torch.ones(4, 5),)
         functional_f = torch.func.functionalize(f)
@@ -5864,6 +6123,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         self.assertFalse(any(op._schema.is_mutable for op in all_ops_in_true_branch))
 
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            pred = torch.tensor(example_inputs[0].shape[0] == 1, device="cuda")
+            _check_compile_cudagraph_backend(self, f_, [torch.ones(4, 5).cuda(), pred])
+            _check_compile_many_backends_with_cudagraph(
+                self, f_, [torch.ones(4, 5).cuda(), pred]
+            )
 
     def test_cond_accepts_torch_function_as_inputs(self):
         a = torch.randn(3, 4)
@@ -6397,6 +6663,18 @@ def forward(self, arg0_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
     return (mul,)""",
         )
+
+        if TEST_CUDA_GRAPH_CONDITIONAL_NODES:
+            _check_compile_cudagraph_backend(
+                self,
+                f,
+                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
+            )
+            _check_compile_many_backends_with_cudagraph(
+                self,
+                f,
+                [x.cuda(), torch.tensor(False).cuda(), torch.tensor(False).cuda()],
+            )
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -7175,7 +7453,8 @@ def forward(self, x_1):
         )
 
     def _check_closure_correctly_lifted(self, f, *, args, exp_res, exp_arg_num):
-        assert isinstance(args, (tuple, list))
+        if not isinstance(args, (tuple, list)):
+            raise AssertionError(f"Expected args to be tuple or list, got {type(args)}")
         self.assertEqual(f(*args), exp_res)
         gm = make_fx(f)(*args)
         self.assertEqual(gm(*args), exp_res)
@@ -7390,13 +7669,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             gm.code.strip(),
             """\
 def forward(self, pred_1, x_1):
-    unbind = torch.ops.aten.unbind.int(x_1)
-    getitem = unbind[0];  getitem = None
-    getitem_1 = unbind[1];  unbind = getitem_1 = None
+    select_copy = torch.ops.aten.select_copy.int(x_1, 0, 0);  select_copy = None
     body_graph_0 = self.body_graph_0
     map_impl = torch.ops.higher_order.map_impl(body_graph_0, [x_1], [pred_1]);  body_graph_0 = x_1 = pred_1 = None
-    getitem_2 = map_impl[0];  map_impl = None
-    return getitem_2""",
+    getitem = map_impl[0];  map_impl = None
+    return getitem""",
         )
         self.assertExpectedInline(
             gm.body_graph_0.code.strip(),
@@ -8306,15 +8583,11 @@ class GraphModule(torch.nn.Module):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (0, x), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x = None
-
         getitem_2: "Sym(u1)" = while_loop[0]
-
         ge: "Sym(u1 >= 1)" = getitem_2 >= 1
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
-
         gt_1: "Sym(u1 > 0)" = getitem_2 > 0
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_1 = None
-
         getitem_1: "f32[s77, 3]" = while_loop[1];  while_loop = None
 
         add: "Sym(u1 + 1)" = getitem_2 + 1
@@ -8370,15 +8643,11 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (0, l_x_), (s27, s77));  cond_fn_0 = body_fn_0 = l_x_ = s27 = None
-
         getitem_4: "Sym(u2)" = while_loop[0]
-
         ge: "Sym(u2 >= 1)" = getitem_4 >= 1
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u2 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
-
         gt_1: "Sym(u2 > 0)" = getitem_4 > 0
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u2 on node 'gt_1'");  gt_1 = _assert_scalar_default_1 = None
-
         out_x: "f32[s77, s27]" = while_loop[1];  while_loop = None
 
         gt: "Sym(u2 > 0)" = getitem_4 > 0
@@ -8460,7 +8729,6 @@ class GraphModule(torch.nn.Module):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (2, 3, 1, 1, 1, 3, item, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = item = sin = None
-
         getitem_8: "Sym(u8)" = while_loop[0]
         getitem_9: "Sym(u9)" = while_loop[1]
         getitem_10: "Sym(u10)" = while_loop[2]
@@ -8468,7 +8736,6 @@ class GraphModule(torch.nn.Module):
         getitem_12: "Sym(u12)" = while_loop[4]
         getitem_13: "Sym(u13)" = while_loop[5]
         getitem_14: "Sym(u14)" = while_loop[6]
-
         getitem_7: "f32[2, 3]" = while_loop[7];  while_loop = None
 
         add: "Sym(u8 + 1)" = getitem_8 + 1
@@ -8537,7 +8804,6 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (2, 3, 1, 1, 1, 3, item, sin), ());  cond_fn_0 = body_fn_0 = item = sin = None
-
         getitem_8: "Sym(u15)" = while_loop[0]
         getitem_9: "Sym(u16)" = while_loop[1]
         getitem_10: "Sym(u17)" = while_loop[2]
@@ -8545,7 +8811,6 @@ class GraphModule(torch.nn.Module):
         getitem_12: "Sym(u19)" = while_loop[4]
         getitem_13: "Sym(u20)" = while_loop[5]
         getitem_14: "Sym(u21)" = while_loop[6]
-
         getitem_7: "f32[2, 3]" = while_loop[7];  while_loop = None
 
         add: "Sym(u15 + 1)" = getitem_8 + 1
@@ -8607,13 +8872,11 @@ class GraphModule(torch.nn.Module):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (sym_size_int_1, 3, 2, 2, 3, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = sym_size_int_1 = sin = None
-
         getitem_6: "Sym(u10)" = while_loop[0]
         getitem_7: "Sym(u11)" = while_loop[1]
         getitem_8: "Sym(u12)" = while_loop[2]
         getitem_9: "Sym(u13)" = while_loop[3]
         getitem_10: "Sym(u14)" = while_loop[4]
-
         getitem_5: "f32[s6, 3]" = while_loop[5];  while_loop = None
 
         add: "Sym(u12 + 1)" = getitem_8 + 1
@@ -8673,13 +8936,11 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s77, s27, 2, 2, 3, child), (s27, s77));  cond_fn_0 = body_fn_0 = s77 = s27 = child = None
-
         getitem_10: "Sym(u10)" = while_loop[0]
         getitem_11: "Sym(u11)" = while_loop[1]
         getitem_12: "Sym(u12)" = while_loop[2]
         getitem_13: "Sym(u13)" = while_loop[3]
         getitem_14: "Sym(u14)" = while_loop[4]
-
         out_x: "f32[s77, s27]" = while_loop[5];  while_loop = None
 
         add: "Sym(u12 + 1)" = getitem_12 + 1
@@ -8951,15 +9212,41 @@ class GraphModule(torch.nn.Module):
             ):
                 torch.compile(fn)(f, x)
 
-            with self.assertRaisesRegex(
-                # Should be
-                # torch._dynamo.exc.Unsupported,
-                # "Encountered aliasing during higher order op tracing for HOP.*"
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                r"Higher Order Operator: torch\.cond",
-            ):
-                with torch.inference_mode(inference_mode):
+            with torch.inference_mode(inference_mode):
+                if not inference_mode:
+                    with self.assertRaisesRegex(
+                        # Should be
+                        # torch._dynamo.exc.Unsupported,
+                        # "Encountered aliasing during higher order op tracing for HOP.*"
+                        torch._dynamo.exc.UncapturedHigherOrderOpError,
+                        r"Higher Order Operator: torch\.cond",
+                    ):
+                        torch.compile(fn)(f, x)
+                else:
                     torch.compile(fn)(f, x)
+
+    @requires_cuda
+    @parametrize("device", ["cuda", "cpu"])
+    def test_cond_input_mutation(self, device):
+        predicate_true = torch.tensor(True, device=device)
+        predicate_false = torch.tensor(False, device=device)
+        org_data = torch.ones(2, 2, device=device)
+
+        def fn(predicate, data):
+            return torch.cond(
+                predicate, lambda x: x + 1, lambda x: x.sin_().add_(2), [data]
+            )
+
+        with torch.no_grad():
+            expected = org_data.sin() + 2
+            data = org_data.clone()
+            output = torch.compile(fn)(predicate_false, data)
+            self.assertEqual(output, expected)
+            self.assertIsNot(output, data)
+
+            data = org_data.clone()
+            output = torch.compile(fn)(predicate_true, data)
+            self.assertEqual(output, org_data + 1)
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     def test_while_loop_unbacked_bindings(self):
@@ -9293,10 +9580,8 @@ class GraphModule(torch.nn.Module):
         cond_true_0 = self.cond_true_0
         cond_false_0 = self.cond_false_0
         cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_, s94, s17, s17, l_z_));  gt = cond_true_0 = cond_false_0 = l_x_ = s94 = s17 = l_z_ = None
-
         getitem_5: "f32[u0, s94]" = cond[0]
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
-
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         ret: "f32[u0, s94]" = cond[0];  cond = None
@@ -9359,6 +9644,238 @@ class GraphModule(torch.nn.Module):
             m, backend=backend, dynamic=dynamic, fullgraph=True
         )(x, y)
         self.assertEqual(compiled_out, out)
+
+
+class TestAutoFunctionalizeControlFlow(TestCase):
+    def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
+        args = pytree.tree_map(lambda t: t.to(device=device), args)
+
+        def _clone(args):
+            return [
+                arg.clone() if isinstance(arg, torch.Tensor) else arg for arg in args
+            ]
+
+        def _new_fn():
+            mod_or_fn = gen_fn()
+            if isinstance(mod_or_fn, torch.nn.Module):
+                mod_or_fn.to(device)
+            return mod_or_fn
+
+        # Only support input mutation in inference
+        cloned_args = [_clone(args) for _ in range(3)]
+        with torch.no_grad():
+            exp = _new_fn()(*cloned_args[0])
+        backend = AotEagerAndRecordGraphs()
+        torch._dynamo.reset()
+        with torch.no_grad():
+            eager_out = torch.compile(
+                _new_fn(), backend=backend, fullgraph=True, dynamic=dynamic
+            )(*cloned_args[1])
+        torch._dynamo.reset()
+        with torch.no_grad():
+            inductor_out = torch.compile(
+                _new_fn(), backend="inductor", fullgraph=True, dynamic=dynamic
+            )(*cloned_args[2])
+
+        self.assertEqual(exp, eager_out)
+        self.assertEqual(exp, inductor_out)
+        self.assertEqual(cloned_args[0], cloned_args[1])
+        self.assertEqual(cloned_args[0], cloned_args[2])
+        return backend.fw_graphs[0]
+
+    @requires_cuda
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @parametrize("device", ["cuda", "cpu"])
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_input_mutation(self, device, dynamic):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                def true_fn(x):
+                    x.add_(1)
+                    return x.sin()
+
+                x = x.clone()
+                ret = torch.cond(x.sum() > 0, true_fn, true_fn, (x,))
+                return y + ret
+
+        x, y = (
+            torch.randn(3, 4, requires_grad=True),
+            torch.randn(3, 4, requires_grad=True),
+        )
+        fw_gm = self.check(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[3, 4]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
+
+        add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, getitem);  arg1_1 = getitem = None
+        return (add,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (sin,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (sin,)
+""",  # noqa: B950
+            )
+
+    @requires_cuda
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @parametrize("device", ["cuda", "cpu"])
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_buffer_mutation(self, device, dynamic):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "buf", torch.ones(8, requires_grad=False, device=device)
+                )
+
+            def forward(self, p, x):
+                def true_fn(x):
+                    x.add_(1)
+                    self.buf.add_(1)
+                    return x + self.buf
+
+                x = x.clone()
+                out = torch.cond(p, true_fn, true_fn, (x,))
+                return x + self.buf + out
+
+        p, x = torch.tensor(True), torch.randn(1, requires_grad=True)
+        fw_gm = self.check(M, (p, x), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[1]", arg1_1: "b8[]", arg2_1: "f32[8]"):
+        clone: "f32[1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = arg1_1, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg2_1, clone], _op_schema = _tree_spec_constant0);  arg1_1 = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[8]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1]
+        getitem_2: "f32[1]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+
+        add: "f32[8]" = torch.ops.aten.add.Tensor(getitem_2, getitem_1);  getitem_2 = None
+        add_1: "f32[8]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
+
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg2_1, getitem_1);  arg2_1 = getitem_1 = copy_ = None
+        return (add_1,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[1]"):
+            add: "f32[1]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add, add_1)
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add_1);  arg0_1 = add_1 = copy_ = None
+            copy__1: "f32[1]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy__1 = None
+            return (add_2,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[1]"):
+            add: "f32[1]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            add_2: "f32[8]" = torch.ops.aten.add.Tensor(add, add_1)
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg0_1, add_1);  arg0_1 = add_1 = copy_ = None
+            copy__1: "f32[1]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy__1 = None
+            return (add_2,)
+""",  # noqa: B950
+            )
+
+    @requires_cuda
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @parametrize("device", ["cuda", "cpu"])
+    @parametrize("dynamic", [True, False])
+    def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(4, 3, requires_grad=False))
+
+            def forward(self, x, y):
+                def true_fn(x):
+                    x.add_(1)
+                    return x.sin() @ self.buf
+
+                def false_fn(x):
+                    self.buf.add_(1)
+                    return x.sin() @ self.buf
+
+                x = x.clone()
+                ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
+                return y + ret + x.sum() + self.buf.sum()
+
+        x, y = (
+            torch.randn(3, 4, requires_grad=False),
+            torch.randn(1, requires_grad=False),
+        )
+        fw_gm = self.check(M, (x, y), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[4, 3]", arg2_1: "f32[1]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
+        gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        getitem: "f32[3, 3]" = auto_functionalized_v2[0]
+        getitem_1: "f32[4, 3]" = auto_functionalized_v2[1]
+        getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg2_1, getitem);  arg2_1 = getitem = None
+        sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+        add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+        sum_3: "f32[]" = torch.ops.aten.sum.default(getitem_1)
+        add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_3);  add_1 = sum_3 = None
+
+        copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        return (add_2,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[3, 4]"):
+            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(add)
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(sin, arg0_1);  sin = arg0_1 = None
+            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            return (mm,)
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[3, 4]"):
+            add: "f32[4, 3]" = torch.ops.aten.add.Tensor(arg0_1, 1)
+            sin: "f32[3, 4]" = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(sin, add);  sin = None
+            copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
+            return (mm,)
+""",  # noqa: B950
+            )
 
 
 _hop_schema_test_schema_types = [
@@ -9692,11 +10209,115 @@ class TestHopSchema(TestCase):
         )
 
 
+class DynamicCondModel(torch.nn.Module):
+    def __init__(self, input_size=16, hidden_size=64, output_size=10):
+        super().__init__()
+        self.fc1_0 = torch.nn.Linear(input_size, hidden_size)
+        self.fc1_1 = torch.nn.Linear(input_size, 32)
+        self.fc1_2 = torch.nn.Linear(32, hidden_size)
+        self.relu = torch.nn.ReLU()
+        self.fc2 = torch.nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        def true_fn(x):
+            return self.fc1_0(x)
+
+        def false_fn(x):
+            x = self.fc1_1(x)
+            return self.fc1_2(x)
+
+        pred = x.sum() > 0
+        x = cond(pred, true_fn, false_fn, [x])
+
+        x = self.relu(x)
+        x = self.fc2(x)
+
+        return x
+
+
+@unittest.skipIf(
+    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+)
+class TestControlFlowNN(TestCase):
+    def test_cond_in_NN(self):
+        model = DynamicCondModel().cuda()
+
+        def autograd_test(x):
+            model.zero_grad(set_to_none=True)
+            output = model(x)
+            loss = output.sum()
+            loss.backward()
+            grads = [p.grad for p in model.parameters()]
+            return (output, loss, grads)
+
+        x = torch.randn(16, device="cuda")
+
+        _check_compile_many_backends_with_cudagraph(self, autograd_test, [x])
+        _check_compile_cudagraph_backend(self, autograd_test, [x])
+
+
+@unittest.skipIf(
+    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+)
+class TestControlFlowAndRNG(TestCase):
+    @parametrize("rng_func", ["custom_generator", "default_generator"])
+    def test_rng_with_conditional_nodes_errors(self, rng_func):
+        pred = torch.tensor(True, device="cuda")
+        x = torch.ones(10, dtype=torch.float32, device="cuda")
+
+        if rng_func == "custom_generator":
+            self.skipTest(
+                "randn() currently does not work with a generator argument in dynamo."
+            )
+            generator = torch.Generator("cuda")
+
+            def custom_generator(x):
+                return x + torch.randn(
+                    *x.shape, generator=generator, dtype=x.dtype, device=x.device
+                )
+
+            rng_func = custom_generator
+        elif rng_func == "default_generator":
+
+            def default_generator(x):
+                return x + torch.randn(*x.shape, dtype=x.dtype, device=x.device)
+
+            rng_func = default_generator
+
+        def func(pred, x):
+            return torch.cond(pred, rng_func, lambda x: 2 * x, [x])
+
+        compiled_func = torch.compile(func, backend="cudagraphs")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "RNG within data-dependent conditional nodes is not supported yet",
+        ):
+            compiled_func(pred, x)
+
+    def test_rng_outside_conditional_nodes_does_not_error(self):
+        pred = torch.tensor(True, device="cuda")
+        x = torch.ones(10, dtype=torch.float32, device="cuda")
+
+        def func(pred, x):
+            y = torch.cond(pred, lambda t: 2 * t, lambda t: 3 * t, [x])
+            return y + torch.randn(*y.shape, dtype=y.dtype, device=y.device)
+
+        compiled_func = torch.compile(func, backend="cudagraphs")
+        for _ in range(3):
+            out = compiled_func(pred, x)
+            self.assertEqual(out.shape, x.shape)
+
+
 instantiate_parametrized_tests(TestHopSchema)
 instantiate_parametrized_tests(TestControlFlowTraced)
+instantiate_parametrized_tests(TestAutoFunctionalizeControlFlow)
 
 instantiate_parametrized_tests(TestControlFlow)
 instantiate_parametrized_tests(AssociativeScanTests)
+
+instantiate_parametrized_tests(TestControlFlowAndRNG)
 
 if __name__ == "__main__":
     run_tests()
