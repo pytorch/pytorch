@@ -635,6 +635,97 @@ class TestVarlenAttention(NNTestCase):
 
                     self.assertEqual(orig_seq_grad, perm_seq_grad)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "actual_kv_lens",
+        [
+            [32, 64, 96, 48],
+            [1, 1, 1, 1],
+            [128, 128, 128, 128],
+            [1, 128, 1, 128],
+            [127, 63, 33, 17],
+        ],
+    )
+    def test_seqused_k_kv_cache(self, device, dtype, actual_kv_lens):
+        torch.manual_seed(42)
+
+        batch_size = 4
+        num_heads = 8
+        head_dim = 64
+        cache_size = 128
+
+        q_seqs = [
+            torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(batch_size)
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        k_seqs = [
+            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
+            for kv_len in actual_kv_lens
+        ]
+        v_seqs = [
+            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
+            for kv_len in actual_kv_lens
+        ]
+
+        k_cache_slots = []
+        v_cache_slots = []
+        for i in range(batch_size):
+            k_slot = torch.randn(
+                cache_size, num_heads, head_dim, device=device, dtype=dtype
+            )
+            v_slot = torch.randn(
+                cache_size, num_heads, head_dim, device=device, dtype=dtype
+            )
+            # overriding garbage values with real ones up to how much cache is filled
+            k_slot[: actual_kv_lens[i]] = k_seqs[i]
+            v_slot[: actual_kv_lens[i]] = v_seqs[i]
+            k_cache_slots.append(k_slot)
+            v_cache_slots.append(v_slot)
+
+        k_cache_packed = torch.cat(k_cache_slots, dim=0)
+        v_cache_packed = torch.cat(v_cache_slots, dim=0)
+        cu_seq_k_cache = torch.arange(
+            0,
+            (batch_size + 1) * cache_size,
+            cache_size,
+            device=device,
+            dtype=torch.int32,
+        )
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+
+        with torch.no_grad():
+            output_cached = varlen_attn(
+                q_packed,
+                k_cache_packed,
+                v_cache_packed,
+                cu_seq_q,
+                cu_seq_k_cache,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+            )
+
+        k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
+        v_real_packed = torch.cat(v_seqs, dim=0)
+
+        with torch.no_grad():
+            output_reference = varlen_attn(
+                q_packed,
+                k_real_packed,
+                v_real_packed,
+                cu_seq_q,
+                cu_seq_k_real,
+                max_q,
+                max_k_real,
+            )
+
+        self.assertEqual(output_cached, output_reference)
+
 
 device_types = ("cuda",)
 
