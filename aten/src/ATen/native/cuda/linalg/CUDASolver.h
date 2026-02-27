@@ -484,51 +484,6 @@ template <>
 void syevd<c10::complex<double>, double>(
     CUDASOLVER_SYEVD_ARGTYPES(c10::complex<double>, double));
 
-#define CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(scalar_t, value_t)             \
-  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
-      int n, const scalar_t *A, int lda, const value_t *W, int *lwork,      \
-      syevjInfo_t params
-
-template <class scalar_t, class value_t = scalar_t>
-void syevj_bufferSize(CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::syevj_bufferSize: not implemented");
-}
-
-template <>
-void syevj_bufferSize<float>(
-    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(float, float));
-template <>
-void syevj_bufferSize<double>(
-    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(double, double));
-template <>
-void syevj_bufferSize<c10::complex<float>, float>(
-    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
-template <>
-void syevj_bufferSize<c10::complex<double>, double>(
-    CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
-
-#define CUDASOLVER_SYEVJ_ARGTYPES(scalar_t, value_t)                        \
-  cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
-      int n, scalar_t *A, int lda, value_t *W, scalar_t *work, int lwork,   \
-      int *info, syevjInfo_t params
-
-template <class scalar_t, class value_t = scalar_t>
-void syevj(CUDASOLVER_SYEVJ_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t), "at::cuda::solver::syevj: not implemented");
-}
-
-template <>
-void syevj<float>(CUDASOLVER_SYEVJ_ARGTYPES(float, float));
-template <>
-void syevj<double>(CUDASOLVER_SYEVJ_ARGTYPES(double, double));
-template <>
-void syevj<c10::complex<float>, float>(
-    CUDASOLVER_SYEVJ_ARGTYPES(c10::complex<float>, float));
-template <>
-void syevj<c10::complex<double>, double>(
-    CUDASOLVER_SYEVJ_ARGTYPES(c10::complex<double>, double));
-
 #define CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)     \
   cusolverDnHandle_t handle, cusolverEigMode_t jobz, cublasFillMode_t uplo, \
       int n, const scalar_t *A, int lda, const value_t *W, int *lwork,      \

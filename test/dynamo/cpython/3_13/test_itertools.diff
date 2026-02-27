@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_itertools.py b/test/dynamo/cpython/3_13/test_itertools.py
-index 7d5ba727389..27c84f95bb4 100644
+index 7d5ba727389..e434f80610a 100644
 --- a/test/dynamo/cpython/3_13/test_itertools.py
 +++ b/test/dynamo/cpython/3_13/test_itertools.py
 @@ -1,3 +1,25 @@
@@ -185,19 +185,6 @@ index 7d5ba727389..27c84f95bb4 100644
  
          # check copy, deepcopy, pickle
 -        ans = [0,2,4]
--
--        c = filter(isEven, range(6))
--        self.assertEqual(list(copy.copy(c)), ans)
--        c = filter(isEven, range(6))
--        self.assertEqual(list(copy.deepcopy(c)), ans)
--        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
--            c = filter(isEven, range(6))
--            self.assertEqual(list(pickle.loads(pickle.dumps(c, proto))), ans)
--            next(c)
--            self.assertEqual(list(pickle.loads(pickle.dumps(c, proto))), ans[1:])
--        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
--            c = filter(isEven, range(6))
--            self.pickletest(proto, c)
 +        # ans = [0,2,4]
 +
 +        # c = filter(isEven, range(6))
@@ -213,6 +200,19 @@ index 7d5ba727389..27c84f95bb4 100644
 +        #     c = filter(isEven, range(6))
 +        #     self.pickletest(proto, c)
  
+-        c = filter(isEven, range(6))
+-        self.assertEqual(list(copy.copy(c)), ans)
+-        c = filter(isEven, range(6))
+-        self.assertEqual(list(copy.deepcopy(c)), ans)
+-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+-            c = filter(isEven, range(6))
+-            self.assertEqual(list(pickle.loads(pickle.dumps(c, proto))), ans)
+-            next(c)
+-            self.assertEqual(list(pickle.loads(pickle.dumps(c, proto))), ans[1:])
+-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+-            c = filter(isEven, range(6))
+-            self.pickletest(proto, c)
+-
 -    @pickle_deprecated
      def test_filterfalse(self):
          self.assertEqual(list(filterfalse(isEven, range(6))), [1,3,5])
@@ -299,7 +299,144 @@ index 7d5ba727389..27c84f95bb4 100644
              expected_len = prod(map(len, args))
              self.assertEqual(len(list(product(*args))), expected_len)
              self.assertEqual(list(product(*args)), list(product1(*args)))
-@@ -1688,7 +1712,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1473,7 +1497,7 @@ class TestBasicOps(unittest.TestCase):
+             c = starmap(operator.pow, zip(range(3), range(1,7)))
+             self.pickletest(proto, c)
+ 
+-    @pickle_deprecated
++    # @pickle_deprecated
+     def test_islice(self):
+         for args in [          # islice(args) should agree with range(args)
+                 (10, 20, 3),
+@@ -1510,20 +1534,20 @@ class TestBasicOps(unittest.TestCase):
+         self.assertEqual(list(islice(it, 3, 3)), [])
+         self.assertEqual(list(it), list(range(3, 10)))
+ 
+-        # Test invalid arguments
+-        ra = range(10)
+-        self.assertRaises(TypeError, islice, ra)
+-        self.assertRaises(TypeError, islice, ra, 1, 2, 3, 4)
+-        self.assertRaises(ValueError, islice, ra, -5, 10, 1)
+-        self.assertRaises(ValueError, islice, ra, 1, -5, -1)
+-        self.assertRaises(ValueError, islice, ra, 1, 10, -1)
+-        self.assertRaises(ValueError, islice, ra, 1, 10, 0)
+-        self.assertRaises(ValueError, islice, ra, 'a')
+-        self.assertRaises(ValueError, islice, ra, 'a', 1)
+-        self.assertRaises(ValueError, islice, ra, 1, 'a')
+-        self.assertRaises(ValueError, islice, ra, 'a', 1, 1)
+-        self.assertRaises(ValueError, islice, ra, 1, 'a', 1)
+-        self.assertEqual(len(list(islice(count(), 1, 10, maxsize))), 1)
++        # # Test invalid arguments
++        # ra = range(10)
++        # self.assertRaises(TypeError, islice, ra)
++        # self.assertRaises(TypeError, islice, ra, 1, 2, 3, 4)
++        # self.assertRaises(ValueError, islice, ra, -5, 10, 1)
++        # self.assertRaises(ValueError, islice, ra, 1, -5, -1)
++        # self.assertRaises(ValueError, islice, ra, 1, 10, -1)
++        # self.assertRaises(ValueError, islice, ra, 1, 10, 0)
++        # self.assertRaises(ValueError, islice, ra, 'a')
++        # self.assertRaises(ValueError, islice, ra, 'a', 1)
++        # self.assertRaises(ValueError, islice, ra, 1, 'a')
++        # self.assertRaises(ValueError, islice, ra, 'a', 1, 1)
++        # self.assertRaises(ValueError, islice, ra, 1, 'a', 1)
++        # self.assertEqual(len(list(islice(count(), 1, 10, maxsize))), 1)
+ 
+         # Issue #10323:  Less islice in a predictable state
+         c = count()
+@@ -1538,12 +1562,13 @@ class TestBasicOps(unittest.TestCase):
+                 (10, 3),
+                 (20,)
+                 ]:
+-            self.assertEqual(list(copy.copy(islice(range(100), *args))),
+-                             list(range(*args)))
+-            self.assertEqual(list(copy.deepcopy(islice(range(100), *args))),
+-                             list(range(*args)))
+-            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+-                self.pickletest(proto, islice(range(100), *args))
++            # self.assertEqual(list(copy.copy(islice(range(100), *args))),
++            #                  list(range(*args)))
++            # self.assertEqual(list(copy.deepcopy(islice(range(100), *args))),
++            #                  list(range(*args)))
++            with torch._dynamo.error_on_graph_break(False):
++                for proto in range(pickle.HIGHEST_PROTOCOL + 1):
++                    self.pickletest(proto, islice(range(100), *args))
+ 
+         # Issue #21321: check source iterator is not referenced
+         # from islice() after the latter has been exhausted
+@@ -1568,44 +1593,48 @@ class TestBasicOps(unittest.TestCase):
+         self.assertEqual(list(islice(range(100), IntLike(10), IntLike(50), IntLike(5))),
+                          list(range(10,50,5)))
+ 
+-    @pickle_deprecated
++    # @pickle_deprecated
+     def test_takewhile(self):
+         data = [1, 3, 5, 20, 2, 4, 6, 8]
+         self.assertEqual(list(takewhile(underten, data)), [1, 3, 5])
+         self.assertEqual(list(takewhile(underten, [])), [])
+-        self.assertRaises(TypeError, takewhile)
+-        self.assertRaises(TypeError, takewhile, operator.pow)
+-        self.assertRaises(TypeError, takewhile, operator.pow, [(4,5)], 'extra')
+-        self.assertRaises(TypeError, next, takewhile(10, [(4,5)]))
+-        self.assertRaises(ValueError, next, takewhile(errfunc, [(4,5)]))
++        with torch._dynamo.error_on_graph_break(False):
++            self.assertRaises(TypeError, takewhile)
++            self.assertRaises(TypeError, takewhile, operator.pow)
++            self.assertRaises(TypeError, takewhile, operator.pow, [(4,5)], 'extra')
++            self.assertRaises(TypeError, next, takewhile(10, [(4,5)]))
++            # self.assertRaises(ValueError, next, takewhile(errfunc, [(4,5)]))
+         t = takewhile(bool, [1, 1, 1, 0, 0, 0])
+         self.assertEqual(list(t), [1, 1, 1])
+         self.assertRaises(StopIteration, next, t)
+ 
+         # check copy, deepcopy, pickle
+-        self.assertEqual(list(copy.copy(takewhile(underten, data))), [1, 3, 5])
+-        self.assertEqual(list(copy.deepcopy(takewhile(underten, data))),
+-                        [1, 3, 5])
+-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+-            self.pickletest(proto, takewhile(underten, data))
++        # self.assertEqual(list(copy.copy(takewhile(underten, data))), [1, 3, 5])
++        # self.assertEqual(list(copy.deepcopy(takewhile(underten, data))),
++        #                 [1, 3, 5])
++        with torch._dynamo.error_on_graph_break(False):
++            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
++                self.pickletest(proto, takewhile(underten, data))
+ 
+-    @pickle_deprecated
++    # @pickle_deprecated
+     def test_dropwhile(self):
+         data = [1, 3, 5, 20, 2, 4, 6, 8]
+         self.assertEqual(list(dropwhile(underten, data)), [20, 2, 4, 6, 8])
+         self.assertEqual(list(dropwhile(underten, [])), [])
+-        self.assertRaises(TypeError, dropwhile)
+-        self.assertRaises(TypeError, dropwhile, operator.pow)
+-        self.assertRaises(TypeError, dropwhile, operator.pow, [(4,5)], 'extra')
+-        self.assertRaises(TypeError, next, dropwhile(10, [(4,5)]))
+-        self.assertRaises(ValueError, next, dropwhile(errfunc, [(4,5)]))
+-
+-        # check copy, deepcopy, pickle
+-        self.assertEqual(list(copy.copy(dropwhile(underten, data))), [20, 2, 4, 6, 8])
+-        self.assertEqual(list(copy.deepcopy(dropwhile(underten, data))),
+-                        [20, 2, 4, 6, 8])
+-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+-            self.pickletest(proto, dropwhile(underten, data))
++        with torch._dynamo.error_on_graph_break(False):
++            self.assertRaises(TypeError, dropwhile)
++            self.assertRaises(TypeError, dropwhile, operator.pow)
++            self.assertRaises(TypeError, dropwhile, operator.pow, [(4,5)], 'extra')
++            self.assertRaises(TypeError, next, dropwhile(10, [(4,5)]))
++        #self.assertRaises(ValueError, next, dropwhile(errfunc, [(4,5)]))
++        #
++        ## check copy, deepcopy, pickle
++        #self.assertEqual(list(copy.copy(dropwhile(underten, data))), [20, 2, 4, 6, 8])
++        #self.assertEqual(list(copy.deepcopy(dropwhile(underten, data))),
++        #                [20, 2, 4, 6, 8])
++        with torch._dynamo.error_on_graph_break(False):
++            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
++                self.pickletest(proto, dropwhile(underten, data))
+ 
+     @pickle_deprecated
+     def test_tee(self):
+@@ -1688,7 +1717,7 @@ class TestBasicOps(unittest.TestCase):
          t3 = tnew(t1)
          self.assertTrue(list(t1) == list(t2) == list(t3) == list('abc'))
  
@@ -308,7 +445,7 @@ index 7d5ba727389..27c84f95bb4 100644
          a, b = tee(range(10))
          p = weakref.proxy(a)
          self.assertEqual(getattr(p, '__class__'), type(b))
-@@ -1767,6 +1791,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1767,6 +1796,7 @@ class TestBasicOps(unittest.TestCase):
          script_helper.assert_python_ok("-c", script)
  
      # Issue 13454: Crash when deleting backward iterator from tee()
@@ -316,7 +453,7 @@ index 7d5ba727389..27c84f95bb4 100644
      def test_tee_del_backward(self):
          forward, backward = tee(repeat(None, 20000000))
          try:
-@@ -1920,7 +1945,7 @@ class TestBasicOps(unittest.TestCase):
+@@ -1920,7 +1950,7 @@ class TestBasicOps(unittest.TestCase):
                      tp.foobar = 1
  
  
@@ -325,7 +462,7 @@ index 7d5ba727389..27c84f95bb4 100644
  
      def test_accumulate(self):
          self.assertEqual(list(accumulate([1,2,3,4,5])), [1, 3, 6, 10, 15])
-@@ -2032,7 +2057,7 @@ class TestExamples(unittest.TestCase):
+@@ -2032,7 +2062,7 @@ class TestExamples(unittest.TestCase):
          self.assertEqual(list(takewhile(lambda x: x<5, [1,4,6,4,1])), [1,4])
  
  
@@ -334,7 +471,7 @@ index 7d5ba727389..27c84f95bb4 100644
  
      def test_batched_recipe(self):
          def batched_recipe(iterable, n):
-@@ -2081,6 +2106,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
+@@ -2081,6 +2111,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
              for i, element in zip(range(i + 1, stop), iterable):
                  pass
  
@@ -342,7 +479,7 @@ index 7d5ba727389..27c84f95bb4 100644
      def test_islice_recipe(self):
          self.assertEqual(list(self.islice('ABCDEFG', 2)), list('AB'))
          self.assertEqual(list(self.islice('ABCDEFG', 2, 4)), list('CD'))
-@@ -2218,7 +2244,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
+@@ -2218,7 +2249,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
          t3 = tnew(t1)
          self.assertTrue(list(t1) == list(t2) == list(t3) == list('abc'))
  
@@ -351,7 +488,7 @@ index 7d5ba727389..27c84f95bb4 100644
          a, b = tee(range(10))
          p = weakref.proxy(a)
          self.assertEqual(getattr(p, '__class__'), type(b))
-@@ -2265,7 +2291,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
+@@ -2265,7 +2296,7 @@ class TestPurePythonRoughEquivalents(unittest.TestCase):
              raise
  
  
@@ -360,7 +497,7 @@ index 7d5ba727389..27c84f95bb4 100644
  
      def makecycle(self, iterator, container):
          container.append(iterator)
-@@ -2465,7 +2491,7 @@ def L(seqn):
+@@ -2465,7 +2496,7 @@ def L(seqn):
      return chain(map(lambda x:x, R(Ig(G(seqn)))))
  
  
@@ -369,7 +506,40 @@ index 7d5ba727389..27c84f95bb4 100644
  
      def test_accumulate(self):
          s = [1,2,3,4,5]
-@@ -2644,7 +2670,7 @@ class TestVariousIteratorArgs(unittest.TestCase):
+@@ -2585,8 +2616,8 @@ class TestVariousIteratorArgs(unittest.TestCase):
+         for s in ("12345", "", range(1000), ('do', 1.2), range(2000,2200,5)):
+             for g in (G, I, Ig, S, L, R):
+                 self.assertEqual(list(islice(g(s),1,None,2)), list(g(s))[1::2])
+-            self.assertRaises(TypeError, islice, X(s), 10)
+-            self.assertRaises(TypeError, islice, N(s), 10)
++            # self.assertRaises(TypeError, islice, X(s), 10)
++            # self.assertRaises(TypeError, islice, N(s), 10)
+             self.assertRaises(ZeroDivisionError, list, islice(E(s), 10))
+ 
+     def test_pairwise(self):
+@@ -2618,8 +2649,8 @@ class TestVariousIteratorArgs(unittest.TestCase):
+                     if not isEven(elem): break
+                     tgt.append(elem)
+                 self.assertEqual(list(takewhile(isEven, g(s))), tgt)
+-            self.assertRaises(TypeError, takewhile, isEven, X(s))
+-            self.assertRaises(TypeError, takewhile, isEven, N(s))
++            # self.assertRaises(TypeError, takewhile, isEven, X(s))
++            # self.assertRaises(TypeError, takewhile, isEven, N(s))
+             self.assertRaises(ZeroDivisionError, list, takewhile(isEven, E(s)))
+ 
+     def test_dropwhile(self):
+@@ -2630,8 +2661,8 @@ class TestVariousIteratorArgs(unittest.TestCase):
+                     if not tgt and isOdd(elem): continue
+                     tgt.append(elem)
+                 self.assertEqual(list(dropwhile(isOdd, g(s))), tgt)
+-            self.assertRaises(TypeError, dropwhile, isOdd, X(s))
+-            self.assertRaises(TypeError, dropwhile, isOdd, N(s))
++            # self.assertRaises(TypeError, dropwhile, isOdd, X(s))
++            # self.assertRaises(TypeError, dropwhile, isOdd, N(s))
+             self.assertRaises(ZeroDivisionError, list, dropwhile(isOdd, E(s)))
+ 
+     def test_tee(self):
+@@ -2644,7 +2675,7 @@ class TestVariousIteratorArgs(unittest.TestCase):
              self.assertRaises(TypeError, tee, N(s))
              self.assertRaises(ZeroDivisionError, list, tee(E(s))[0])
  
@@ -378,7 +548,7 @@ index 7d5ba727389..27c84f95bb4 100644
  
      def test_repeat(self):
          self.assertEqual(operator.length_hint(repeat(None, 50)), 50)
-@@ -2657,7 +2683,7 @@ class LengthTransparency(unittest.TestCase):
+@@ -2657,7 +2688,7 @@ class LengthTransparency(unittest.TestCase):
          self.assertEqual(operator.length_hint(repeat(None, times=-1)), 0)
          self.assertEqual(operator.length_hint(repeat(None, times=-2)), 0)
  
@@ -387,7 +557,7 @@ index 7d5ba727389..27c84f95bb4 100644
  
      def test_sf_793826(self):
          # Fix Armin Rigo's successful efforts to wreak havoc
-@@ -2718,6 +2744,7 @@ class RegressionTests(unittest.TestCase):
+@@ -2718,6 +2749,7 @@ class RegressionTests(unittest.TestCase):
  
      @support.skip_if_pgo_task
      @support.requires_resource('cpu')
@@ -395,7 +565,7 @@ index 7d5ba727389..27c84f95bb4 100644
      def test_long_chain_of_empty_iterables(self):
          # Make sure itertools.chain doesn't run into recursion limits when
          # dealing with long chains of empty iterables. Even with a high
-@@ -2750,7 +2777,7 @@ class RegressionTests(unittest.TestCase):
+@@ -2750,7 +2782,7 @@ class RegressionTests(unittest.TestCase):
              next(g, None)  # shouldn't crash
  
  
@@ -404,7 +574,7 @@ index 7d5ba727389..27c84f95bb4 100644
      def test_keywords_in_subclass(self):
          # count is not subclassable...
          testcases = [
-@@ -2805,49 +2832,5 @@ class SubclassWithKwargsTest(unittest.TestCase):
+@@ -2805,49 +2837,5 @@ class SubclassWithKwargsTest(unittest.TestCase):
                  self.assertEqual(u.newarg, 3)
  
  

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch._inductor.config as config
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -71,7 +71,7 @@ class ROCmTemplateKernel(ROCmKernel):
         outputs: list[IRNode],
         size_args: list[str],
         names_str: str = "",
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: list[int] | None = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -228,13 +228,11 @@ class ROCmTemplateCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
-            [ROCmTemplateBuffer, Optional[Sequence[IRNode]]], str
+            [ROCmTemplateBuffer, Sequence[IRNode] | None], str
         ],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
-        ],  # type: ignore[type-arg]
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -268,7 +266,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "ROCm",

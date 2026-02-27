@@ -266,7 +266,7 @@ def get_device_capability(device: Device = None) -> dict[str, Any]:
 
 def get_device_properties(
     device: Device = None,
-) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
+) -> _XpuDeviceProperties:
     r"""Get the properties of a device. Returns _XpuDeviceProperties containing the following device properties:
 
     - ``name`` (str): device name.

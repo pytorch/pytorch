@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Protocol, TYPE_CHECKING
 
 import sympy
 
@@ -19,6 +19,7 @@ import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
@@ -43,13 +44,13 @@ if TYPE_CHECKING:
     from ..graph import GraphLowering
 
     # At most, the list nesting can go one layer deep.
-    _OUTPUT_ARGS_TYPE = list[Union[Optional[str], list[Optional[str]]]]
+    _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
 
     from ..scheduler import BaseSchedulerNode
 
 
 class HasWriteLine(Protocol):
-    def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None: ...
+    def writeline(self, line: LineContext | DeferredLineBase | str) -> None: ...
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
@@ -102,9 +103,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
     @staticmethod
     def create(
         is_subgraph: bool,
-        subgraph_name: Optional[str],
-        parent_wrapper: Optional[PythonWrapperCodegen],
-        partition_signatures: Optional[ir.GraphPartitionSignature] = None,
+        subgraph_name: str | None,
+        parent_wrapper: PythonWrapperCodegen | None,
+        partition_signatures: ir.GraphPartitionSignature | None = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -321,7 +322,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return f"{name}_stride"
 
         def codegen_symbol(
-            sym_or_exp: Union[sympy.Symbol, sympy.Expr],
+            sym_or_exp: sympy.Symbol | sympy.Expr,
             base_name: str,
             name_fn: Callable[[str], str],
             dim: int,
@@ -994,7 +995,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         with self.prefix.indent():
             # This is a mapping to the index of constant folding graph's output
-            const_index_mapping: list[Optional[tuple[int, str]]] = [None] * len(
+            const_index_mapping: list[tuple[int, str] | None] = [None] * len(
                 V.graph.const_output_index
             )
             for idx, (name, _) in enumerate(V.graph.constants.items()):
@@ -1069,9 +1070,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         kernel_name: str,
         kernel_body: str,
-        metadata: Optional[str] = None,
+        metadata: str | None = None,
         gpu: bool = False,
-        cpp_definition: Optional[str] = None,
+        cpp_definition: str | None = None,
     ):
         if cpp_definition is not None:
             self.header.splice(cpp_definition)
@@ -1283,8 +1284,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         args: list[str],
         device: str,
         *,
-        debug_args: Optional[list[str]] = None,
-        stack_traces: Optional[OrderedSet[str]] = None,
+        debug_args: list[str] | None = None,
+        stack_traces: OrderedSet[str] | None = None,
     ) -> None:
         """debug_args kwarg allows CppWrapperCpuArrayRef to pass in wrapped arguments in
         place of args while preserving debug printer output."""
@@ -1410,10 +1411,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         kernel: str,
         out: str,
-        out_view: Optional[str],
+        out_view: str | None,
         args: list[str],
         device: str,
-        stack_traces: Optional[OrderedSet[str]] = None,
+        stack_traces: OrderedSet[str] | None = None,
     ) -> None:
         if out_view:
             out_name = f"{out}_as_strided"
@@ -1491,8 +1492,68 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
+    def _extract_divisors_from_expr(
+        self, expr: sympy.Expr
+    ) -> list[tuple[sympy.Expr, str]]:
+        """
+        Walk the sympy expression and extract all divisors/modulos from
+        FloorDiv, CleanDiv, Mod, and ModularIndexing nodes.
+
+        Returns a list of (divisor_expr, operation_name) tuples for divisors
+        that are not constant positive integers (which cannot be zero).
+        """
+        divisors: list[tuple[sympy.Expr, str]] = []
+        seen: OrderedSet[str] = OrderedSet()
+
+        def is_constant_nonzero(e: sympy.Expr) -> bool:
+            """Check if expression is a constant that cannot be zero."""
+            if isinstance(e, sympy.Integer):
+                return int(e) != 0
+            if isinstance(e, sympy.Number):
+                return float(e) != 0
+            return False
+
+        def maybe_add_divisor(divisor: sympy.Expr, op_name: str) -> None:
+            """Add divisor to list if it could potentially be zero."""
+            if not is_constant_nonzero(divisor):
+                key = str(divisor)
+                if key not in seen:
+                    seen.add(key)
+                    divisors.append((divisor, op_name))
+
+        def walk(e: sympy.Expr) -> None:
+            if isinstance(e, (FloorDiv, CleanDiv)):
+                _, div = e.args
+                maybe_add_divisor(div, "floor division")
+            elif isinstance(e, Mod):
+                _, mod = e.args
+                maybe_add_divisor(mod, "modulo")
+            elif isinstance(e, ModularIndexing):
+                _, div, mod = e.args
+                maybe_add_divisor(div, "modular indexing division")
+                maybe_add_divisor(mod, "modular indexing modulo")
+
+            # Recurse into arguments
+            if hasattr(e, "args"):
+                for arg in e.args:
+                    if isinstance(arg, sympy.Expr):
+                        walk(arg)
+
+        walk(expr)
+        return divisors
+
     def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
-        return cexpr(V.graph.sizevars.simplify(x) if simplify else x)
+        maybe_simplified_x = V.graph.sizevars.simplify(x) if simplify else x
+        # In AOT mode, emit runtime checks for potential division/modulo by zero
+        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
+        if V.graph.aot_mode:
+            divisors = self._extract_divisors_from_expr(maybe_simplified_x)
+            for divisor, op_name in divisors:
+                divisor_str = cexpr(divisor)
+                self.writeline(
+                    f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
+                )
+        return cexpr(maybe_simplified_x)
 
     def codegen_sizevar(self, x: sympy.Expr) -> str:
         return self.codegen_cpp_sizevar(x)
@@ -1952,7 +2013,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # ```
         return final_tensor_str
 
-    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
+    def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
         handle cases where dst is not an AtenTensorHandle."""
         self.writeline(
@@ -2121,7 +2182,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_extern_kernel_args_decl_if_needed(
         self,
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        op_overload: torch._ops.OpOverload | torch._ops.HigherOrderOperator,
         raw_args: Sequence[Any],
         output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
@@ -2323,7 +2384,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         buf_name: str,
         python_kernel_name: str,
         get_args: Callable[[], Sequence[str]],
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        op_overload: torch._ops.OpOverload | torch._ops.HigherOrderOperator,
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
     ) -> None:
@@ -2331,8 +2392,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         different code paths for AOT Inductor vs cpp_wrapper Inductor mode."""
 
         def extract_output_name(
-            out: Optional[Union[ir.Buffer, Sequence[ir.Buffer]]],
-        ) -> Union[Optional[str], _OUTPUT_ARGS_TYPE]:
+            out: ir.Buffer | Sequence[ir.Buffer] | None,
+        ) -> str | None | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
             if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
@@ -2460,6 +2521,9 @@ if (!custom_op_wrapper) {
             return f"{val}"
 
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
+        """Generate C++ code that converts a single operator argument into a Python
+        object and inserts it into a PyTuple at the given index."""
+
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             def handle_scalar(scalar):
                 if isinstance(scalar, int):
@@ -2537,19 +2601,31 @@ if (!custom_op_wrapper) {
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
                 )
 
-        lines = []
-        if isinstance(arg_type, torch.ListType):
-            assert isinstance(raw_arg, (list, tuple)), str(raw_arg) + " is not a list"
-            lines.append(
+        def handle_sequence_arg(raw_arg_, arg_type_, lines_):
+            assert isinstance(raw_arg_, (list, tuple)), str(raw_arg) + " is not a list"
+            lines_.append(
                 f"PyObject* {py_args_var}_{idx} = PyList_New({len(raw_arg)});\n"
             )
-            for i, elem in enumerate(raw_arg):
-                lines.append(
-                    f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(lines, elem, arg_type.getElementType())});\n"
+            for i, elem in enumerate(raw_arg_):
+                lines_.append(
+                    f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(lines, elem, arg_type_.getElementType())});\n"
                 )
-            lines.append(
+            lines_.append(
                 f"PyTuple_SetItem({py_args_var}, {idx}, {py_args_var}_{idx});\n"
             )
+
+        lines = []
+        if isinstance(arg_type, torch.ListType):
+            handle_sequence_arg(raw_arg, arg_type, lines)
+        elif isinstance(arg_type, torch.OptionalType) and isinstance(
+            arg_type.getElementType(), torch.ListType
+        ):
+            if raw_arg is None:
+                lines.append(
+                    f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(lines, raw_arg, arg_type)});\n"
+                )
+            else:
+                handle_sequence_arg(raw_arg, arg_type.getElementType(), lines)
         else:
             lines.append(
                 f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(lines, raw_arg, arg_type)});\n"
@@ -2560,7 +2636,7 @@ if (!custom_op_wrapper) {
         self,
         get_args: Callable[[], Sequence[str]],
         op_overload: torch._ops.OpOverload,
-        output_args: Sequence[Optional[str]],
+        output_args: Sequence[str | None],
         raw_outputs: Sequence[ir.Buffer],
     ) -> None:
         """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
@@ -2672,7 +2748,7 @@ if (!custom_op_wrapper) {
         python_kernel_name: str,
         op_overload: torch._ops.OpOverload,
         raw_args: Sequence[Any],
-        output_args: Sequence[Optional[str]],
+        output_args: Sequence[str | None],
         raw_outputs: Sequence[ir.Buffer],
     ) -> None:
         """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
@@ -2746,7 +2822,7 @@ if (!custom_op_wrapper) {
 
     def generate_fallback_kernel_with_runtime_lookup_aot(
         self,
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        op_overload: torch._ops.OpOverload | torch._ops.HigherOrderOperator,
         raw_args: Sequence[Any],
         output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
@@ -2940,7 +3016,7 @@ if (!custom_op_wrapper) {
         return self.val_to_arg_str_for_prim_type(val, type_)
 
     def create_tmp_raii_handle_var_if_needed(
-        self, handle: str, writer: Optional[Union[HasWriteLine, list[str]]] = None
+        self, handle: str, writer: HasWriteLine | list[str] | None = None
     ) -> str:
         """If the input handle is an rvalue RAII tensor, creates an lvalue variable for
         it in writer.  Returns a variable name that can be used to access handle."""
@@ -2985,10 +3061,10 @@ if (!custom_op_wrapper) {
     def write_kernel_context_guard(
         self,
         kernel_name: str,
-        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     ):
         def aggregate_stack_traces(
-            node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+            node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
         ) -> OrderedSet[str]:
             if isinstance(node_schedule, list):
                 return functools.reduce(

@@ -2,7 +2,6 @@
 # need to fix prim_hop_base type annotations first
 
 import dataclasses
-from typing import Optional
 
 import torch
 from torch._higher_order_ops.base_hop import BaseHOP, FunctionWithNoFreeVars
@@ -50,7 +49,7 @@ class InvokeQuant:
     def __call__(
         self,
         *args,
-        scheme: Optional[str] = None,
+        scheme: str | None = None,
         **kwargs,
     ):
         if not torch.compiler.is_compiling():

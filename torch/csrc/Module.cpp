@@ -76,6 +76,7 @@
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/fx/graph.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
@@ -2269,6 +2270,10 @@ PyObject* initModule() {
   THPEvent_init(module);
   NodeBase_init(module);
   NodeIter_init(module);
+  Namespace_init(module);
+  FindNodesLookupTable_init(module);
+  NodeList_init(module);
+  GraphBase_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
