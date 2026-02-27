@@ -44,10 +44,9 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_BLOCK,
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
-from torch._inductor.runtime.triton_heuristics import (
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner, template
+from torch._inductor.runtime.triton_heuristics_impl.common import (
     autotune_hints_to_configs,
-    CachingAutotuner,
-    template,
     triton_config,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -217,7 +216,7 @@ class TestTritonHeuristics(TestCase):
             return None
 
         with unittest.mock.patch(
-            "torch._inductor.runtime.triton_heuristics.triton_config",
+            "torch._inductor.runtime.triton_heuristics_impl.common.triton_config",
             mock_triton_config,
         ):
             _ = autotune_hints_to_configs(hints, size_hints, block_size, device_props)
