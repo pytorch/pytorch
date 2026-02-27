@@ -195,6 +195,10 @@ def varlen_attn(
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
             or (W, 0) for causal attention with sliding window of size W.
+        seqused_k (Tensor, optional): Number of valid KV tokens per batch element; shape :math:`(N,)`.
+            When set, only the first ``seqused_k[i]`` tokens in the key/value sequence for batch
+            element *i* participate in attention. Useful for KV-cache decoding where the cache slot
+            is larger than the actual sequence. Inference-only (not supported in backward).
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
