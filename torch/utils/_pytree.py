@@ -39,7 +39,6 @@ from typing import (
     TYPE_CHECKING,
     TypeAlias,
     TypeVar,
-    Union,
 )
 from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
@@ -1385,7 +1384,7 @@ def treespec_dict(
 
 def _is_pytreespec_instance(
     obj: Any,
-) -> TypeIs[Union[TreeSpec, "cxx_pytree.PyTreeSpec"]]:
+) -> TypeIs["TreeSpec | cxx_pytree.PyTreeSpec"]:
     if isinstance(obj, TreeSpec):
         return True
     if "torch.utils._cxx_pytree" in sys.modules:
@@ -1407,7 +1406,7 @@ def _is_pytreespec_instance(
 
 
 def _ensure_python_treespec_instance(
-    treespec: Union[TreeSpec, "cxx_pytree.PyTreeSpec"],
+    treespec: "TreeSpec | cxx_pytree.PyTreeSpec",
 ) -> TreeSpec:
     if isinstance(treespec, TreeSpec):
         return treespec

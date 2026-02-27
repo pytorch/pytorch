@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 """Provide an API for writing protocol buffers to event files to be consumed by TensorBoard for visualization."""
+from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -728,7 +729,7 @@ class SummaryWriter:
     def add_figure(
         self,
         tag: str,
-        figure: Union["Figure", list["Figure"]],
+        figure: Figure | list[Figure],
         global_step: int | None = None,
         close: bool = True,
         walltime: float | None = None,
