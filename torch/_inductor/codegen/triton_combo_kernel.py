@@ -742,6 +742,22 @@ class ComboKernel(Kernel):
         dispatch = self.dispatch_class
         assert dispatch is not None
 
+        # Compute the max persistent R0_BLOCK across sub-kernels.
+        # This is used by _reduction_configs() to avoid generating configs
+        # where XBLOCK * max_persistent_rblock creates pathologically large
+        # tiles that cause extreme ROCm compilation times.
+        # The max_persistent_rblock mirrors how R0_BLOCK is computed in
+        # codegen_static_numels_sub_kernel() for persistent reductions.
+        max_persistent_rblock = 0
+        for sub in self.sub_kernels:
+            if sub.persistent_reduction:
+                for tree in sub.range_trees:
+                    if tree.is_reduction:
+                        simplified_numel = V.graph.sizevars.simplify(tree.numel)
+                        if isinstance(simplified_numel, (Integer, int)):
+                            val = next_power_of_2(int(simplified_numel))
+                            max_persistent_rblock = max(max_persistent_rblock, val)
+
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
@@ -749,6 +765,8 @@ class ComboKernel(Kernel):
             "mutated_arg_names": mutated_args,
             **self.triton_kernel_cls.inductor_meta_common(),
         }
+        if max_persistent_rblock > 0:
+            inductor_meta["max_persistent_rblock"] = max_persistent_rblock
 
         sub_kernel = selected_kernel
         if heuristics == "foreach":
