@@ -32,6 +32,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
+    IS_CPU_CAPABILITY_SVE256,
+    IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
     MI200_ARCH,
@@ -39,6 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
+    xfailIf,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -3435,6 +3439,8 @@ class CPUReproTests(TestCase):
                 3,
             )
 
+    @xfailIf(IS_ARM64 and not IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/142231
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
@@ -3773,6 +3779,8 @@ class CPUReproTests(TestCase):
                     self.common(m, (x,))
                     check_metrics_vec_kernel_count(6)
 
+    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/169958
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_copy(self):
@@ -4020,6 +4028,8 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
+    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/170877
     def test_transpose_mxn_16_16_bf16_fp16(self):
         def fn(a, b):
             c = a * b
@@ -4664,6 +4674,7 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
+    @xfailIf(IS_ARM64)  # see https://github.com/pytorch/pytorch/issues/168972
     def test_float32_to_uint8(self):
         # https://github.com/pytorch/pytorch/issues/156788
         @torch.compile
@@ -5359,6 +5370,9 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    @xfailIf(
+        IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED
+    )  # see https://github.com/pytorch/pytorch/issues/142134
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
         class M(torch.nn.Module):
