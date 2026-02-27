@@ -157,7 +157,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             loaded_dict = torch.load(b, weights_only=weights_only)
             for key in model_dict:
                 if isinstance(model_dict[key], torch._C.ScriptObject):
-                    assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                    if not isinstance(loaded_dict[key], torch._C.ScriptObject):
+                        raise AssertionError(
+                            f"Expected loaded_dict[{key}] to be ScriptObject, got {type(loaded_dict[key])}"
+                        )
                     w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
                     w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
                     self.assertEqual(w_model, w_loaded)
@@ -206,7 +209,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         for name, _ in loaded_from_package.named_modules():
             # noop, just make sure attribute "_modules" is restored correctly during torch.package import
-            assert(name is not None)  # noqa: E275
+            if name is None:
+                raise AssertionError("name is None")
 
         # Test copy and deepcopy
         copied_linear = copy.copy(qlinear)
@@ -1643,7 +1647,10 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             loaded_dict = torch.load(b, weights_only=weights_only)
             for key in model_dict:
                 if isinstance(model_dict[key], torch._C.ScriptObject):
-                    assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                    if not isinstance(loaded_dict[key], torch._C.ScriptObject):
+                        raise AssertionError(
+                            f"Expected loaded_dict[{key}] to be ScriptObject, got {type(loaded_dict[key])}"
+                        )
                     w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
                     w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
                     self.assertEqual(w_model, w_loaded)

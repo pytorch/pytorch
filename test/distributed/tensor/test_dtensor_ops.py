@@ -64,7 +64,8 @@ def skipOps(op_db, test_case_name, base_test_name, to_skip):
             for o in all_opinfos
             if o.name == op_name and o.variant_test_name == variant_name
         ]
-        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        if not (len(matching_opinfos) >= 1):
+            raise AssertionError(f"Couldn't find OpInfo for {xfail}")
         for opinfo in matching_opinfos:
             decorators = list(opinfo.decorators)
             if expected_failure:
@@ -200,8 +201,6 @@ dtensor_fails = {
     xfail("nn.functional.conv_transpose3d"),
     # in-place op requires placement change during decomposition
     xfail("nn.functional.cosine_similarity"),
-    # Shard(0) causes local tensor index out of bounds for value broadcasting
-    xfail("index_put"),
     # "cannot resize variables that require grad" from test harness
     xfail("resize_"),
     xfail("resize_as_"),
@@ -391,24 +390,8 @@ dtensor_fails_no_strategy = {
     xfail("cummin"),
     xfail("diagonal_scatter"),
     xfail("exponential"),
-    xfail("fft.fft"),
-    xfail("fft.fft2"),
-    xfail("fft.fftn"),
-    xfail("fft.fftshift"),
-    xfail("fft.ifft"),
-    xfail("fft.ifft2"),
-    xfail("fft.ifftshift"),
-    xfail("fft.ihfft"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
-    xfail("fft.irfft2"),
-    xfail("fft.irfftn"),
-    xfail("fft.rfft"),
-    xfail("fft.rfft2"),
-    xfail("fft.rfftn"),
-    xfail("flip"),
-    xfail("fliplr"),
-    xfail("flipud"),
     xfail("geometric"),
     xfail("geqrf"),
     xfail("grid_sampler_2d"),
@@ -513,8 +496,6 @@ dtensor_fails_no_strategy = {
     xfail("polar"),
     xfail("put"),
     xfail("renorm"),
-    xfail("roll"),
-    xfail("rot90"),
     xfail("scatter_reduce", "amax"),
     xfail("scatter_reduce", "amin"),
     xfail("scatter_reduce", "mean"),
@@ -750,7 +731,8 @@ class TestDTensorOps(TestCase):
 
     def run_one_hot(self):
         ops = [op for op in op_db if op.name == "nn.functional.one_hot"]
-        assert len(ops) == 1
+        if len(ops) != 1:
+            raise AssertionError(f"Expected 1 op, got {len(ops)}")
         op = ops[0]
         # num_classes = -1 appears to have a bug with dtensor.max().item()
         self.run_opinfo_test(
@@ -932,6 +914,9 @@ ops_unbacked_dtensor_dde = {
     xfail("expand_copy"),
     xfail("fill"),
     xfail("flatten"),
+    xfail("flip"),
+    xfail("fliplr"),
+    xfail("flipud"),
     xfail("float_power"),
     xfail("floor_divide"),
     xfail("fmax"),
@@ -1020,6 +1005,7 @@ ops_unbacked_dtensor_dde = {
     xfail("reshape"),
     xfail("reshape_as"),
     xfail("rsub"),
+    xfail("rot90"),
     xfail("scatter"),
     xfail("scatter_add"),
     xfail("slice"),

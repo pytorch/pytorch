@@ -90,6 +90,22 @@ def custom_op(
             have a specific reason not to.
             Example: "(Tensor x, int y) -> (Tensor, Tensor)".
 
+    The following types are supported for the wrapped function's input parameters:
+
+        - Scalars: ``int``, ``float``, ``bool``, ``str``, ``torch.types.Number``
+        - Tensors: ``torch.Tensor``
+        - Enums/devices: ``torch.dtype``, ``torch.device``
+        - Flat list of the same type: ``list[torch.Tensor]``,
+          ``list[int]``, ``list[float]``, ``list[bool]``,
+          ``list[torch.types.Number]``
+        - Optionals: ``Optional`` of any of the above scalar/tensor types
+        - Types registered via :func:`torch.library.register_opaque_type`
+
+    The following types are supported for the return value:
+
+        ``torch.Tensor``, ``list[torch.Tensor]``, ``int``, ``float``,
+        ``bool``, ``torch.types.Number``.
+
     .. note::
         We recommend not passing in a ``schema`` arg and instead letting us infer
         it from the type annotations. It is error-prone to write your own schema.
@@ -142,6 +158,18 @@ def custom_op(
         >>>     return torch.ones(3)
         >>>
         >>> bar("cpu")
+        >>>
+        >>> # Example of a custom op with list inputs
+        >>> @custom_op("mylib::weighted_sum", mutates_args=())
+        >>> def weighted_sum(
+        >>>     tensors: list[Tensor],
+        >>>     weights: list[float],
+        >>> ) -> Tensor:
+        >>>     return sum(t * w for t, w in zip(tensors, weights))
+        >>>
+        >>> x = torch.randn(3)
+        >>> y = torch.randn(3)
+        >>> out = weighted_sum([x, y], [0.3, 0.7])
 
     """
 

@@ -381,7 +381,14 @@ Tensor isclose(
     if (isTensorSubclassLike(other)) {
       close.__ior__(self.isnan().bitwise_and(other.isnan()));
     } else {
-      close.__ior__(self.isnan().__iand__(other.isnan()));
+      // In-place __iand__ requires the target shape to equal the broadcast
+      // result. Check shapes to pick the right in-place target, or fall back
+      // to out-of-place for mutual broadcast (e.g. [3,1] vs [1,4] -> [3,4]).
+      if (self.sizes() == other.sizes()) {
+        close.__ior__(self.isnan().__iand__(other.isnan()));
+      } else {
+        close.__ior__(self.isnan().bitwise_and(other.isnan()));
+      }
     }
   }
 

@@ -282,6 +282,38 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, equal_nan=True, rtol=0, atol=0)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.float32)
+    def test_isclose_equal_nan_broadcast(self, device, dtype):
+        # Regression test: isclose with equal_nan=True should handle broadcasting
+        # See https://github.com/pytorch/pytorch/issues/174985
+        nan = torch.nan
+
+        # One-sided broadcast: different sizes
+        a = torch.tensor([nan], device=device, dtype=dtype)
+        b = torch.tensor([nan, nan], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, True], device=device))
+
+        # One-sided broadcast: scalar-like vs vector
+        a = torch.tensor([nan], device=device, dtype=dtype)
+        b = torch.tensor([nan, 1.0, nan], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, False, True], device=device))
+
+        # Mutual broadcast
+        a = torch.tensor([[nan], [1.0]], device=device, dtype=dtype)  # [2, 1]
+        b = torch.tensor([[nan, 1.0]], device=device, dtype=dtype)    # [1, 2]
+        result = torch.isclose(a, b, equal_nan=True)
+        expected = torch.tensor([[True, False], [False, True]], device=device)
+        self.assertEqual(result, expected)
+
+        # Same shape (fast path) still works
+        a = torch.tensor([nan, 1.0], device=device, dtype=dtype)
+        b = torch.tensor([nan, 1.0], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, True], device=device))
+
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.

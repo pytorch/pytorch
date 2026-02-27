@@ -833,6 +833,7 @@ class _CodegenContext:
     full_kernel_params: list[str]
     non_alias_out_set: OrderedSet[str]
     copy_output_indices: list[int]
+    alias_pairs: list[tuple[int, int]]
 
 
 class PallasKernel(SIMDKernel):
@@ -2845,12 +2846,15 @@ class PallasKernel(SIMDKernel):
         non_alias_out_set = OrderedSet(
             [name for name, flag in aliasable_flags.items() if not flag]
         )
-        # On CPU (interpret=True) and TPU, pallas_call returns new arrays so
-        # we must copy back every output.  On CUDA, aliased outputs are
-        # mutated in-place by the donated-buffer mechanism so only
-        # non-aliased outputs need an explicit copy.
-        if interpret_is_cpu or is_tpu:
+        # On CPU (interpret=True), pallas_call returns new arrays so we must
+        # copy back every output.  On TPU, call_custom_kernel with
+        # input_output_aliases handles donation (zero-copy), so no copy is
+        # needed.  On CUDA, aliased outputs are mutated in-place by the
+        # donated-buffer mechanism so only non-aliased outputs need a copy.
+        if interpret_is_cpu:
             copy_output_indices = list(range(len(output_params)))
+        elif is_tpu:
+            copy_output_indices = []
         else:
             copy_output_indices = [
                 idx
@@ -2876,6 +2880,7 @@ class PallasKernel(SIMDKernel):
             full_kernel_params=full_kernel_params,
             non_alias_out_set=non_alias_out_set,
             copy_output_indices=copy_output_indices,
+            alias_pairs=[],
         )
         self.aliasable_out_ptrs = aliasable_flags
 
@@ -2961,6 +2966,7 @@ class PallasKernel(SIMDKernel):
                 input_idx = ctx.kernel_input_params.index(name)
                 alias_pairs.append((input_idx, out_idx))
         alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
+        ctx.alias_pairs = alias_pairs
 
         with code.indent():
             # Pallas requires >= 1-d tensors; promote 0-d to (1,)
@@ -3536,10 +3542,27 @@ from torch._inductor.runtime.runtime_utils import (
             )
 
             # Register and call via tpu_torch_pallas
-            code.writeline(
-                f"kernel_key = '{kernel_name_str}_' + "
-                f"'_'.join(str(s) for s in {ctx.output_params[0]}.shape)"
+            # Include all output and input shapes in the key to avoid stale
+            # cache hits when the same kernel name is compiled with different
+            # input/output ranks (e.g. broadcasting vs non-broadcasting calls).
+            shape_key_parts = []
+            for p in ctx.output_params:
+                shape_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            output_key_expr = (
+                " + 'x' + ".join(shape_key_parts) if shape_key_parts else "''"
             )
+            input_key_parts = []
+            for p in ctx.kernel_input_params:
+                input_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            input_key_expr = (
+                " + 'x' + ".join(input_key_parts) if input_key_parts else "''"
+            )
+            code.writeline(
+                f"kernel_key = '{kernel_name_str}_out_' + "
+                f"{output_key_expr}"
+                f" + '_in_' + {input_key_expr}"
+            )
+
             code.writeline(
                 f"if not tpu_torch_pallas.lookup_custom_kernel('{kernel_name_str}', kernel_key):"
             )
@@ -3570,16 +3593,18 @@ from torch._inductor.runtime.runtime_utils import (
                     )
             code.writeline("]")
 
-            code.writeline(
-                f"results = tpu_torch_pallas.call_custom_kernel("
-                f"input_tensors, output_shape_tensors, "
-                f"'{kernel_name_str}', kernel_key)"
-            )
+            # Build input_output_aliases for zero-copy donation
+            if ctx.alias_pairs:
+                alias_map_str = ", ".join(f"{i}: {o}" for (i, o) in ctx.alias_pairs)
+                code.writeline(f"_input_output_aliases = {{ {alias_map_str} }}")
+            else:
+                code.writeline("_input_output_aliases = {}")
 
-            # Copy results to output buffers
-            for idx in ctx.copy_output_indices:
-                out_name = ctx.output_params[idx]
-                code.writeline(f"{out_name}.copy_(results[{idx}])")
+            code.writeline(
+                f"tpu_torch_pallas.call_custom_kernel("
+                f"input_tensors, output_shape_tensors, "
+                f"'{kernel_name_str}', kernel_key, _input_output_aliases)"
+            )
 
     def _codegen_main_entry_default(
         self, ctx: _CodegenContext, jit_wrapper_name: str
