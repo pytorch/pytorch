@@ -907,10 +907,6 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
-        try:
-            self.backend_hash = torch.utils._triton.triton_hash_with_backend()
-        except Exception:
-            self.backend_hash = None
         self.inductor_config = config.save_config_portable(ignore_private_configs=False)
         # Custom post grad passes should provide an ID to hash.
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
@@ -1146,6 +1142,22 @@ class GuardedCache(Generic[T]):
         for candidate, content, in_local in cls.iterate_over_candidates(
             local, remote_cache, key
         ):
+            # Validate extern_libs (e.g. libdevice) match the current env.
+            # This is checked here rather than in the cache key because
+            # TRITON_LIBDEVICE_PATH may be set after key computation.
+            cached_extern_libs = getattr(candidate, "extern_libs_key", None)
+            if cached_extern_libs is not None:
+                try:
+                    backend = torch.utils._triton.triton_backend()
+                    current_extern_libs = torch.utils._triton._extern_libs_key(
+                        backend
+                    )
+                except Exception:
+                    current_extern_libs = None
+                if current_extern_libs != cached_extern_libs:
+                    result_status = "guard_miss"
+                    continue
+
             assert hasattr(candidate, "guards_expr")
             if not candidate.guards_expr:  # type: ignore[attr-defined]
                 # No guards to evaluate, so this is a hit.
