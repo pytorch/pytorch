@@ -6361,6 +6361,47 @@ def meta__flash_attention_forward(
     )
 
 
+@register_meta([aten._flash_attention_forward.out])
+def meta__flash_attention_forward_out(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Tensor | None,
+    cum_seq_k: Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    out: Tensor = None,  # type: ignore[assignment]
+    scale: float | None = None,
+    window_size_left: int | None = None,
+    window_size_right: int | None = None,
+    seqused_k: Tensor | None = None,
+    alibi_slopes: Tensor | None = None,
+    page_table: Tensor | None = None,
+):
+    _, logsumexp, seed, offset, debug_mask = meta__flash_attention_forward(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
+        window_size_left,
+        window_size_right,
+        seqused_k,
+        alibi_slopes,
+        page_table,
+    )
+    return logsumexp, seed, offset, debug_mask
+
+
 @register_meta([aten._flash_attention_forward.quantized])
 def meta__flash_attention_forward_quantized(
     query: Tensor,

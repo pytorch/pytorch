@@ -130,6 +130,7 @@ aten::_fft_r2c.out
 aten::_fill_mem_eff_dropout_mask_
 aten::_flash_attention_backward
 aten::_flash_attention_forward
+aten::_flash_attention_forward.out
 aten::_flash_attention_forward.quantized
 aten::_foobar
 aten::_foobar.out

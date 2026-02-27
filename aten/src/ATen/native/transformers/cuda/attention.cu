@@ -1158,8 +1158,8 @@ int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Te
   return static_cast<int64_t>(backend);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
-_flash_attention_forward(
+static std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward_impl(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -1175,12 +1175,12 @@ _flash_attention_forward(
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
     const std::optional<Tensor>& _alibi_slopes,
-    const std::optional<Tensor>& _page_table
+    const std::optional<Tensor>& _page_table,
+    std::optional<Tensor> out
     ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).expect_float();
-  std::optional<Tensor> out = std::nullopt;
 
   std::optional<Tensor> seqused_k = _seqused_k;
   TORCH_CHECK(!_page_table.has_value(),
@@ -1287,6 +1287,107 @@ _flash_attention_forward(
       Tensor(),
       Tensor(),
       Tensor());
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _page_table
+    ) {
+  return _flash_attention_forward_impl(
+      query, key, value,
+      cumulative_sequence_length_q, cumulative_sequence_length_k,
+      max_seqlen_batch_q, max_seqlen_batch_k,
+      dropout_p, is_causal, return_debug_mask,
+      scale, window_size_left, window_size_right,
+      _seqused_k, _alibi_slopes, _page_table,
+      /*out=*/std::nullopt);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward_out(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    Tensor& out,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _page_table
+    ) {
+  auto [output, logsumexp, philox_seed, philox_offset, debug_attn_mask] =
+      _flash_attention_forward_impl(
+          query, key, value,
+          cumulative_sequence_length_q, cumulative_sequence_length_k,
+          max_seqlen_batch_q, max_seqlen_batch_k,
+          dropout_p, is_causal, return_debug_mask,
+          scale, window_size_left, window_size_right,
+          _seqused_k, _alibi_slopes, _page_table,
+          /*out=*/std::make_optional(out));
+  return std::make_tuple(
+      std::move(logsumexp),
+      std::move(philox_seed),
+      std::move(philox_offset),
+      std::move(debug_attn_mask));
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward_out_composite(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    Tensor& out,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _page_table
+    ) {
+  auto [output, logsumexp, philox_seed, philox_offset, debug_attn_mask] =
+      at::_flash_attention_forward(
+          query, key, value,
+          cumulative_sequence_length_q, cumulative_sequence_length_k,
+          max_seqlen_batch_q, max_seqlen_batch_k,
+          dropout_p, is_causal, return_debug_mask,
+          scale, window_size_left, window_size_right,
+          _seqused_k, _alibi_slopes, _page_table);
+  out.copy_(output);
+  return std::make_tuple(
+      std::move(logsumexp),
+      std::move(philox_seed),
+      std::move(philox_offset),
+      std::move(debug_attn_mask));
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
