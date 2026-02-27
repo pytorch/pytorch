@@ -1334,11 +1334,6 @@ class Identity(sympy.Function):
         # This avoids creating numeric non-comparable Identity(I) terms.
         return bool(self.args[0].is_number and self.args[0].is_comparable)
 
-    @property
-    def is_comparable(self):
-        # Delegate comparability to the wrapped argument.
-        return bool(self.args[0].is_comparable)
-
     def _eval_expand_identity(self, **hints):
         # Removes the identity op.
         return self.args[0]

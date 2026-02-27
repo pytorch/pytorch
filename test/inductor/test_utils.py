@@ -87,6 +87,14 @@ class TestUtils(TestCase):
         result = sympy_subs(expr, {q0: I})
         self.assertTrue(result.has(I))
 
+    def testIdentityComparisonNoRecursion(self):
+        expr = Identity(sympify("0"))
+        try:
+            result = expr >= 0
+        except RecursionError as exc:
+            self.fail(f"Identity comparison should not recurse: {exc}")
+        self.assertIsNotNone(result)
+
     def test_sympy_str(self):
         self.assertEqual(sympy_str(sympify("a+b+c")), "a + b + c")
         self.assertEqual(sympy_str(sympify("a*b+c")), "c + a * b")
