@@ -461,12 +461,81 @@ class TCPStoreHandler(DebugHandler):
         return "tcpstore"
 
 
+class TorchCommsFlightRecorderHandler(DebugHandler):
+    """Handler for TorchComms FlightRecorder trace data."""
+
+    def routes(self) -> list[Route]:
+        return [
+            Route("/torchcomms_fr_trace", self._handle_torchcomms_fr_trace),
+            Route("/torchcomms_fr_trace_json", self._handle_torchcomms_fr_trace_json),
+        ]
+
+    def nav_links(self) -> list[NavLink]:
+        return [
+            NavLink("/torchcomms_fr_trace", "TorchComms FR"),
+            NavLink("/torchcomms_fr_trace_json", "(JSON)"),
+        ]
+
+    def templates(self) -> dict[str, str]:
+        return {"fr_trace.html": FR_TRACE_TEMPLATE}
+
+    def _handle_torchcomms_fr_trace(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("torchcomms_fr_trace_json", "onlyactive=true")
+        return self._render_tables(req.frontend, addrs, list(resps))
+
+    def _handle_torchcomms_fr_trace_json(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("torchcomms_fr_trace_json", "onlyactive=true")
+        return req.frontend.render_template(
+            "json_resp.html",
+            title="TorchComms FlightRecorder",
+            addrs=addrs,
+            resps=resps,
+        )
+
+    def _render_tables(
+        self, server: FrontendServer, addrs: list[str], resps: list[Response]
+    ) -> bytes:
+        db = FlightRecorderHandler._build_db(addrs, resps)
+        return server.render_template(
+            "fr_trace.html",
+            title="TorchComms FlightRecorder",
+            groups=tabulate(db.groups, headers=Group._fields, tablefmt="html"),
+            memberships=tabulate(
+                db.memberships, headers=Membership._fields, tablefmt="html"
+            ),
+            collectives=tabulate(
+                db.collectives, headers=Collective._fields, tablefmt="html"
+            ),
+            ncclcalls=tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="html"),
+        )
+
+    def dump(self) -> str | None:
+        addrs, resps = fetch_all("torchcomms_fr_trace_json")
+        db = FlightRecorderHandler._build_db(addrs, list(resps))
+        parts = [
+            "=== TorchComms FR Trace ===",
+            "--- Groups ---",
+            tabulate(db.groups, headers=Group._fields, tablefmt="plain"),
+            "--- Memberships ---",
+            tabulate(db.memberships, headers=Membership._fields, tablefmt="plain"),
+            "--- Collectives ---",
+            tabulate(db.collectives, headers=Collective._fields, tablefmt="plain"),
+            "--- NCCL Calls ---",
+            tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="plain"),
+        ]
+        return "\n".join(parts)
+
+    def dump_filename(self) -> str:
+        return "torchcomms_fr_trace"
+
+
 def default_handlers() -> list[DebugHandler]:
     return [
         IndexHandler(),
         StacksHandler(),
         PySpyHandler(),
         FlightRecorderHandler(),
+        TorchCommsFlightRecorderHandler(),
         ProfilerHandler(),
         WaitCountersHandler(),
         TCPStoreHandler(),

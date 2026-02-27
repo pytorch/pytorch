@@ -264,7 +264,6 @@ def _single_tensor_asgd(
             ax.copy_(param)
 
         if capturable:
-            # pyrefly: ignore [unsupported-operation]
             eta.copy_(lr / ((1 + lambd * lr * step_t) ** alpha))
             mu.copy_(1 / torch.maximum(step_t - t0, torch.ones_like(step_t)))
         else:

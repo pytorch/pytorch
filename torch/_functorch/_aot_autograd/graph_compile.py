@@ -18,7 +18,7 @@ import traceback
 from collections import defaultdict
 from collections.abc import Callable, Generator
 from contextlib import nullcontext
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 from torch._library.fake_class_registry import FakeScriptObject
 
@@ -207,7 +207,7 @@ def aot_stage1_graph_capture(
     # NB: This is currently only used for backwards, where fwd/bwd
     # deterministic TLS can be different
     aot_state.fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
+    updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
 
     with maybe_skip_decompose(aot_config):
         # if config.selective_decompose, skip decomposition and apply selective_decompose
@@ -319,7 +319,7 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
 
 
 def _get_inner_meta(
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
 ) -> ViewAndMutationMeta:
     """
@@ -348,9 +348,9 @@ def aot_stage2_compile(
     # pyrefly: ignore [implicit-any]
     fw_compiler: Callable,
     # pyrefly: ignore [implicit-any]
-    bw_compiler: Optional[Callable] = None,
+    bw_compiler: Callable | None = None,
     # pyrefly: ignore [implicit-any]
-    inference_compiler: Optional[Callable] = None,
+    inference_compiler: Callable | None = None,
 ) -> DispatchReturn:
     if bw_compiler is None:
         bw_compiler = fw_compiler
@@ -371,7 +371,7 @@ def aot_stage2_compile(
 def _log_inference_graph(
     fw_module: torch.fx.GraphModule,
     aot_config: AOTConfig,
-) -> Optional[str]:
+) -> str | None:
     """
     Log the inference graph to the structured logger.
     Return a str representation of the graph.
@@ -404,7 +404,7 @@ def _log_inference_graph(
 def _aot_stage2b_inference_compile(
     fw_module: torch.fx.GraphModule,
     updated_flat_args: list[Any],
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
     # pyrefly: ignore [implicit-any]
@@ -472,11 +472,11 @@ def aot_stage2_inference(
 def _cache_inference_info(
     aot_config: AOTConfig,
     fw_metadata: ViewAndMutationMeta,
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     compiled_fw: Callable[..., Any],
-    aot_forward_graph_str: Optional[str],
+    aot_forward_graph_str: str | None,
     wrappers: list[CompilerWrapper],
-) -> Optional[GenericAOTAutogradResult[Any, Any]]:
+) -> GenericAOTAutogradResult[Any, Any] | None:
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
     cache_info = aot_config.cache_info
@@ -487,7 +487,7 @@ def _cache_inference_info(
         else:
             return hasattr(compiled_fw, "_fx_graph_cache_key")
 
-    entry: Optional[GenericAOTAutogradResult[Any, Any]] = None
+    entry: GenericAOTAutogradResult[Any, Any] | None = None
     if cache_info is not None and should_save_cache():
         time_taken_ns = time.time_ns() - cache_info.start_time_ns
         guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
@@ -524,7 +524,7 @@ def _aot_stage2c_make_inference_function(
     fw_metadata: ViewAndMutationMeta,
     compiled_fw: Callable[..., Any],
     wrappers: list[CompilerWrapper],
-    entry: Optional[GenericAOTAutogradResult[Any, Any]],
+    entry: GenericAOTAutogradResult[Any, Any] | None,
 ) -> DispatchReturn:
     if entry is not None:
         compiled_fw = SerializableCompiledFunction(compiled_fw, lambda: entry)
@@ -547,9 +547,9 @@ def _aot_stage2c_make_inference_function(
 
 
 def collect_fw_donated_buffer_idxs(
-    fw_ins: list[Optional[FakeTensor]],
-    user_fw_outs: list[Optional[FakeTensor]],
-    bw_outs: list[Optional[FakeTensor]],
+    fw_ins: list[FakeTensor | None],
+    user_fw_outs: list[FakeTensor | None],
+    bw_outs: list[FakeTensor | None],
     saved_tensors: list[FakeTensor | None],
 ) -> list[int]:
     """
@@ -646,13 +646,13 @@ class InvokeSubgraphHopGraphs:
 
     # To avoid re-partitioning subgraphs
     partitioning_done: bool = False
-    old_num_fw_outputs: Optional[int] = None
-    old_num_fw_inputs: Optional[int] = None
+    old_num_fw_outputs: int | None = None
+    old_num_fw_inputs: int | None = None
 
-    new_fw_hop_gm: Optional[torch.fx.GraphModule] = None
-    new_bw_hop_gm: Optional[torch.fx.GraphModule] = None
-    new_num_sym_nodes: Optional[int] = None
-    new_num_saved_nodes: Optional[int] = None
+    new_fw_hop_gm: torch.fx.GraphModule | None = None
+    new_bw_hop_gm: torch.fx.GraphModule | None = None
+    new_num_sym_nodes: int | None = None
+    new_num_saved_nodes: int | None = None
 
 
 def prepare_for_partitioner(
@@ -1098,7 +1098,7 @@ def maybe_log_graph(
     graph_name: str,
     aot_config: AOTConfig,
     structured_log_prefix_fn: Callable[[], str],
-    out_structured_logs: Optional[list[str]] = None,
+    out_structured_logs: list[str] | None = None,
 ) -> None:
     if not aot_config.enable_log:
         return
@@ -1419,7 +1419,7 @@ def maybe_inline_graph_saved_tensors_hooks(
 
         def find_saved_in_bw_inputs(
             bw_inputs: list[torch.fx.Node],
-        ) -> Optional[torch.fx.Node]:
+        ) -> torch.fx.Node | None:
             for n in bw_inputs:
                 if n.name == saved.name:  # type: ignore[union-attr]
                     return n
@@ -1592,7 +1592,7 @@ def maybe_inline_graph_saved_tensors_hooks(
 def _log_joint_graph(
     fx_g: torch.fx.GraphModule,
     aot_config: AOTConfig,
-) -> Optional[str]:
+) -> str | None:
     """
     Log the joint graph to the structured logger.
     Return a str representation of the graph.
@@ -1626,10 +1626,10 @@ def _log_joint_graph(
 def _log_fw_bw_graphs(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """
     Log the fw and bw graphs to the structured logger.
     Return str representations of the graphs.
@@ -1718,8 +1718,8 @@ def _log_fw_bw_graphs(
 
 def _aot_stage2a_partition(
     fx_g: torch.fx.GraphModule,
-    joint_inputs: Union[list[Any], tuple[list[Any], list[Any]]],
-    maybe_subclass_meta: Optional[SubclassMeta],
+    joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
 ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule, int, int, list[int], list[Any]]:
@@ -1977,12 +1977,12 @@ def _aot_stage2a_partition(
 def _aot_stage2b_fw_compile(
     fw_module: torch.fx.GraphModule,
     adjusted_flat_args: list[Any],
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
     num_fw_outs_saved_for_bw: int,
     aot_config: AOTConfig,
     # pyrefly: ignore [implicit-any]
-) -> tuple[Optional[list[Optional[tuple[int, ...]]]], Callable]:
+) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
     return _aot_stage2b_compile_forward_or_inference(
         fw_module,
         adjusted_flat_args,
@@ -1996,13 +1996,13 @@ def _aot_stage2b_fw_compile(
 
 def _aot_stage2b_bw_compile(
     bw_module: torch.fx.GraphModule,
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
-    fwd_output_strides: Optional[list[Optional[tuple[int, ...]]]],
+    fwd_output_strides: list[tuple[int, ...] | None] | None,
     num_symints_saved_for_bw: int,
     aot_config: AOTConfig,
     # pyrefly: ignore [implicit-any]
-) -> tuple[AutogradLazyBackwardCompileInfo, Optional[Callable]]:
+) -> tuple[AutogradLazyBackwardCompileInfo, Callable | None]:
     """
     Compile the backward graph. Returns:
     - the placeholder list for the backward graph
@@ -2249,13 +2249,13 @@ def _aot_stage2c_make_autograd_function(
     aot_config: AOTConfig,
     flat_args: list[Any],
     fw_metadata: ViewAndMutationMeta,
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     wrappers: list[CompilerWrapper],
     compiled_fw_func: Callable[..., Any],
-    compiled_bw_func: Optional[Callable[..., Any]],
-    lazy_backward_info: Optional[AutogradLazyBackwardCompileInfo],
+    compiled_bw_func: Callable[..., Any] | None,
+    lazy_backward_info: AutogradLazyBackwardCompileInfo | None,
     try_save_cache_entry: Callable[..., Any],
-    entry: Optional[GenericAOTAutogradResult[Any, Any]],
+    entry: GenericAOTAutogradResult[Any, Any] | None,
     _indices_of_inps_to_detach: list[int],
     num_symints_saved_for_bw: int,
 ) -> DispatchReturn:
@@ -2286,7 +2286,7 @@ def _aot_stage2c_make_autograd_function(
         compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: entry)
 
     if config.debug_assert:
-        flat_requires_grad: list[Optional[bool]] = [
+        flat_requires_grad: list[bool | None] = [
             a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
         ]
         compiled_fn = DebugAssertWrapper(
@@ -2306,19 +2306,19 @@ def _cache_autograd_info(
     aot_config: AOTConfig,
     flat_args: list[Any],
     compiled_fw_func: Callable[..., Any],
-    compiled_bw_func: Optional[Callable[..., Any]],
-    fw_module_str: Optional[str],
-    bw_module_str: Optional[str],
-    joint_graph_str: Optional[str],
+    compiled_bw_func: Callable[..., Any] | None,
+    fw_module_str: str | None,
+    bw_module_str: str | None,
+    joint_graph_str: str | None,
     wrappers: list[CompilerWrapper],
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
     num_fw_outs_saved_for_bw: int,
     _indices_of_inps_to_detach: list[int],
     num_symints_saved_for_bw: int,
-    bw_module: Optional[torch.fx.GraphModule],
+    bw_module: torch.fx.GraphModule | None,
 ) -> tuple[
-    Optional[GenericAOTAutogradResult[Any, Any]],
+    GenericAOTAutogradResult[Any, Any] | None,
     Callable[..., Any],
 ]:
     backward_state_indices = [
@@ -2331,8 +2331,8 @@ def _cache_autograd_info(
 
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
-    try_save_cache_entry: Optional[Callable[..., Any]] = None
-    entry: Optional[GenericAOTAutogradResult[Any, Any]] = None
+    try_save_cache_entry: Callable[..., Any] | None = None
+    entry: GenericAOTAutogradResult[Any, Any] | None = None
 
     if aot_config.cache_info is not None:
         forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
@@ -2345,7 +2345,7 @@ def _cache_autograd_info(
             bw_module: torch.fx.GraphModule,
             _fw_metadata: ViewAndMutationMeta,
             aot_config: AOTConfig,
-        ) -> Optional[GenericAOTAutogradResult[Any, Any]]:
+        ) -> GenericAOTAutogradResult[Any, Any] | None:
             cache_info = aot_config.cache_info
 
             def should_save_cache() -> bool:
@@ -2367,9 +2367,9 @@ def _cache_autograd_info(
                 # update backward_time_taken_ns to be more inclusive
                 backward_time_taken_ns = getattr(compiled_bw_func, "_time_taken_ns", 0)
 
-                aot_forward_graph_str: Optional[str] = fw_module_str
-                aot_backward_graph_str: Optional[str] = bw_module_str
-                aot_joint_graph_str: Optional[str] = joint_graph_str
+                aot_forward_graph_str: str | None = fw_module_str
+                aot_backward_graph_str: str | None = bw_module_str
+                aot_joint_graph_str: str | None = joint_graph_str
                 guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
 
                 entry = AOTAutogradCache.make_entry(
@@ -2419,14 +2419,14 @@ def _cache_autograd_info(
 def _aot_stage2b_compile_forward_or_inference(
     fw_module: torch.fx.GraphModule,
     adjusted_flat_args: list[Any],
-    maybe_subclass_meta: Optional[SubclassMeta],
+    maybe_subclass_meta: SubclassMeta | None,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
     *,
     is_inference: bool,
-    num_fw_outs_saved_for_bw: Optional[int] = None,
+    num_fw_outs_saved_for_bw: int | None = None,
     # pyrefly: ignore [implicit-any]
-) -> tuple[Optional[list[Optional[tuple[int, ...]]]], Callable]:
+) -> tuple[list[tuple[int, ...] | None] | None, Callable]:
     """
     Compile the forward or inference graph. Returns:
     - the output strides of the forward graph

@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._guards import detect_fake_mode
@@ -347,12 +347,12 @@ def get_keystr(key_path: KeyPath) -> str:
 
 
 def _check_symint(
-    symint: Union[int, torch.SymInt],
+    symint: int | torch.SymInt,
     arg: int,
     range_constraints,
     unification_map,
     keypath: KeyPath,
-    i: Optional[int] = None,
+    i: int | None = None,
 ) -> None:
     from torch.export.dynamic_shapes import _IntWrapper
 
@@ -489,12 +489,12 @@ def _check_input_constraints_for_graph(
 
 def register_dataclass_as_pytree_node(
     cls: type[Any],
-    flatten_fn: Optional[FlattenFunc] = None,
-    unflatten_fn: Optional[UnflattenFunc] = None,
+    flatten_fn: FlattenFunc | None = None,
+    unflatten_fn: UnflattenFunc | None = None,
     *,
-    serialized_type_name: Optional[str] = None,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    serialized_type_name: str | None = None,
+    to_dumpable_context: ToDumpableContextFn | None = None,
+    from_dumpable_context: FromDumpableContextFn | None = None,
     return_none_fields: bool = False,
 ) -> None:
     if not dataclasses.is_dataclass(cls):
@@ -557,7 +557,7 @@ def is_param(program: "ExportedProgram", node: torch.fx.Node) -> bool:
 def get_param(
     program: "ExportedProgram",
     node: torch.fx.Node,
-) -> Optional[torch.nn.Parameter]:
+) -> torch.nn.Parameter | None:
     """
     Returns the parameter associated with the given node in the exported program.
     Returns None if the node is not a parameter within the exported program
@@ -581,7 +581,7 @@ def is_buffer(program: "ExportedProgram", node: torch.fx.Node) -> bool:
 def get_buffer(
     program: "ExportedProgram",
     node: torch.fx.Node,
-) -> Optional[torch.Tensor]:
+) -> torch.Tensor | None:
     """
     Returns the buffer associated with the given node in the exported program.
     Returns None if the node is not a buffer within the exported program
@@ -611,7 +611,7 @@ def is_lifted_tensor_constant(
 def get_lifted_tensor_constant(
     program: "ExportedProgram",
     node: torch.fx.Node,
-) -> Optional[torch.Tensor]:
+) -> torch.Tensor | None:
     """
     Returns the lifted tensor constant associated with the given node in the exported program.
     Returns None if the node is not a lifted tensor constant within the exported program
@@ -628,7 +628,7 @@ def get_lifted_tensor_constant(
 
 def sequential_split(
     gm: torch.fx.GraphModule,
-    node_call_back: Callable[[torch.fx.Node], Union[torch.fx.Node, bool]],
+    node_call_back: Callable[[torch.fx.Node], torch.fx.Node | bool],
 ) -> torch.fx.GraphModule:
     """
     sequential_split creates a new graph module that splits the input graph module into multiple submodules
@@ -759,7 +759,7 @@ def apply_runtime_assertion_pass(gm: torch.fx.GraphModule, graph_signature):
 
 def nodes_first(
     nodes: list[torch.fx.Node], node_call_back=None
-) -> Optional[torch.fx.Node]:
+) -> torch.fx.Node | None:
     """
     Returns the first node that matches the node_call_back. If no node matches, returns None.
     When node_call_back is None, returns the first node in the node list.
@@ -803,7 +803,7 @@ def _update_gm_meta_if_possible(gm: torch.fx.GraphModule, mod: torch.nn.Module) 
         gm.meta.update({"custom": mod.meta["custom"]})
 
 
-def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]:
+def node_inline_(call_mod_node: torch.fx.Node) -> torch.fx.GraphModule | None:
     """
     Inline the submodule of the given node into the parent module.
     Note: we only support the case where submodule takes tensors inputs.
@@ -1211,7 +1211,7 @@ def remove_proxy_from_state_dict(state_dict: dict, in_place: bool) -> dict:
 
 def _detect_fake_mode_from_gm(
     gm: torch.fx.GraphModule,
-) -> Optional[torch._subclasses.fake_tensor.FakeTensorMode]:
+) -> torch._subclasses.fake_tensor.FakeTensorMode | None:
     """
     For a given graph module, we look at the "val" of placeholder nodes to find the fake inputs.
     Additionally, if gm doesn't have placeholders, we further look at the "example_value" or "val" of other nodes.
@@ -1434,7 +1434,7 @@ def _compiling_state_context():
 def _fakify_params_buffers(
     fake_mode: FakeTensorMode,
     mod: torch.nn.Module,
-) -> dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
+) -> dict[str, torch.Tensor | torch.nn.Parameter]:
     params_buffers = {
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),

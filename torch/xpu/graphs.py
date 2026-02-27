@@ -34,7 +34,6 @@ if not hasattr(torch._C, "_XpuStreamBase"):
         "_xpu_isCurrentStreamCapturing"
     )
 
-# pyrefly: ignore [missing-module-attribute]
 from torch._C import _xpu_graph_pool_handle, _xpu_isCurrentStreamCapturing, _XPUGraph
 
 
@@ -478,9 +477,7 @@ def make_graphed_callables(
                 if not isinstance(static_grad_inputs, tuple):
                     raise RuntimeError("static_grad_inputs must be a tuple")
                 return tuple(
-                    # pyrefly: ignore [bad-argument-type]
-                    b.detach() if b is not None else b
-                    for b in static_grad_inputs
+                    b.detach() if b is not None else b for b in static_grad_inputs
                 )
 
         def functionalized(*user_args: object) -> object:
