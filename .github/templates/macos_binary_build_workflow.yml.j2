@@ -71,7 +71,7 @@ jobs:
     steps:
       !{{ set_runner_specific_vars() }}
       !{{ setup_python(config.get("python_version", "3.10")) }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False) }}
       - name: Populate binary env
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
@@ -137,7 +137,6 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
-          path: pytorch
           show-progress: false
       !{{ setup_python("3.10") }}
       - uses: actions/download-artifact@v4.1.7
@@ -149,7 +148,7 @@ jobs:
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform macos \
