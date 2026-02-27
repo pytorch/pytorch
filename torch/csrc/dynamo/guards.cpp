@@ -223,23 +223,30 @@ bool TensorCheck::check(
 
   const auto& sizes = sym_sizes;
   const auto& strides = sym_strides;
+  const bool check_excluded = !excluded_sizes_.empty();
+  bool all_excluded_match = true;
+  bool has_excluded_check = false;
   for (auto i : c10::irange(ndim)) {
     auto known_size = sizes_[i];
-    auto known_stride = strides_[i];
     if (known_size.has_value()) {
       if (known_size.value() != sizes[i]) {
         return false;
       }
-    } else if (
-        !excluded_sizes_.empty() && excluded_sizes_[i].has_value() &&
-        sizes[i] == excluded_sizes_[i].value()) {
-      return false;
+    } else if (check_excluded && all_excluded_match &&
+               excluded_sizes_[i].has_value()) {
+      has_excluded_check = true;
+      if (sizes[i] != excluded_sizes_[i].value()) {
+        all_excluded_match = false;
+      }
     }
-    if (known_stride.has_value()) {
-      if (known_stride.value() != strides[i]) {
+    if (strides_[i].has_value()) {
+      if (strides_[i].value() != strides[i]) {
         return false;
       }
     }
+  }
+  if (has_excluded_check && all_excluded_match) {
+    return false;
   }
   return true;
 }
@@ -283,6 +290,9 @@ std::string TensorCheck::check_verbose(
     return fail_reason.str();
   }
   const auto& sizes = v.sym_sizes();
+  const bool check_excluded = !excluded_sizes_.empty();
+  bool all_excluded_match = true;
+  bool has_excluded_check = false;
   for (auto i : c10::irange(ndim)) {
     auto known_size = sizes_[i];
     if (known_size.has_value()) {
@@ -291,14 +301,18 @@ std::string TensorCheck::check_verbose(
                     << known_size.value() << ", actual " << sizes[i];
         return fail_reason.str();
       }
-    } else if (
-        !excluded_sizes_.empty() && excluded_sizes_[i].has_value() &&
-        sizes[i] == excluded_sizes_[i].value()) {
-      fail_reason << "size excluded at index " << i << ". value "
-                  << excluded_sizes_[i].value()
-                  << " is reserved for a more specialized graph";
-      return fail_reason.str();
+    } else if (check_excluded && all_excluded_match &&
+               excluded_sizes_[i].has_value()) {
+      has_excluded_check = true;
+      if (sizes[i] != excluded_sizes_[i].value()) {
+        all_excluded_match = false;
+      }
     }
+  }
+  if (has_excluded_check && all_excluded_match) {
+    fail_reason << "excluded sizes matched on dynamic dims."
+                << " Input matches a more specialized graph";
+    return fail_reason.str();
   }
   const bool supports_stride =
       !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
