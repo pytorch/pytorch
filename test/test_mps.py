@@ -12778,9 +12778,10 @@ class TestConsistency(TestCaseMPS):
                 # TODO: Handle list inputs later
                 if not isinstance(mps_out, torch.Tensor):
                     raise
-                if mps_sample.input.dtype not in [torch.float16, torch.bfloat16]:
-                    raise
-                dtype = torch.float32
+                if mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
+                    dtype = torch.float32
+                elif mps_sample.input.dtype == torch.bool:
+                    dtype = torch.uint8
 
                 # Often CPU ops are not implemented for low precision dtypes
                 # In that case, upcast to higher precision and try again
@@ -13364,6 +13365,22 @@ class TestMetalLibrary(TestCaseMPS):
         lib.check_bounds(y, 5, error_buf_idx=2)
         with self.assertRaisesRegex(RuntimeError, "Index .* exceeds limit"):
             torch.mps.synchronize()
+
+    def test_metal_compiler_bug_workaround(self):
+        # (uint / 65536) % non_power of 2, gives wrong result without safe_mod
+        lib = torch.mps.compile_shader('''
+            #include <c10/metal/utils.h>
+
+            kernel void func(device int* out, uint idx [[thread_position_in_grid]]) {
+                out[idx] = c10::metal::safe_mod((idx / 65536), 6);
+            }
+        ''')
+        out = torch.empty(128, device='mps', dtype=torch.int32)
+        lib.func(out)
+        # Every value should be 0 since xindex/65536 == 0 for xindex in [0,127]
+        for i in [0, 5, 6, 7, 63, 64]:
+            self.assertEqual(out[i], 0)
+
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
