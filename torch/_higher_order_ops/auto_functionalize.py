@@ -618,7 +618,10 @@ class FunctionalCallableWithEpilogue:
             if len(args) == 1 and isinstance(args[0], list):
                 return tuple(functionalized(args[0]))
             return tuple(functionalized(list(args)))
-        return tuple(functionalized(*args, **kwargs))
+        result = functionalized(*args, **kwargs)
+        if isinstance(result, (tuple, list)):
+            return tuple(result)
+        return result
 
     def __hash__(self):
         return id(self.orig_callable)

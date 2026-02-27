@@ -580,9 +580,30 @@ def while_loop_fake_tensor_mode(
 def while_loop_func(
     ctx, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    from torch._higher_order_ops.auto_functionalize import (
+        can_auto_functionalize,
+        do_auto_functionalize_v2,
+    )
+    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
 
     op = while_loop_stack_output_op if stack_output else while_loop_op
+    # For now, we only support auto-functionalization for while_loop when using python
+    # functionalization mode
+    if not stack_output and hasattr(ctx, "mode"):
+        hop_instance = HopInstance.create(
+            op, cond_fn, body_fn, carried_inputs, additional_inputs
+        )
+        if can_auto_functionalize(hop_instance):
+            return do_auto_functionalize_v2(
+                ctx.mode,
+                hop_instance,
+                tuple(
+                    pytree.tree_flatten(
+                        (cond_fn, body_fn, carried_inputs, additional_inputs)
+                    )[0]
+                ),
+                {},
+            )
 
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
