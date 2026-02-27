@@ -1152,7 +1152,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    msg = f"{speedup:.3f}x latency={median[1] * 1000:.3f}ms"
+    msg = f"{speedup:.3f}x"
     if args.baseline:
         headers.extend(
             [
@@ -3824,6 +3824,32 @@ def _run_compare_backed_unbacked(runner, args):
     import re
     import subprocess
 
+    def print_comparison(all_results):
+        print(f"\n{'=' * 60}", flush=True)
+        print("COMPARISON", flush=True)
+        print(f"{'=' * 60}", flush=True)
+        print(
+            f"  {'model':<40s} {'backed':>10s} {'unbacked':>10s} {'diff':>8s}", flush=True
+        )
+        print(f"  {'-' * 40} {'-' * 10} {'-' * 10} {'-' * 8}", flush=True)
+        for name, modes in all_results.items():
+            if "backed" in modes and "unbacked" in modes:
+                b = modes["backed"]
+                u = modes["unbacked"]
+                diff_pct = (u - b) / b * 100
+                print(f"  {name:<40s} {b:>9.3f}x {u:>9.3f}x {diff_pct:>+7.1f}%", flush=True)
+            elif "backed" in modes:
+                print(
+                    f"  {name:<40s} {modes['backed']:>9.3f}x {'N/A':>10s} {'N/A':>8s}",
+                    flush=True,
+                )
+            elif "unbacked" in modes:
+                print(
+                    f"  {name:<40s} {'N/A':>10s} {modes['unbacked']:>9.3f}x {'N/A':>8s}",
+                    flush=True,
+                )
+        print(f"{'=' * 60}", flush=True)
+
     # Build base command, stripping --compare-backed-unbacked and --only + value
     filtered = []
     skip_next = False
@@ -3898,34 +3924,7 @@ def _run_compare_backed_unbacked(runner, args):
             diff_pct = (u - b) / b * 100
             print(f"  => diff: {diff_pct:+.1f}%", flush=True)
 
-    _print_comparison(all_results)
-
-
-def _print_comparison(all_results):
-    print(f"\n{'=' * 60}", flush=True)
-    print("COMPARISON", flush=True)
-    print(f"{'=' * 60}", flush=True)
-    print(
-        f"  {'model':<40s} {'backed':>10s} {'unbacked':>10s} {'diff':>8s}", flush=True
-    )
-    print(f"  {'-' * 40} {'-' * 10} {'-' * 10} {'-' * 8}", flush=True)
-    for name, modes in all_results.items():
-        if "backed" in modes and "unbacked" in modes:
-            b = modes["backed"]
-            u = modes["unbacked"]
-            diff_pct = (u - b) / b * 100
-            print(f"  {name:<40s} {b:>9.3f}x {u:>9.3f}x {diff_pct:>+7.1f}%", flush=True)
-        elif "backed" in modes:
-            print(
-                f"  {name:<40s} {modes['backed']:>9.3f}x {'N/A':>10s} {'N/A':>8s}",
-                flush=True,
-            )
-        elif "unbacked" in modes:
-            print(
-                f"  {name:<40s} {'N/A':>10s} {modes['unbacked']:>9.3f}x {'N/A':>8s}",
-                flush=True,
-            )
-    print(f"{'=' * 60}", flush=True)
+    print_comparison(all_results)
 
 
 def write_csv_when_exception(args, name: str, status: str, device=None):
