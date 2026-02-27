@@ -743,15 +743,16 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
             full transition graph, adding every shardable match to the set. Still
             returns the optimal (first) match.
     """
-    # Extract input DTensorSpecs from op_schema.args_schema, handling both
-    # raw DTensorSpec and OpStrategy wrappers (the caller wraps specs in OpStrategy)
+    # Extract input DTensorSpecs from OpStrategy-wrapped args.
+    # Fall back for TupleStrategy (e.g. index tensors in index_put) since the PQ
+    # search doesn't model variable-length tuple inputs.
     input_specs: list[DTensorSpec] = []
     for arg in op_schema.args_schema:
-        if isinstance(arg, DTensorSpec):
-            input_specs.append(arg)
-        elif isinstance(arg, OpStrategy):
+        if isinstance(arg, OpStrategy):
             assert len(arg.strategies) == 1
             input_specs.append(arg.strategies[0].output_spec)
+        elif isinstance(arg, TupleStrategy):
+            return None
 
     assert len(input_specs) > 0, "broken input"
     num_inputs = len(input_specs)

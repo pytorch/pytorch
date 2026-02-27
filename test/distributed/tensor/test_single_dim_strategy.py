@@ -1276,7 +1276,10 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
 
         op_schema = OpSchema(
             op=torch.ops.aten.mm.default,
-            args_schema=(left_spec, right_spec),
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
             kwargs_schema={},
         )
 
@@ -1290,25 +1293,16 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         pq_cost = sum(chain.from_iterable(pq_strategy.strategies[0].redistribute_cost))
 
         # Full expansion reference
-        # _expand_single_dim_strategy_to_mesh expects OpStrategy-wrapped args
-        wrapped_schema = OpSchema(
-            op=torch.ops.aten.mm.default,
-            args_schema=(
-                OpStrategy([OpSpec(left_spec)]),
-                OpStrategy([OpSpec(right_spec)]),
-            ),
-            kwargs_schema={},
-        )
         expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
             mesh,
-            wrapped_schema,
+            op_schema,
             _SingleDimStrategyInfo(mm_single_dim_strategy),
             output_meta,
         )
         ref_strategy = expanded_strategy_fn(
             torch.ops.aten.mm.default,
-            wrapped_schema.args_meta,
-            wrapped_schema.kwargs_meta,
+            op_schema.args_meta,
+            op_schema.kwargs_meta,
         )
         ref_min_cost = min(
             sum(chain.from_iterable(s.redistribute_cost))
@@ -1339,7 +1333,10 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
 
         op_schema = OpSchema(
             op=torch.ops.aten.mm.default,
-            args_schema=(left_spec, right_spec),
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
             kwargs_schema={},
         )
 
@@ -1426,7 +1423,10 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
 
         op_schema = OpSchema(
             op=torch.ops.aten.mm.default,
-            args_schema=(left_spec, right_spec),
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
             kwargs_schema={},
         )
 
@@ -1464,7 +1464,10 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
 
         op_schema = OpSchema(
             op=torch.ops.aten.mm.default,
-            args_schema=(left_spec, right_spec),
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
             kwargs_schema={},
         )
 
@@ -1479,24 +1482,16 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         pq_cost = sum(chain.from_iterable(strategy.strategies[0].redistribute_cost))
 
         # Full expansion reference
-        wrapped_schema = OpSchema(
-            op=torch.ops.aten.mm.default,
-            args_schema=(
-                OpStrategy([OpSpec(left_spec)]),
-                OpStrategy([OpSpec(right_spec)]),
-            ),
-            kwargs_schema={},
-        )
         expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
             mesh,
-            wrapped_schema,
+            op_schema,
             _SingleDimStrategyInfo(mm_single_dim_strategy),
             output_meta,
         )
         ref_strategy = expanded_strategy_fn(
             torch.ops.aten.mm.default,
-            wrapped_schema.args_meta,
-            wrapped_schema.kwargs_meta,
+            op_schema.args_meta,
+            op_schema.kwargs_meta,
         )
         ref_min_cost = min(
             sum(chain.from_iterable(s.redistribute_cost))
@@ -1525,7 +1520,10 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
 
         op_schema = OpSchema(
             op=torch.ops.aten.mm.default,
-            args_schema=(left_spec, right_spec),
+            args_schema=(
+                OpStrategy([OpSpec(left_spec)]),
+                OpStrategy([OpSpec(right_spec)]),
+            ),
             kwargs_schema={},
         )
 
@@ -1604,7 +1602,10 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
                 )
                 op_schema = OpSchema(
                     op=torch.ops.aten.mm.default,
-                    args_schema=(left_spec, right_spec),
+                    args_schema=(
+                        OpStrategy([OpSpec(left_spec)]),
+                        OpStrategy([OpSpec(right_spec)]),
+                    ),
                     kwargs_schema={},
                 )
                 matches: set[tuple[tuple[Placement, ...], ...]] = set()
