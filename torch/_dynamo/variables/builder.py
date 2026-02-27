@@ -175,6 +175,7 @@ from ..utils import (
     wrap_fake_exception,
 )
 from .base import (
+    AttributeMutationExisting,
     AttributeMutationNew,
     typestr,
     ValueMutationExisting,
@@ -1216,7 +1217,11 @@ class VariableBuilder:
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.ID_MATCH)
             self.source = OptimizerSource(self.source)
-            return OptimizerVariable(value, source=self.source)
+            return OptimizerVariable(
+                value,
+                source=self.source,
+                mutation_type=AttributeMutationExisting(),
+            )
         elif isinstance(value, torch.DispatchKeySet):
             self.install_guards(GuardBuilder.DISPATCH_KEY_SET_MATCH)
             return DispatchKeySetVariable(value)
