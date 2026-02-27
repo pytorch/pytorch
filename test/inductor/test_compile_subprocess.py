@@ -132,7 +132,8 @@ class TestSubprocess(TestCase):
 
         with contextlib.ExitStack() as stack:
             # When this bug is fixed, remove the cache disabling below
-            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
+            if not torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC:
+                raise AssertionError
             stack.enter_context(
                 torch._inductor.config.patch(
                     autotune_local_cache=False, fx_graph_cache=False
@@ -201,7 +202,8 @@ class TestSubprocess(TestCase):
         _AsyncFxCompile._reset_stats()
 
         with contextlib.ExitStack() as stack:
-            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
+            if not torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC:
+                raise AssertionError
             stack.enter_context(
                 torch._inductor.config.patch(
                     autotune_local_cache=False, fx_graph_cache=False
