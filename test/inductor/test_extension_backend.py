@@ -94,7 +94,12 @@ class BaseExtensionBackendTests(TestCase):
         super().tearDown()
         torch._dynamo.reset()
 
-        # return the working directory (see setUp)
+        backend_name = torch._C._get_privateuse1_backend_name()
+        if hasattr(torch, backend_name):
+            delattr(torch, backend_name)
+        if f"torch.{backend_name}" in sys.modules:
+            del sys.modules[f"torch.{backend_name}"]
+
         os.chdir(self.old_working_dir)
 
 
