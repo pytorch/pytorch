@@ -30,6 +30,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -5930,6 +5931,53 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     finally:
         gc.set_debug(0)
 
+def win_safe_rmtree(path):
+    """
+    Robustly removes a directory tree on Windows.
+    Handles read-only file attributes and reports process-level locks via logging.
+    """
+    if not os.path.exists(path):
+        return
+
+    # --- Long Path Fix ---
+    path = os.path.abspath(path)
+    if not path.startswith("\\\\?\\"):
+        path = "\\\\?\\" + path
+
+    def handle_error(func, path, exc_info):
+        """
+        Custom error handler for shutil.rmtree to manage Windows-specific failures.
+        """
+        # exc_info is a tuple: (type, value, traceback)
+        exc_type, exc_value, exc_traceback = exc_info
+
+        # 1. Attempt to fix permission issues (e.g., read-only files)
+        try:
+            # S_IWRITE ensures the file is writable, bypassing WinError 5 for attributes
+            os.chmod(path, stat.S_IWRITE)
+            # Retry the operation that failed (os.unlink or os.rmdir)
+            func(path)
+            return
+        except Exception:
+            # If chmod doesn't solve it, move to lock detection
+            pass
+
+        # 2. If it's a lock (5/32) or any other failure, raise it!
+        # This is CRITICAL for the outer retry loop to catch it.
+        raise exc_value
+
+    # Execute rmtree using the logic above
+    max_retries = 3
+    for i in range(max_retries):
+        try:
+            shutil.rmtree(path, onerror=handle_error)
+            break
+        except OSError:
+            if i < max_retries - 1:
+                time.sleep(0.1)  # Wait briefly for the system to release the file lock
+                continue
+            else:
+                raise  # If the last attempt fails, propagate the exception
 
 def remove_cpp_extensions_build_root():
     """
@@ -5938,9 +5986,7 @@ def remove_cpp_extensions_build_root():
     default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a workaround
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+            win_safe_rmtree(default_build_root)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 
