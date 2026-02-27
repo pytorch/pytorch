@@ -1231,6 +1231,12 @@ class PallasKernel(SIMDKernel):
         the permutation in the collapsed space and returns
         (collapsed_input_shape, perm) so the caller can generate:
             jnp.permute_dims(load.reshape(collapsed_shape), perm)
+
+        Uses index coefficients on both sides: load-index coefficients
+        map vars to collapsed input dims, and store-side coefficients
+        (derived from the range tree nesting) map vars to collapsed
+        output dims.  Both sets of strides are always unique, so
+        matching is unambiguous even with duplicate group sizes.
         """
         info = self._get_buffer_info(name)
         if not info:
@@ -1256,18 +1262,59 @@ class PallasKernel(SIMDKernel):
         if _math.prod(ranges) != _math.prod(in_shape):
             return None
 
-        # Compute input coefficients
+        # Group consecutive input dims (right-to-left) to match ranges
+        in_groups = self._group_dims_to_ranges(in_shape, ranges)
+        if in_groups is None:
+            return None
+
+        # Compute collapsed input strides (row-major) and use load-index
+        # coefficients to map each range tree var to a collapsed input dim.
+        # Strides are always unique, so this is unambiguous even when
+        # group sizes are duplicated.
+        collapsed_in_strides = [0] * n
+        stride = 1
+        for i in range(n - 1, -1, -1):
+            collapsed_in_strides[i] = stride
+            stride *= in_groups[i]
+
         simplified = V.graph.sizevars.simplify(index)
         in_coeffs = [self._get_index_coefficient(simplified, v)
                      for v in ordered]
         if not all(isinstance(c, int) and c > 0 for c in in_coeffs):
             return None
 
-        # Group consecutive input dims (right-to-left) to match ranges
-        in_groups = self._group_dims_to_ranges(in_shape, ranges)
-        if in_groups is None:
-            return None
+        in_stride_to_dim = {s: i for i, s in enumerate(collapsed_in_strides)}
+        var_to_in_dim = []
+        for coeff in in_coeffs:
+            dim = in_stride_to_dim.get(coeff)
+            if dim is None:
+                return None
+            var_to_in_dim.append(dim)
 
+        # Compute store-side coefficients from the range tree nesting.
+        # The tree structure encodes the output iteration order: later
+        # trees (e.g. prefix 'x') are innermost, earlier trees ('y', 'z')
+        # are outer.  Within a tree, dict order goes inner → outer.
+        # The innermost variable has coefficient 1, and each successive
+        # variable (moving outward) has coeff *= previous range.
+        prefix_groups: dict[str, list[sympy.Symbol]] = {}
+        prefix_order: list[str] = []
+        for v in ordered:
+            p = self.range_tree_nodes[v].prefix
+            if p not in prefix_groups:
+                prefix_groups[p] = []
+                prefix_order.append(p)
+            prefix_groups[p].append(v)
+        inner_to_outer: list[sympy.Symbol] = []
+        for p in reversed(prefix_order):
+            inner_to_outer.extend(prefix_groups[p])
+        store_coeffs: dict[sympy.Symbol, int] = {}
+        coeff = 1
+        for v in inner_to_outer:
+            store_coeffs[v] = coeff
+            coeff *= self._safe_int(self.range_tree_nodes[v].length)
+
+        # Find the output-side mapping using store coefficients.
         for out_name in self._output_buffer_names:
             out_buf = V.graph.get_buffer(out_name)
             if out_buf is None:
@@ -1277,33 +1324,32 @@ class PallasKernel(SIMDKernel):
                 continue
             if _math.prod(out_shape) != _math.prod(in_shape):
                 continue
-            out_groups = self._group_dims_to_ranges(out_shape, ranges)
+            out_groups = self._group_dims_to_ranges(out_shape, list(in_groups))
             if out_groups is None:
                 continue
 
-            if in_groups == out_groups:
-                return None  # same grouping order
+            # Compute collapsed output strides and match store coefficients.
+            collapsed_out_strides = [0] * n
+            stride = 1
+            for i in range(n - 1, -1, -1):
+                collapsed_out_strides[i] = stride
+                stride *= out_groups[i]
 
-            # Check all group sizes are distinct (ambiguous otherwise)
-            if len(set(in_groups)) != n or len(set(out_groups)) != n:
-                return None
-
-            # Build perm: for each output group, find the input group
-            # with the same size.
-            perm = []
-            used = [False] * n
-            for i in range(n):
-                for j in range(n):
-                    if not used[j] and in_groups[j] == out_groups[i]:
-                        perm.append(j)
-                        used[j] = True
-                        break
-                else:
+            out_stride_to_dim = {s: j for j, s in enumerate(collapsed_out_strides)}
+            var_to_out_dim = []
+            for v in ordered:
+                j = out_stride_to_dim.get(store_coeffs[v])
+                if j is None:
                     return None
+                var_to_out_dim.append(j)
+
+            # Build perm: perm[out_dim] = in_dim
+            perm = [0] * n
+            for k in range(n):
+                perm[var_to_out_dim[k]] = var_to_in_dim[k]
             if perm == list(range(n)):
                 return None
-            collapsed_in = tuple(in_groups)
-            return (collapsed_in, tuple(perm))
+            return (tuple(in_groups), tuple(perm))
         return None
 
     @staticmethod
@@ -2443,28 +2489,38 @@ class PallasKernel(SIMDKernel):
                 f"{out}[...] = jnp.full({out}.shape, _val) if _val.ndim == 0 else _val.reshape({out}.shape)",
             ]
         else:
-            # Check for scatter pattern (indirect indexing for stores)
-            scatter_info = self._detect_scatter_pattern(index, name)
-
-            if scatter_info is not None:
-                # Track iteration variables used in scatter index
-                self.used_iter_vars.update(self._get_used_iter_vars(index))
-                store_lines = [
-                    self._build_scatter_store_expr(out, value, scatter_info, name, mode)
-                ]
+            # When collapsed_output_shape is set, the load-side permutation
+            # already produces data in the correct layout for the collapsed
+            # output.  Force a full-array store ("...") so the scatter index
+            # (which was computed for the original output layout) does not
+            # rearrange the permuted data.
+            if self.collapsed_output_shape is not None:
+                store_lines = self._build_full_array_store_expr(
+                    out, value, False
+                )
             else:
-                # Get base index expression
-                index_str, needs_flatten = self._get_index_expr(index)
+                # Check for scatter pattern (indirect indexing for stores)
+                scatter_info = self._detect_scatter_pattern(index, name)
 
-                # Check for im2col-like patterns
-                index_str, needs_flatten = self._check_im2col_pattern(
-                    index, index_str, needs_flatten
-                )
+                if scatter_info is not None:
+                    # Track iteration variables used in scatter index
+                    self.used_iter_vars.update(self._get_used_iter_vars(index))
+                    store_lines = [
+                        self._build_scatter_store_expr(out, value, scatter_info, name, mode)
+                    ]
+                else:
+                    # Get base index expression
+                    index_str, needs_flatten = self._get_index_expr(index)
 
-                # Build the store expression
-                store_lines = self._build_store_expr(
-                    out, name, index, value, index_str, needs_flatten, mode
-                )
+                    # Check for im2col-like patterns
+                    index_str, needs_flatten = self._check_im2col_pattern(
+                        index, index_str, needs_flatten
+                    )
+
+                    # Build the store expression
+                    store_lines = self._build_store_expr(
+                        out, name, index, value, index_str, needs_flatten, mode
+                    )
 
         for line in store_lines:
             self.stores.writeline(line)

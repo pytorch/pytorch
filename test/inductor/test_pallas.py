@@ -1790,16 +1790,14 @@ class PallasTestsMixin:
         accidentally produce correct results.
 
         (1, 0, 2), (0, 2, 1), and (2, 1, 0) work via full-rank
-        permutation detection.  (2, 0, 1) works via collapsed-dimension
-        permutation detection.  (1, 2, 0) works on CPU but fails on TPU
-        due to scatter store codegen limitations.
+        permutation detection.  (2, 0, 1) and (1, 2, 0) work via
+        collapsed-dimension permutation detection.
         """
         working = [
             (1, 0, 2), (0, 2, 1), (2, 1, 0),  # full-rank detection
-            (2, 0, 1),                           # collapsed-dim detection
+            (2, 0, 1), (1, 2, 0),               # collapsed-dim detection
         ]
-        # (1, 2, 0) works on CPU but the scatter store pattern fails on TPU
-        broken = [(1, 2, 0)]
+        broken = []
 
         x = torch.randn(4, 8, 16, device=self.DEVICE)
 
@@ -1830,25 +1828,19 @@ class PallasTestsMixin:
     def test_permute_contiguous_4d(self):
         """Test 4D permutations with distinct dim sizes (2, 4, 8, 16).
 
-        13 of 23 non-identity permutations work on both CPU and TPU.
-        5 fail due to duplicate collapsed ranges preventing permutation
-        detection.  5 more work on CPU but fail on TPU due to scatter
-        store codegen limitations.
+        All 23 non-identity permutations work on both CPU and TPU.
         """
         working = [
-            (0, 2, 1, 3), (0, 3, 2, 1), (1, 0, 3, 2), (1, 3, 0, 2),
-            (1, 3, 2, 0), (2, 0, 3, 1), (2, 1, 0, 3), (2, 1, 3, 0),
-            (2, 3, 0, 1), (3, 0, 1, 2), (3, 0, 2, 1), (3, 1, 0, 2),
-            (3, 2, 1, 0),
+            (0, 1, 3, 2), (0, 2, 1, 3), (0, 2, 3, 1), (0, 3, 1, 2),
+            (0, 3, 2, 1),
+            (1, 0, 2, 3), (1, 0, 3, 2), (1, 2, 0, 3), (1, 2, 3, 0),
+            (1, 3, 0, 2), (1, 3, 2, 0),
+            (2, 0, 1, 3), (2, 0, 3, 1), (2, 1, 0, 3), (2, 1, 3, 0),
+            (2, 3, 0, 1), (2, 3, 1, 0),
+            (3, 0, 1, 2), (3, 0, 2, 1), (3, 1, 0, 2), (3, 1, 2, 0),
+            (3, 2, 0, 1), (3, 2, 1, 0),
         ]
-        broken = [
-            # Duplicate collapsed ranges
-            (0, 1, 3, 2), (2, 0, 1, 3), (2, 3, 1, 0),
-            (3, 1, 2, 0), (3, 2, 0, 1),
-            # Scatter store fails on TPU
-            (0, 2, 3, 1), (0, 3, 1, 2), (1, 0, 2, 3),
-            (1, 2, 0, 3), (1, 2, 3, 0),
-        ]
+        broken = []
 
         x = torch.randn(2, 4, 8, 16, device=self.DEVICE)
 
