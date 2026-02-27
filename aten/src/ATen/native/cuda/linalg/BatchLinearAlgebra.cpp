@@ -808,19 +808,65 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
   return self_working_copy;
 }
 
-// Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
-//     Batched cholesky_solve is dispatched to magma.
+namespace {
+// At the time of writing, the unconditional dispatch
+// to the native cholesky_solve method in cuSOLVER is slow
+// with batched inputs.
+template <bool use_dedicated_kernel_unconditionally = false>
+inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
+  const Tensor& self,
+  const Tensor& A,
+  bool upper) {
+  if constexpr (use_dedicated_kernel_unconditionally) {
+    return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+  } else {
+    // TODO: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
+    // TODO: Non-batched potrs is too slow in the batched setting compared to two triangular solves.
+    // Non-batched input -> non-batched potrs.
+    // Batched input -> two triangular solves.
+    if (batchCount(self) == 1) {
+      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+    } else {
+      const auto L = upper
+        ? c10::MaybeOwned<Tensor>::owned(A.mH())
+        : c10::MaybeOwned<Tensor>::borrowed(A);
+      // NOTE: we tolerate redispatch with at::triangular_solve_triangular
+      // because it handles memory layout optimization and conj/neg flags.
+      // IMPORTANT NOTE: `self` and `A` are not processed for kernel calls yet!
+      // Step 1: Solve for Y: L Y = B or U^H Y = B.
+      auto X = at::linalg_solve_triangular(*L, self, /*upper=*/false);
+      // Step 2: Solve for X: L^H X = Y or U X = Y.
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(X), L->mH(), X, /*upper=*/true);
+      return X;
+    }
+  }
+}
+
+inline Tensor _cholesky_solve_helper_cuda_cusolver_dispatcher(
+    const Tensor& self,
+    const Tensor& A,
+    bool upper) {
+  // For now, unconditional dispatch to the dedicated cholesky solve
+  // kernel in cuSOLVER is slow for batched inputs.
+  // TODO: switch once resolved.
+  return _cholesky_solve_helper_cuda_cusolver_algo_selector<
+    /*use_dedicated_kernel_unconditionally=*/false
+  >(self, A, upper);
+}
+
+} // namespace (anonymous)
+
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
 #if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
-      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+      return _cholesky_solve_helper_cuda_cusolver_dispatcher(self, A, upper);
     case at::LinalgBackend::Magma:
       return _cholesky_solve_helper_cuda_magma(self, A, upper);
     default:
-      if (batchCount(self) == 1 || !use_magma_) {
-        return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+      if (!use_magma_) {
+        return _cholesky_solve_helper_cuda_cusolver_dispatcher(self, A, upper);
       } else {
         return _cholesky_solve_helper_cuda_magma(self, A, upper);
       }
