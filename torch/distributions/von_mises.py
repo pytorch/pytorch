@@ -163,10 +163,8 @@ class VonMises(Distribution):
     @lazy_property
     def _proposal_r(self) -> Tensor:
         kappa = self._concentration
-        # pyrefly: ignore [unsupported-operation]
         tau = 1 + (1 + 4 * kappa**2).sqrt()
         rho = (tau - (2 * tau).sqrt()) / (2 * kappa)
-        # pyrefly: ignore [unsupported-operation]
         _proposal_r = (1 + rho**2) / (2 * rho)
         # second order Taylor expansion around 0 for small kappa
         _proposal_r_taylor = 1 / kappa + kappa

@@ -311,12 +311,6 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-if [[ "${TEST_CONFIG}" == "legacy_nvidia_driver" ]]; then
-  # Make sure that CUDA can be initialized
-  (cd test && python -c "import torch; torch.rand(2, 2, device='cuda')")
-  export USE_LEGACY_DRIVER=1
-fi
-
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty

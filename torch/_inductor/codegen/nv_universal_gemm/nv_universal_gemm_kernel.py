@@ -8,7 +8,7 @@ This module generates Python code that calls cutlass_api to execute GEMM operati
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 from torch._inductor.codegen.common import (
     IndentedBuffer,
@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 class NVUniversalGemmKernelWrapper:
     """Wrapper to provide .run() interface for NVIDIA Universal GEMM kernels."""
 
-    def __init__(self, kernel_fn, kernel_path: Optional[str] = None):
+    def __init__(self, kernel_fn, kernel_path: str | None = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
 
@@ -68,10 +68,10 @@ class NVUniversalGemmKernel(Kernel):
         accumulator_type: Any,
         variant: GemmVariant,
         workspace_size: int = 0,
-        scale_type_a: Optional[Any] = None,
-        scale_type_b: Optional[Any] = None,
-        swizzle_type_a: Optional[Any] = None,
-        swizzle_type_b: Optional[Any] = None,
+        scale_type_a: Any | None = None,
+        scale_type_b: Any | None = None,
+        swizzle_type_a: Any | None = None,
+        swizzle_type_b: Any | None = None,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -225,7 +225,7 @@ class NVUniversalGemmKernel(Kernel):
 
         return code.getvalue()
 
-    def _get_reinterpret_view(self, node) -> Optional[ReinterpretView]:
+    def _get_reinterpret_view(self, node) -> ReinterpretView | None:
         """Extract or convert to ReinterpretView from a node, handling all views."""
         while isinstance(node, MutableBox):
             node = node.data
@@ -243,7 +243,7 @@ class NVUniversalGemmKernel(Kernel):
 
         call_args: list[str] = []
         arg_types: list[Any] = []
-        raw_args: list[Union[Buffer, ReinterpretView, None]] = []
+        raw_args: list[Buffer | ReinterpretView | None] = []
 
         for _, input_node in self._template_input_args:
             reinterpret_view = self._get_reinterpret_view(input_node)
@@ -263,7 +263,7 @@ class NVUniversalGemmKernel(Kernel):
         raw_args.append(None)  # Output buffer is findable by name
 
         # Allocate workspace if needed
-        ws: Optional[WorkspaceArg] = None
+        ws: WorkspaceArg | None = None
         if self.workspace_size > 0:
             ws = WorkspaceArg(
                 count=self.workspace_size,

@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -71,7 +71,7 @@ class WrapperSubclass(torch.Tensor):
             return return_and_correct_aliasing(func, args, kwargs, out)
 
     def __coerce_same_metadata_as_tangent__(
-        self, expected_metadata: Any, expected_type: Optional[type] = None
+        self, expected_metadata: Any, expected_type: type | None = None
     ):
         if expected_type is type(self.a):
             return self.a
