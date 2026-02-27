@@ -1,5 +1,5 @@
 @echo off
 
 cd %MODULE_NAME%
-python setup.py clean
+if exist build rmdir /s /q build
 cd ..
