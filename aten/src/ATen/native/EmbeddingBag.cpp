@@ -885,14 +885,28 @@ void check_arguments(
 
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_embedding_bag_cpu_impl", [&]() {
     if (offsets.size(0) > 0) {
-      index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
-      index_t offset_n = offsets.const_data_ptr<index_t>()[offsets.size(0)-1];
+      const index_t* offsets_data = offsets.const_data_ptr<index_t>();
+      index_t offset_0 = offsets_data[0];
+      index_t offset_n = offsets_data[offsets.size(0)-1];
       TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
                                 "in the mini-batch has to start from position 0. "
                                 "However, got ", offsets[0]);
       TORCH_CHECK(offset_n <= indices.size(0), "offsets[-1] can not "
                   "be greater than input's length ", indices.size(0), " but got offsets[-1] of ",
                   offset_n);
+
+      // Validate all offsets are within bounds and monotonically non-decreasing
+      int64_t numIndices = indices.size(0);
+      for (int64_t i = 0; i < offsets.size(0); ++i) {
+        index_t offset_i = offsets_data[i];
+        TORCH_CHECK(offset_i >= 0 && offset_i <= numIndices,
+                    "offsets[", i, "] = ", offset_i, " is out of bounds [0, ", numIndices, "]");
+        if (i > 0) {
+          TORCH_CHECK(offset_i >= offsets_data[i-1],
+                      "offsets must be monotonically non-decreasing, but got offsets[", i-1, "] = ",
+                      offsets_data[i-1], " > offsets[", i, "] = ", offset_i);
+        }
+      }
     }
   });
 

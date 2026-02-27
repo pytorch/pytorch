@@ -1122,6 +1122,82 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             )
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
+    def test_embedding_bag_invalid_offsets(self, device, dtypes):
+        """Test that embedding_bag validates offsets to prevent illegal memory access"""
+        idx_dtype, offset_dtype = dtypes
+        weight = torch.ones(10, 5, dtype=torch.float32, device=device)
+
+        # Test case 1: Empty indices with offset pointing beyond bounds
+        # This was the original bug - offsets[1]=2 > len(indices)=0
+        indices = torch.zeros(0, dtype=idx_dtype, device=device)
+        offsets = torch.tensor([0, 2, 0], dtype=offset_dtype, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"offsets\[1\] = 2 is out of bounds"):
+            F.embedding_bag(
+                indices, weight, offsets, mode="sum", include_last_offset=False
+            )
+
+        # Test case 2: Offset not starting at 0
+        indices = torch.tensor([1, 2, 3], dtype=idx_dtype, device=device)
+        offsets = torch.tensor([1, 3], dtype=offset_dtype, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"offsets\[0\] has to be 0"):
+            F.embedding_bag(
+                indices, weight, offsets, mode="sum", include_last_offset=False
+            )
+
+        # Test case 3: Last offset beyond indices length
+        indices = torch.tensor([1, 2, 3], dtype=idx_dtype, device=device)
+        offsets = torch.tensor([0, 5], dtype=offset_dtype, device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"offsets\[-1\] can not be greater than input's length"
+        ):
+            F.embedding_bag(
+                indices, weight, offsets, mode="sum", include_last_offset=False
+            )
+
+        # Test case 4: Intermediate offset out of bounds
+        indices = torch.tensor([1, 2, 3], dtype=idx_dtype, device=device)
+        offsets = torch.tensor([0, 5, 3], dtype=offset_dtype, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"offsets\[1\] = 5 is out of bounds"):
+            F.embedding_bag(
+                indices, weight, offsets, mode="sum", include_last_offset=False
+            )
+
+        # Test case 5: Non-monotonically non-decreasing offsets
+        indices = torch.tensor([1, 2, 3, 4, 5], dtype=idx_dtype, device=device)
+        offsets = torch.tensor([0, 3, 2, 5], dtype=offset_dtype, device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"offsets must be monotonically non-decreasing"
+        ):
+            F.embedding_bag(
+                indices, weight, offsets, mode="sum", include_last_offset=False
+            )
+
+        # Test case 6: Negative offset (checked before bounds check, so error is about offset[0] != 0)
+        indices = torch.tensor([1, 2, 3], dtype=idx_dtype, device=device)
+        offsets = torch.tensor([-1, 3], dtype=offset_dtype, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, r"offsets\[0\] has to be 0"):
+            F.embedding_bag(
+                indices, weight, offsets, mode="sum", include_last_offset=False
+            )
+
+        # Test case 7: Valid offsets should work
+        indices = torch.tensor([1, 2, 3, 4, 5], dtype=idx_dtype, device=device)
+        offsets = torch.tensor([0, 2, 5], dtype=offset_dtype, device=device)
+        # This should not raise an error
+        # When include_last_offset=False, output shape is (offsets.size(0), weight.size(1))
+        # offsets has size 3, so output shape is (3, 5)
+        output = F.embedding_bag(
+            indices, weight, offsets, mode="sum", include_last_offset=False
+        )
+        self.assertEqual(output.shape, (3, 5))
+
+    @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
         # Failure 1: mismatched embeddings / per_sample_weights dtype (only on CPU device)
         es = nn.EmbeddingBag(5, 2, mode="sum").to(dtype=torch.float, device=device)

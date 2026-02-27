@@ -366,8 +366,38 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkSameGPU("embedding_bag_cuda", weight_arg, indices_arg);
   checkSameGPU("embedding_bag_cuda", weight_arg, offsets_arg);
-
+  
+  // Validate offsets before kernel execution to prevent illegal memory access
+  // Copy offsets to CPU for validation (small tensor, minimal overhead)
+  Tensor offsets_cpu = offsets.cpu();
   int64_t numIndices = indices.size(0);
+  AT_DISPATCH_INDEX_TYPES(offsets_cpu.scalar_type(), "_embedding_bag_cuda_validate", [&]() {
+    if (offsets_cpu.size(0) > 0) {
+      const index_t* offsets_data = offsets_cpu.const_data_ptr<index_t>();
+      index_t offset_0 = offsets_data[0];
+      index_t offset_n = offsets_data[offsets_cpu.size(0)-1];
+      TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
+                                "in the mini-batch has to start from position 0. "
+                                "However, got ", offsets_cpu[0]);
+      TORCH_CHECK(offset_n <= numIndices, "offsets[-1] can not "
+                  "be greater than input's length ", numIndices, " but got offsets[-1] of ",
+                  offset_n);
+      
+      // Validate all offsets are within bounds and monotonically non-decreasing
+      for (int64_t i = 0; i < offsets_cpu.size(0); ++i) {
+        index_t offset_i = offsets_data[i];
+        TORCH_CHECK(offset_i >= 0 && offset_i <= numIndices,
+                    "offsets[", i, "] = ", offset_i, " is out of bounds [0, ", numIndices, "]");
+        if (i > 0) {
+          TORCH_CHECK(offset_i >= offsets_data[i-1],
+                      "offsets must be monotonically non-decreasing, but got offsets[", i-1, "] = ",
+                      offsets_data[i-1], " > offsets[", i, "] = ", offset_i);
+        }
+      }
+    }
+  });
+
+  // numIndices already declared above for validation
   int64_t numBags = offsets.size(0);
   if (include_last_offset) {
     // Check https://github.com/pytorch/pytorch/issues/29019
