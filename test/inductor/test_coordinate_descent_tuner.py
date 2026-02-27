@@ -35,7 +35,8 @@ def mock_compare_config_prefer_larger_XBLOCK(
     self is the CoordescTuner object
     """
     if "XBLOCK" in candidate_config.kwargs:
-        assert "XBLOCK" in best_config.kwargs
+        if "XBLOCK" not in best_config.kwargs:
+            raise AssertionError
         if candidate_config.kwargs["XBLOCK"] < best_config.kwargs["XBLOCK"]:
             func(candidate_config)  # run func so the launcher will be created
             return False, best_timing * 1.1

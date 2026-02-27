@@ -2309,6 +2309,34 @@ class GraphModule(torch.nn.Module):
         expected = x * float(Color.RED.value)
         self.assertTrue(torch.allclose(result, expected))
 
+    def test_captured_opaque_object_export(self):
+        """Test that opaque objects captured from closures work with torch.export.
+
+        When an opaque object is captured via a module hook closure, it gets a
+        CellContentsSource instead of GetItemSource. The export path needs to
+        handle this gracefully.
+        """
+        rng = RNGState(42)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                torch.ops._TestOpaqueObject.noisy_inject(x, rng)
+                return self.linear(x)
+
+        ep = torch.export.export(Model(), (torch.randn(4, 4),), strict=True)
+        self.assertExpectedInline(
+            ep.graph_module.code.strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    return (linear,)""",  # noqa: B950
+        )
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
