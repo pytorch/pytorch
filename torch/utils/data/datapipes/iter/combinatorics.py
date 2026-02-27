@@ -38,12 +38,13 @@ class SamplerIterDataPipe(IterDataPipe[_T_co]):
         sampler_args: tuple | None = None,
         sampler_kwargs: dict | None = None,
     ) -> None:
+        # pyrefly: ignore [unsafe-overlap]
         if not isinstance(datapipe, Sized):
             raise AssertionError(
                 "Sampler class requires input datapipe implemented `__len__`"
             )
         super().__init__()
-        # pyrefly: ignore [bad-assignment]
+
         self.datapipe = datapipe
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs
@@ -148,6 +149,7 @@ class ShufflerIterDataPipe(IterDataPipe[_T_co]):
                 yield self._buffer.pop(idx)
 
     def __len__(self) -> int:
+        # pyrefly: ignore [unsafe-overlap]
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
         raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

@@ -59,25 +59,29 @@ def get_task_func(task: str) -> Callable:
 def get_task_functorch(task: str) -> Callable:
     @torch.no_grad()
     def vjp(model, inp, v=None, strict=None):
-        assert v is not None
+        if v is None:
+            raise AssertionError("v must not be None for vjp")
         out, vjpfunc = ft.vjp(model, *inp)
         return out, vjpfunc(v)
 
     @torch.no_grad()
     def jvp(model, inp, v=None, strict=None):
-        assert v is not None
+        if v is None:
+            raise AssertionError("v must not be None for jvp")
         return ft.jvp(model, inp, v)
 
     @torch.no_grad()
     def vhp(model, inp, v=None, strict=None):
-        assert v is not None
+        if v is None:
+            raise AssertionError("v must not be None for vhp")
         argnums = tuple(range(len(inp)))
         _, vjpfunc, aux = ft.vjp(ft.grad_and_value(model, argnums), *inp, has_aux=True)
         return aux, vjpfunc(v)
 
     @torch.no_grad()
     def hvp(model, inp, v=None, strict=None):
-        assert v is not None
+        if v is None:
+            raise AssertionError("v must not be None for hvp")
         argnums = tuple(range(len(inp)))
         _, hvp_out, aux = ft.jvp(
             ft.grad_and_value(model, argnums), inp, v, has_aux=True

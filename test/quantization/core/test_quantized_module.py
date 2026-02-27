@@ -157,7 +157,10 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             loaded_dict = torch.load(b, weights_only=weights_only)
             for key in model_dict:
                 if isinstance(model_dict[key], torch._C.ScriptObject):
-                    assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                    if not isinstance(loaded_dict[key], torch._C.ScriptObject):
+                        raise AssertionError(
+                            f"Expected loaded_dict[{key}] to be ScriptObject, got {type(loaded_dict[key])}"
+                        )
                     w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
                     w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
                     self.assertEqual(w_model, w_loaded)
@@ -206,7 +209,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
         for name, _ in loaded_from_package.named_modules():
             # noop, just make sure attribute "_modules" is restored correctly during torch.package import
-            assert(name is not None)  # noqa: E275
+            if name is None:
+                raise AssertionError("name is None")
 
         # Test copy and deepcopy
         copied_linear = copy.copy(qlinear)
@@ -1592,6 +1596,16 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         for bias in [True, False]:
             self._test_qconv_impl(q_mod, dq_mod, dim, dtype, bias)
 
+    def test_convtranspose_invalid_out_channels(self):
+        """Test that ConvTranspose modules raise ValueError for out_channels <= 0"""
+        for module_class in [
+            torch.ao.nn.quantized.ConvTranspose1d,
+            torch.ao.nn.quantized.ConvTranspose2d,
+            torch.ao.nn.quantized.ConvTranspose3d,
+        ]:
+            with self.assertRaisesRegex(ValueError, "out_channels must be greater than 0"):
+                module_class(in_channels=3, out_channels=0, kernel_size=3)
+
     @given(
         batch_size=st.integers(1, 5),
         in_features=st.integers(16, 32),
@@ -1633,7 +1647,10 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             loaded_dict = torch.load(b, weights_only=weights_only)
             for key in model_dict:
                 if isinstance(model_dict[key], torch._C.ScriptObject):
-                    assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                    if not isinstance(loaded_dict[key], torch._C.ScriptObject):
+                        raise AssertionError(
+                            f"Expected loaded_dict[{key}] to be ScriptObject, got {type(loaded_dict[key])}"
+                        )
                     w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
                     w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
                     self.assertEqual(w_model, w_loaded)

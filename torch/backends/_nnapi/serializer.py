@@ -233,8 +233,10 @@ class Operand(NamedTuple):
 
 
 def broadcast_shapes(shape1, shape2):
-    assert len(shape1) > 0
-    assert len(shape2) > 0
+    if len(shape1) <= 0:
+        raise AssertionError(f"shape1 must have length > 0, got {len(shape1)}")
+    if len(shape2) <= 0:
+        raise AssertionError(f"shape2 must have length > 0, got {len(shape2)}")
     s1 = list(shape1)
     s2 = list(shape2)
     # TODO: Support non-equal-rank broadcast where semantics match.
@@ -298,7 +300,10 @@ def fix_shape(shape, dim_order):
     if dim_order is DimOrder.CHANNELS_LAST:
         return tuple([shape[0]] + list(shape[2:]) + [shape[1]])
     if dim_order is DimOrder.SCALAR_OR_VECTOR:
-        assert len(shape) == 0 or len(shape) == 1
+        if not (len(shape) == 0 or len(shape) == 1):
+            raise AssertionError(
+                f"SCALAR_OR_VECTOR requires len(shape) == 0 or 1, got {len(shape)}"
+            )
         return shape
     if dim_order is DimOrder.UNKNOWN_CONSTANT:
         # XXX think this through
@@ -313,8 +318,9 @@ def reverse_map_dim(dim_order, d):
     # reverse_map_dim(CHANNELS_LAST, 3) == 1
     if dim_order in (DimOrder.PRESUMED_CONTIGUOUS, DimOrder.SCALAR_OR_VECTOR):
         return d
-    assert dim_order is DimOrder.CHANNELS_LAST
-    return [0, 2, 3, 1][d]
+    if dim_order is DimOrder.CHANNELS_LAST:
+        return [0, 2, 3, 1][d]
+    raise AssertionError(f"expected DimOrder.CHANNELS_LAST, got {dim_order}")
 
 
 def flex_name(op_id, dim):
@@ -353,7 +359,8 @@ class _NnapiSerializer:
     # Returns the NNAPI operand ID.  Can be looked up later with
     # get_tensor_operand_by_jitval.
     def add_tensor_operand(self, jitval, oper):
-        assert isinstance(oper, Operand)
+        if not isinstance(oper, Operand):
+            raise AssertionError(f"expected Operand, got {type(oper)}")
         if jitval in self.jitval_operand_map:
             raise Exception(f"Duplicate tensor: {jitval!r}")  # noqa: TRY002
 
@@ -366,7 +373,8 @@ class _NnapiSerializer:
     # Useful for cases where multiple NNAPI operands are required
     # to implement one JIT IR node.  Returns the NNAPI operand ID.
     def add_anonymous_tensor_operand(self, oper):
-        assert isinstance(oper, Operand)
+        if not isinstance(oper, Operand):
+            raise AssertionError(f"expected Operand, got {type(oper)}")
         operand_id = self.get_next_operand_id()
         self.operands.append(oper)
         return operand_id
@@ -387,7 +395,8 @@ class _NnapiSerializer:
             op_type = NNAPI_OperandCode.TENSOR_INT32
             scale = tensor.q_scale()
             zero_point = tensor.q_zero_point()
-            assert zero_point == 0
+            if zero_point != 0:
+                raise AssertionError(f"qint32 zero_point must be 0, got {zero_point}")
         elif dtype == "int16":
             if self.use_int16_for_qint16:
                 nnapi_dtype = getattr(tensor, "nnapi_dtype", None)
@@ -455,7 +464,8 @@ class _NnapiSerializer:
         return operand_id
 
     def add_immediate_operand(self, code, value, dims):
-        assert isinstance(dims, tuple)
+        if not isinstance(dims, tuple):
+            raise AssertionError(f"dims must be a tuple, got {type(dims)}")
         cache_key = (code, value)
         if cache_key not in self.cached_immediates:
             operand_id = len(self.operands)
@@ -527,11 +537,13 @@ class _NnapiSerializer:
         self.operation_args.extend(inputs + outputs)
 
     def add_tensor_sequence(self, jitval, values):
-        assert jitval not in self.tensor_sequences
+        if jitval in self.tensor_sequences:
+            raise AssertionError(f"jitval {jitval!r} already in tensor_sequences")
         self.tensor_sequences[jitval] = values
 
     def add_constant_value(self, jitval, ctype, value):
-        assert jitval not in self.constants
+        if jitval in self.constants:
+            raise AssertionError(f"jitval {jitval!r} already in constants")
         self.constants[jitval] = (ctype, value)
 
     def get_constant_value(self, jitval, typekind=None):
@@ -552,7 +564,10 @@ class _NnapiSerializer:
         if shape is None:
             shape = oper.shape
         else:
-            assert len(shape) == len(oper.shape)
+            if len(shape) != len(oper.shape):
+                raise AssertionError(
+                    f"shape length {len(shape)} != oper.shape length {len(oper.shape)}"
+                )
 
         shape_parts = ["("]
         for d, s in enumerate(shape):
@@ -644,7 +659,10 @@ class _NnapiSerializer:
     def get_size_arg(self, jitval):
         ctype, value = self.get_constant_value(jitval)
         if ctype.kind() == "ListType":
-            assert ctype.getElementType().kind() == "IntType"
+            if ctype.getElementType().kind() != "IntType":
+                raise AssertionError(
+                    f"expected ListType of IntType, got {ctype.getElementType().kind()}"
+                )
             return value
         raise Exception(  # noqa: TRY002
             f"Can't handle size arg of type '{ctype!r}' for '{jitval!r}'"
@@ -652,15 +670,20 @@ class _NnapiSerializer:
 
     def get_conv_pool_args_2d_from_pack(self, kernel_size, packed_config):
         pc = [i.item() for i in packed_config]
-        assert pc[0] == 2
+        if pc[0] != 2:
+            raise AssertionError(f"expected pc[0] == 2, got {pc[0]}")
         strides = [pc[1], pc[2]]
         paddings = [pc[3], pc[4]]
         dilations = [pc[5], pc[6]]
         output_padding = [pc[7], pc[8]]
         group_num = pc[9]
 
-        assert len(pc) == 11
-        assert output_padding == [0, 0]
+        if len(pc) != 11:
+            raise AssertionError(f"expected len(pc) == 11, got {len(pc)}")
+        if output_padding != [0, 0]:
+            raise AssertionError(
+                f"expected output_padding == [0, 0], got {output_padding}"
+            )
 
         return self.get_conv_pool_args_2d_common(
             kernel_size, strides, paddings, dilations, group_num
@@ -688,10 +711,14 @@ class _NnapiSerializer:
     ):
         kernels = list(kernel_size)
 
-        assert len(kernels) == 2
-        assert len(strides) == 2
-        assert len(paddings) == 2
-        assert len(dilations) == 2
+        if len(kernels) != 2:
+            raise AssertionError(f"expected len(kernels) == 2, got {len(kernels)}")
+        if len(strides) != 2:
+            raise AssertionError(f"expected len(strides) == 2, got {len(strides)}")
+        if len(paddings) != 2:
+            raise AssertionError(f"expected len(paddings) == 2, got {len(paddings)}")
+        if len(dilations) != 2:
+            raise AssertionError(f"expected len(dilations) == 2, got {len(dilations)}")
 
         # NNAPI uses 4 values for padding.
         ph, pw = paddings
@@ -724,8 +751,14 @@ class _NnapiSerializer:
             self.add_node(node)
 
         retn = model.graph.return_node()
-        assert retn.inputsSize() == 1
-        assert retn.outputsSize() == 0
+        if retn.inputsSize() != 1:
+            raise AssertionError(
+                f"expected retn.inputsSize() == 1, got {retn.inputsSize()}"
+            )
+        if retn.outputsSize() != 0:
+            raise AssertionError(
+                f"expected retn.outputsSize() == 0, got {retn.outputsSize()}"
+            )
         retn_input = retn.inputsAt(0)
         template_return_lines = ["return ["]
         if retn_input.type().kind() == "TensorType":
@@ -740,7 +773,10 @@ class _NnapiSerializer:
             )  # noqa: TRY002
 
         if return_shapes is not None:
-            assert len(return_shapes) == len(return_values)
+            if len(return_shapes) != len(return_values):
+                raise AssertionError(
+                    f"return_shapes length {len(return_shapes)} != return_values length {len(return_values)}"
+                )
         for i, v in enumerate(return_values):
             op_id = self.jitval_operand_map[v]
             self.outputs.append(op_id)
@@ -780,7 +816,10 @@ class _NnapiSerializer:
         # Model offset is the index into the model (in 32-bit words, not bytes)
         # of the next dimension we're about to serialize.  If it's 0,
         # generate code to mutate it before passing to NNAPI.
-        assert model_offset % 4 == 0
+        if model_offset % 4 != 0:
+            raise AssertionError(
+                f"model_offset must be divisible by 4, got {model_offset}"
+            )
         model_offset = int(model_offset / 4)
 
         for op_id, (_, dims, dim_order, _, _) in enumerate(self.operands):
@@ -816,7 +855,10 @@ class _NnapiSerializer:
     def serialize_values(self):
         serialized_values = []
         serialized_value_data = []
-        assert len(self.values) == len(self.value_data)
+        if len(self.values) != len(self.value_data):
+            raise AssertionError(
+                f"values length {len(self.values)} != value_data length {len(self.value_data)}"
+            )
         for (op_index, source_type), data in zip(self.values, self.value_data):
             source_length = len(data)
 
@@ -922,10 +964,19 @@ class _NnapiSerializer:
         self.jitval_operand_map[jitval] = in_id
 
     def add_getattr(self, node):
-        assert node.inputsSize() == 1
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 1:
+            raise AssertionError(
+                f"expected node.inputsSize() == 1, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         obj_ctype, obj = self.get_constant_value(node.inputsAt(0))
-        assert str(obj_ctype).startswith("__torch__.")
+        if not str(obj_ctype).startswith("__torch__."):
+            raise AssertionError(
+                f"expected obj_ctype to start with '__torch__.', got {obj_ctype}"
+            )
         name = node.s("name")
         value = getattr(obj, name)
         output = node.outputsAt(0)
@@ -933,15 +984,24 @@ class _NnapiSerializer:
         self.add_constant_value(output, ctype, value)
 
     def add_constant_node(self, node):
-        assert node.inputsSize() == 0
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 0:
+            raise AssertionError(
+                f"expected node.inputsSize() == 0, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         output = node.outputsAt(0)
         ctype = output.type()
         value = output.toIValue()
         self.add_constant_value(output, ctype, value)
 
     def add_list_construct(self, node):
-        assert node.outputsSize() == 1
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         output = node.outputsAt(0)
         ctype = output.type()
         const_vals: Optional[list] = []
@@ -969,19 +1029,31 @@ class _NnapiSerializer:
             )
 
     def add_tuple_construct(self, node):
-        assert node.outputsSize() == 1
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         output = node.outputsAt(0)
         values = list(node.inputs())
         self.add_tensor_sequence(output, values)
 
     def add_unsqueeze(self, node):
-        assert node.inputsSize() == 2
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 2:
+            raise AssertionError(
+                f"expected node.inputsSize() == 2, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
 
         _, dim = self.get_constant_value(node.inputsAt(1), "IntType")
-        assert in_oper.dim_order == DimOrder.PRESUMED_CONTIGUOUS
+        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS:
+            raise AssertionError(
+                f"expected dim_order PRESUMED_CONTIGUOUS, got {in_oper.dim_order}"
+            )
 
         real_dim = dim if dim >= 0 else dim + len(in_oper.shape) + 1
         out_shape_list = list(in_oper.shape)
@@ -1003,14 +1075,26 @@ class _NnapiSerializer:
         self._identity(node)
 
     def add_reshape(self, node):
-        assert node.inputsSize() == 2
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 2:
+            raise AssertionError(
+                f"expected node.inputsSize() == 2, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
 
         shape_ctype, shape = self.get_constant_value(node.inputsAt(1))
-        assert shape_ctype.kind() == "ListType"
-        assert shape_ctype.getElementType().kind() == "IntType"
+        if shape_ctype.kind() != "ListType":
+            raise AssertionError(
+                f"expected shape_ctype ListType, got {shape_ctype.kind()}"
+            )
+        if shape_ctype.getElementType().kind() != "IntType":
+            raise AssertionError(
+                f"expected shape element type IntType, got {shape_ctype.getElementType().kind()}"
+            )
         is_trivial_reshape = len(shape) == 2 and shape[1] == -1
 
         if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS and not is_trivial_reshape:
@@ -1034,8 +1118,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
 
     def add_flatten(self, node):
-        assert node.inputsSize() == 3
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 3:
+            raise AssertionError(
+                f"expected node.inputsSize() == 3, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
 
@@ -1090,8 +1180,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
 
     def add_slice(self, node):
-        assert node.inputsSize() == 5
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 5:
+            raise AssertionError(
+                f"expected node.inputsSize() == 5, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
         _, dim_value = self.get_constant_value(node.inputsAt(1))
@@ -1165,8 +1261,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.STRIDED_SLICE, inputs, outputs)
 
     def add_size(self, node):
-        assert node.inputsSize() == 2
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 2:
+            raise AssertionError(
+                f"expected node.inputsSize() == 2, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         _, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         _, value = self.constants[node.inputsAt(1)]
@@ -1175,13 +1277,20 @@ class _NnapiSerializer:
         self.add_constant_value(output, output.type(), res)
 
     def add_cat(self, node):
-        assert node.inputsSize() == 2
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 2:
+            raise AssertionError(
+                f"expected node.inputsSize() == 2, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         tensors = self.tensor_sequences[node.inputsAt(0)]
         _, dim = self.get_constant_value(node.inputsAt(1), "IntType")
 
-        assert len(tensors) > 0
+        if len(tensors) <= 0:
+            raise AssertionError(f"expected len(tensors) > 0, got {len(tensors)}")
         in_ids = []
         out_oper = None
         out_dim_size = 0
@@ -1190,23 +1299,36 @@ class _NnapiSerializer:
             if out_oper is None:
                 out_shape = change_element(in_oper.shape, dim, -1)
                 out_oper = in_oper._replace(shape=out_shape)
-            assert in_oper.op_type == out_oper.op_type
-            assert in_oper.dim_order == out_oper.dim_order
-            assert change_element(in_oper.shape, dim, -1) == change_element(
+            if in_oper.op_type != out_oper.op_type:
+                raise AssertionError(
+                    f"in_oper.op_type {in_oper.op_type} != out_oper.op_type {out_oper.op_type}"
+                )
+            if in_oper.dim_order != out_oper.dim_order:
+                raise AssertionError(
+                    f"in_oper.dim_order {in_oper.dim_order} != out_oper.dim_order {out_oper.dim_order}"
+                )
+            if change_element(in_oper.shape, dim, -1) != change_element(
                 out_oper.shape, dim, -1
-            )
+            ):
+                raise AssertionError(
+                    f"shape mismatch: {change_element(in_oper.shape, dim, -1)} != {change_element(out_oper.shape, dim, -1)}"
+                )
             # TODO: Possibly check scale and zero point.
             in_ids.append(in_id)
             # TODO: Possibly support variable-sized inputs.
             out_dim_size += in_oper.shape[dim]
 
-        assert out_oper is not None
+        if out_oper is None:
+            raise AssertionError("out_oper must not be None")
         out_oper = out_oper._replace(
             shape=change_element(out_oper.shape, dim, out_dim_size)
         )
 
         if in_oper.dim_order == DimOrder.CHANNELS_LAST:  # type: ignore[possibly-undefined]
-            assert len(out_oper.shape) == 4
+            if len(out_oper.shape) != 4:
+                raise AssertionError(
+                    f"expected len(out_oper.shape) == 4 for CHANNELS_LAST, got {len(out_oper.shape)}"
+                )
             nnapi_dim = [0, 3, 1, 2][dim]
         else:
             nnapi_dim = dim
@@ -1228,19 +1350,32 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.CONCATENATION, inputs, outputs)
 
     def add_mean(self, node):
-        assert node.inputsSize() == 4
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 4:
+            raise AssertionError(
+                f"expected node.inputsSize() == 4, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         dim_ctype, dim = self.get_constant_value(node.inputsAt(1))
-        assert dim_ctype.kind() == "ListType"
-        assert dim_ctype.getElementType().kind() == "IntType"
+        if dim_ctype.kind() != "ListType":
+            raise AssertionError(f"expected dim_ctype ListType, got {dim_ctype.kind()}")
+        if dim_ctype.getElementType().kind() != "IntType":
+            raise AssertionError(
+                f"expected dim element type IntType, got {dim_ctype.getElementType().kind()}"
+            )
         _, keep_dim = self.get_constant_value(node.inputsAt(2), "BoolType")
         # Expect None for dtype
         self.get_constant_value(node.inputsAt(3), "NoneType")
 
         if in_oper.dim_order == DimOrder.CHANNELS_LAST:
-            assert len(in_oper.shape) == 4
+            if len(in_oper.shape) != 4:
+                raise AssertionError(
+                    f"expected len(in_oper.shape) == 4 for CHANNELS_LAST, got {len(in_oper.shape)}"
+                )
             nnapi_dim = [[0, 3, 1, 2][d] for d in dim]
         else:
             nnapi_dim = dim
@@ -1252,7 +1387,10 @@ class _NnapiSerializer:
             collapsed_dims.add(d)
 
         if in_oper.dim_order == DimOrder.CHANNELS_LAST and not keep_dim:
-            assert collapsed_dims.issuperset({2, 3})
+            if not collapsed_dims.issuperset({2, 3}):
+                raise AssertionError(
+                    f"expected collapsed_dims to include {{2, 3}}, got {collapsed_dims}"
+                )
             out_dim_order = DimOrder.PRESUMED_CONTIGUOUS
         else:
             out_dim_order = in_oper.dim_order
@@ -1277,8 +1415,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.MEAN, inputs, outputs)
 
     def add_quantize(self, node):
-        assert node.inputsSize() == 4
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 4:
+            raise AssertionError(
+                f"expected node.inputsSize() == 4, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         if in_oper.dim_order != DimOrder.CHANNELS_LAST:
@@ -1311,8 +1455,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.QUANTIZE, inputs, outputs)
 
     def add_dequantize(self, node):
-        assert node.inputsSize() == 1
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 1:
+            raise AssertionError(
+                f"expected node.inputsSize() == 1, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         out_oper = in_oper._replace(
@@ -1330,8 +1480,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.DEQUANTIZE, inputs, outputs)
 
     def add_pointwise_simple_unary_op(self, node, opcode):
-        assert node.inputsSize() == 1
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 1:
+            raise AssertionError(
+                f"expected node.inputsSize() == 1, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
 
@@ -1359,10 +1515,19 @@ class _NnapiSerializer:
 
     def _do_add_binary(self, node, opcode, fuse_code, *, qparams=None):  # noqa: D401
         """Helper for pointwise binary broadcast ops with superfluous extra args."""
-        assert node.outputsSize() == 1
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
-        assert node.inputsAt(0).type().kind() == "TensorType"
-        assert node.inputsAt(1).type().kind() == "TensorType"
+        if node.inputsAt(0).type().kind() != "TensorType":
+            raise AssertionError(
+                f"expected inputsAt(0) TensorType, got {node.inputsAt(0).type().kind()}"
+            )
+        if node.inputsAt(1).type().kind() != "TensorType":
+            raise AssertionError(
+                f"expected inputsAt(1) TensorType, got {node.inputsAt(1).type().kind()}"
+            )
 
         if self.has_operand_for_jitval(node.inputsAt(0)):
             in0_id, in0_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
@@ -1379,7 +1544,10 @@ class _NnapiSerializer:
                 f"Can't do a NNAPI binary op: {opcode} on two constants"
             )  # noqa: TRY002
 
-        assert in0_oper.op_type == in1_oper.op_type
+        if in0_oper.op_type != in1_oper.op_type:
+            raise AssertionError(
+                f"in0_oper.op_type {in0_oper.op_type} != in1_oper.op_type {in1_oper.op_type}"
+            )
         in0_id, in0_oper, in1_id, in1_oper = self.transpose_for_broadcast(
             in0_id, in0_oper, in1_id, in1_oper
         )
@@ -1413,11 +1581,17 @@ class _NnapiSerializer:
         self.add_operation(opcode, inputs, outputs)
 
     def add_pointwise_simple_binary_broadcast_op(self, node, opcode, fuse_code):
-        assert node.inputsSize() == 2
+        if node.inputsSize() != 2:
+            raise AssertionError(
+                f"expected node.inputsSize() == 2, got {node.inputsSize()}"
+            )
         self._do_add_binary(node, opcode, fuse_code)
 
     def add_add_sub_op(self, node, opcode, fuse_code):
-        assert node.inputsSize() == 3
+        if node.inputsSize() != 3:
+            raise AssertionError(
+                f"expected node.inputsSize() == 3, got {node.inputsSize()}"
+            )
 
         _, alpha = self.get_constant_value(node.inputsAt(2), "IntType")
         if alpha != 1:
@@ -1428,7 +1602,10 @@ class _NnapiSerializer:
         self._do_add_binary(node, opcode, fuse_code)
 
     def add_qadd(self, node, opcode, fuse_code):
-        assert node.inputsSize() == 4
+        if node.inputsSize() != 4:
+            raise AssertionError(
+                f"expected node.inputsSize() == 4, got {node.inputsSize()}"
+            )
 
         _, scale = self.get_constant_value(node.inputsAt(2), "FloatType")
         _, zero_point = self.get_constant_value(node.inputsAt(3), "IntType")
@@ -1436,7 +1613,10 @@ class _NnapiSerializer:
         self._do_add_binary(node, opcode, fuse_code, qparams=(scale, zero_point))
 
     def add_softmax(self, node):
-        assert node.inputsSize() == 3
+        if node.inputsSize() != 3:
+            raise AssertionError(
+                f"expected node.inputsSize() == 3, got {node.inputsSize()}"
+            )
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
 
         _, softmax_dim = self.get_constant_value(node.inputsAt(1), "IntType")
@@ -1459,8 +1639,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.SOFTMAX, inputs, outputs)
 
     def add_hardtanh(self, node):
-        assert node.inputsSize() == 3
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 3:
+            raise AssertionError(
+                f"expected node.inputsSize() == 3, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
         _, min_val = self.get_constant_value(node.inputsAt(1), "FloatType")
@@ -1486,16 +1672,32 @@ class _NnapiSerializer:
         self.add_operation(opcode, inputs, outputs)
 
     def add_prelu_op(self, node):
-        assert node.inputsSize() == 2
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 2:
+            raise AssertionError(
+                f"expected node.inputsSize() == 2, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
-        assert node.inputsAt(0).type().kind() == "TensorType"
-        assert node.inputsAt(1).type().kind() == "TensorType"
+        if node.inputsAt(0).type().kind() != "TensorType":
+            raise AssertionError(
+                f"expected inputsAt(0) TensorType, got {node.inputsAt(0).type().kind()}"
+            )
+        if node.inputsAt(1).type().kind() != "TensorType":
+            raise AssertionError(
+                f"expected inputsAt(1) TensorType, got {node.inputsAt(1).type().kind()}"
+            )
 
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
         w_id, w_oper = self.get_tensor_operand_for_weight(node.inputsAt(1))
-        assert len(w_oper.shape) == 1
-        assert w_oper.shape[0] > 0
+        if len(w_oper.shape) != 1:
+            raise AssertionError(
+                f"expected len(w_oper.shape) == 1, got {len(w_oper.shape)}"
+            )
+        if w_oper.shape[0] <= 0:
+            raise AssertionError(f"expected w_oper.shape[0] > 0, got {w_oper.shape[0]}")
         if w_oper.shape[0] > 1:
             if in_oper.use_nchw():
                 # TODO: Support this by adding trailing 1 dims.
@@ -1524,8 +1726,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.PRELU, inputs, outputs)
 
     def add_pool2d_node(self, node, opcode):
-        assert node.inputsSize() == 6
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 6:
+            raise AssertionError(
+                f"expected node.inputsSize() == 6, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         image, kernel, stride, padding, dilation, _ceil_mode = node.inputs()
 
         stride = stride or kernel
@@ -1539,7 +1747,10 @@ class _NnapiSerializer:
             raise Exception("NNAPI does not support dilated pooling.")  # noqa: TRY002
 
         image_id, image_oper = self.get_tensor_operand_by_jitval_fixed_size(image)
-        assert len(image_oper.shape) == 4
+        if len(image_oper.shape) != 4:
+            raise AssertionError(
+                f"expected len(image_oper.shape) == 4, got {len(image_oper.shape)}"
+            )
 
         out_shape = get_conv_pool_shape(
             image_oper.shape, args, image_oper.shape[1], False
@@ -1567,8 +1778,14 @@ class _NnapiSerializer:
         self.add_operation(opcode, inputs, outputs)
 
     def add_avg_pool2d(self, node):
-        assert node.inputsSize() == 7
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 7:
+            raise AssertionError(
+                f"expected node.inputsSize() == 7, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         (
             image,
             kernel,
@@ -1591,7 +1808,10 @@ class _NnapiSerializer:
         )
 
         image_id, image_oper = self.get_tensor_operand_by_jitval(image)
-        assert len(image_oper.shape) == 4
+        if len(image_oper.shape) != 4:
+            raise AssertionError(
+                f"expected len(image_oper.shape) == 4, got {len(image_oper.shape)}"
+            )
 
         out_shape = get_conv_pool_shape(
             image_oper.shape, args, image_oper.shape[1], False
@@ -1621,17 +1841,32 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.AVERAGE_POOL_2D, inputs, outputs)
 
     def add_adaptive_avg_pool2d(self, node):
-        assert node.inputsSize() == 2
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 2:
+            raise AssertionError(
+                f"expected node.inputsSize() == 2, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         image_id, image_oper = self.get_tensor_operand_by_jitval_fixed_size(
             node.inputsAt(0)
         )
-        assert len(image_oper.shape) == 4
+        if len(image_oper.shape) != 4:
+            raise AssertionError(
+                f"expected len(image_oper.shape) == 4, got {len(image_oper.shape)}"
+            )
 
         size_ctype, size_arg = self.get_constant_value(node.inputsAt(1))
-        assert size_ctype.kind() == "ListType"
-        assert size_ctype.getElementType().kind() == "IntType"
+        if size_ctype.kind() != "ListType":
+            raise AssertionError(
+                f"expected size_ctype ListType, got {size_ctype.kind()}"
+            )
+        if size_ctype.getElementType().kind() != "IntType":
+            raise AssertionError(
+                f"expected size element type IntType, got {size_ctype.getElementType().kind()}"
+            )
         if size_arg != [1, 1]:
             raise Exception(  # noqa: TRY002
                 "NNAPI only supports adaptive_avg_pool2d with output size (1, 1)."
@@ -1661,8 +1896,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.AVERAGE_POOL_2D, inputs, outputs)
 
     def add_upsample_nearest2d(self, node):
-        assert node.inputsSize() == 3 or node.inputsSize() == 4
-        assert node.outputsSize() == 1
+        if not (node.inputsSize() == 3 or node.inputsSize() == 4):
+            raise AssertionError(
+                f"expected node.inputsSize() == 3 or 4, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         if node.inputsSize() == 3:
             image, size_jit, scale_jit = node.inputs()
         else:
@@ -1678,43 +1919,88 @@ class _NnapiSerializer:
             # The only way for the 4-argument overload of upsample_nearest2d to
             # have been added to the graph without error is if the scale_h and
             # scale_w arguments are None
-            assert scale_h_ctype.kind() == "NoneType"
-            assert scale_w_ctype.kind() == "NoneType"
+            if scale_h_ctype.kind() != "NoneType":
+                raise AssertionError(
+                    f"expected scale_h_ctype NoneType, got {scale_h_ctype.kind()}"
+                )
+            if scale_w_ctype.kind() != "NoneType":
+                raise AssertionError(
+                    f"expected scale_w_ctype NoneType, got {scale_w_ctype.kind()}"
+                )
 
             scale_ctype = scale_h_ctype
             scale_arg = scale_h_arg
 
         image_id, image_oper = self.get_tensor_operand_by_jitval(image)
-        assert len(image_oper.shape) == 4
+        if len(image_oper.shape) != 4:
+            raise AssertionError(
+                f"expected len(image_oper.shape) == 4, got {len(image_oper.shape)}"
+            )
 
         if size_ctype.kind() != "NoneType" and scale_ctype.kind() != "NoneType":
             raise Exception("Size and scale cannot both be non-None.")  # noqa: TRY002
         elif size_ctype.kind() != "NoneType":
-            assert size_ctype.kind() == "ListType"
-            assert size_ctype.getElementType().kind() == "IntType"
-            assert scale_ctype.kind() == "NoneType"
-            assert scale_arg is None
-            assert isinstance(size_arg, list)
-            assert size_arg
-            assert all(isinstance(val, int) for val in size_arg)
+            if size_ctype.kind() != "ListType":
+                raise AssertionError(
+                    f"expected size_ctype ListType, got {size_ctype.kind()}"
+                )
+            if size_ctype.getElementType().kind() != "IntType":
+                raise AssertionError(
+                    f"expected size element type IntType, got {size_ctype.getElementType().kind()}"
+                )
+            if scale_ctype.kind() != "NoneType":
+                raise AssertionError(
+                    f"expected scale_ctype NoneType, got {scale_ctype.kind()}"
+                )
+            if scale_arg is not None:
+                raise AssertionError(f"expected scale_arg None, got {scale_arg}")
+            if not isinstance(size_arg, list):
+                raise AssertionError(
+                    f"expected size_arg to be list, got {type(size_arg)}"
+                )
+            if not size_arg:
+                raise AssertionError("expected size_arg to be non-empty")
+            if not all(isinstance(val, int) for val in size_arg):
+                raise AssertionError("expected all size_arg values to be int")
             if len(size_arg) == 1:
                 size_arg = size_arg * 2
-            assert len(size_arg) == 2
+            if len(size_arg) != 2:
+                raise AssertionError(
+                    f"expected len(size_arg) == 2, got {len(size_arg)}"
+                )
             out_h = size_arg[0]
             out_w = size_arg[1]
             arg_h = self.add_immediate_int_scalar(out_h)
             arg_w = self.add_immediate_int_scalar(out_w)
         elif scale_ctype.kind() != "NoneType":
-            assert scale_ctype.kind() == "ListType"
-            assert scale_ctype.getElementType().kind() == "FloatType"
-            assert size_ctype.kind() == "NoneType"
-            assert size_arg is None
-            assert isinstance(scale_arg, list)
-            assert scale_arg
-            assert all(isinstance(val, float) for val in scale_arg)
+            if scale_ctype.kind() != "ListType":
+                raise AssertionError(
+                    f"expected scale_ctype ListType, got {scale_ctype.kind()}"
+                )
+            if scale_ctype.getElementType().kind() != "FloatType":
+                raise AssertionError(
+                    f"expected scale element type FloatType, got {scale_ctype.getElementType().kind()}"
+                )
+            if size_ctype.kind() != "NoneType":
+                raise AssertionError(
+                    f"expected size_ctype NoneType, got {size_ctype.kind()}"
+                )
+            if size_arg is not None:
+                raise AssertionError(f"expected size_arg None, got {size_arg}")
+            if not isinstance(scale_arg, list):
+                raise AssertionError(
+                    f"expected scale_arg to be list, got {type(scale_arg)}"
+                )
+            if not scale_arg:
+                raise AssertionError("expected scale_arg to be non-empty")
+            if not all(isinstance(val, float) for val in scale_arg):
+                raise AssertionError("expected all scale_arg values to be float")
             if len(scale_arg) == 1:
                 scale_arg = scale_arg * 2
-            assert len(scale_arg) == 2
+            if len(scale_arg) != 2:
+                raise AssertionError(
+                    f"expected len(scale_arg) == 2, got {len(scale_arg)}"
+                )
             out_h = int(scale_arg[0] * image_oper.shape[2])
             out_w = int(scale_arg[1] * image_oper.shape[3])
             arg_h = self.add_immediate_float_scalar(scale_arg[0])
@@ -1761,13 +2047,22 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.RESIZE_NEAREST_NEIGHBOR, inputs, outputs)
 
     def add_addmm(self, node):
-        assert node.inputsSize() == 5
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 5:
+            raise AssertionError(
+                f"expected node.inputsSize() == 5, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         jit_bias, jit_input, jit_weight, jit_beta, jit_alpha = node.inputs()
 
         for jitval in (jit_beta, jit_alpha):
             scale_ctype, scale_value = self.get_constant_value(jitval)
-            assert scale_ctype.kind() in ("IntType", "FloatType")
+            if scale_ctype.kind() not in ("IntType", "FloatType"):
+                raise AssertionError(
+                    f"expected scale_ctype IntType or FloatType, got {scale_ctype.kind()}"
+                )
             if scale_value != 1:
                 raise Exception(  # noqa: TRY002
                     "NNAPI Fully-Connected does not support alpha and beta."
@@ -1776,8 +2071,14 @@ class _NnapiSerializer:
         self.add_addmm_or_linear(node, True, jit_input, jit_weight, jit_bias)
 
     def add_linear(self, node):
-        assert node.inputsSize() == 3
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 3:
+            raise AssertionError(
+                f"expected node.inputsSize() == 3, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         jit_input, jit_weight, jit_bias = node.inputs()
 
         self.add_addmm_or_linear(node, False, jit_input, jit_weight, jit_bias)
@@ -1788,12 +2089,21 @@ class _NnapiSerializer:
         input_id, input_oper = self.get_tensor_operand_by_jitval(jit_input)
         bias_id, bias_oper = self.get_tensor_operand_for_weight(jit_bias)
 
-        assert len(input_oper.shape) == 2
-        assert len(bias_oper.shape) == 1
+        if len(input_oper.shape) != 2:
+            raise AssertionError(
+                f"expected len(input_oper.shape) == 2, got {len(input_oper.shape)}"
+            )
+        if len(bias_oper.shape) != 1:
+            raise AssertionError(
+                f"expected len(bias_oper.shape) == 1, got {len(bias_oper.shape)}"
+            )
 
         # TODO: Transform at load time to share weights with CPU model.
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
-        assert len(weight_tensor.shape) == 2
+        if len(weight_tensor.shape) != 2:
+            raise AssertionError(
+                f"expected len(weight_tensor.shape) == 2, got {len(weight_tensor.shape)}"
+            )
         if transpose_weight:
             nnapi_weight_tensor = weight_tensor.t().contiguous()
         else:
@@ -1821,8 +2131,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
 
     def add_qlinear(self, node):
-        assert node.inputsSize() == 4
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 4:
+            raise AssertionError(
+                f"expected node.inputsSize() == 4, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
         (
             jit_input,
             jit_packed_weight,
@@ -1832,25 +2148,50 @@ class _NnapiSerializer:
 
         input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
         # TODO: Support automatic reshape
-        assert len(input_oper.shape) == 2
+        if len(input_oper.shape) != 2:
+            raise AssertionError(
+                f"expected len(input_oper.shape) == 2, got {len(input_oper.shape)}"
+            )
 
         _, out_scale = self.get_constant_value(jit_scale, "FloatType")
         _, out_zero_point = self.get_constant_value(jit_zero_point, "IntType")
         weight_ctype, packed_weight = self.get_constant_value(jit_packed_weight)
-        assert weight_ctype.name() == "LinearPackedParamsBase"
+        if weight_ctype.name() != "LinearPackedParamsBase":
+            raise AssertionError(
+                f"expected weight_ctype LinearPackedParamsBase, got {weight_ctype.name()}"
+            )
         raw_weight, raw_bias = packed_weight.__getstate__()[0]
-        assert raw_bias is not None
+        if raw_bias is None:
+            raise AssertionError("raw_bias must not be None")
 
-        assert len(raw_weight.shape) == 2
-        assert len(raw_bias.shape) == 1
-        assert raw_bias.shape[0] == raw_weight.shape[0]
-        assert raw_weight.shape[1] == input_oper.shape[1]
+        if len(raw_weight.shape) != 2:
+            raise AssertionError(
+                f"expected len(raw_weight.shape) == 2, got {len(raw_weight.shape)}"
+            )
+        if len(raw_bias.shape) != 1:
+            raise AssertionError(
+                f"expected len(raw_bias.shape) == 1, got {len(raw_bias.shape)}"
+            )
+        if raw_bias.shape[0] != raw_weight.shape[0]:
+            raise AssertionError(
+                f"raw_bias.shape[0] {raw_bias.shape[0]} != raw_weight.shape[0] {raw_weight.shape[0]}"
+            )
+        if raw_weight.shape[1] != input_oper.shape[1]:
+            raise AssertionError(
+                f"raw_weight.shape[1] {raw_weight.shape[1]} != input_oper.shape[1] {input_oper.shape[1]}"
+            )
 
-        assert raw_weight.qscheme() == torch.per_tensor_affine
+        if raw_weight.qscheme() != torch.per_tensor_affine:
+            raise AssertionError(
+                f"expected raw_weight.qscheme() per_tensor_affine, got {raw_weight.qscheme()}"
+            )
         if raw_weight.dtype == torch.quint8:
             unsigned_weight = raw_weight
         else:
-            assert raw_weight.dtype == torch.qint8
+            if raw_weight.dtype != torch.qint8:
+                raise AssertionError(
+                    f"expected raw_weight.dtype qint8, got {raw_weight.dtype}"
+                )
             unsigned_weight = torch._make_per_tensor_quantized_tensor(
                 (raw_weight.int_repr().int() + 128).to(torch.uint8),
                 scale=raw_weight.q_scale(),
@@ -1862,7 +2203,8 @@ class _NnapiSerializer:
         bias_id = self.add_tensor_operand_for_weight(int_bias)
 
         multiplier = input_oper.scale * weight_scale / out_scale
-        assert multiplier > 0
+        if multiplier <= 0:
+            raise AssertionError(f"expected multiplier > 0, got {multiplier}")
         if multiplier >= 1:
             raise Exception(  # noqa: TRY002
                 "Quantized convolution multiplier is greater than 1.  "
@@ -1907,8 +2249,14 @@ class _NnapiSerializer:
             return self.get_tensor_operand_for_weight(jit_bias)
 
     def add_conv2d(self, node):
-        assert node.inputsSize() == 7
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 7:
+            raise AssertionError(
+                f"expected node.inputsSize() == 7, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         (
             jit_image,
@@ -1939,8 +2287,14 @@ class _NnapiSerializer:
         )
 
     def add_conv_underscore(self, node):
-        assert node.inputsSize() == 13
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 13:
+            raise AssertionError(
+                f"expected node.inputsSize() == 13, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         (
             jit_image,
@@ -1978,8 +2332,14 @@ class _NnapiSerializer:
         )
 
     def add_log_softmax(self, node):
-        assert node.inputsSize() == 3
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 3:
+            raise AssertionError(
+                f"expected node.inputsSize() == 3, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         jit_input, jit_dim, _jit_half_to_float = node.inputs()
         input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
@@ -2000,8 +2360,14 @@ class _NnapiSerializer:
         self.add_operation(NNAPI_OperationCode.LOG_SOFTMAX, inputs, outputs)
 
     def add_qconv2d(self, node, fuse_code, transpose=False):
-        assert node.inputsSize() == 4
-        assert node.outputsSize() == 1
+        if node.inputsSize() != 4:
+            raise AssertionError(
+                f"expected node.inputsSize() == 4, got {node.inputsSize()}"
+            )
+        if node.outputsSize() != 1:
+            raise AssertionError(
+                f"expected node.outputsSize() == 1, got {node.outputsSize()}"
+            )
 
         (
             jit_image,
@@ -2013,25 +2379,36 @@ class _NnapiSerializer:
         _, out_scale = self.get_constant_value(jit_scale, "FloatType")
         _, out_zero_point = self.get_constant_value(jit_zero_point, "IntType")
         weight_ctype, packed_weight = self.get_constant_value(jit_packed_weight)
-        assert weight_ctype.name() == "Conv2dPackedParamsBase"
+        if weight_ctype.name() != "Conv2dPackedParamsBase":
+            raise AssertionError(
+                f"expected weight_ctype Conv2dPackedParamsBase, got {weight_ctype.name()}"
+            )
         (
             pack_version,
             tensors,
             opt_tensors,
         ) = packed_weight.__getstate__()[0]
-        assert pack_version == "2"
+        if pack_version != "2":
+            raise AssertionError(f"expected pack_version '2', got {pack_version!r}")
         packed_config, raw_weight = tensors
         (raw_bias,) = opt_tensors
-        assert raw_bias is not None
+        if raw_bias is None:
+            raise AssertionError("raw_bias must not be None")
         args = self.get_conv_pool_args_2d_from_pack(
             raw_weight.shape[2:4], packed_config
         )
 
-        assert raw_weight.qscheme() == torch.per_tensor_affine
+        if raw_weight.qscheme() != torch.per_tensor_affine:
+            raise AssertionError(
+                f"expected raw_weight.qscheme() per_tensor_affine, got {raw_weight.qscheme()}"
+            )
         if raw_weight.dtype == torch.quint8:
             unsigned_weight = raw_weight
         else:
-            assert raw_weight.dtype == torch.qint8
+            if raw_weight.dtype != torch.qint8:
+                raise AssertionError(
+                    f"expected raw_weight.dtype qint8, got {raw_weight.dtype}"
+                )
             unsigned_weight = torch._make_per_tensor_quantized_tensor(
                 (raw_weight.int_repr().int() + 128).to(torch.uint8),
                 scale=raw_weight.q_scale(),
@@ -2044,7 +2421,8 @@ class _NnapiSerializer:
         bias_id = self.add_tensor_operand_for_weight(int_bias)
 
         multiplier = image_oper.scale * weight_scale / out_scale
-        assert multiplier > 0
+        if multiplier <= 0:
+            raise AssertionError(f"expected multiplier > 0, got {multiplier}")
         if multiplier >= 1:
             raise Exception(  # noqa: TRY002
                 "Quantized convolution multiplier is greater than 1.  "
@@ -2101,36 +2479,73 @@ class _NnapiSerializer:
         bias_oper = self.operands[bias_id]
 
         if image_oper.op_type == NNAPI_OperandCode.TENSOR_FLOAT32:
-            assert weight_oper.op_type == NNAPI_OperandCode.TENSOR_FLOAT32
-            assert bias_oper.op_type == NNAPI_OperandCode.TENSOR_FLOAT32
+            if weight_oper.op_type != NNAPI_OperandCode.TENSOR_FLOAT32:
+                raise AssertionError(
+                    f"expected weight_oper TENSOR_FLOAT32, got {weight_oper.op_type}"
+                )
+            if bias_oper.op_type != NNAPI_OperandCode.TENSOR_FLOAT32:
+                raise AssertionError(
+                    f"expected bias_oper TENSOR_FLOAT32, got {bias_oper.op_type}"
+                )
         elif image_oper.op_type == NNAPI_OperandCode.TENSOR_QUANT8_ASYMM:
-            assert weight_oper.op_type == NNAPI_OperandCode.TENSOR_QUANT8_ASYMM
-            assert bias_oper.op_type == NNAPI_OperandCode.TENSOR_INT32
-            assert approx_equal(image_oper.scale * weight_oper.scale, bias_oper.scale)
-            assert bias_oper.zero_point == 0
+            if weight_oper.op_type != NNAPI_OperandCode.TENSOR_QUANT8_ASYMM:
+                raise AssertionError(
+                    f"expected weight_oper TENSOR_QUANT8_ASYMM, got {weight_oper.op_type}"
+                )
+            if bias_oper.op_type != NNAPI_OperandCode.TENSOR_INT32:
+                raise AssertionError(
+                    f"expected bias_oper TENSOR_INT32, got {bias_oper.op_type}"
+                )
+            if not approx_equal(image_oper.scale * weight_oper.scale, bias_oper.scale):
+                raise AssertionError(
+                    f"scale mismatch: image*weight scale {image_oper.scale * weight_oper.scale} != bias scale {bias_oper.scale}"
+                )
+            if bias_oper.zero_point != 0:
+                raise AssertionError(
+                    f"expected bias_oper.zero_point == 0, got {bias_oper.zero_point}"
+                )
         else:
             raise Exception(  # noqa: TRY002
                 f"Unsupported input type for conv2d: {image_oper.op_type}"
             )  # noqa: TRY002
 
-        assert len(image_oper.shape) == 4
-        assert len(weight_oper.shape) == 4
-        assert len(bias_oper.shape) == 1
+        if len(image_oper.shape) != 4:
+            raise AssertionError(
+                f"expected len(image_oper.shape) == 4, got {len(image_oper.shape)}"
+            )
+        if len(weight_oper.shape) != 4:
+            raise AssertionError(
+                f"expected len(weight_oper.shape) == 4, got {len(weight_oper.shape)}"
+            )
+        if len(bias_oper.shape) != 1:
+            raise AssertionError(
+                f"expected len(bias_oper.shape) == 1, got {len(bias_oper.shape)}"
+            )
 
         if depthwise:
             # Depthwise convolution
             one, _kern_h, _kern_w, out_c = weight_oper.shape
-            assert one == 1
-            assert out_c % in_c == 0
+            if one != 1:
+                raise AssertionError(f"expected weight_oper.shape[0] == 1, got {one}")
+            if out_c % in_c != 0:
+                raise AssertionError(f"out_c {out_c} must be divisible by in_c {in_c}")
             channel_multiplier = out_c // in_c
-            assert channel_multiplier == 1  # Don't support multiplier
-            assert out_c == in_c
+            if channel_multiplier != 1:
+                raise AssertionError(
+                    f"channel_multiplier must be 1, got {channel_multiplier}"
+                )
+            if out_c != in_c:
+                raise AssertionError(f"out_c {out_c} != in_c {in_c}")
         else:
             # Full convolution
             out_c, _kern_h, _kern_w, kern_d = weight_oper.shape
-            assert kern_d == in_c
+            if kern_d != in_c:
+                raise AssertionError(f"kern_d {kern_d} != in_c {in_c}")
 
-        assert out_c == bias_oper.shape[0]
+        if out_c != bias_oper.shape[0]:
+            raise AssertionError(
+                f"out_c {out_c} != bias_oper.shape[0] {bias_oper.shape[0]}"
+            )
 
         use_nchw = image_oper.use_nchw()
 

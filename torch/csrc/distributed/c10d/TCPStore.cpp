@@ -747,6 +747,54 @@ std::vector<std::string> TCPStore::listKeys() {
   return keys;
 }
 
+void TCPStore::barrier(
+    const std::string& key,
+    int64_t world_size,
+    const std::chrono::milliseconds& timeout) {
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__barrier);
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::BARRIER);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.appendValue<int64_t>(world_size);
+  buffer.flush();
+
+  auto response_opt =
+      client_->receiveValueWithTimeout<detail::WaitResponseType>(timeout);
+  if (response_opt.has_value()) {
+    if (response_opt != detail::WaitResponseType::STOP_WAITING) {
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "Stop_waiting response is expected");
+    }
+    return;
+  }
+
+  // Timeout occurred - send cancel and handle response
+  {
+    detail::SendBuffer cancelBuffer(*client_, detail::QueryType::CANCEL_WAIT);
+    cancelBuffer.flush();
+  }
+
+  auto response = client_->receiveValue<detail::WaitResponseType>();
+  // This can happen if the server responds before we cancel
+  if (response != detail::WaitResponseType::WAIT_CANCELED) {
+    if (response != detail::WaitResponseType::STOP_WAITING) {
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "Stop_waiting response is expected");
+    }
+    // Wait for the cancel acknowledgment
+    response = client_->receiveValue<detail::WaitResponseType>();
+    if (response != detail::WaitResponseType::WAIT_CANCELED) {
+      TORCH_CHECK_WITH(
+          DistStoreError, false, "wait_canceled response is expected");
+    }
+  }
+
+  C10_THROW_ERROR(
+      DistStoreError,
+      fmt::format("barrier timeout after {}ms, key: {}", timeout.count(), key));
+}
+
 bool TCPStore::hasExtendedApi() const {
   return true;
 }

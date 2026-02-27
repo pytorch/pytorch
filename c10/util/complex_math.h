@@ -86,6 +86,41 @@ C10_HOST_DEVICE inline c10::complex<T> pow(
 #endif
 }
 
+// Regression in ROCm 7.2. See https://github.com/ROCm/rocm-libraries/pull/3836.
+// Specialized version for complex<float> on AMD GPUs to use FMA-based
+// multiplication
+#if defined(__HIPCC__)
+namespace detail {
+// FMA-aware complex multiplication for float precision on AMD GPUs.
+// This prevents SLP vectorizer from breaking FMA formation, which causes
+// numerical precision loss in complex arithmetic.
+// The issue occurs when vectorizer packs scalar multiplies before backend
+// can form FMA instructions, resulting in double rounding instead of single.
+C10_HOST_DEVICE inline thrust::complex<float> complex_mul_fma(
+    thrust::complex<float> a,
+    thrust::complex<float> b) {
+  // Complex multiplication: (a.r + a.i*i) * (b.r + b.i*i)
+  // = (a.r*b.r - a.i*b.i) + (a.r*b.i + a.i*b.r)*i
+  // Using __builtin_fmaf ensures FMA at source level:
+  // real: a.r*b.r + (-(a.i*b.i)) = FMA(a.r, b.r, -(a.i*b.i))
+  // imag: a.i*b.r + a.r*b.i = FMA(a.r, b.i, a.i*b.r)
+  float real_part = __builtin_fmaf(a.real(), b.real(), -(a.imag() * b.imag()));
+  float imag_part = __builtin_fmaf(a.real(), b.imag(), a.imag() * b.real());
+  return thrust::complex<float>(real_part, imag_part);
+}
+} // namespace detail
+
+template <>
+C10_HOST_DEVICE inline c10::complex<float> pow(
+    const c10::complex<float>& x,
+    const c10::complex<float>& y) {
+  auto log_x = thrust::log(static_cast<thrust::complex<float>>(x));
+  auto y_log_x =
+      detail::complex_mul_fma(static_cast<thrust::complex<float>>(y), log_x);
+  return static_cast<c10::complex<float>>(thrust::exp(y_log_x));
+}
+#endif
+
 template <typename T>
 C10_HOST_DEVICE inline c10::complex<T> pow(
     const c10::complex<T>& x,

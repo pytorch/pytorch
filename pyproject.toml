@@ -4,7 +4,7 @@
 requires = [
     # 70.1.0: min version for integrated bdist_wheel command from wheel package
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=70.1.0",
+    "setuptools>=70.1.0,<82",
     "cmake>=3.27",
     "ninja",
     "numpy",
@@ -115,6 +115,10 @@ multi_line_output = 3
 include_trailing_comma = true
 combine_as_imports = true
 
+[tool.usort]
+preserve_inline_comments = true
+collapse_blank_lines_in_category = false
+
 [tool.usort.known]
 first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
@@ -122,6 +126,9 @@ standard_library = ["typing_extensions"]
 [tool.ruff]
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
+
+[tool.ruff.per-file-target-version]
+"**/py312_intrinsics.py" = "py312"
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -278,7 +285,7 @@ keep-runtime-typing = true
     "F401",
 ]
 "test/export/**" = [
-    "PGH004"
+    "PGH004",
 ]
 "test/typing/**" = [
     "PGH004"
@@ -338,54 +345,11 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-"benchmarks/**" = [
-    "S101"
-]
-"test/**" = [
-    "S101"
-]
-"torchgen/**" = [
-    "S101"
-]
-"torch/_decomp/decompositions.py" = ["S101"]
+
+# torch/ folders still needing S101 migration
 "torch/_dynamo/**" = ["S101"]
-"torch/_export/**" = ["S101"]
-"torch/_functorch/**" = ["S101"]
-"torch/_higher_order_ops/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
-"torch/_library/**" = ["S101"]
-"torch/_meta_registrations.py" = ["S101"]
-"torch/_numpy/testing/**" = ["S101"]
-"torch/_prims/**" = ["S101"]
-"torch/_prims_common/**" = ["S101"]
-"torch/_refs/__init__.py" = ["S101"]
-"torch/_refs/special/**" = ["S101"]
-"torch/_subclasses/**" = ["S101"]
-"torch/ao/nn/**" = ["S101"]
-"torch/ao/pruning/_experimental/data_sparsifier/lightning/tests/test_callbacks.py" = ["S101"]
-"torch/backends/_nnapi/**" = ["S101"]
-"torch/cuda/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
-"torch/export/**" = ["S101"]
-"torch/fx/**" = ["S101"]
-"torch/jit/**" = ["S101"]
-"torch/nn/modules/**" = ["S101"]
-"torch/onnx/_internal/**" = ["S101"]
-"torch/testing/**" = ["S101"]
-"tools/**" = [
-    "S101"
-]
-"setup.py" = [
-    "S101"
-]
-"functorch/**" = [
-    "S101"
-]
-"docs/source/scripts/exportdb/generate_example_rst.py" = ["S101"]
-"android/pytorch_android/generate_test_torchscripts.py" = ["S101"]
-".github/scripts/gitutils.py" = ["S101"]
-".github/scripts/test_trymerge.py" = ["S101"]
-".github/scripts/trymerge.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"

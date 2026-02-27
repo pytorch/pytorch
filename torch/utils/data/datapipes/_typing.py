@@ -14,11 +14,11 @@ from abc import ABCMeta
 from collections.abc import Iterator
 
 # TODO: Use TypeAlias when Python 3.6 is deprecated
-from typing import (  # type: ignore[attr-defined]
-    _eval_type,
-    _GenericAlias,
-    _tp_cache,
-    _type_check,
+from typing import (
+    _eval_type,  # pyrefly: ignore [missing-module-attribute]
+    _GenericAlias,  # pyrefly: ignore [missing-module-attribute]
+    _tp_cache,  # pyrefly: ignore [missing-module-attribute]
+    _type_check,  # pyrefly: ignore [missing-module-attribute]
     _type_repr,
     Any,
     ForwardRef,
@@ -284,7 +284,6 @@ class _DataPipeMeta(GenericMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
-        # pyrefly: ignore [no-access]
         cls.__origin__ = None
         if "type" in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]

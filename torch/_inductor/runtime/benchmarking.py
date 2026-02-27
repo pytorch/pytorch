@@ -9,19 +9,15 @@ from typing import Any, Concatenate, Optional, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
+import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import (
-    inductor_default_autotune_rep,
-    inductor_default_autotune_warmup,
-    use_experimental_benchmarker,
-)
+from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 use_experimental_benchmarker = (
-    use_experimental_benchmarker and torch.cuda.is_available()
+    inductor_config.use_experimental_benchmarker and torch.cuda.is_available()
 )
 
 
@@ -83,17 +79,20 @@ def may_ban_benchmarking() -> None:
 def time_and_count(
     fn: Callable[Concatenate[Any, P], T],
 ) -> Callable[Concatenate[Any, P], T]:
-    """Wraps `fn` with `dynamo_timed` context, and increments the appropriate dynamo
-    counters. It is expected that `fn` is a method of `Benchmarker` or one of its
-    subclasses; typing limitations prevent us from declaring this directly.
+    """
+    Wraps `fn` to increment the appropriate dynamo counters. It is expected that `fn`
+    is a method of `Benchmarker` or one of its subclasses; typing limitations prevent
+    us from declaring this directly.
+
+    NOTE: If you're tempted to add a dynamo_timed call here, this function can be
+    called enough that the dynamo_timed overhead is not negligible.
     """
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
-        with dynamo_timed(fn_qual_name, log_pt2_compile_event=False):
-            return fn(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -194,8 +193,8 @@ class Benchmarker:
         else:
             _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
 
-        warmup = kwargs.pop("warmup", inductor_default_autotune_warmup)
-        rep = kwargs.pop("rep", inductor_default_autotune_rep)
+        warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
+        rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
 
         # Surfacing all kernels during autotuning is super noisy; filtering these out.
         with DebugMode._benchmarking_inductor():
@@ -244,6 +243,30 @@ class Benchmarker:
     @time_and_count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
+
+    @time_and_count
+    def benchmark_gpu_with_cuda_graph(
+        self: Self,
+        _callable: Callable[[], Any],
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark a GPU callable using CUDA graph capture and replay.
+
+        This captures the callable into a CUDA graph and benchmarks the graph replay,
+        which eliminates kernel launch overhead for fair comparison between different
+        implementations.
+        """
+        # Warmup
+        _callable()
+        torch.cuda.synchronize()
+
+        # Capture into CUDA graph
+        cuda_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(cuda_graph, capture_error_mode="thread_local"):
+            _callable()
+        torch.cuda.synchronize()
+
+        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
 
 
 class TritonBenchmarker(Benchmarker):
@@ -399,9 +422,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
-        benchmark_iters = max(
-            min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
-        )
+        if estimated_timing > 0:
+            benchmark_iters = max(
+                min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
+            )
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):

@@ -4,7 +4,7 @@ import logging
 import os
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 from torch._library.custom_ops import _maybe_get_opdef
@@ -37,20 +37,20 @@ class TensorMetadata:
 
 @dataclass(frozen=True)
 class OpProfile:
-    args_profile: tuple[Optional[TensorMetadata]]
-    out_profile: Union[TensorMetadata, tuple[TensorMetadata]]
+    args_profile: tuple[TensorMetadata | None]
+    out_profile: TensorMetadata | tuple[TensorMetadata]
 
 
 def _generate_fake_kernel(op_name: str, op_profile: set[OpProfile]) -> Callable:
-    def _match_args(args_profile: tuple[Optional[TensorMetadata]], args: Any) -> bool:
+    def _match_args(args_profile: tuple[TensorMetadata | None], args: Any) -> bool:
         return all(
             TensorMetadata.maybe_from_tensor(arg) == args_profile[i]
             for i, arg in enumerate(args)
         )
 
     def _generate_res(
-        out_profile: Union[TensorMetadata, tuple[TensorMetadata]],
-    ) -> Union[torch.Tensor, list[torch.Tensor]]:
+        out_profile: TensorMetadata | tuple[TensorMetadata],
+    ) -> torch.Tensor | list[torch.Tensor]:
         ctx = torch.library.get_ctx()
 
         def _generate_tensor_out(t: TensorMetadata) -> torch.Tensor:
@@ -184,7 +184,8 @@ def unsafe_generate_fake_kernels(op_profiles: dict[str, set[OpProfile]]) -> Gene
         # Restore abstract_fns for CustomOpDefs
         for op_str, old_fake in old_fake_impls.items():
             opdef = _maybe_get_opdef(op_str)
-            assert opdef is not None
+            if opdef is None:
+                raise AssertionError(f"opdef for {op_str} must not be None")
             opdef.register_fake(old_fake)
 
 
@@ -284,7 +285,7 @@ def read_profiles_from_yaml(yaml_str: str) -> dict[str, set[OpProfile]]:
             deserialize_tensor_metadata(arg) for arg in data["args_profile"]
         )
         out_profile_data = data["out_profile"]
-        out_profile: Union[tuple[TensorMetadata], TensorMetadata] = (
+        out_profile: tuple[TensorMetadata] | TensorMetadata = (
             tuple(deserialize_tensor_metadata(out) for out in out_profile_data)  # type: ignore[assignment]
             if isinstance(out_profile_data, list)
             else deserialize_tensor_metadata(out_profile_data)

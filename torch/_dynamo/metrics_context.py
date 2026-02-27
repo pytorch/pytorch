@@ -19,7 +19,7 @@ import heapq
 import logging
 import time
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
 from typing_extensions import Self
 
 
@@ -37,7 +37,7 @@ class TopN:
     Helper to record a list of metrics, keeping only the top N "most expensive" elements.
     """
 
-    def __init__(self, at_most: int = 25):
+    def __init__(self, at_most: int = 25) -> None:
         self.at_most = at_most
         self.heap: list[tuple[int, Any]] = []
 
@@ -54,13 +54,13 @@ class TopN:
 
 
 OnExitType: TypeAlias = Callable[
-    [int, int, dict[str, Any], Optional[type[BaseException]], Optional[BaseException]],
+    [int, int, dict[str, Any], type[BaseException] | None, BaseException | None],
     None,
 ]
 
 
 class MetricsContext:
-    def __init__(self, on_exit: OnExitType):
+    def __init__(self, on_exit: OnExitType) -> None:
         """
         Use this class as a contextmanager to create a context under which to accumulate
         a set of metrics, e.g., metrics gathered during a compilation. On exit of the
@@ -87,8 +87,8 @@ class MetricsContext:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
         _traceback: Any,
     ) -> None:
         """
@@ -207,7 +207,7 @@ class MetricsContext:
 
 
 class RuntimeMetricsContext:
-    def __init__(self, on_exit: OnExitType):
+    def __init__(self, on_exit: OnExitType) -> None:
         """
         Similar to MetricsContext, but used to gather the runtime metrics that are
         decoupled from compilation, where there's not a natural place to insert a
@@ -218,7 +218,7 @@ class RuntimeMetricsContext:
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: Optional[dict[str, Any]] = None
+        self, metric: str, value: int, extra: dict[str, Any] | None = None
     ) -> None:
         """
         Increment a metric by a given amount.

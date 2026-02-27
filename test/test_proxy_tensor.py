@@ -430,7 +430,8 @@ def forward(self, x_1):
         def f(x):
             x = x.clone()
             x.unsqueeze_(-1)
-            assert x.shape[-1] == 1
+            if x.shape[-1] != 1:
+                raise AssertionError(f"expected x.shape[-1] == 1, got {x.shape[-1]}")
             return x
 
         self._test(f, [torch.randn(5)])
@@ -837,13 +838,39 @@ class TestRealProxyTensor(TestCase):
         def f():
             x = torch.randn([])
             y = torch.randn([])
-            assert torch.allclose(x * y, y * x)
+            if not torch.allclose(x * y, y * x):
+                raise AssertionError("x * y should equal y * x")
             z = float(x)
             z2 = float(y)
 
         # Smoke tests
         make_fx(f, _error_on_data_dependent_ops=False)()
         make_fx(f, pre_dispatch=True, _error_on_data_dependent_ops=False)()
+
+    def test_disable_torch_fn_metadata_mode(self):
+        class MyModule(nn.Module):
+            def forward(self, x):
+                return torch.sin(x) + torch.cos(x)
+
+        mod = MyModule()
+
+        def fn(x):
+            return mod(x)
+        fn._orig_mod = mod
+
+        # With TorchFunctionMetadataMode enabled (default), torch_fn should be present
+        gm_with = make_fx(fn, record_module_stack=True)(torch.randn(3))
+        torch_fn_present = any(
+            "torch_fn" in n.meta for n in gm_with.graph.nodes if n.op == "call_function"
+        )
+        self.assertTrue(torch_fn_present, "torch_fn metadata should be present by default")
+
+        # With TorchFunctionMetadataMode disabled, torch_fn should be absent
+        gm_without = make_fx(fn, record_module_stack=True, _disable_torch_fn_metadata_mode=True)(torch.randn(3))
+        torch_fn_absent = all(
+            "torch_fn" not in n.meta for n in gm_without.graph.nodes if n.op == "call_function"
+        )
+        self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
 
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
@@ -965,7 +992,7 @@ def _get_node(fx_g, cond):
     raise AssertionError
 
 def _get_free_symbols(shape_env):
-    vars = tuple(shape_env.var_to_val.keys())
+    vars = tuple(shape_env.backed_var_to_val.keys())
     return len([var for var in vars if var not in shape_env.replacements])
 
 def _trace(f, *args):
@@ -1097,7 +1124,8 @@ def forward(self, x_1, y_1):
 
     def test_unary(self):
         def f(x):
-            assert x.shape[0] < 20
+            if x.shape[0] >= 20:
+                raise AssertionError(f"expected x.shape[0] < 20, got {x.shape[0]}")
             return x.cos()
         test_inputs = []
         test_inputs.append([(2, 5)])
@@ -1263,7 +1291,8 @@ def forward(self, a_1, b_1):
         test_inputs.append([(1, 5), (3, 1)])
         test_inputs.append([(1, 4), (4, 1)])
         shape_env = self._test_dynamic(f, [(1, 2), (3, 1)], test_inputs).shape_env
-        assert len(shape_env.guards) == 0
+        if len(shape_env.guards) != 0:
+            raise AssertionError(f"expected no guards, got {len(shape_env.guards)}")
 
     def test_multiply_shape(self):
         def f(a):
@@ -1292,7 +1321,8 @@ def forward(self, a_1):
     def test_tensor_symfloat(self):
         def f(a):
             r = torch.tensor(a.size(0) ** 2.0)
-            assert r.dtype is torch.float
+            if r.dtype is not torch.float:
+                raise AssertionError(f"expected dtype torch.float, got {r.dtype}")
             return r
 
         gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2))
@@ -1605,7 +1635,8 @@ def forward(self, lengths_1, values_1):
             x = b.nonzero()
             x1 = b.nonzero()
             x2 = b.nonzero()
-            assert x1.shape[0] == x2.shape[0]
+            if x1.shape[0] != x2.shape[0]:
+                raise AssertionError("x1.shape[0] should equal x2.shape[0]")
             ok = True
             b.normal_()
             y = b.nonzero()
@@ -1624,12 +1655,14 @@ def forward(self, lengths_1, values_1):
             x = b.nonzero()
             x1 = b.nonzero()
             x2 = b.nonzero()
-            assert x1.shape[0] == x2.shape[0]
+            if x1.shape[0] != x2.shape[0]:
+                raise AssertionError("x1.shape[0] should equal x2.shape[0]")
             b.normal_()
             y = b.nonzero()
             # Because you're not actually going to generate exactly zero with
             # normal_ lol
-            assert x1.shape[0] == y.shape[0]
+            if x1.shape[0] != y.shape[0]:
+                raise AssertionError("x1.shape[0] should equal y.shape[0]")
 
         make_fx(f, tracing_mode="symbolic")(torch.randn(4))
 
@@ -1781,7 +1814,8 @@ def forward(self, x_1):
 
     def test_metadata_fresh(self):
         def f(x):
-            assert x.shape[0] == 3
+            if x.shape[0] != 3:
+                raise AssertionError(f"expected x.shape[0] == 3, got {x.shape[0]}")
             return x.cos()
 
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(3))
@@ -1830,7 +1864,8 @@ def forward(self, x_1):
 
     def test_mega_guard(self):
         def f(a, b):
-            assert a.shape[0] == b.shape[0] * 2
+            if a.shape[0] != b.shape[0] * 2:
+                raise AssertionError("a.shape[0] should equal b.shape[0] * 2")
             return a.cos()
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.randn(16), torch.randn(8))
         from torch._dynamo.source import LocalSource
@@ -1845,22 +1880,26 @@ def forward(self, x_1):
 
     def test_guard_upperbound_range_refinement(self):
         def f(a):
-            assert a.shape[0] > 5 and a.shape[0] > 12
+            if not (a.shape[0] > 5 and a.shape[0] > 12):
+                raise AssertionError("a.shape[0] should be > 12")
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
         self.assertExpectedInline(show_guards(tensor), """13 <= L['a'].size()[0]""")
 
     def test_guard_lowerbound_range_refinement(self):
         def f(a):
-            assert a.shape[0] < 20 and a.shape[0] < 30
+            if not (a.shape[0] < 20 and a.shape[0] < 30):
+                raise AssertionError("a.shape[0] should be < 20")
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
         self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] <= 19""")
 
     def test_guard_upperbound_range_refinement_multivariate(self):
         def f(a):
-            assert a.shape[0] > 5 and a.shape[0] > 12
-            assert a.shape[1] > 5 and a.shape[1] > a.shape[0]
+            if not (a.shape[0] > 5 and a.shape[0] > 12):
+                raise AssertionError("a.shape[0] should be > 12")
+            if not (a.shape[1] > 5 and a.shape[1] > a.shape[0]):
+                raise AssertionError("a.shape[1] should be > a.shape[0]")
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
         self.assertExpectedInline(show_guards(tensor), """\
@@ -1870,8 +1909,10 @@ L['a'].size()[1] > L['a'].size()[0]
 
     def test_guard_lowerbound_range_refinement_multivariate(self):
         def f(a):
-            assert a.shape[0] < 20 and a.shape[0] < 30
-            assert a.shape[1] < 30 and a.shape[1] < a.shape[0]
+            if not (a.shape[0] < 20 and a.shape[0] < 30):
+                raise AssertionError("a.shape[0] should be < 20")
+            if not (a.shape[1] < 30 and a.shape[1] < a.shape[0]):
+                raise AssertionError("a.shape[1] should be < a.shape[0]")
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 5)))
         self.assertExpectedInline(
@@ -1891,8 +1932,10 @@ L['a'].size()[1] <= 18""")
         self.assertEqual(fx_g(*inp), f(*inp))
 
     def _assert_no_guards(self, fx_g, free_symbols):
-        assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
-        assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
+        if _get_free_symbols(fx_g.shape_env) != free_symbols:
+            raise AssertionError(f"free symbols mismatch: {fx_g.shape_env.backed_var_to_val}")
+        if len(fx_g.shape_env.get_nontrivial_guards()) != 0:
+            raise AssertionError(f"expected no guards: {fx_g.shape_env.format_guards()}")
 
     def test_guards_equal(self):
         def f(a, b):
@@ -1957,7 +2000,8 @@ L['a'].size()[1] <= 18""")
     @torch.fx.experimental._config.patch(translation_validation=True)
     def test_constant_specialization(self):
         def f(t):
-            assert t.shape[0] == 10
+            if t.shape[0] != 10:
+                raise AssertionError(f"expected t.shape[0] == 10, got {t.shape[0]}")
             return t
 
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))

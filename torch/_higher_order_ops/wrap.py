@@ -2,12 +2,17 @@
 import inspect
 import itertools
 import logging
-from typing import Any, Optional
+import weakref
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import redirect_to_mode, reenter_make_fx
+from torch._higher_order_ops.utils import (
+    redirect_to_mode,
+    reenter_make_fx,
+    register_fake,
+)
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
@@ -18,6 +23,7 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 
 
 log = logging.getLogger(__name__)
+
 
 uid = itertools.count(1)
 
@@ -52,7 +58,7 @@ class InductorCompiledCode(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("inductor_compiled_code")
+        super().__init__("inductor_compiled_code", no_overloaded_args=True)
 
     def __call__(self, func, *args, **kwargs):
         # pyrefly: ignore [missing-attribute]
@@ -62,16 +68,144 @@ class InductorCompiledCode(HigherOrderOperator):
 inductor_compiled_code = InductorCompiledCode()
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
+inductor_compiled_code.fallthrough(DispatchKey.Negative)
+inductor_compiled_code.fallthrough(DispatchKey.Conjugate)
+
+
+_inductor_compiled_callable_id = itertools.count()
+
+
+class InductorCompiledCallable:
+    """
+    A wrapper class that holds both the Inductor-compiled callable and the
+    original FX graph for fake tensor propagation.
+    Each instance gets a globally unique idx at creation (via atomic itertools.count).
+    """
+
+    def __init__(self, compiled_callable, original_gm=None):
+        self.idx = next(_inductor_compiled_callable_id)
+        self.compiled_callable = compiled_callable
+        self.original_gm = original_gm
+        # AOT autograd needs this to know inputs are passed as a list
+        self._boxed_call = True
+
+    def __call__(self, inputs):
+        return self.compiled_callable(inputs)
+
+
+class InductorCodeSideTable:
+    """
+    Side table for storing InductorCompiledCallable objects.
+
+    We cannot put InductorCompiledCallable objects directly into the FX graph
+    as graph nodes do not support arbitrary objects. We use this side table
+    and pass callable.idx instead.
+
+    Uses WeakValueDictionary so entries are automatically removed when
+    the InductorCompiledCallable is no longer referenced elsewhere
+    (e.g. after dynamo.reset() drops the compiled code cache).
+    """
+
+    def __init__(self):
+        self.id_to_callable: weakref.WeakValueDictionary[
+            int, InductorCompiledCallable
+        ] = weakref.WeakValueDictionary()
+
+    def add_callable(self, callable_obj: InductorCompiledCallable) -> int:
+        """Register a callable and return its idx."""
+        self.id_to_callable[callable_obj.idx] = callable_obj
+        return callable_obj.idx
+
+    def get_callable(self, idx: int) -> InductorCompiledCallable:
+        """Get the callable at the given index."""
+        assert idx in self.id_to_callable, f"Invalid inductor code index: {idx}"  # noqa: S101
+        return self.id_to_callable[idx]
+
+    def __getstate__(self):
+        # Convert WeakValueDictionary to regular dict for pickling
+        return {"id_to_callable": dict(self.id_to_callable)}
+
+    def __setstate__(self, state):
+        self.id_to_callable = weakref.WeakValueDictionary(state["id_to_callable"])
+
+    def reset_table(self) -> None:
+        """Reset the table."""
+        self.id_to_callable = weakref.WeakValueDictionary()
+
+
+inductor_code_side_table = InductorCodeSideTable()
+
+
+def _resolve_inductor_callable(func) -> InductorCompiledCallable:
+    """
+    Resolve func to an InductorCompiledCallable.
+
+    func is either an InductorCompiledCallable directly (from post_compile)
+    or an int index into the side table (from a traced FX graph node).
+    """
+    if isinstance(func, int):
+        return inductor_code_side_table.get_callable(func)
+    assert isinstance(func, InductorCompiledCallable), (  # noqa: S101
+        f"Unexpected func type: {type(func)}"
+    )
+    return func
 
 
 @inductor_compiled_code.py_impl(DispatchKey.CompositeExplicitAutograd)
 def inductor_compiled_code_impl(func, inputs):
-    return func(inputs)
+    resolved = _resolve_inductor_callable(func)
+    return resolved.compiled_callable(inputs)
 
 
 redirect_to_mode(inductor_compiled_code, DebugMode)
 redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)
 redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
+
+
+@register_fake(inductor_compiled_code)
+def inductor_compiled_code_fake(func, inputs):
+    resolved = _resolve_inductor_callable(func)
+    if resolved.original_gm is None:
+        raise RuntimeError(
+            "inductor_compiled_code original_gm is None — the compiled graph may "
+            "have been serialized without it. Recompile to restore."
+        )
+    # Run the original FX graph under FakeTensorMode to re-derive output
+    # shapes, dtypes, and aliasing from the input fake tensors.
+    return tuple(resolved.original_gm(*inputs))
+
+
+@inductor_compiled_code.py_functionalize_impl
+def inductor_compiled_code_functionalize(ctx, func, inputs):
+    # Unwrap the functional tensors to get the underlying tensors
+    unwrapped_inputs = ctx.unwrap_tensors(inputs)
+
+    # Redispatch to the next handler in the dispatch chain
+    with ctx.redispatch_to_next():
+        result = inductor_compiled_code(func, unwrapped_inputs)
+        return ctx.wrap_tensors(result)
+
+
+@inductor_compiled_code.py_impl(ProxyTorchDispatchMode)
+def inductor_compiled_code_proxy(mode, func, inputs):
+    resolved = _resolve_inductor_callable(func)
+
+    # Run the fake impl to get example outputs for tracing
+    example_out = inductor_compiled_code(func, inputs)
+
+    # Register in side table so the FX node stores a serializable int
+    callable_idx = inductor_code_side_table.add_callable(resolved)
+
+    proxy_inputs = pytree.tree_map(mode.tracer.unwrap_proxy, inputs)
+
+    out_proxy = mode.tracer.create_proxy(
+        "call_function",
+        inductor_compiled_code,
+        (callable_idx, proxy_inputs),
+        {},
+    )
+
+    return track_tensor_tree(example_out, out_proxy, constant=None, tracer=mode.tracer)
 
 
 class WrapWithSetGradEnabled(HigherOrderOperator):
@@ -105,9 +239,9 @@ class WrapWithAutocast(HigherOrderOperator):
     def __call__(
         self,
         device_type: str,
-        dtype: Optional[_dtype],
+        dtype: _dtype | None,
         enabled: bool,
-        cache_enabled: Optional[bool],
+        cache_enabled: bool | None,
         wrapped_func,
         *args,
         **kwargs,
@@ -152,7 +286,10 @@ class DynamoBypassingWrapper(HigherOrderOperator):
 
         is_compiling = isinstance(wrapper_fn_or_key, str)
         if is_compiling:
-            assert isinstance(inner_fn, torch.fx.GraphModule)
+            if not isinstance(inner_fn, torch.fx.GraphModule):
+                raise AssertionError(
+                    f"expected inner_fn to be torch.fx.GraphModule, got {type(inner_fn)}"
+                )
             wrapper_fn = inner_fn.meta[wrapper_fn_or_key]
         else:
             wrapper_fn = wrapper_fn_or_key
@@ -350,9 +487,10 @@ def proxy_mode_key(
     import torch.fx.traceback as fx_traceback
     from torch.fx import Interpreter
 
-    assert proxy_mode.pre_dispatch, (
-        "post-dispatch mode should have inlined in the Autograd key"
-    )
+    if not proxy_mode.pre_dispatch:
+        raise AssertionError(
+            "post-dispatch mode should have inlined in the Autograd key"
+        )
     example_out = tag_activation_checkpoint(gmod, *args, **kwargs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
     proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)  # type: ignore[union-attr]

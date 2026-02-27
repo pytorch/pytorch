@@ -366,7 +366,7 @@ def forward(self):
         index = 2
         shape_env = ShapeEnv()
         symbol = shape_env.create_symbol(index, source=ConstantSource(
-            f"__testing_only{len(shape_env.var_to_val)}"))
+            f"__testing_only{len(shape_env.backed_var_to_val)}"))
         sym_index = torch.SymInt(SymNode(symbol, shape_env, int, hint=index))
 
         inpt = [x, sym_index]

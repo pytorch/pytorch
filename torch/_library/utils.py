@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 from collections.abc import Callable, Iterable, Iterator
-from typing import Any, Literal, Optional, overload, Union
+from typing import Any, Literal, overload
 
 import torch
 import torch.utils._pytree as pytree
@@ -71,7 +71,8 @@ def lookup_op(qualname: str) -> OpOverload:
 
 
 def is_builtin(op: OpOverload) -> bool:
-    assert isinstance(op, OpOverload)
+    if not isinstance(op, OpOverload):
+        raise AssertionError(f"op must be OpOverload, got {type(op)}")
     return op.namespace in {"aten", "prim", "prims"}
 
 
@@ -131,7 +132,8 @@ def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool
 
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)
-    assert isinstance(schema, FunctionSchema)
+    if not isinstance(schema, FunctionSchema):
+        raise AssertionError(f"schema must be FunctionSchema, got {type(schema)}")
     return is_functional(schema)
 
 
@@ -214,7 +216,10 @@ def zip_schema(
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
     that is, (args, kwargs) must be bindable to the schema (args, kwargs).
     """
-    assert len(schema.arguments) >= len(args) + len(kwargs)
+    if len(schema.arguments) < len(args) + len(kwargs):
+        raise AssertionError(
+            f"schema has {len(schema.arguments)} arguments but got {len(args)} args and {len(kwargs)} kwargs"
+        )
     for i in range(len(schema.arguments)):
         info = schema.arguments[i]
         if info.kwarg_only:
@@ -242,7 +247,10 @@ def hop_schema_from_fx_node(node):
     def _collect_example_val(node):
         meta_val = node.meta.get("val", None)
         if meta_val is None:
-            assert node.op == "get_attr"
+            if node.op != "get_attr":
+                raise AssertionError(
+                    f"node.op must be 'get_attr' when val is None, got {node.op!r}"
+                )
             meta_val = getattr(node.graph.owning_module, node.target)
         return meta_val
 
@@ -271,7 +279,8 @@ def hop_schema_from_fx_node(node):
 
 
 def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
-    assert isinstance(op, OpOverload)
+    if not isinstance(op, OpOverload):
+        raise AssertionError(f"op must be OpOverload, got {type(op)}")
     if is_builtin(op):
         # We control the built-ins. These may (in rare cases)
         # do input metadata mutation (which we have banned on custom ops)
@@ -296,7 +305,10 @@ def requires_set_python_module() -> bool:
 
 
 def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
-    assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
+    if not isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode):
+        raise AssertionError(
+            f"curr_mode must be TorchDispatchMode, got {type(curr_mode)}"
+        )
     args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
     # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
     # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
@@ -338,7 +350,7 @@ def has_tensor_arg(schema: _C.FunctionSchema) -> bool:
     )
 
 
-def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
+def get_device_arg_index(schema: _C.FunctionSchema) -> int | None:
     """
     Given a schema, returns the id of the `device: torch.device` argument.
     If it does not exist, returns None.
@@ -539,7 +551,7 @@ def get_layout_constraint_tag(
 @overload
 def get_layout_constraint_tag(
     fn: Any, *, with_default: Literal[False]
-) -> Optional[_C.Tag]: ...
+) -> _C.Tag | None: ...
 
 
 def get_layout_constraint_tag(fn, *, with_default=True):
@@ -575,8 +587,8 @@ _RANDOM_FUNCTIONS = {
 def is_impure(
     op: Callable,
     *,
-    args: Optional[tuple[Any, ...]] = None,
-    kwargs: Optional[dict[str, Any]] = None,
+    args: tuple[Any, ...] | None = None,
+    kwargs: dict[str, Any] | None = None,
     impure_random: bool = True,
 ) -> bool:
     """

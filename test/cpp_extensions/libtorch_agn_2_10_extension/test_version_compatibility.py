@@ -178,7 +178,12 @@ if not IS_WINDOWS:
             actually does compile. This validates that our test infrastructure correctly
             distinguishes between files that require 2.10+ and those that don't.
             """
-            cpp_file = self.csrc_dir / "mv_tensor_accessor_cpu.cpp"
+            cpp_file = (
+                Path(self.csrc_dir).parent
+                / "libtorch_agn_2_9_extension"
+                / "csrc"
+                / "mv_tensor_accessor_cpu.cpp"
+            )
 
             if not cpp_file.exists():
                 self.skipTest(f"{cpp_file} not found - this is a test file only")
@@ -218,7 +223,12 @@ if not IS_WINDOWS:
                     "CUDA not available, skipping mv_tensor_accessor_cuda.cu test"
                 )
 
-            cu_file = self.csrc_dir / "mv_tensor_accessor_cuda.cu"
+            cu_file = (
+                Path(self.csrc_dir).parent
+                / "libtorch_agn_2_9_extension"
+                / "csrc"
+                / "mv_tensor_accessor_cuda.cu"
+            )
 
             if not cu_file.exists():
                 self.skipTest(f"{cu_file} not found - this is a test file only")
@@ -282,36 +292,27 @@ if not IS_WINDOWS:
         return test_method_impl
 
     # Test discovery: generate a test for each .cpp and .cu file
-    _csrc_dir = Path(__file__).parent / "libtorch_agn_2_10" / "csrc"
-    if _csrc_dir.exists():
-        # Collect both .cpp and .cu files, excluding those used for negative test
-        # already defined above
-        _source_files = sorted(
-            [
-                f
-                for f in _csrc_dir.rglob("*.cpp")
-                if f.name not in ("mv_tensor_accessor_cpu.cpp",)
-            ]
-            + [
-                f
-                for f in _csrc_dir.rglob("*.cu")
-                if f.name not in ("mv_tensor_accessor_cuda.cu",)
-            ]
-        )
+    _csrc_dir = Path(__file__).parent / "csrc"
+    if not _csrc_dir.exists():
+        raise AssertionError(f"Expected csrc directory to exist at {_csrc_dir}")
+    # Collect both .cpp and .cu files, excluding those used for negative test
+    # already defined above
+    _source_files = sorted(
+        [f for f in _csrc_dir.rglob("*.cpp") if f.name != "mv_tensor_accessor_cpu.cpp"]
+        + [f for f in _csrc_dir.rglob("*.cu") if f.name != "mv_tensor_accessor_cuda.cu"]
+    )
 
-        for _source_file in _source_files:
-            _test_method = _create_test_method_for_file(_source_file)
-            setattr(
-                FunctionVersionCompatibilityTest, _test_method.__name__, _test_method
-            )
+    for _source_file in _source_files:
+        _test_method = _create_test_method_for_file(_source_file)
+        setattr(FunctionVersionCompatibilityTest, _test_method.__name__, _test_method)
 
-        del (
-            _create_test_method_for_file,
-            _csrc_dir,
-            _source_files,
-            _source_file,
-            _test_method,
-        )
+    del (
+        _create_test_method_for_file,
+        _csrc_dir,
+        _source_files,
+        _source_file,
+        _test_method,
+    )
 
 if __name__ == "__main__":
     run_tests()

@@ -98,16 +98,14 @@ def get_fwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
 ) -> list[Optional[ComputedBuffer]]:
     subgraph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
     )
-    # pyrefly: ignore [not-iterable]
+
     return [*subgraph_buffer, *mask_graph_buffer]
 
 
@@ -254,12 +252,23 @@ def infer_dense_strides(
         The behavior of empty_like()
     """
     fill_order = get_fill_order(orig_strides, V.graph.sizevars.shape_env)
-    return construct_strides(size, fill_order)
+    strides = construct_strides(size, fill_order)
+
+    # Attention kernels require stride[-1]=1 for efficient memory access.
+    # Ensure this by moving last dim to front of fill_order if needed.
+    if strides[-1] != 1:
+        last_dim = len(size) - 1
+        fill_order = list(fill_order)
+        fill_order.remove(last_dim)
+        fill_order = [last_dim] + fill_order
+        strides = construct_strides(size, fill_order)
+
+    return strides
 
 
 def create_indices_fake(x) -> torch.Tensor:
     """Create a fake indices that is used for autotuning."""
-    size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
+    size = V.graph.sizevars.optimization_hints(x.get_size())
     indices = torch.arange(0, size[-1], dtype=x.get_dtype(), device=x.get_device())
     indices = indices.expand(size).contiguous()
     return indices
@@ -281,8 +290,10 @@ def create_num_blocks_fake_generator(sparse_indices):
     """
 
     def create_num_blocks_fake(x) -> torch.Tensor:
-        num_blocks_for_autotuning = V.graph.sizevars.size_hint(sparse_indices.shape[-1])
-        size = [V.graph.sizevars.size_hint(i) for i in x.get_size()]
+        num_blocks_for_autotuning = V.graph.sizevars.optimization_hint(
+            sparse_indices.shape[-1]
+        )
+        size = V.graph.sizevars.optimization_hints(x.get_size())
         return torch.full(
             size,
             num_blocks_for_autotuning,

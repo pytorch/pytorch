@@ -247,7 +247,10 @@ class OperatorInputsLoader:
         i = 0
         while i < len(lines):
             op_line = lines[i].strip("\n")
-            assert "Operator: " in op_line, op_line
+            if "Operator: " not in op_line:
+                raise AssertionError(
+                    f"Expected 'Operator: ' in line, but got: {op_line}"
+                )
             operator = op_line[len("Operator: ") :]
             operator = (
                 operator if operator != "aten.sum.SymInt" else "aten.sum.dim_IntList"
@@ -265,9 +268,8 @@ class OperatorInputsLoader:
     def get_inputs_for_operator(
         self, operator, dtype=None, device="cuda"
     ) -> Generator[tuple[Iterable[Any], dict[str, Any]], None, None]:
-        assert str(operator) in self.operator_db, (
-            f"Could not find {operator}, must provide overload"
-        )
+        if str(operator) not in self.operator_db:
+            raise AssertionError(f"Could not find {operator}, must provide overload")
 
         if "embedding" in str(operator):
             log.warning("Embedding inputs NYI, input data cannot be randomized")
@@ -302,9 +304,8 @@ class OperatorInputsLoader:
             yield op
 
     def get_call_frequency(self, op):
-        assert str(op) in self.operator_db, (
-            f"Could not find {op}, must provide overload"
-        )
+        if str(op) not in self.operator_db:
+            raise AssertionError(f"Could not find {op}, must provide overload")
 
         count = 0
         for counter in self.operator_db[str(op)].values():
@@ -330,7 +331,8 @@ class OperatorInputsLoader:
 
     @staticmethod
     def _load_directory(inp_dir):
-        assert os.path.isdir(inp_dir), inp_dir
+        if not os.path.isdir(inp_dir):
+            raise AssertionError(f"Directory does not exist: {inp_dir}")
         union = None
         for inp in os.listdir(inp_dir):
             if inp[-4:] != ".txt":

@@ -1,9 +1,11 @@
 import copy
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch.fx.node import Target
 
 
@@ -11,7 +13,7 @@ from torch.fx.node import Target
 # This is helpful for generating FunctionSchema for HigherOrderOperator, where
 # we don't have a function to inspect and each call of the higher order operator
 # would have different schema.
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class HopArgumentInfo:
     # Could give a name to the operand by default it's empty string.
     name: str
@@ -30,14 +32,15 @@ class HopArgumentInfoGen:
         example_value: Any,
         *,
         name: str = "",
-        default_value: Optional[Any] = None,
+        default_value: Any | None = None,
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
-            assert type(example_value) is type(default_value), (
-                f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
-            )
+            if type(example_value) is not type(default_value):
+                raise AssertionError(
+                    f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
+                )
 
         return HopArgumentInfo(
             name=name,
@@ -67,6 +70,12 @@ class CTypeGen:
             return torch._C.SymIntType.get()
         elif isinstance(obj, torch.SymBool):
             return torch._C.SymBoolType.get()
+        elif isinstance(obj, torch.SymFloat):
+            return torch._C.FloatType.get()
+        elif isinstance(obj, (FakeScriptObject, pytree.TreeSpec)) or is_opaque_type(
+            type(obj)
+        ):
+            return torch._C.PyObjectType.get()  # pyrefly: ignore[missing-attribute]
         return torch._C._jit_try_infer_type(obj).type()
 
 
@@ -95,24 +104,25 @@ class HopSchemaGenerator:
     def __init__(self, hop: torch._ops.HigherOrderOperator):
         self.arg_infos: list[HopArgumentInfo] = []
         self.example_outputs: list[Any] = []
-        self.schema_tree_spec: Optional[pytree.TreeSpec] = None
+        self.schema_tree_spec: pytree.TreeSpec | None = None
         self.hop = hop
 
     def add_arg(
         self,
         name: str,
         example_value: Any,
-        default_value: Optional[Any] = None,
+        default_value: Any | None = None,
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> None:
-        if callable(example_value):
-            assert isinstance(
+        if callable(example_value) and not is_opaque_type(type(example_value)):
+            if not isinstance(
                 example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
-            ), (
-                "Expect callable to be a GraphModule or an. Please call materialize_as_graph first "
-                f"to turn callable arguments {example_value} into a GraphModule."
-            )
+            ):
+                raise AssertionError(
+                    "Expect callable to be a GraphModule or an OperatorBase. Please call materialize_as_graph first "
+                    f"to turn callable arguments {example_value} into a GraphModule."
+                )
         _, flat_spec = pytree.tree_flatten(example_value)
         if not flat_spec.is_leaf():
             raise RuntimeError(
@@ -202,19 +212,21 @@ class CFunctionSchemaGen:
         op_name: str,
         inp_argument_info: list[HopArgumentInfo],
         out_argument_info: HopArgumentInfo,
-        schema_tree_spec: Optional[pytree.TreeSpec],
+        schema_tree_spec: pytree.TreeSpec | None,
     ) -> Any:
         args = []
         for i, arg_info in enumerate(inp_argument_info):
             args.append(CArgumentGen.from_hop_argument_info(i, arg_info))
 
         # NOTE: we want the output to always be a single argument with torch._C.TupleType.
-        assert isinstance(out_argument_info.example_value, tuple), (
-            f"expect out_argument_info's example_value to be a tuple but got {out_argument_info.example_value}"
-        )
-        assert not out_argument_info.is_mutated, (
-            "out_argument_info.is_mutated should always be set to False."
-        )
+        if not isinstance(out_argument_info.example_value, tuple):
+            raise AssertionError(
+                f"expect out_argument_info's example_value to be a tuple but got {out_argument_info.example_value}"
+            )
+        if out_argument_info.is_mutated:
+            raise AssertionError(
+                "out_argument_info.is_mutated should always be set to False."
+            )
         rets = None
         if len(out_argument_info.example_value) == 1:
             rets = [CArgumentGen.from_hop_argument_info(0, out_argument_info, True)]
@@ -253,7 +265,7 @@ class HopSchema(torch._C.FunctionSchema):
         returns: list[torch._C.Argument],
         is_vararg: bool,
         is_varret: bool,
-        schema_tree_spec: Optional[pytree.TreeSpec],
+        schema_tree_spec: pytree.TreeSpec | None,
     ):
         self.tree_spec = schema_tree_spec
         self.is_vararg = is_vararg
@@ -289,7 +301,10 @@ def find_hop_schema(
 
         def _get_example_value(node: torch.fx.Node) -> Any:
             if node.op == "get_attr":
-                assert isinstance(node.target, str)
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"expected node.target to be str for get_attr, got {type(node.target)}"
+                    )
                 return getattr(gm, node.target)
             else:
                 return (

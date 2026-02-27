@@ -96,7 +96,8 @@ class TestAutogradFallback(TestCase):
             return self.assertWarnsRegex(
                 UserWarning, "an autograd kernel was not registered"
             )
-        assert mode == "nothing"
+        if mode != "nothing":
+            raise AssertionError(f"mode should be 'nothing', got {mode!r}")
         if mode_nothing_raises:
             return self.assertRaisesRegex(RuntimeError, "does not require grad")
         return contextlib.nullcontext()

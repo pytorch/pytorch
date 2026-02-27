@@ -8,6 +8,9 @@ ENV DEBIAN_FRONTEND noninteractive
 
 ARG CLANG_VERSION
 
+# Allow APT to run as root
+RUN echo 'APT::Sandbox::User "root";' | tee -a /etc/apt/apt.conf.d/10sandbox
+
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
@@ -28,8 +31,10 @@ RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ARG ANACONDA_PYTHON_VERSION
+ARG PYTHON_FREETHREADED
 ARG DOCS
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
+ENV PYTHON_FREETHREADED=$PYTHON_FREETHREADED
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
@@ -63,17 +68,7 @@ ENV NCCL_INCLUDE_DIR="/usr/local/cuda/include/"
 ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 
 
-# (optional) Install UCC
-ARG UCX_COMMIT
-ARG UCC_COMMIT
 ARG CUDA_VERSION
-ENV UCX_COMMIT $UCX_COMMIT
-ENV UCC_COMMIT $UCC_COMMIT
-ENV UCX_HOME /usr
-ENV UCC_HOME /usr
-ADD ./common/install_ucc.sh install_ucc.sh
-RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
 
 # (optional) Install vision packages like OpenCV
 ARG VISION
@@ -150,11 +145,16 @@ ARG CUDA_VERSION
 # TPU=yes -> install JAX with TPU support
 # PALLAS=yes + CUDA_VERSION -> install JAX with CUDA support
 # PALLAS=yes (no CUDA) -> install JAX CPU-only
+COPY ./common/requirements_tpu.txt requirements_tpu.txt
 COPY ./common/install_jax.sh install_jax.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
-RUN if [ -n "${TPU}" ]; then bash ./install_jax.sh tpu; \
-    elif [ -n "${PALLAS}" ]; then bash ./install_jax.sh ${CUDA_VERSION:-cpu}; fi
+RUN if [ -n "${TPU}" ]; then \
+      bash -c "source ./common_utils.sh && pip_install -r requirements_tpu.txt" && \
+      bash ./install_jax.sh tpu; \
+    elif [ -n "${PALLAS}" ]; then \
+      bash ./install_jax.sh ${CUDA_VERSION:-cpu}; \
+    fi
 RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
 
 ARG ONNX

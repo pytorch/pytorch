@@ -3278,13 +3278,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        # NB: Key ordering is only preserved in python 3.6+. So here, we
-        # manually check keys are equal.
-        for key in expected:
-            self.assertIn(key, info.keys())
-
-        for key in info:
-            self.assertIn(key, expected.keys())
+        self.assertEqual(info.keys(), expected.keys())
 
     @dist_init(setup_rpc=False)
     @skip_but_pass_in_sandcastle_if(
@@ -6021,11 +6015,12 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @staticmethod
     def _return_tensor_view(i):
-        x = torch.ones(1000, 200).cuda(0) * i
-        torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
-        # serialization of the return value will create a new tensor from the
-        # view, which is done outside of the user function.
-        return x.split(100)[0]
+        with torch.cuda.stream(torch.cuda.current_stream(0)):
+            x = torch.ones(1000, 200).cuda(0) * i
+            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            # serialization of the return value will create a new tensor from the
+            # view, which is done outside of the user function.
+            return x.split(100)[0]
 
     @skip_if_lt_x_gpu(1)
     def test_tensor_view_as_return_value(self):

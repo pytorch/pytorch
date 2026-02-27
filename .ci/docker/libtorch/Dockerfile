@@ -101,7 +101,7 @@ RUN apt-get update -y && \
     apt-get install python3 python-is-python3 -y && \
     apt-get clean
 
-RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
+RUN bash ./install_rocm_drm.sh /opt/amdgpu && rm install_rocm_drm.sh
 RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
 
 FROM ${BASE_TARGET} as final

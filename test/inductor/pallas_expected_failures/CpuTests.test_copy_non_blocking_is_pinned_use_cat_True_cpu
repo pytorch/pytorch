@@ -1,6 +1,0 @@
-ERROR
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/dlpack.py", line 244, in from_dlpack
-    raise TypeError(
-TypeError: Array passed to from_dlpack is on unsupported device type (DLDeviceType: 3, array: tensor([1.2720e-01, 8.1689e-01, 5.4395e-01, 6.6016e-01, 2.7197e-01, 9.7363e-01,
-        3.9038e-01, 3.3936e-01, 5.4492e-01, 7.3096e-01, 3.8647e-01, 5.9570e-01,

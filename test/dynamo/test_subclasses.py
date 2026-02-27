@@ -74,7 +74,8 @@ def get_view_test_cases():
         # view is not a leaf and has the same requires grad as its basic case
         x, _ = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
         x = x.clone() if base_is_nt else x
-        assert not x.is_leaf
+        if x.is_leaf:
+            raise AssertionError("Expected x to not be a leaf")
         return x.unsqueeze(-1)
 
     def mk_leaf(base_is_nt, requires_grad_1, requires_grad_2):
@@ -234,7 +235,8 @@ class ScaledTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
-        assert len(inner_tensors) == 2
+        if len(inner_tensors) != 2:
+            raise AssertionError(f"Expected 2 inner tensors, got {len(inner_tensors)}")
         return ScaledTensor(
             inner_tensors["_data"],
             inner_tensors["_scale"],
@@ -877,6 +879,26 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         out = compiled_fn(x)
         self.assertEqual(out, torch.ones(4, 4) * 2)
 
+    def test_tensor_subclass_unpack(self):
+        class Foo(torch.Tensor):
+            pass
+
+        torch._dynamo.config.traceable_tensor_subclasses.add(Foo)
+        try:
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn_list(x):
+                return list(x)
+
+            x = torch.ones(3).as_subclass(Foo)
+            res_list = fn_list(x)
+
+            for elem in res_list:
+                self.assertIsInstance(elem, Foo)
+            self.assertEqual(len(res_list), 3)
+        finally:
+            torch._dynamo.config.traceable_tensor_subclasses.discard(Foo)
+
     def test_torch_function_wrapper_class_with_kwargs(self):
         x = torch.ones(2, 2)
         wrapped = WrapperSubclass(x)
@@ -1176,6 +1198,23 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
+
+    def test_subclass_method_override(self):
+        class MyTensor(torch.Tensor):
+            def sum(self, dim=None, keepdim=False):
+                return super().sum(dim=dim, keepdim=keepdim).as_subclass(MyTensor)
+
+        def fn(x):
+            y = x.as_subclass(MyTensor)
+            return y.sum(dim=1)
+
+        x = torch.randn(4, 10)
+        fn_opt = torch.compile(fn, backend="eager", fullgraph=False)
+
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
+        self.assertIsInstance(res_act, MyTensor)
 
     def test_tensor_subclass_attr_codegen_tos(self):
         # This repros a very subtle interaction between
@@ -1621,7 +1660,8 @@ class GraphModule(torch.nn.Module):
 
             guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
             curr_var_to_val = {
-                str(k): v for k, v in context.fake_mode.shape_env.var_to_val.items()
+                str(k): v
+                for k, v in context.fake_mode.shape_env.backed_var_to_val.items()
             }
             curr_var_to_sources = {
                 str(k): v[0].name
@@ -3015,7 +3055,7 @@ class GraphModule(torch.nn.Module):
                 if outer_stride is None:
                     outer_stride = a.stride()
 
-                assert (
+                assert (  # noqa: S101
                     a.device == b.device
                     and a.layout == b.layout
                     and a.requires_grad == b.requires_grad
@@ -3034,11 +3074,11 @@ class GraphModule(torch.nn.Module):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
+                assert meta is None  # noqa: S101
                 a, b = inner_tensors["a"], inner_tensors["b"]
                 if type(a) is torch.Tensor:
-                    assert outer_size is not None
-                    assert outer_stride is not None
+                    assert outer_size is not None  # noqa: S101
+                    assert outer_stride is not None  # noqa: S101
                 return TT(a, b, outer_size, outer_stride)
 
         @torch.compile(dynamic=True)
@@ -3928,6 +3968,44 @@ class GraphModule(torch.nn.Module):
         out_ref = fn()
         out_test = torch.compile(fn, backend="aot_eager")()
         self.assertEqual(out_ref, out_test)
+
+    def test_buffer_subclass_isinstance_input(self):
+        from torch.nn.parameter import Buffer
+
+        buf = Buffer(torch.ones(5))
+
+        def fn(b):
+            if isinstance(b, torch.nn.Buffer):
+                return b + 1
+            else:
+                return b + 2
+
+        out_ref = fn(buf)
+        out_test = torch.compile(fn, backend="aot_eager", fullgraph=True)(buf)
+        self.assertEqual(out_ref, out_test)
+
+        torch._dynamo.reset()
+
+        tensor = torch.ones(5)
+        out_ref_tensor = fn(tensor)
+        out_test_tensor = torch.compile(fn, backend="aot_eager", fullgraph=True)(tensor)
+        self.assertEqual(out_ref_tensor, out_test_tensor)
+
+    def test_buffer_subclass_check(self):
+        from torch.nn.parameter import Buffer
+
+        def check_buffer(x):
+            return isinstance(x, torch.nn.Buffer)
+
+        buf = Buffer(torch.ones(5))
+        compiled_fn = torch.compile(check_buffer, fullgraph=True, backend="inductor")
+        self.assertTrue(compiled_fn(buf))
+
+        torch._dynamo.reset()
+
+        tensor = torch.ones(5)
+        compiled_fn = torch.compile(check_buffer, fullgraph=True, backend="inductor")
+        self.assertFalse(compiled_fn(tensor))
 
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()

@@ -30,7 +30,6 @@ from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     ConvertIntKey,
     DivideByKey,
-    free_unbacked_symbols,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv
@@ -50,8 +49,6 @@ from .common import (
 from .wrapper import (
     AllocateLine,
     BufferLike,
-    CommBufferAllocateLine,
-    CommBufferFreeLine,
     CommentLine,
     ConditionalLine,
     DynamicScalarLine,
@@ -187,7 +184,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Get the input nodes corresponding to FX graph placeholders.
         """
-        # pyrefly: ignore [missing-argument]
+
         if V.aot_compilation and not self.is_subgraph:
             # AOT graphs must match the signature of the input module.
             return {
@@ -212,7 +209,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             graph_inputs=self.get_fx_graph_inputs(),
             graph_outputs=self.get_graph_outputs(),
             subgms=self.subgms,
-            # pyrefly: ignore [missing-argument]
             is_subgraph=self.is_subgraph,
         ).generate()
 
@@ -928,11 +924,11 @@ class FxConverter:
         # Does nothing.
 
     def _generate_comm_buffer_allocate(self, line: WrapperLine) -> None:
-        assert isinstance(line, CommBufferAllocateLine)
+        assert isinstance(line, AllocateLine) and line.comm_buffer
         raise NotImplementedError("Comm buffer allocation is not yet supported")
 
     def _generate_comm_buffer_free(self, line: WrapperLine) -> None:
-        assert isinstance(line, CommBufferFreeLine)
+        assert isinstance(line, FreeIfNotReusedLine) and line.comm_buffer
         self._free(line.node)
 
     def _generate_triton_call(self, line: WrapperLine) -> None:
@@ -943,16 +939,13 @@ class FxConverter:
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
 
-        class UnbackedSymintsError(Exception):
-            pass
-
         def tune_kernel(tuner: CachingAutotuner, call_args: Sequence[Any]) -> None:
             from triton.runtime import driver
 
             log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
-            # pyrefly: ignore  # missing-attribute
+
             device = driver.active.get_current_device()
-            # pyrefly: ignore  # missing-attribute
+
             stream = driver.active.get_current_stream(device)
 
             def node_to_tuning_arg(arg: Any) -> Any:
@@ -961,23 +954,27 @@ class FxConverter:
                 for dynamic shapes.
                 """
 
-                def to_size_hint(arg: Any) -> Any:
-                    if len(free_unbacked_symbols(arg)) > 0:
-                        # NYI: tuning args require backed symints.
-                        raise UnbackedSymintsError
-                    return pytree.tree_map(V.graph.sizevars.size_hint, arg)
+                def to_size_hint_sympy_int(arg: Union[sympy.Expr, int]) -> int:
+                    return V.graph.sizevars.optimization_hint(arg)
+
+                def to_size_hint_list(arg: list[Union[torch.SymInt, int]]) -> list[int]:
+                    args_sympy = [
+                        x.node.expr if isinstance(x, torch.SymInt) else x for x in arg
+                    ]
+                    return pytree.tree_map(to_size_hint_sympy_int, args_sympy)
 
                 if not isinstance(arg, torch.fx.Node):
-                    return to_size_hint(arg)
+                    return to_size_hint_sympy_int(arg)
 
                 fake = arg.meta["val"]
                 return torch.empty_strided(
-                    to_size_hint(fake.shape),
-                    to_size_hint(fake.stride()),
+                    to_size_hint_list(fake.shape),
+                    to_size_hint_list(fake.stride()),
                     dtype=fake.dtype,
                     device=device,
                 ).zero_()
 
+            # call args can be fx nodes or sympy expressions or integers!
             arg_values = [node_to_tuning_arg(arg) for arg in call_args]
             tuner.run(*arg_values, stream=stream)
 
@@ -985,11 +982,25 @@ class FxConverter:
         # The FX backend currently only supports compile-time tuning.
         kernel_name = tuner.fn.__name__
         if config.triton.autotune_at_compile_time:
-            try:
+            # Skip compile-time autotuning if any unbacked symbol lacks a user-provided
+            # optimization hint — autotuning with the generic fallback would
+            # produce meaningless results.
+            hinted = V.graph.sizevars.all_unbacked_explicitly_hinted
+            can_tune = True
+            for arg in call_args:
+                if isinstance(arg, torch.fx.Node):
+                    fake = arg.meta["val"]
+                    if not hinted(list(fake.shape) + list(fake.stride())):
+                        can_tune = False
+                        break
+                elif not hinted(arg):
+                    can_tune = False
+                    break
+            if can_tune:
                 tune_kernel(tuner, call_args)
-            except UnbackedSymintsError:
+            else:
                 log.info(
-                    "Detected unbacked symints. Skipping autotuning for kernel %s.",
+                    "Detected unhinted unbacked symints. Skipping compile-time autotuning for kernel %s.",
                     kernel_name,
                 )
         else:
@@ -1104,7 +1115,11 @@ class FxConverter:
 
         # Get the result buffer.
         # Some kernels write to a pre-existing output tensor via the "out" kwarg.
-        kwargs = kernel.kwargs.copy()
+        # Materialize any IR nodes in kwargs to FX nodes (e.g., TensorBox -> Tensor).
+        kwargs = {
+            k: self._generate_buffer(v) if isinstance(v, ir.IRNode) else v
+            for k, v in kernel.kwargs.items()
+        }
 
         result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):

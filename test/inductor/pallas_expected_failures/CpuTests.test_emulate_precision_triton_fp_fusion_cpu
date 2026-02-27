@@ -1,5 +1,0 @@
-FAIL
-           ^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/test/inductor/test_torchinductor.py", line 14696, in test_emulate_precision_triton_fp_fusion
-    self.assertTrue("'enable_fp_fusion': False" in code)
-AssertionError: False is not true

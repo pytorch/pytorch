@@ -116,7 +116,8 @@ class WrapperTensorWithCustomStrides(WrapperTensor):
 class DiagTensorBelow(WrapperTensor):
     @classmethod
     def get_wrapper_properties(cls, diag, requires_grad=False):
-        assert diag.ndim == 1
+        if diag.ndim != 1:
+            raise AssertionError(f"Expected diag.ndim == 1, got {diag.ndim}")
         return diag, {"size": diag.size() + diag.size(), "requires_grad": requires_grad}
 
     def __init__(self, diag, requires_grad=False):
@@ -158,7 +159,8 @@ class DiagTensorBelow(WrapperTensor):
 class SparseTensor(WrapperTensor):
     @classmethod
     def get_wrapper_properties(cls, size, values, indices, requires_grad=False):
-        assert values.device == indices.device
+        if values.device != indices.device:
+            raise AssertionError(f"Expected values.device == indices.device, got {values.device} != {indices.device}")
         return values, {"size": size, "requires_grad": requires_grad}
 
     def __init__(self, size, values, indices, requires_grad=False):

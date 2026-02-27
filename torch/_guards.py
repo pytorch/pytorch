@@ -6,7 +6,6 @@ import enum
 import functools
 import logging
 import re
-import sys
 import threading
 import traceback
 import unittest.mock
@@ -16,18 +15,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
-
-
-if sys.version_info >= (3, 11):
-    from typing import dataclass_transform
-else:
-
-    def dataclass_transform():
-        def decorator(fn):
-            return fn
-
-        return decorator
-
+from typing_extensions import dataclass_transform
 
 import torch
 from torch.utils import _pytree as pytree
@@ -887,6 +875,15 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+@dataclass
+class InlinedCodeCache:
+    """Cache for code-object-derived data used during inlining."""
+
+    instructions: list[Any]
+    indexof: dict[Any, int]
+    code_options: dict[str, Any]
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -913,6 +910,8 @@ class TracingContext:
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
+        # Combined cache for inlined code data (instructions, indexof, code_options)
+        self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
         self.fake_mode: FakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -957,6 +956,7 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
+        self.cudagraph_annotation: Any = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
@@ -964,6 +964,7 @@ class TracingContext:
         self.global_context.global_state = {}
         self.previously_inlined_functions.clear()
         self.previously_cleaned_instructions.clear()
+        self.inlined_code_cache.clear()
 
     @staticmethod
     @contextmanager
@@ -1290,24 +1291,25 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         get_plain_tensors,
     )
 
-    fake_modes = []
-
+    # If TracingContext has a fake_mode, use it authoritatively.
+    # This is the case when Dynamo is driving compilation - any fake tensors
+    # from other modes in the inputs will be refakified by the caller.
     if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            fake_modes.append((fake_mode, "tracing context", 0))
+            return fake_mode
+
+    fake_modes = []
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((m, "active fake mode", i))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
@@ -1316,7 +1318,6 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
                 x for x in out if isinstance(x, FakeTensor)
             ]
             fake_modes.extend(
-                # pyrefly: ignore [bad-argument-type]
                 [
                     (tensor.fake_mode, f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
@@ -1329,12 +1330,10 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
             if fake_mode is not m:
                 raise AssertionError(
                     f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                    # pyrefly: ignore [missing-attribute]
                     f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                    # pyrefly: ignore [missing-attribute]
                     f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
                 )
-        # pyrefly: ignore [bad-return]
+
         return fake_mode
     else:
         return None

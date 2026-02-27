@@ -139,7 +139,10 @@ class AllToAllBase:
             sizes = torch.full((world_size,), buf_size // world_size, dtype=torch.int64)
         if not isinstance(sizes, torch.Tensor):
             sizes = torch.tensor(sizes, dtype=torch.int64)
-        assert sizes.dtype == torch.int64
+        if sizes.dtype != torch.int64:
+            raise AssertionError(
+                f"Expected sizes.dtype == torch.int64, got {sizes.dtype}"
+            )
         sizes = torch.cumsum(
             torch.cat(
                 (torch.tensor([0], dtype=torch.int64, device=sizes.device), sizes),
@@ -184,7 +187,10 @@ class AllGather:
         for src_rank in range(len(data)):
             in_tensor_list = data[src_rank][1]
             # Can't handle all_gather with multiple tensors
-            assert len(in_tensor_list) == 1
+            if len(in_tensor_list) != 1:
+                raise AssertionError(
+                    f"Can't handle all_gather with multiple tensors, got {len(in_tensor_list)}"
+                )
             src_tensor = in_tensor_list[0]
 
             for dest in data:
@@ -201,13 +207,19 @@ class Scatter:
     def work(self, data):
         src_in_tensor_list = data[self.src][1]
         # Can't handle scatter with multiple input tensor list
-        assert len(src_in_tensor_list) == 1
+        if len(src_in_tensor_list) != 1:
+            raise AssertionError(
+                f"Can't handle scatter with multiple input tensor list, got {len(src_in_tensor_list)}"
+            )
         src_in_tensors = src_in_tensor_list[0]
 
         for rank, each_rank_data in enumerate(data):
             out_tensor_list = each_rank_data[0]
             # Can't handle scatter with multiple output tensor
-            assert len(out_tensor_list) == 1
+            if len(out_tensor_list) != 1:
+                raise AssertionError(
+                    f"Can't handle scatter with multiple output tensor, got {len(out_tensor_list)}"
+                )
             dest_tensor = out_tensor_list[0]
             # See Note [Hide collectives mutation from autograd]
             dest_tensor.detach().copy_(src_in_tensors[rank])
@@ -220,12 +232,18 @@ class Gather:
     @torch.no_grad()
     def work(self, data):
         # Can't handle gather with multiple tensor lists
-        assert len(data[self.dst][0]) == 1
+        if len(data[self.dst][0]) != 1:
+            raise AssertionError(
+                f"Can't handle gather with multiple tensor lists, got {len(data[self.dst][0])}"
+            )
         out_tensor_list = data[self.dst][0][0]
         for rank, each_rank_data in enumerate(data):
             src_in_tensor_list = each_rank_data[1]
             # Can't handle gather with multiple tensor lists
-            assert len(src_in_tensor_list) == 1
+            if len(src_in_tensor_list) != 1:
+                raise AssertionError(
+                    f"Can't handle gather with multiple tensor lists, got {len(src_in_tensor_list)}"
+                )
             dest_tensor = out_tensor_list[rank]
             # See Note [Hide collectives mutation from autograd]
             dest_tensor.detach().copy_(src_in_tensor_list[0])
@@ -242,12 +260,18 @@ class ReduceScatter:
         start_reduction = [False for _ in range(len(data))]
         for each_rank_data in data:
             # Can't handle reduce_scatter with multiple scatter list
-            assert len(each_rank_data[1]) == 1
+            if len(each_rank_data[1]) != 1:
+                raise AssertionError(
+                    f"Can't handle reduce_scatter with multiple scatter list, got {len(each_rank_data[1])}"
+                )
             to_scatter = each_rank_data[1][0]
             for i in range(len(to_scatter)):
                 dest_tensor_on_rank_i = data[i][0]
                 # Can't handle reduce_scatter with multiple output tensor
-                assert len(dest_tensor_on_rank_i) == 1
+                if len(dest_tensor_on_rank_i) != 1:
+                    raise AssertionError(
+                        f"Can't handle reduce_scatter with multiple output tensor, got {len(dest_tensor_on_rank_i)}"
+                    )
                 dst_tensor_device = dest_tensor_on_rank_i[0].device
                 if not start_reduction[i]:
                     # See Note [Hide collectives mutation from autograd]
@@ -536,6 +560,7 @@ class WorldData:
     tags_to_pg: dict[str, list[dist.ProcessGroup]]
     pg_to_tag: dict[dist.ProcessGroup, str]
     pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
+    comms: list
 
 
 class ThreadLocalWorld:
@@ -544,7 +569,7 @@ class ThreadLocalWorld:
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(
-                None, {}, {}, {}, {}, 0, {}, {}, {}
+                None, {}, {}, {}, {}, 0, {}, {}, {}, []
             )
         return ThreadLocalWorld._world.world
 
@@ -592,6 +617,10 @@ class ThreadLocalWorld:
     def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]:
         return self._get_world().pg_coalesce_state
 
+    @property
+    def comms(self):
+        return self._get_world().comms
+
 
 _old_pg_world = None
 _ctx_manager = None
@@ -608,4 +637,9 @@ def _install_threaded_pg():
 
 
 def _uninstall_threaded_pg():
+    global _ctx_manager
     dist.distributed_c10d._world = _old_pg_world
+    # Restore autograd multithreading state that was disabled in _install_threaded_pg
+    if _ctx_manager is not None:
+        _ctx_manager.__exit__(None, None, None)
+        _ctx_manager = None

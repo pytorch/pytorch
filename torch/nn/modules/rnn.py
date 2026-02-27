@@ -317,7 +317,8 @@ class RNNBase(Module):
                 and not torch._C._is_any_autocast_enabled()
             ):
                 raise ValueError(
-                    f"input must have the type {self._flat_weights[0].dtype}, got type {input.dtype}"  # type: ignore[union-attr]
+                    f"RNN input dtype ({input.dtype}) does not match weight dtype ({self._flat_weights[0].dtype}). "  # type: ignore[union-attr]
+                    f"Convert input: input.to({self._flat_weights[0].dtype}), or convert model: model.to({input.dtype})"  # type: ignore[union-attr]
                 )
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
@@ -739,6 +740,7 @@ class RNN(RNNBase):
             raise AssertionError(f"mode must be RNN_TANH or RNN_RELU, got {self.mode}")
         if batch_sizes is None:
             if self.mode == "RNN_TANH":
+                # pyrefly: ignore [no-matching-overload]
                 result = _VF.rnn_tanh(
                     input,
                     hx,
@@ -751,6 +753,7 @@ class RNN(RNNBase):
                     self.batch_first,
                 )
             else:
+                # pyrefly: ignore [no-matching-overload]
                 result = _VF.rnn_relu(
                     input,
                     hx,
@@ -764,6 +767,7 @@ class RNN(RNNBase):
                 )
         else:
             if self.mode == "RNN_TANH":
+                # pyrefly: ignore [no-matching-overload]
                 result = _VF.rnn_tanh(
                     input,
                     batch_sizes,
@@ -776,6 +780,7 @@ class RNN(RNNBase):
                     self.bidirectional,
                 )
             else:
+                # pyrefly: ignore [no-matching-overload]
                 result = _VF.rnn_relu(
                     input,
                     batch_sizes,
@@ -1020,6 +1025,7 @@ class LSTM(RNNBase):
 
     # In the future, we should prevent mypy from applying contravariance rules here.
     # See torch/nn/modules/module.py::_forward_unimplemented
+    # pyrefly: ignore [bad-override]
     def check_forward_args(
         self,
         input: Tensor,
@@ -1152,6 +1158,7 @@ class LSTM(RNNBase):
                 hx = self.permute_hidden(hx, sorted_indices)
 
         if batch_sizes is None:
+            # pyrefly: ignore [no-matching-overload]
             result = _VF.lstm(
                 input,
                 hx,
@@ -1164,6 +1171,7 @@ class LSTM(RNNBase):
                 self.batch_first,
             )
         else:
+            # pyrefly: ignore [no-matching-overload]
             result = _VF.lstm(
                 input,
                 batch_sizes,
@@ -1426,6 +1434,7 @@ class GRU(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
+            # pyrefly: ignore [no-matching-overload]
             result = _VF.gru(
                 input,
                 hx,
@@ -1438,6 +1447,7 @@ class GRU(RNNBase):
                 self.batch_first,
             )
         else:
+            # pyrefly: ignore [no-matching-overload]
             result = _VF.gru(
                 input,
                 batch_sizes,

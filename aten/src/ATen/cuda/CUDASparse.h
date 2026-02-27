@@ -8,14 +8,16 @@
 
 
 // cuSparse Generic API spsv function was added in CUDA 11.3.0
-#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION)
+// hipSparse supports SpSV as well
+#if (defined(CUDART_VERSION) && defined(CUSPARSE_VERSION)) || defined(USE_ROCM)
 #define AT_USE_CUSPARSE_GENERIC_SPSV() 1
 #else
 #define AT_USE_CUSPARSE_GENERIC_SPSV() 0
 #endif
 
 // cuSparse Generic API spsm function was added in CUDA 11.3.1
-#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION)
+// hipSparse supports SpSM as well
+#if (defined(CUDART_VERSION) && defined(CUSPARSE_VERSION)) || defined(USE_ROCM)
 #define AT_USE_CUSPARSE_GENERIC_SPSM() 1
 #else
 #define AT_USE_CUSPARSE_GENERIC_SPSM() 0

@@ -40,6 +40,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         std::chrono::milliseconds timeout = kBackendDefaultTimeout)
         : timeout(timeout), backend(std::move(backend)) {}
     ~Options() override = default;
+    Options(const Options&) = default;
 
     std::chrono::milliseconds timeout;
 
@@ -47,6 +48,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
     std::string group_name;
+    std::string group_desc;
     std::vector<uint64_t> global_ranks_in_group;
   };
 

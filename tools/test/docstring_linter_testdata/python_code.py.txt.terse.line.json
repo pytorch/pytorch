@@ -1,97 +1,97 @@
 {
   "  1": {
     "docstring_len": 44,
-    "lines": 4,
+    "lines": 3,
     "name": "class ShortWithDocstring",
     "status": "good"
   },
   "  6": {
     "docstring_len": 0,
-    "lines": 3,
+    "lines": 2,
     "name": "class Short",
     "status": "good"
   },
   " 10": {
     "docstring_len": 44,
-    "lines": 6,
+    "lines": 5,
     "name": "class LongWithDocstring",
     "status": "good"
   },
   " 13": {
     "docstring_len": 0,
-    "lines": 3,
+    "lines": 2,
     "name": "def LongWithDocstring.short1",
     "status": "good"
   },
   " 17": {
     "docstring_len": 0,
-    "lines": 6,
+    "lines": 5,
     "name": "class LongWithoutDocstring",
     "status": "good"
   },
   " 20": {
     "docstring_len": 0,
-    "lines": 3,
+    "lines": 2,
     "name": "def LongWithoutDocstring.short1",
     "status": "good"
   },
   " 24": {
     "docstring_len": 10,
-    "lines": 6,
+    "lines": 5,
     "name": "class LongWithShortDocstring",
     "status": "good"
   },
   " 27": {
     "docstring_len": 0,
-    "lines": 3,
+    "lines": 2,
     "name": "def LongWithShortDocstring.short1",
     "status": "good"
   },
   " 31": {
     "docstring_len": 10,
-    "lines": 6,
+    "lines": 5,
     "name": "class _Protected",
     "status": "good"
   },
   " 34": {
     "docstring_len": 0,
-    "lines": 3,
+    "lines": 2,
     "name": "def _Protected.short1",
     "status": "good"
   },
   " 38": {
     "docstring_len": 0,
-    "lines": 6,
+    "lines": 5,
     "name": "def short",
     "status": "good"
   },
   " 45": {
     "docstring_len": 44,
-    "lines": 8,
+    "lines": 7,
     "name": "def long",
     "status": "good"
   },
   " 54": {
     "docstring_len": 0,
-    "lines": 7,
+    "lines": 6,
     "name": "def long_without_docstring",
     "status": "good"
   },
   " 62": {
     "docstring_len": 44,
-    "lines": 21,
+    "lines": 20,
     "name": "class ImpossibleCombo",
     "status": "good"
   },
   " 71": {
     "docstring_len": 0,
-    "lines": 12,
+    "lines": 11,
     "name": "def ImpossibleCombo.needs_docs",
     "status": "good"
   },
   " 72": {
     "docstring_len": 0,
-    "lines": 11,
+    "lines": 10,
     "name": "def ImpossibleCombo.needs_docs.not_short",
     "status": "good"
   },
@@ -103,13 +103,13 @@
   },
   " 80": {
     "docstring_len": 0,
-    "lines": 3,
+    "lines": 2,
     "name": "class ImpossibleCombo.needs_docs.not_short.Short",
     "status": "good"
   },
   " 85": {
     "docstring_len": 0,
-    "lines": 21,
+    "lines": 19,
     "name": "class NotDocstring",
     "status": "good"
   },
@@ -133,13 +133,13 @@
   },
   "102": {
     "docstring_len": 0,
-    "lines": 4,
+    "lines": 2,
     "name": "def NotDocstring.short3",
     "status": "good"
   },
   "107": {
     "docstring_len": 0,
-    "lines": 5,
+    "lines": 6,
     "name": "def long_with_omit",
     "status": "good"
   }

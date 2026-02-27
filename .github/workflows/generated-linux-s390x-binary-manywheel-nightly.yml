@@ -16,6 +16,7 @@ on:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
+      - 'ciflow/s390/*'
   workflow_dispatch:
 
 permissions:
@@ -110,6 +111,9 @@ jobs:
       build_name: manywheel-py3_10-cpu-s390x
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_11-cpu-s390x-build:
@@ -175,6 +179,9 @@ jobs:
       build_name: manywheel-py3_11-cpu-s390x
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_12-cpu-s390x-build:
@@ -240,6 +247,9 @@ jobs:
       build_name: manywheel-py3_12-cpu-s390x
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13-cpu-s390x-build:
@@ -305,6 +315,9 @@ jobs:
       build_name: manywheel-py3_13-cpu-s390x
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_13t-cpu-s390x-build:
@@ -370,6 +383,9 @@ jobs:
       build_name: manywheel-py3_13t-cpu-s390x
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_14-cpu-s390x-build:
@@ -435,6 +451,9 @@ jobs:
       build_name: manywheel-py3_14-cpu-s390x
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 
   manywheel-py3_14t-cpu-s390x-build:
@@ -500,4 +519,7 @@ jobs:
       build_name: manywheel-py3_14t-cpu-s390x
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml

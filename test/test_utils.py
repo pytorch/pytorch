@@ -562,6 +562,34 @@ class TestCheckpoint(TestCase):
         self.assertTrue(f"Device types: ['{device_type}', 'meta']" in warning_msg)
         self.assertTrue(f"first device type: {device_type}" in warning_msg)
 
+    @unittest.skipIf(not TEST_GPU, "No accelerator")
+    def test_checkpoint_preserves_device_context(self):
+        """Test that checkpoint preserves torch.device() context during recomputation.
+
+        When a forward function is executed inside a torch.device() context manager,
+        tensors created without explicit device should be placed on the context's device.
+        This should also hold during checkpoint recomputation in backward pass.
+        """
+        recomputed_devices = []
+
+        def fn_creates_tensor(x):
+            # Create tensor without explicit device - should use default from context
+            intermediate = torch.empty(4)
+            recomputed_devices.append(intermediate.device)
+            return x * intermediate.sum()
+
+        x = torch.randn(4, device=device_type, requires_grad=True)
+
+        with torch.device(device_type):
+            # Forward pass: intermediate should be on device_type
+            y = checkpoint(fn_creates_tensor, x, use_reentrant=False)
+            self.assertEqual(recomputed_devices[-1].type, device_type)
+
+            # Backward pass triggers recomputation: intermediate should still be on device_type
+            y.sum().backward()
+            self.assertEqual(len(recomputed_devices), 2)  # forward + recompute
+            self.assertEqual(recomputed_devices[-1].type, device_type)
+
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
@@ -1014,8 +1042,10 @@ def _deprecated_api(x, y=15):
 class TestDeprecate(TestCase):
     def test_deprecated(self):
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
             deprecated_api(1, 2)  # noqa: F821
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
             deprecated_api(1, y=2)  # noqa: F821
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)

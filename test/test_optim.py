@@ -52,17 +52,15 @@ FP16_REDUCED_PRECISION = {"atol": 1e-5, "rtol": 1e-4}
 
 
 def rosenbrock(tensor):
-    assert tensor.size() == torch.Size([2]), (
-        f"Requires tensor with 2 scalars but got {tensor.size()}"
-    )
+    if tensor.size() != torch.Size([2]):
+        raise AssertionError(f"Requires tensor with 2 scalars but got {tensor.size()}")
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
 
 
 def drosenbrock(tensor):
-    assert tensor.size() == torch.Size([2]), (
-        f"Requires tensor with 2 scalars but got {tensor.size()}"
-    )
+    if tensor.size() != torch.Size([2]):
+        raise AssertionError(f"Requires tensor with 2 scalars but got {tensor.size()}")
     x, y = tensor
     return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
@@ -791,7 +789,8 @@ class TestOptimRenewed(TestCase):
         and updated parameters between when the flag is set to True and False
         for provided optimizer configurations.
         """
-        assert flag in ("foreach", "fused")
+        if flag not in ("foreach", "fused"):
+            raise AssertionError(f"flag must be 'foreach' or 'fused', got {flag!r}")
         assert_eq_kwargs = {} if not reduced_precision else FP16_REDUCED_PRECISION
 
         optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
@@ -860,7 +859,8 @@ class TestOptimRenewed(TestCase):
         CPU and GPU) because fused adam only works on GPUs. (Thus we only run the tests
         that call into this helper when TEST_MULTIGPU.)
         """
-        assert impl in ("foreach", "fused")
+        if impl not in ("foreach", "fused"):
+            raise AssertionError(f"impl must be 'foreach' or 'fused', got {impl!r}")
         if impl == "foreach" and "foreach" not in optim_info.supported_impls:
             return unittest.skip(
                 f"foreach not supported for {optim_info.optim_cls.__name__}"

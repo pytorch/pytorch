@@ -11,22 +11,11 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Literal, NamedTuple, TypeAlias
+from typing import Any, Literal, NamedTuple, TypeAlias
+from typing_extensions import NotRequired, TypedDict
 
 import torch
 from torch import Tensor
-
-
-try:
-    from typing import TypedDict
-except ImportError:
-    from typing_extensions import TypedDict
-
-try:
-    from typing import NotRequired
-except ImportError:
-    from typing_extensions import NotRequired
-
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch._prims_common import DeviceLikeType
@@ -60,7 +49,8 @@ def _warn_once(
 ) -> None:
     """Helper to ensure each warning is shown only once per process."""
     if warning_id not in _WARNINGS_SHOWN:
-        warnings.warn(message, category, stacklevel=2)
+        if not torch.compiler.is_compiling():
+            warnings.warn(message, category, stacklevel=2)
         _WARNINGS_SHOWN.add(warning_id)
 
 
@@ -82,7 +72,6 @@ _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 _Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
 
 
-# pyrefly: ignore [invalid-inheritance]
 class FlexKernelOptions(TypedDict, total=False):
     """Options for controlling the behavior of FlexAttention kernels.
 
@@ -126,97 +115,82 @@ class FlexKernelOptions(TypedDict, total=False):
     """
 
     # Performance tuning options
-    # pyrefly: ignore [invalid-annotation]
+
     num_warps: NotRequired[int]
     """Number of warps to use in the CUDA kernel. Higher values may improve performance
     but increase register pressure. Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
     num_stages: NotRequired[int]
     """Number of pipeline stages in the CUDA kernel. Higher values may improve performance
     but increase shared memory usage. Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
     BLOCK_M: NotRequired[int]
     """Thread block size for the sequence length dimension of Q in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
     BLOCK_N: NotRequired[int]
     """Thread block size for the sequence length dimension of K/V in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
     # Backward-specific block sizes (when prefixed with 'bwd_')
-    # pyrefly: ignore [invalid-annotation]
+
     BLOCK_M1: NotRequired[int]
     """Thread block size for Q dimension in backward pass. Use as 'bwd_BLOCK_M1'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
     BLOCK_N1: NotRequired[int]
     """Thread block size for K/V dimension in backward pass. Use as 'bwd_BLOCK_N1'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
     BLOCK_M2: NotRequired[int]
     """Thread block size for second Q dimension in backward pass. Use as 'bwd_BLOCK_M2'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
     BLOCK_N2: NotRequired[int]
     """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
     PRESCALE_QK: NotRequired[bool]
     """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
     may have more numerical error. Default: False."""
 
-    # pyrefly: ignore [invalid-annotation]
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
     """If True, guarantees that at least one value in each row is not masked out.
     Allows skipping safety checks for better performance. Only set this if you are certain
     your mask guarantees this property. For example, causal attention is guaranteed safe
     because each query has at least 1 key-value to attend to. Default: False."""
 
-    # pyrefly: ignore [invalid-annotation]
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.
     Allows optimizing block traversal. For example, causal masks would satisfy this,
     but prefix_lm + sliding window would not. Default: False."""
 
-    # pyrefly: ignore [invalid-annotation]
     WRITE_DQ: NotRequired[bool]
     """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
     Setting this to False will force this to happen in the DK loop which depending on your
     specific score_mod and mask_mod might be faster. Default: True."""
 
-    # pyrefly: ignore [invalid-annotation]
     FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
     """If True, forces the use of the flex attention kernel instead of potentially using
     the more optimized flex-decoding kernel for short sequences. This can be a helpful
     option for debugging. Default: False."""
 
-    # pyrefly: ignore [invalid-annotation]
     USE_TMA: NotRequired[bool]
     """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
     This is experimental and may not work on all hardware, currently specific
     to NVIDIA GPUs Hopper+. Default: False."""
 
     # ROCm-specific options
-    # pyrefly: ignore [invalid-annotation]
+
     kpack: NotRequired[int]
     """ROCm-specific kernel packing parameter."""
 
-    # pyrefly: ignore [invalid-annotation]
     matrix_instr_nonkdim: NotRequired[int]
     """ROCm-specific matrix instruction non-K dimension."""
 
-    # pyrefly: ignore [invalid-annotation]
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
-    # pyrefly: ignore [invalid-annotation]
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
 
@@ -451,6 +425,57 @@ def _adjust_num_blocks_and_indices(
     num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
     num_blocks = torch.sum(indices < num_blocks[:, :, :, None], dim=-1).to(torch.int32)
     return num_blocks, indices
+
+
+def _closure_contents(fn: object) -> tuple[object, ...]:
+    """Extract closure cell contents for comparison."""
+    closure = getattr(fn, "__closure__", None)
+    if closure is None:
+        return ()
+    return tuple(cell.cell_contents for cell in closure)
+
+
+class _MaskModWrapper:
+    """Wraps a mask_mod function with value-based equality.
+
+    BlockMask stores an arbitrary callable (mask_mod) in its pytree context.
+    The default __eq__ for functions uses identity comparison, which is too
+    strict when the same closure is recreated (e.g., defined inside forward()).
+    This wrapper compares functions by their code object and closure contents.
+    """
+
+    __slots__ = ("fn",)
+
+    def __init__(self, fn: _mask_mod_signature) -> None:
+        self.fn = fn
+
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _MaskModWrapper):
+            return False
+        if self.fn is other.fn:
+            return True
+        if (
+            inspect.isfunction(self.fn)
+            and inspect.isfunction(other.fn)
+            and self.fn.__code__ == other.fn.__code__
+            and _closure_contents(self.fn) == _closure_contents(other.fn)
+        ):
+            return True
+        # For callable objects (not plain functions), delegate to their __eq__
+        if not inspect.isfunction(self.fn) and not inspect.isfunction(other.fn):
+            return self.fn == other.fn
+        return False
+
+    def __hash__(self) -> int:
+        if inspect.isfunction(self.fn):
+            return hash(self.fn.__code__)
+        return hash(self.fn)
+
+    def __repr__(self) -> str:
+        return f"_MaskModWrapper({self.fn})"
 
 
 class BlockMask:
@@ -947,29 +972,53 @@ class BlockMask:
         )
         return BlockMask(*mapped_attributes)
 
+    @staticmethod
+    def _wrap_context_value(attr: str, value: Any) -> Any:
+        if attr == "mask_mod":
+            return _MaskModWrapper(value)
+        return value
+
+    @staticmethod
+    def _unwrap_context_value(attr: str, value: Any) -> Any:
+        if attr == "mask_mod":
+            if not isinstance(value, _MaskModWrapper):
+                raise AssertionError(f"Expected _MaskModWrapper, got {type(value)}")
+            return value.fn
+        return value
+
     def _flatten(self):
-        """Flatten BlockMask into a list of tensors and context."""
+        """Flatten BlockMask into a list of tensors and context.
+
+        Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
+        """
         tensors = tuple(getattr(self, attr) for attr in self._TENSOR_ATTRS)
-        context = tuple(getattr(self, attr) for attr in self._CONTEXT_ATTRS)
+        context = tuple(
+            self._wrap_context_value(attr, getattr(self, attr))
+            for attr in self._CONTEXT_ATTRS
+        )
         return tensors, context
 
     @classmethod
     def _unflatten(cls, tensors, context):
         """Unflatten tensors and context back into a BlockMask."""
         kwargs = {
-            **dict(zip(cls._CONTEXT_ATTRS, context)),
-            **dict(zip(cls._TENSOR_ATTRS, tensors)),
+            attr: cls._unwrap_context_value(attr, val)
+            for attr, val in zip(cls._CONTEXT_ATTRS, context)
         }
-        # pyrefly: ignore [bad-argument-type]
+        kwargs.update(zip(cls._TENSOR_ATTRS, tensors))
         return cls(**kwargs)
 
     def _flatten_with_keys(self):
-        """Flatten BlockMask with keys for better tracing."""
+        """Flatten BlockMask with keys for better tracing.
+
+        Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
+        """
         tensors = tuple(
             (GetAttrKey(attr), getattr(self, attr)) for attr in self._TENSOR_ATTRS
         )
         context = tuple(
-            (GetAttrKey(attr), getattr(self, attr)) for attr in self._CONTEXT_ATTRS
+            (GetAttrKey(attr), self._wrap_context_value(attr, getattr(self, attr)))
+            for attr in self._CONTEXT_ATTRS
         )
         return tensors, context
 
@@ -1431,7 +1480,9 @@ def flex_attention(
     *,
     return_aux: AuxRequest | None = None,
 ) -> Tensor | tuple[Tensor, Tensor] | tuple[Tensor, AuxOutput]:
-    r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
+    r"""This function implements scaled dot product attention with an arbitrary attention score modification function
+    described in the `Flex Attention <https://arxiv.org/abs/2412.05496>`_ paper. See also the
+    `blog post <https://pytorch.org/blog/flexattention/>`_.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
     attention score modification function. The attention score modification function will be applied after the attention
@@ -1495,7 +1546,7 @@ def flex_attention(
 
     """
     # Some basic input validation
-    _validate_sdpa_input(query, key, value)
+    _validate_sdpa_input(query, key, value, allow_lowp_kv=True)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
     query, key, value = _enforce_mem_layouts(query, key, value)

@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "pyyaml==6.0.2",
+# ]
+# ///
 """
 This a linter that ensures that jobs that can be triggered by push,
 pull_request, or schedule will check if the repository owner is 'pytorch'.  This

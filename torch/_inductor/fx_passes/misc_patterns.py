@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Optional
 
 import torch
 from torch._dynamo.utils import counters
@@ -13,17 +14,20 @@ aten = torch.ops.aten
 
 
 @functools.cache
-def _misc_patterns_init():
+def _misc_patterns_init(input_device: Optional[torch.device] = None):
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
 
     post_grad_patterns = post_grad_patterns_all[1]  # medium priority
 
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
+    if input_device:
+        device = str(input_device)
     else:
-        device = "cpu"
+        if torch.cuda.is_available():
+            # workaround https://github.com/pytorch/pytorch/issues/97894
+            device = "cuda"
+        else:
+            device = "cpu"
 
     # These patterns do 2 things
     # 1. Since we know that index is completely unique, we can codegen it using
@@ -53,6 +57,7 @@ def _misc_patterns_init():
         fwd_only,
         # pyrefly: ignore [bad-argument-type]
         [post_grad_patterns, joint_graph_patterns],
+        skip_duplicates=True,
     )
 
     def randperm_index_pattern(x, slice_shape):
@@ -74,7 +79,83 @@ def _misc_patterns_init():
         # pyrefly: ignore [bad-argument-type]
         [post_grad_patterns, joint_graph_patterns],
         scalar_workaround={"slice_shape": 42},
+        skip_duplicates=True,
     )
+
+    # Pattern: e8m0 extraction with ceiling rounding (for MX format scaling)
+    # Only register on SM100+ where the PTX instruction is available
+    if device == "cuda" and torch.cuda.get_device_capability() >= (10, 0):
+        from .. import inductor_prims
+
+        # Pattern 1: Bit manipulation approach
+        def e8m0_rceil_pattern(inp):
+            inp_bits = inp.view(torch.int32)
+            biased_exp = (inp_bits >> 23) & 0xFF
+            mantissa = inp_bits & 0x7FFFFF
+            needs_round_up = mantissa != 0
+            e8m0_biased = biased_exp + needs_round_up.to(torch.int32)
+            e8m0_biased = torch.clamp(e8m0_biased, 0, 255)
+            return e8m0_biased.to(torch.uint8)
+
+        def e8m0_rceil_replacement(inp):
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        def e8m0_extra_check(match):
+            inp = match.kwargs.get("inp")
+            if inp is None:
+                return False
+            inp_val = inp.meta.get("val")
+            return (
+                inp_val is not None
+                and inp_val.device.type == "cuda"
+                and inp_val.dtype == torch.float32
+            )
+
+        register_replacement(
+            # pyrefly: ignore [bad-argument-type]
+            e8m0_rceil_pattern,
+            # pyrefly: ignore [bad-argument-type]
+            e8m0_rceil_replacement,
+            [torch.randn(32, device="cuda", dtype=torch.float32)],
+            # pyrefly: ignore [bad-argument-type]
+            fwd_only,
+            # pyrefly: ignore [bad-argument-type]
+            [post_grad_patterns],
+            extra_check=e8m0_extra_check,
+        )
+
+        # Pattern 2: log2 + ceil approach (used by torchao MX formats)
+        # Matches: (clamp(ceil(log2(x)), -127, 127) + 127).to(uint8)
+        E8M0_BIAS = 127
+
+        def e8m0_rceil_log2_pattern(inp):
+            log2_val = torch.log2(inp)
+            ceil_val = torch.ceil(log2_val)
+            clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
+            biased = clamped + E8M0_BIAS
+            return biased.to(torch.uint8)
+
+        def e8m0_rceil_log2_replacement(inp):
+            # The PTX instruction expects the raw float value, not log2
+            # So we need to convert: if inp is log2(x), then 2^inp is x
+            # But actually our pattern matches on the value before log2
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        register_replacement(
+            # pyrefly: ignore [bad-argument-type]
+            e8m0_rceil_log2_pattern,
+            # pyrefly: ignore [bad-argument-type]
+            e8m0_rceil_log2_replacement,
+            [torch.randn(32, device="cuda", dtype=torch.float32).abs() + 1e-10],
+            # pyrefly: ignore [bad-argument-type]
+            fwd_only,
+            # pyrefly: ignore [bad-argument-type]
+            [post_grad_patterns],
+            extra_check=e8m0_extra_check,
+        )
+
+    # TODO: Add pattern for cvt.rn.bf16x2.ue8m0x2 (e8m0 -> bf16 conversion)
+    # This is the inverse operation for MX format dequantization
 
 
 class NumpyCompatNormalization:

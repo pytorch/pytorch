@@ -11,7 +11,7 @@ from torch.fx._symbolic_trace import symbolic_trace
 
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
-from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+from torch.fx.passes.utils.fuser_utils import fuse_by_partitions, topo_sort
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
@@ -240,6 +240,28 @@ class TestPartitionFunctions:
         a0, a1 = torch.ops.aten.var_mean(a)
         return a0
 
+@torch.fx.wrap
+def _nested_tuple_producer(x):
+    """Returns a nested tuple structure: (x+1, (x+2, x+3))"""
+    return (x + 1, (x + 2, x + 3))
+
+
+class TestNestedGetitemFunctions:
+    """Test functions for nested getitem chain handling in partitioner."""
+
+    @staticmethod
+    def forward_nested_getitem_cross_partition(a, b, c):
+        result = _nested_tuple_producer(a)
+        outer_0 = result[0]
+        inner_tuple = result[1]
+        inner_0 = inner_tuple[0]
+        # UNSUPPORTED operation (relu) - this creates a partition boundary
+        # the getitem chain should still be reassigned to producer's partition
+        blocked = outer_0.relu()
+        # downstream use that crosses partition boundary
+        return inner_0 + blocked + b
+
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
@@ -247,7 +269,8 @@ class MockOperatorSupport(OperatorSupport):
                 node.target in {operator.add, operator.getitem,
                                 torch.ops.aten.view,
                                 torch.ops.aten.permute,
-                                torch.ops.aten.std_mean})
+                                torch.ops.aten.std_mean,
+                                _nested_tuple_producer})
 
 @instantiate_parametrized_tests
 class TestFXGraphPasses(JitTestCase):
@@ -303,9 +326,11 @@ class TestFXGraphPasses(JitTestCase):
             partitioner.remove_bookend_non_compute_ops(partitions)
 
         partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        assert len(partitions_name) == len(expected_partition)
+        if len(partitions_name) != len(expected_partition):
+            raise AssertionError(f"partition count mismatch: {len(partitions_name)} != {len(expected_partition)}")
         for i in range(len(partitions_name)):
-            assert set(partitions_name[i]) == set(expected_partition[i])
+            if set(partitions_name[i]) != set(expected_partition[i]):
+                raise AssertionError(f"partition {i} mismatch: {set(partitions_name[i])} != {set(expected_partition[i])}")
 
         fused_graph = partitioner.fuse_partitions(partitions)
 
@@ -327,9 +352,11 @@ class TestFXGraphPasses(JitTestCase):
                                                  allows_single_node_partition=True)
         partitions = partitioner.propose_partitions()
         partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        assert len(partitions_name) == len(expected_partition)
+        if len(partitions_name) != len(expected_partition):
+            raise AssertionError(f"partition count mismatch: {len(partitions_name)} != {len(expected_partition)}")
         for i in range(len(partitions_name)):
-            assert set(partitions_name[i]) == set(expected_partition[i])
+            if set(partitions_name[i]) != set(expected_partition[i]):
+                raise AssertionError(f"partition {i} mismatch: {set(partitions_name[i])} != {set(expected_partition[i])}")
 
         fused_graph = partitioner.fuse_partitions(partitions)
 
@@ -400,6 +427,122 @@ class TestFXGraphPasses(JitTestCase):
                                                  supported_ops,
                                                  allows_single_node_partition=True)
         partitions = partitioner.propose_partitions()
+
+    def test_topo_sort_stability(self):
+        """Test that topo_sort preserves relative order of independent nodes."""
+        m = TestModule()
+        gm = symbolic_trace(m)
+
+        nodes_by_name = {node.name: node for node in gm.graph.nodes}
+
+        # add_2 and linear depend on add_1 but are independent of each other.
+        # add_3 depends on both add_2 and linear (via add_1 -> linear -> add_3
+        # and add_1 -> add_2 -> add_3 paths in TestModule).
+        # Provide them in a specific order and verify it is preserved.
+        node_list = [
+            nodes_by_name["add_1"],
+            nodes_by_name["add_2"],
+            nodes_by_name["linear"],
+            nodes_by_name["add_3"],
+        ]
+        sorted_nodes = topo_sort(node_list)
+        sorted_names = [n.name for n in sorted_nodes]
+
+        # add_1 must come first (dependency of add_2, linear, add_3)
+        self.assertEqual(sorted_names[0], "add_1")
+        # add_2 and linear are independent; stable sort preserves input order
+        self.assertEqual(sorted_names[1], "add_2")
+        self.assertEqual(sorted_names[2], "linear")
+        # add_3 depends on both, so it comes last
+        self.assertEqual(sorted_names[3], "add_3")
+
+        # Now reverse the order of the independent nodes and verify stability
+        # is with respect to the new input order.
+        node_list_reversed = [
+            nodes_by_name["add_1"],
+            nodes_by_name["linear"],
+            nodes_by_name["add_2"],
+            nodes_by_name["add_3"],
+        ]
+        sorted_nodes_reversed = topo_sort(node_list_reversed)
+        sorted_names_reversed = [n.name for n in sorted_nodes_reversed]
+
+        self.assertEqual(sorted_names_reversed[0], "add_1")
+        # Now linear should come before add_2 since that's the input order
+        self.assertEqual(sorted_names_reversed[1], "linear")
+        self.assertEqual(sorted_names_reversed[2], "add_2")
+        self.assertEqual(sorted_names_reversed[3], "add_3")
+
+    def test_partitioner_nested_getitem_chains(self):
+        """Test that nested getitem chains are properly reassigned to producer's partition.
+
+        this tests the fix for handling patterns like:
+            producer_node = call(...)  # returns ((a, b), c)
+            getitem_1 = producer_node[0]  # gets (a, b)
+            getitem_2 = getitem_1[0]  # gets a
+
+        without the iterative fix, getitem_2 would be assigned to getitem_1's original
+        partition instead of the producer's partition.
+        """
+        traced = symbolic_trace(TestNestedGetitemFunctions.forward_nested_getitem_cross_partition)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(
+            traced,
+            supported_ops,
+            allows_single_node_partition=True
+        )
+        partitions = partitioner.propose_partitions()
+
+        node_to_partition: dict[torch.fx.Node, int] = {}
+        for idx, partition in enumerate(partitions):
+            for node in partition.nodes:
+                node_to_partition[node] = idx
+
+        producer_node = None
+        getitem_nodes = []
+        for node in traced.graph.nodes:
+            if node.op == "call_function":
+                if node.target == _nested_tuple_producer:
+                    producer_node = node
+                elif node.target == operator.getitem:
+                    getitem_nodes.append(node)
+
+        self.assertIsNotNone(producer_node, "Should find the nested tuple producer node")
+        self.assertGreaterEqual(len(getitem_nodes), 3, "Should find at least 3 getitem nodes")
+
+        # all getitems that derive from the producer (including nested ones)
+        # should be in the same partition as the producer
+        if producer_node in node_to_partition:
+            producer_partition = node_to_partition[producer_node]
+
+            for getitem_node in getitem_nodes:
+                current = getitem_node.args[0]
+                derives_from_producer = False
+                while hasattr(current, 'op'):
+                    if current == producer_node:
+                        derives_from_producer = True
+                        break
+                    if current.op == "call_function" and current.target == operator.getitem:
+                        current = current.args[0]
+                    else:
+                        break
+
+                if derives_from_producer:
+                    getitem_partition = node_to_partition.get(getitem_node)
+                    self.assertEqual(
+                        getitem_partition,
+                        producer_partition,
+                        f"Getitem node '{getitem_node.name}' (nested in chain from producer) "
+                        f"should be in same partition as producer. "
+                        f"Got partition {getitem_partition}, expected {producer_partition}"
+                    )
+
+        fused_graph = partitioner.fuse_partitions(partitions)
+        a, b, c = torch.rand(4), torch.rand(4), torch.rand(4)
+        expected = TestNestedGetitemFunctions.forward_nested_getitem_cross_partition(a, b, c)
+        result = fused_graph(a, b, c)
+        torch.testing.assert_close(expected, result)
 
 @dataclass
 class TestCase:
@@ -850,7 +993,8 @@ class TestFXMatcherUtils(JitTestCase):
                                       remove_overlapping_matches=test_case.remove_overlapping_matches)
             matches = matcher.match(traced.graph)
 
-            assert len(matches) == test_case.num_matches
+            if len(matches) != test_case.num_matches:
+                raise AssertionError(f"match count mismatch: {len(matches)} != {test_case.num_matches}")
 
             for match in matches:
                 for node in pattern_traced.graph.nodes:
@@ -858,7 +1002,8 @@ class TestFXMatcherUtils(JitTestCase):
                         continue
                     if not test_case.match_output and node.op == "output":
                         continue
-                    assert node in match.nodes_map
+                    if node not in match.nodes_map:
+                        raise AssertionError(f"node {node} not in match.nodes_map")
 
         tearDown = getattr(test_model, "tearDown", None)
         if callable(setup):
