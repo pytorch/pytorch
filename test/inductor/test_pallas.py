@@ -1789,14 +1789,15 @@ class PallasTestsMixin:
         are caught — if dimensions were equal, a wrong reshape could
         accidentally produce correct results.
 
-        Currently only (1, 0, 2) works (swap first two dims).
-        Other permutations are tracked but expected to fail.
+        (1, 0, 2), (0, 2, 1), and (2, 1, 0) work via shape-comparison
+        permutation detection.  (2, 0, 1) and (1, 2, 0) fail because the
+        range tree collapses their iteration dimensions.
         """
 
         # Permutations that currently work
-        working = [(1, 0, 2)]
-        # Permutations that don't work yet (need general N-d store permute)
-        broken = [(0, 2, 1), (2, 1, 0), (2, 0, 1), (1, 2, 0)]
+        working = [(1, 0, 2), (0, 2, 1), (2, 1, 0)]
+        # Permutations that don't work yet (range tree collapses dims)
+        broken = [(2, 0, 1), (1, 2, 0)]
 
         x = torch.randn(4, 8, 16, device=self.DEVICE)
 
@@ -1827,9 +1828,9 @@ class PallasTestsMixin:
     def test_permute_contiguous_4d(self):
         """Test 4D permutations with distinct dim sizes.
 
-        Currently no 4D permutations are supported (Mosaic rejects the
-        shape cast). These are tracked so they start passing once support
-        is added.
+        Some 4D permutations work via shape-comparison permutation
+        detection.  Others fail due to range tree dimension collapsing.
+        These are tracked so they start passing once support is added.
         """
         perms = [(0, 2, 3, 1), (0, 3, 1, 2), (3, 2, 1, 0)]
         x = torch.randn(2, 4, 8, 16, device=self.DEVICE)

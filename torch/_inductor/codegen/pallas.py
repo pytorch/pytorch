@@ -1104,63 +1104,120 @@ class PallasKernel(SIMDKernel):
         # So output shape is [second_var_length, first_var_length, ...]
         return list(reversed(broadcast_vars))
 
-    def _get_load_permutation(
+    def _get_full_load_permutation(
         self, name: str, index: sympy.Expr
     ) -> Optional[tuple[int, ...]]:
-        """Return permutation axes if load needs reorder, else None.
+        """Return permutation for a full-array load, or None.
 
-        Detects when a full-array load reads a contiguous buffer whose
-        dimensions are accessed in a different order than the iteration
-        variables.  Returns the permutation tuple for ``jnp.permute_dims``.
+        Two-phase detection:
+        1. Index-coefficient analysis: non-ascending coefficients prove the
+           load accesses data in permuted order.
+        2. Broadcast-shape fallback: when coefficients are ascending (the
+           range tree may have reordered dimensions), check whether the
+           input buffer shape matches the broadcast shape but differs from
+           the output -- indicating a transpose the range tree obscured.
 
-        Only triggers when the load coefficients differ from every output
-        buffer's stride pattern.  When they match an output's strides the
-        non-ascending order just reflects the output's iteration layout.
+        Once a permutation is confirmed, the exact mapping is determined
+        by comparing input and output buffer shapes.
         """
         info = self._get_buffer_info(name)
         if not info:
             return None
         _, buf_size, _, _, is_contiguous = info
-        if len(buf_size) < 2 or not is_contiguous:
+        in_shape = [self._safe_int(s) for s in buf_size]
+        if len(in_shape) < 2 or None in in_shape:
             return None
-        used = self._get_used_iter_vars(index)
+        if not is_contiguous:
+            return None  # .contiguous() at JAX boundary handles this
+
+        # Phase 1: coefficient analysis.
+        iter_used = self._get_used_iter_vars(index)
         ordered = [s for s, e in self.range_tree_nodes.items()
-                   if s in used and not e.is_reduction]
-        if len(ordered) != len(buf_size):
+                   if s in iter_used and not e.is_reduction]
+        if len(ordered) != len(in_shape):
             return None
         coeffs = [self._get_index_coefficient(
             V.graph.sizevars.simplify(index), v) for v in ordered]
         if not all(isinstance(c, int) and c > 0 for c in coeffs):
             return None
-        if coeffs == sorted(coeffs):
-            return None  # already in ascending order
-        # Check if the coefficient pattern matches any output buffer's
-        # strides.  When the output has more dimensions (broadcasting),
-        # compare with its trailing strides since broadcast adds leading
-        # dimensions.
-        n = len(coeffs)
-        for buf_name in V.graph.name_to_buffer:
-            out_buf = V.graph.get_buffer(buf_name)
-            if out_buf is None or not isinstance(out_buf, ComputedBuffer):
+        access_is_permuted = coeffs != sorted(coeffs)
+
+        if access_is_permuted:
+            # Verify the non-ascending coefficients aren't just matching
+            # the output buffer's stride pattern (which would mean the
+            # access follows the output's iteration layout, not a
+            # permutation).
+            n = len(coeffs)
+            for out_name in self._output_buffer_names:
+                out_buf = V.graph.get_buffer(out_name)
+                if out_buf is None:
+                    continue
+                layout = getattr(out_buf, "get_layout", lambda: None)()
+                if layout is None:
+                    continue
+                out_stride = getattr(layout, "stride", None)
+                if out_stride is None or len(out_stride) != n:
+                    continue
+                out_s = [self._safe_int(s) for s in out_stride]
+                if any(s is None for s in out_s):
+                    continue
+                if list(coeffs) == out_s:
+                    access_is_permuted = False
+                    break
+
+        if not access_is_permuted:
+            # Ascending coefficients: could be a view/reshape OR a true
+            # permute where the range tree reordered dimensions.
+            # Distinguish via the broadcast shape: if the input shape
+            # matches the iteration-variable pattern but differs from the
+            # output, it is a genuine permute.
+            broadcast = self._get_expected_output_shape()
+            if not broadcast or in_shape != broadcast:
+                return None  # view/reshape -- no permutation needed
+
+        # Permutation confirmed.  Determine the mapping from shapes.
+        for out_name in self._output_buffer_names:
+            out_buf = V.graph.get_buffer(out_name)
+            if out_buf is None:
                 continue
-            layout = getattr(out_buf, "get_layout", lambda: None)()
-            if layout is None:
+            out_shape = [self._safe_int(s) for s in out_buf.get_size()]
+            if any(s is None for s in out_shape):
                 continue
-            out_stride = getattr(layout, "stride", None)
-            if out_stride is None or len(out_stride) < n:
+            if len(out_shape) != len(in_shape):
                 continue
-            # Use trailing strides to handle broadcast dimension mismatch
-            trailing = out_stride[-n:] if len(out_stride) > n else out_stride
-            out_s = [self._safe_int(s) for s in trailing]
-            if any(s is None for s in out_s):
-                continue
-            if list(coeffs) == out_s:
-                return None  # access follows output layout
-        rev = list(reversed(coeffs))  # outermost-first
-        desc = sorted(rev, reverse=True)
-        if len(set(desc)) != len(desc):
-            return None  # duplicate strides, ambiguous
-        return tuple(desc.index(c) for c in rev)
+            if in_shape == out_shape:
+                if not access_is_permuted:
+                    return None  # shapes match, no permutation needed
+                # Same shapes but permuted access (e.g. (8,8) transpose).
+                # Derive permutation from coefficients.
+                rev = list(reversed(coeffs))  # outermost-first
+                desc = sorted(rev, reverse=True)
+                if len(set(desc)) != len(desc):
+                    return None  # duplicate coefficients, ambiguous
+                return tuple(desc.index(c) for c in rev)
+            if sorted(in_shape) != sorted(out_shape):
+                continue  # not a permutation of each other
+            n = len(in_shape)
+            if len(set(in_shape)) == n:
+                # All dims distinct: unambiguous permutation from shapes
+                return tuple(in_shape.index(out_shape[i]) for i in range(n))
+            # Duplicate dims: greedily match each output dim to an unused
+            # input dim of the same size.  This is unambiguous as long as
+            # the permutation is unique (which it is for clone kernels).
+            perm = []
+            used: list[bool] = [False] * n
+            for i in range(n):
+                for j in range(n):
+                    if not used[j] and in_shape[j] == out_shape[i]:
+                        perm.append(j)
+                        used[j] = True
+                        break
+                else:
+                    return None  # can't match
+            if perm == list(range(n)):
+                return None  # identity permutation
+            return tuple(perm)
+        return None
 
     def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
         """Get the index expression string and whether it needs flattening."""
@@ -1591,22 +1648,11 @@ class PallasKernel(SIMDKernel):
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
 
-            # Check for permuted access (covers N-d permute and 2-d transpose)
             if index_str == "...":
-                perm = self._get_load_permutation(name, index)
+                perm = self._get_full_load_permutation(name, index)
                 if perm is not None:
                     load_expr = f"jnp.permute_dims({load_expr}, {perm})"
                     self.permuted_input_buffers[name] = perm
-                else:
-                    # When the input buffer shape matches the broadcast shape
-                    # but differs from the output shape, the data is in
-                    # broadcast order and needs reordering.  Apply the
-                    # permutation here at load time (not at store) so that
-                    # tiling and block specs work correctly.
-                    store_perm = self._get_broadcast_to_output_permutation(name)
-                    if store_perm is not None:
-                        load_expr = f"jnp.permute_dims({load_expr}, {store_perm})"
-                        self.permuted_input_buffers[name] = store_perm
 
             return load_expr
 
@@ -1854,46 +1900,6 @@ class PallasKernel(SIMDKernel):
                 return False  # Input is also column-major
 
         return True
-
-    def _get_broadcast_to_output_permutation(
-        self, input_name: str
-    ) -> "Optional[tuple[int, ...]]":
-        """Return permutation from broadcast shape to output shape.
-
-        When a full-array load's buffer shape matches the broadcast shape
-        (from iteration variables) but differs from the output buffer shape,
-        the data needs reordering.  Returns the permutation to apply at
-        load time so the value is in output-buffer order.
-        """
-        info = self._get_buffer_info(input_name)
-        if not info:
-            return None
-        _, buf_size, _, _, _ = info
-        buf_int = [self._safe_int(s) for s in buf_size]
-        if len(buf_int) < 2 or None in buf_int:
-            return None
-        broadcast = self._get_expected_output_shape()
-        if not broadcast or buf_int != broadcast:
-            return None
-        # Find an output buffer whose shape is a permutation of broadcast
-        for out_name in self._output_buffer_names:
-            out_buf = V.graph.get_buffer(out_name)
-            if out_buf is None:
-                continue
-            out_shape = [self._safe_int(s) for s in out_buf.get_size()]
-            if any(s is None for s in out_shape):
-                continue
-            if len(out_shape) != len(broadcast):
-                continue
-            if out_shape == broadcast:
-                continue  # shapes match, no permutation needed
-            if sorted(out_shape) != sorted(broadcast):
-                continue  # not a permutation
-            n = len(broadcast)
-            if len(set(broadcast)) != n:
-                continue  # duplicate dims, ambiguous
-            return tuple(broadcast.index(out_shape[i]) for i in range(n))
-        return None
 
     def _build_full_array_store_expr(
         self, out: str, value: CSEVariable, needs_transpose: bool
