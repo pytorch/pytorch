@@ -6,7 +6,7 @@ import operator
 import typing
 from collections import Counter
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch._guards
@@ -56,7 +56,7 @@ pass_patterns = [
 
 
 @init_once_fakemode
-def lazy_init(input_device: torch.device | None = None):
+def lazy_init(input_device: Optional[torch.device] = None):
     from .fuse_attention import _sfdp_init
     from .misc_patterns import _misc_patterns_init
     from .pad_mm import _pad_mm_init
@@ -619,7 +619,7 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
 
 
 def joint_graph_passes(
-    graph: torch.fx.GraphModule, input_device: torch.device | None = None
+    graph: torch.fx.GraphModule, input_device: Optional[torch.device] = None
 ):
     """
     Run FX transformations on the joint forwards+backwards graph.
