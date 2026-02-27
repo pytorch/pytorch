@@ -28,6 +28,7 @@ _gradcheck_ops = partial(
 
 @unMarkDynamoStrictTest
 class TestBwdGradients(TestGradients):
+    @skipIfRocm(msg="Fails with Triton 3.7")
     # Tests that gradients are computed correctly
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_grad(self, device, dtype, op):

@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     MI350_ARCH,
     parametrize,
-    skipIfRocmArch,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,

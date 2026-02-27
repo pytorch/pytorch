@@ -2325,6 +2325,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
+    # Flaky with triton 3.7
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @skip_on_cpu
     def test_return_aux_deprecation_warnings(self, device, dtype):
         """Test that deprecation warnings are issued for legacy parameters"""

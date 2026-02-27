@@ -157,6 +157,7 @@ class TestMaxAutotune(TestCase):
         b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
         return a, b
 
+    @skipIfRocm(msg="Flaky with Triton 3.7")
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
@@ -4403,6 +4404,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         # Clear the AsyncAutotuner cache to prevent test pollution
         AsyncAutotuner.choice_hash_to_future.clear()
 
+    @skipIfRocm(msg="Flaky with Triton 3.7")
     @config.patch(max_autotune_gemm=True)
     def test_async_autotuner_cache_same_inputs(self):
         M, K, N = 128, 64, 256

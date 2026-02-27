@@ -987,6 +987,8 @@ class TestOperators(TestCase):
                 ),  # derivate not implemented for _ctc_loss_backward
                 # flaky on ROCM needs investigation
                 decorate("nn.functional.conv_transpose2d", decorator=skipIfRocm),
+                # Flaky with triton 3.7
+                decorate("nn.functional.conv3d", decorator=skipIfRocm),
                 skip("nn.functional.dropout"),  # calls random op
                 skip("nn.functional.dropout2d"),  # calls random op
                 skip("nn.functional.dropout3d"),  # calls random op
