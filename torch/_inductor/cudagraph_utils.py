@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
@@ -25,7 +25,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = list[Optional[Union[int, torch.Tensor]]]
+OutputType = list[int | torch.Tensor | None]
 ModelType = Callable[[list[InputType]], OutputType]
 
 
@@ -45,10 +45,10 @@ class PlaceholderInfo:
     """
 
     name: str
-    stack_trace: Optional[str]
+    stack_trace: str | None
     # This field is recursive, but never cyclic (since a node never uses itself)
     users: list[PlaceholderInfo]
-    mutating_use_stack_trace: Optional[str]
+    mutating_use_stack_trace: str | None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -69,7 +69,7 @@ class WrappedFunction:
 
 def get_mutating_use_stack_trace_from_node(
     placeholder_node: torch.fx.Node,
-) -> Optional[str]:
+) -> str | None:
     # reinplaced uses might have a single, non-copy_ use
     if len(placeholder_node.users) == 1:
         return next(iter(placeholder_node.users)).meta.get("stack_trace", None)
@@ -82,7 +82,7 @@ def get_mutating_use_stack_trace_from_node(
     return None
 
 
-def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> Optional[str]:
+def get_mutating_use_stack_trace(placeholder_info: PlaceholderInfo) -> str | None:
     return placeholder_info.mutating_use_stack_trace
 
 
@@ -113,9 +113,9 @@ def format_default_skip_message(reason: str) -> str:
 
 def get_mutation_stack_trace(
     placeholders: Sequence[PlaceholderInfo],
-    mutation_indices: Union[AbstractSet[int], Sequence[int]],
+    mutation_indices: AbstractSet[int] | Sequence[int],
 ) -> str:
-    stack_trace: Optional[str] = ""
+    stack_trace: str | None = ""
 
     for idx in mutation_indices:
         placeholder = placeholders[idx]
@@ -135,7 +135,7 @@ def check_for_mutation(
     func: WrappedFunction,
     inputs: list[InputType],
     is_cuda_graph_recorded_tensor: Callable[[torch.Tensor], bool],
-) -> Optional[str]:
+) -> str | None:
     # doesn't work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
         # checking if mutation is only on parameters/static inputs
@@ -162,7 +162,7 @@ def check_for_mutation(
     )
 
 
-def _get_use_stack_trace(node: torch.fx.Node) -> Optional[str]:
+def _get_use_stack_trace(node: torch.fx.Node) -> str | None:
     for use in node.users:
         if stack_trace := use.meta.get("stack_trace", None):
             return stack_trace
@@ -171,7 +171,7 @@ def _get_use_stack_trace(node: torch.fx.Node) -> Optional[str]:
 
 def check_multiple_devices_or_any_cpu_nodes(
     device_node_mapping: dict[torch.device, torch.fx.Node],
-) -> Optional[str]:
+) -> str | None:
     # meta tensors are supported since there is no compute
     device_node_mapping.pop(torch.device("meta"), None)
 
@@ -199,7 +199,7 @@ def check_multiple_devices_or_any_cpu_nodes(
 
 def check_lowering_disable_cudagraph(
     device_node_mapping: dict[torch.device, torch.fx.Node],
-) -> Optional[str]:
+) -> str | None:
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
 
 
@@ -217,9 +217,9 @@ def log_cudagraph_skip_and_bump_counter(msg: str) -> None:
 
 @dataclasses.dataclass
 class BoxedDeviceIndex:
-    value: Optional[int]
+    value: int | None
 
-    def set(self, device_idx: Optional[int]) -> None:
+    def set(self, device_idx: int | None) -> None:
         assert device_idx is None or isinstance(device_idx, int)
         self.value = device_idx
 
@@ -229,7 +229,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
     mutated_inputs: OrderedSet[str],
     mutated_input_idxs: OrderedSet[int],
     static_input_idxs: Sequence[int],
-) -> Optional[str]:
+) -> str | None:
     default_msg = format_default_skip_message("mutated inputs")
 
     # doesn't work for non-trees because the warmup run would apply mutation twice
@@ -248,7 +248,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
         return None if not has_mutation else default_msg
 
 
-def get_placeholder_stack_trace(placeholder: PlaceholderInfo) -> Optional[str]:
+def get_placeholder_stack_trace(placeholder: PlaceholderInfo) -> str | None:
     """
     Gets the first non-empty stack trace of a placeholder or its users.
     """
@@ -289,7 +289,7 @@ class CheckInvariantStatus(Enum):
 def log_data_ptr_mismatch(
     placeholders: Sequence[PlaceholderInfo],
     inputs: list[InputType],
-    recorded_data_ptr: Sequence[Optional[int]],
+    recorded_data_ptr: Sequence[int | None],
     target_idxs: Sequence[int],
     mismatch: CheckInvariantStatus,
 ) -> str:
@@ -353,7 +353,7 @@ class CudagraphCachedInfo:
     """
 
     placeholders: Sequence[PlaceholderInfo]
-    stack_traces: list[Optional[str]]
+    stack_traces: list[str | None]
     cudagraph_fail_reasons: list[str]
 
 
@@ -366,7 +366,7 @@ class CudagraphMetadata:
     placeholders: Sequence[PlaceholderInfo]
     static_input_idxs: OrderedSet[int]
     mutated_input_idxs: OrderedSet[int]
-    stack_traces: list[Optional[str]]
+    stack_traces: list[str | None]
     constants: dict[str, torch.Tensor]
 
 

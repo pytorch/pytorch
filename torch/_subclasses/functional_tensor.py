@@ -5,7 +5,7 @@ import warnings
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
 
@@ -106,7 +106,7 @@ class FunctionalTensor(torch.Tensor):
     ]
 
     # Used by auto_functionalize to determine base of tensors during inference mode.
-    _inference_mode_base: Optional[FunctionalTensor] = None
+    _inference_mode_base: FunctionalTensor | None = None
 
     def __new__(cls, elem: torch.Tensor, mode: FunctionalTensorMode) -> Self:
         if not torch._is_functional_tensor(elem):
@@ -366,12 +366,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._allow_token_discovery = _allow_token_discovery
 
         self._storage_to_base: weakref.WeakKeyDictionary[
-            torch.storage.UntypedStorage, Optional[FunctionalTensor]
+            torch.storage.UntypedStorage, FunctionalTensor | None
         ] = weakref.WeakKeyDictionary()
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self) -> Self:
-        def _get_prev_mode() -> Optional[FunctionalTensorMode]:
+        def _get_prev_mode() -> FunctionalTensorMode | None:
             if self._dispatch_key == torch._C.DispatchKey.PreDispatch:
                 return _get_dispatch_mode_pre_dispatch(
                     torch._C._TorchDispatchModeKey.FUNCTIONAL
@@ -389,9 +389,9 @@ class FunctionalTensorMode(TorchDispatchMode):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         is_on_stack = self.enter_stack.pop()
         if is_on_stack:
@@ -765,7 +765,7 @@ class BaseFunctionalizeAPI(ABC):
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def __init__(
-        self, mode: Optional[FunctionalTensorMode] = None, pre_dispatch: bool = False
+        self, mode: FunctionalTensorMode | None = None, pre_dispatch: bool = False
     ) -> None:
         super().__init__()
         self.mode = mode if mode else FunctionalTensorMode()
@@ -778,7 +778,7 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
             )
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, tuple[torch.Tensor, ...], list[torch.Tensor]]
+        self, args: torch.Tensor | tuple[torch.Tensor, ...] | list[torch.Tensor]
     ) -> Any:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
@@ -834,8 +834,8 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
         return _wrap_all_tensors_to_functional(args, level=0)
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+        self, args: torch.Tensor | tuple[torch.Tensor, ...]
+    ) -> torch.Tensor | tuple[torch.Tensor, ...]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
@@ -874,8 +874,8 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
         return _wrap_all_tensors_to_functional(args, level=self.interpreter.level())
 
     def unwrap_tensors(
-        self, args: Union[torch.Tensor, tuple[torch.Tensor, ...]]
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+        self, args: torch.Tensor | tuple[torch.Tensor, ...]
+    ) -> torch.Tensor | tuple[torch.Tensor, ...]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
