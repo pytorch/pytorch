@@ -339,4 +339,4 @@ jobs:
         shell: bash
         run: |
           set -ex
-          bash .ci/pytorch/binary_upload.sh
+          bash .circleci/scripts/binary_upload.sh

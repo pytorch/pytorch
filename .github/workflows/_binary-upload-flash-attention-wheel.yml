@@ -67,7 +67,7 @@ jobs:
         run: |
           set -ex
           for subfolder in ${{ matrix.upload_subfolders }}; do
-            UPLOAD_SUBFOLDER="${subfolder}" bash .ci/pytorch/binary_upload.sh
+            UPLOAD_SUBFOLDER="${subfolder}" bash .circleci/scripts/binary_upload.sh
           done
 
   upload-wheel-windows:
@@ -114,5 +114,5 @@ jobs:
         run: |
           set -ex
           for subfolder in ${{ matrix.upload_subfolders }}; do
-            UPLOAD_SUBFOLDER="${subfolder}" bash .ci/pytorch/binary_upload.sh
+            UPLOAD_SUBFOLDER="${subfolder}" bash .circleci/scripts/binary_upload.sh
           done
