@@ -88,12 +88,11 @@ class Library:
         from torch.fx.operator_schemas import _SCHEMA_TO_SIGNATURE_CACHE
 
         if kind not in ("IMPL", "DEF", "FRAGMENT"):
-            raise ValueError("Unsupported kind: ", kind)
+            raise ValueError(f"Unsupported kind: {kind}")
 
         if ns in _reserved_namespaces and (kind == "DEF" or kind == "FRAGMENT"):
             raise ValueError(
-                ns,
-                " is a reserved namespace. Please try creating a library with another name.",
+                f"{ns} is a reserved namespace. Please try creating a library with another name."
             )
 
         frame = traceback.extract_stack(limit=2)[0]
