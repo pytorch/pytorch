@@ -32,6 +32,7 @@ from torch.testing._internal.common_cuda import (
     SM89OrLater,
     SM90OrLater,
     xfailIfSM100OrLater,
+    TEST_WITH_ROCM
 )
 from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
@@ -638,9 +639,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 A_shard, [B], gather_dim=0, group_name=group_name
             )
 
-        self.assertTrue(
-            any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
-        )
+        if not TEST_WITH_ROCM:
+            self.assertTrue(
+                any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
+            )
 
         torch.testing.assert_close(ag_target, ag_baseline)
         torch.testing.assert_close(mm_target[0], mm_baseline[0])

@@ -953,23 +953,38 @@ def _fused_all_gather_matmul_native(
     A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
     A_shards = A.chunk(world_size)
 
-    A_shards[rank].copy_(A_shard)
-    if not torch.cuda.is_current_stream_capturing():
-        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
-    else:
-        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
-
-    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
-    for step in range(1, world_size):
-        src_rank = (rank + step) % world_size
-        src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
-        with backend_stream:
+    # On ROCm the kernel can hang (cross-stream visibility / kernel wait logic).
+    # Run all copies and signals on current_stream, synchronize, then kernel.
+    if torch.version.hip is not None:
+        for step in range(world_size):
+            src_rank = (rank + step) % world_size
+            src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
             A_shards[src_rank].copy_(src_buf)
             if not torch.cuda.is_current_stream_capturing():
-                # cuStreamWriteValue32 issues a system level fence before the write
                 _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
             else:
                 _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+        current_stream.synchronize()
+        out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
+    else:
+        A_shards[rank].copy_(A_shard)
+        if not torch.cuda.is_current_stream_capturing():
+            _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+        else:
+            _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
+
+        out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
+        for step in range(1, world_size):
+            src_rank = (rank + step) % world_size
+            src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
+            with backend_stream:
+                A_shards[src_rank].copy_(src_buf)
+                if not torch.cuda.is_current_stream_capturing():
+                    _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+                else:
+                    _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+
+        current_stream.wait_stream(backend_stream)
 
     current_stream.wait_stream(backend_stream)
     backend_stream.wait_stream(current_stream)
