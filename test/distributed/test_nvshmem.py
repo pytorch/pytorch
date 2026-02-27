@@ -783,7 +783,10 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
     @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
     def test_tile_reduce(self, tile_size: int, dtype: torch.dtype) -> None:
         full_size = 1024
-        assert tile_size <= full_size
+        if not (tile_size <= full_size):
+            raise AssertionError(
+                f"Expected tile_size <= full_size, got {tile_size} vs {full_size}"
+            )
 
         self._init_device()
         group_name = dist.group.WORLD.group_name
@@ -826,8 +829,16 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         num_slices_row = (
             self.world_size // num_slices_col
         )  # number of tiles on row dimension
-        assert tile_size * num_slices_col <= full_size
-        assert tile_size * num_slices_row <= full_size
+        if not (tile_size * num_slices_col <= full_size):
+            raise AssertionError(
+                f"tile_size * num_slices_col > full_size: "
+                f"{tile_size * num_slices_col} vs {full_size}"
+            )
+        if not (tile_size * num_slices_row <= full_size):
+            raise AssertionError(
+                f"tile_size * num_slices_row > full_size: "
+                f"{tile_size * num_slices_row} vs {full_size}"
+            )
 
         self._init_device()
         group_name = dist.group.WORLD.group_name
