@@ -14,7 +14,8 @@ IValue readArchiveAndTensors(
     std::optional<at::Device> device,
     caffe2::serialize::PyTorchStreamReader& stream_reader,
     c10::TypePtr (*type_parser)(const std::string&),
-    std::shared_ptr<DeserializationStorageContext> storage_context) {
+    std::shared_ptr<DeserializationStorageContext> storage_context,
+    const torch::utils::THPByteOrder& byte_order) {
   std::string picklename = pickle_prefix + archive_name + ".pkl";
   at::DataPtr pickle_ptr;
   size_t pickle_size = 0;
@@ -52,6 +53,7 @@ IValue readArchiveAndTensors(
       type_parser,
       std::move(storage_context));
   unpickler.set_version(stream_reader.version());
+  unpickler.set_byte_order(byte_order);
   return unpickler.parse_ivalue();
 }
 

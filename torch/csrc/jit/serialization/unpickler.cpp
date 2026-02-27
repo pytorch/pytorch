@@ -578,6 +578,48 @@ PickleOpCode Unpickler::readInstruction() {
           storage_ptr = read_record_(key);
         }
 
+        if (byte_order_ != torch::utils::THP_nativeByteOrder()) {
+          auto itemsize = dtype.itemsize();
+          auto amount = numel;
+
+          // half size for complex types, but double the amount
+          if (isComplexType(type)) {
+            itemsize /= 2;
+            amount *= 2;
+          }
+
+          switch (itemsize) {
+            case 1:
+              break;
+            case 2:
+              torch::utils::THP_decodeBuffer(
+                  (int16_t*)storage_ptr.mutable_get(),
+                  (const uint8_t*)storage_ptr.mutable_get(),
+                  true,
+                  amount);
+              break;
+            case 4:
+              torch::utils::THP_decodeBuffer(
+                  (int32_t*)storage_ptr.mutable_get(),
+                  (const uint8_t*)storage_ptr.mutable_get(),
+                  true,
+                  amount);
+              break;
+            case 8:
+              torch::utils::THP_decodeBuffer(
+                  (int64_t*)storage_ptr.mutable_get(),
+                  (const uint8_t*)storage_ptr.mutable_get(),
+                  true,
+                  amount);
+              break;
+            default:
+              TORCH_CHECK(
+                  false,
+                  "supported data sizes are 1, 2, 4 and 8, however got ",
+                  dtype.itemsize());
+          }
+        }
+
         storage = at::Storage(
             c10::Storage::use_byte_size_t(),
             numel * dtype.itemsize(),
