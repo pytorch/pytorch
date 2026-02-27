@@ -2044,3 +2044,56 @@ class DunderDictVariable(ConstDictVariable):
         if self.contains(name):
             return self.getitem(name)
         return super().getitem_const_raise_exception_if_absent(tx, arg)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("items", "keys", "values"):
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            self.install_dict_keys_match_guard()
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
+            merged_items = self._get_merged_dict(tx)
+            merged_dict = ConstDictVariable(merged_items, user_cls=dict)
+
+            if name == "items":
+                return DictItemsVariable(merged_dict)
+            elif name == "keys":
+                return DictKeysVariable(merged_dict)
+            elif name == "values":
+                return DictValuesVariable(merged_dict)
+        return super().call_method(tx, name, args, kwargs)
+
+    def _get_merged_dict(
+        self, tx: "InstructionTranslator"
+    ) -> dict[VariableTracker, VariableTracker]:
+        """Get all items as a proper dict, merging dict_proxy and side effects."""
+        Hasher = ConstDictVariable._HashableTracker
+
+        def make_key(k):
+            return Hasher(VariableTracker.build(tx, k))
+
+        merged = {}
+
+        for k, v in self.dict_proxy.items():
+            merged[make_key(k)] = v
+
+        d = self.items.side_effects.store_attr_mutations.get(self.items.item, {})
+        for k, v in d.items():
+            if isinstance(v, variables.DeletedVariable):
+                key_obj = make_key(k)
+                merged.pop(key_obj, None)
+            else:
+                merged[make_key(k)] = v
+
+        return merged
