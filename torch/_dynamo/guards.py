@@ -3160,6 +3160,25 @@ class GuardBuilder(GuardBuilderBase):
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
 
+    def SCALAR_EXCLUSION(self, guard: Guard, excluded_value: int | None = None) -> None:
+        if (
+            excluded_value is not None
+            and config.stable_graph_selection_for_automatic_dynamic
+            and not config.enable_compiler_collectives
+        ):
+            value = self.get(guard)
+            if value != excluded_value:
+                guard_manager = self.get_guard_manager(guard)
+
+                def check_exclusion(x, ev=excluded_value):
+                    return x != ev
+
+                guard_manager.add_lambda_guard(
+                    check_exclusion,
+                    get_verbose_code_parts(f"excluded_scalar({excluded_value})", guard),
+                    guard.user_stack,
+                )
+
     # A util that in the case of export, adds data onto guards
     def _set_guard_export_info(
         self,

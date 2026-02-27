@@ -400,10 +400,10 @@ class TestGuardExclusion(TestCase):
         opt = torch.compile(foo, backend=tracker)
 
         # Build up 4 graphs progressively
-        opt(torch.randn(2, 3, 4, 5))  # Graph 0
-        opt(torch.randn(7, 3, 4, 5))  # Graph 1: dim0 dynamic
-        opt(torch.randn(7, 8, 4, 5))  # Graph 2: dim1 also dynamic
-        opt(torch.randn(7, 8, 9, 5))  # Graph 3: dim2 also dynamic
+        opt(torch.randn(2, 3, 4, 5))       # Graph 0
+        opt(torch.randn(7, 3, 4, 5))       # Graph 1: dim0 dynamic
+        opt(torch.randn(7, 8, 4, 5))       # Graph 2: dim1 also dynamic
+        opt(torch.randn(7, 8, 9, 5))       # Graph 3: dim2 also dynamic
         self.assertEqual(tracker.frame_count, 4)
 
         # Now stress-test routing with various inputs:
@@ -444,7 +444,7 @@ class TestGuardExclusion(TestCase):
         tracker = GraphTracker()
         opt = torch.compile(foo, backend=tracker)
 
-        opt(torch.randn(4, 3, 234, 5))  # Graph 0: static
+        opt(torch.randn(4, 3, 234, 5))   # Graph 0: static
         opt(torch.randn(10, 3, 100, 20))  # Graph 1: dims 0,2,3 dynamic
         self.assertEqual(tracker.frame_count, 2)
 
@@ -453,16 +453,16 @@ class TestGuardExclusion(TestCase):
         self.assertEqual(tracker.call_log[-1], 0, "Exact original -> Graph 0")
 
         # Partial matches should NOT be excluded (AND semantics)
-        opt(torch.randn(4, 3, 100, 20))  # dim0=4 matches, dims 2,3 don't
+        opt(torch.randn(4, 3, 100, 20))   # dim0=4 matches, dims 2,3 don't
         self.assertEqual(tracker.call_log[-1], 1, "dim0=4 partial match -> Graph 1")
 
         opt(torch.randn(10, 3, 234, 20))  # dim2=234 matches, dims 0,3 don't
         self.assertEqual(tracker.call_log[-1], 1, "dim2=234 partial match -> Graph 1")
 
-        opt(torch.randn(10, 3, 234, 5))  # dim2=234, dim3=5 match, dim0 doesn't
+        opt(torch.randn(10, 3, 234, 5))   # dim2=234, dim3=5 match, dim0 doesn't
         self.assertEqual(tracker.call_log[-1], 1, "dim2+dim3 partial match -> Graph 1")
 
-        opt(torch.randn(4, 3, 234, 20))  # dim0=4, dim2=234 match, dim3 doesn't
+        opt(torch.randn(4, 3, 234, 20))   # dim0=4, dim2=234 match, dim3 doesn't
         self.assertEqual(tracker.call_log[-1], 1, "dim0+dim2 partial match -> Graph 1")
 
         # Totally new shape, no exclusion hit
@@ -470,6 +470,87 @@ class TestGuardExclusion(TestCase):
         self.assertEqual(tracker.call_log[-1], 1, "New shape -> Graph 1")
 
         self.assertEqual(tracker.frame_count, 2, "No additional recompilations")
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_integer_input_exclusion_basic(self):
+        """
+        Integer inputs that become dynamic should also get exclusion guards.
+        1. foo(x, 3) -> Graph 0: static n=3
+        2. foo(x, 5) -> Graph 1: dynamic n, excluded should reject n==3
+        3. foo(x, 3) -> should use Graph 0 (static), not Graph 1
+        """
+
+        def foo(x, n):
+            return x * n
+
+        tracker = GraphTracker()
+        opt = torch.compile(foo, backend=tracker)
+
+        x = torch.randn(4)
+
+        opt(x, 3)
+        self.assertEqual(tracker.frame_count, 1)
+        self.assertEqual(tracker.call_log[-1], 0)
+
+        opt(x, 5)
+        self.assertEqual(tracker.frame_count, 2)
+        self.assertEqual(tracker.call_log[-1], 1)
+
+        opt(x, 3)
+        self.assertEqual(
+            tracker.call_log[-1],
+            0,
+            "Input n=3 should use Graph 0 (static), not Graph 1 (dynamic n).",
+        )
+
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=True, assume_static_by_default=True
+    )
+    def test_integer_input_exclusion_accumulation(self):
+        """
+        Same accumulation scenario as the tensor test but with integer inputs.
+        1. foo(x, 3, 4)  -> Graph 0: static (3, 4)
+        2. foo(x, 5, 4)  -> Graph 1: dynamic (s0, 4), exclusion rejects n0==3
+        3. foo(x, 3, 19) -> Graph 2: dynamic (s0, s1), exclusion should reject
+                            n1==4 independently, not require n0==3 AND n1==4
+        4. foo(x, 5, 4)  -> should use Graph 1, not Graph 2
+        """
+
+        def foo(x, n, m):
+            return x * n + m
+
+        tracker = GraphTracker()
+        opt = torch.compile(foo, backend=tracker)
+
+        x = torch.randn(4)
+
+        opt(x, 3, 4)
+        self.assertEqual(tracker.frame_count, 1)
+        self.assertEqual(tracker.call_log[-1], 0)
+
+        opt(x, 5, 4)
+        self.assertEqual(tracker.frame_count, 2)
+        self.assertEqual(tracker.call_log[-1], 1)
+
+        opt(x, 3, 19)
+        self.assertEqual(tracker.frame_count, 3)
+        self.assertEqual(tracker.call_log[-1], 2)
+
+        opt(x, 5, 4)
+        self.assertEqual(
+            tracker.call_log[-1],
+            1,
+            "Input (5, 4) should use Graph 1 (s0, 4), not Graph 2 (s0, s1).",
+        )
+
+        opt(x, 3, 4)
+        self.assertEqual(
+            tracker.call_log[-1],
+            0,
+            "Input (3, 4) should use Graph 0 (static)",
+        )
 
 
 if __name__ == "__main__":
